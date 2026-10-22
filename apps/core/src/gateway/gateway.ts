@@ -75,7 +75,7 @@ export function createGateway(d: {
   rolesDir: string
   dataDir: string
   concurrency?: number
-  extraEnv?: Record<string, string>
+  extraEnv?: Record<string, string> | (() => Record<string, string>)
 }): Gateway {
   const limit = d.concurrency ?? 2
   let running = 0
@@ -118,7 +118,7 @@ export function createGateway(d: {
             token,
             cwd,
             timeoutMs: meta.timeoutMs,
-            extraEnv: d.extraEnv,
+            extraEnv: typeof d.extraEnv === 'function' ? d.extraEnv() : d.extraEnv,
           })
           durationMs = run.durationMs
           result = classify(run, schema)

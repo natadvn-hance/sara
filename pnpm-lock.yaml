@@ -315,6 +315,21 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
+  tests:
+    dependencies:
+      "@sara/core":
+        specifier: workspace:*
+        version: link:../apps/core
+      "@sara/profi-node":
+        specifier: workspace:*
+        version: link:../apps/profi-node
+      "@sara/shared":
+        specifier: workspace:*
+        version: link:../packages/shared
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@types/pg@8.23.1)(pg@8.23.1)
+
 packages:
   "@babel/code-frame@7.29.7":
     resolution:

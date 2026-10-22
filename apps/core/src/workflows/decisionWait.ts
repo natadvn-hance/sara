@@ -29,6 +29,11 @@ export async function startDecisionWait(taskId: string, remindAfterMs: number): 
   )
 }
 
+/** Ends the wait for this task; a task without a running wait (already finished or never started) is fine. */
 export async function deliverDecision(taskId: string, resolution: TaskAction): Promise<void> {
-  await DBOS.send(workflowId(taskId), resolution, TOPIC, `decision:${taskId}:${resolution}`)
+  try {
+    await DBOS.send(workflowId(taskId), resolution, TOPIC, `decision:${taskId}:${resolution}`)
+  } catch (e) {
+    if ((e as Error).name !== 'DBOSNonExistentWorkflowError') throw e
+  }
 }

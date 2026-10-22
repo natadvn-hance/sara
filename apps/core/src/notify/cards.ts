@@ -16,6 +16,7 @@ export const TEXTS = {
   skipped: 'Пропущено',
   bidQueued: 'Отправляю отклик',
   bidsPaused: 'Отклик не ушёл: отправка откликов на паузе',
+  bidFailed: 'Отклик не ушёл: площадка ответила ошибкой. Посмотри «Состояние системы».',
   bidSent: (title: string, priceRub: number) =>
     `✅ Отклик отправлен: ${title}, ${formatRub(priceRub)}`,
   reminder: (title: string) => `⏰ Заявка ждёт решения: ${title}`,

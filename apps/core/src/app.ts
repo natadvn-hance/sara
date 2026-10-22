@@ -1,0 +1,110 @@
+import type { FastifyInstance } from 'fastify'
+import { speedReport } from './analytics/speed'
+import type { AppDeps } from './api/deps'
+import { buildServer } from './api/server'
+import { requireSession } from './auth/session'
+import type { Config } from './config'
+import { createDb, type Db } from './db/client'
+import { migrate } from './db/migrate'
+import { createGateway } from './gateway/gateway'
+import { setOutboxDeps } from './leads/outbox'
+import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
+import { type BotControl, createBotControl } from './notify/botControl'
+import { createProfiClient } from './profi/client'
+import { registerProfiEventsRoute } from './profi/eventsRoute'
+import { createSecretStore, type SecretStore } from './secrets/store'
+import { getSetting } from './settings/store'
+import { launchDbos, shutdownDbos } from './workflows/dbos'
+import { setReminderHandler } from './workflows/decisionWait'
+
+export type RunningApp = {
+  url: string
+  app: FastifyInstance
+  db: Db
+  secrets: SecretStore
+  bot: BotControl
+  pipeline: LeadPipeline
+  close(): Promise<void>
+}
+
+export type StartOptions = {
+  claudeEnv?: () => Record<string, string>
+  retryDelaysMs?: number[]
+}
+
+/** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
+export async function startApp(config: Config, o: StartOptions = {}): Promise<RunningApp> {
+  await migrate(config.databaseUrl)
+  const { db, close: closeDb } = createDb(config.databaseUrl)
+  const secrets = createSecretStore(config.dataDir)
+  const gateway = createGateway({
+    db,
+    secrets,
+    claudeBin: config.claudeBin,
+    rolesDir: config.rolesDir,
+    dataDir: config.dataDir,
+    extraEnv: o.claudeEnv,
+  })
+  const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
+
+  let pipeline: LeadPipeline | null = null
+  const bot = createBotControl({
+    db,
+    apiRoot: config.telegramApiRoot,
+    onPress: (p) => (pipeline ? pipeline.onPress(p) : Promise.resolve('Сара ещё запускается')),
+  })
+  pipeline = createLeadPipeline({
+    db,
+    gateway,
+    notifier: bot.notifier,
+    remindAfterMs: async () => (await getSetting(db, 'reminder.decision_after_min')) * 60_000,
+  })
+  const lp = pipeline
+  setOutboxDeps({
+    db,
+    profi,
+    notifier: bot.notifier,
+    retryDelaysMs: o.retryDelaysMs ?? [1000, 2000, 4000, 8000, 16000],
+  })
+  setReminderHandler((taskId) => lp.onReminder(taskId))
+  await launchDbos(config.databaseUrl)
+
+  const deps: AppDeps = {
+    db,
+    secrets,
+    gateway,
+    profi,
+    bot,
+    production: config.production,
+    telegramApiRoot: config.telegramApiRoot,
+  }
+  const app = await buildServer(deps)
+  registerProfiEventsRoute(app, {
+    db,
+    nodeToken: config.nodeToken,
+    onEvent: (e) => lp.onOrderSeen(e),
+  })
+  app.register(async (scoped) => {
+    scoped.addHook('preHandler', requireSession)
+    scoped.get('/api/metrics/speed', async () => speedReport(db))
+  })
+  const url = await app.listen({ port: config.port, host: '127.0.0.1' })
+
+  const token = await secrets.get('telegram_bot_token')
+  if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))
+
+  return {
+    url,
+    app,
+    db,
+    secrets,
+    bot,
+    pipeline: lp,
+    async close() {
+      await bot.stop()
+      await app.close()
+      await shutdownDbos()
+      await closeDb()
+    },
+  }
+}

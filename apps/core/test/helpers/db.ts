@@ -4,7 +4,7 @@ import { createDb, type Db } from '../../src/db/client'
 export function testDatabaseUrl(): string {
   const base = process.env.DATABASE_URL ?? 'postgres://sara:sara@localhost:54329/sara'
   const u = new URL(base)
-  u.pathname = '/sara_test'
+  u.pathname = `/${process.env.SARA_TEST_DB ?? 'sara_test'}`
   return u.toString()
 }
 

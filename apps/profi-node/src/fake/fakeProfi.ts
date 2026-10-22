@@ -17,6 +17,7 @@ export type FakeProfi = {
   emitOrder(o?: Partial<ProfiOrder>): Promise<string>
   redeliver(eventId: string): Promise<void>
   failNextAck(): void
+  setCoreEventsUrl(url: string): void
   setHealth(h: Partial<SessionHealthOutput>): void
   close(): Promise<void>
 }
@@ -42,6 +43,7 @@ export async function createFakeProfi(o: {
   }
   let balance = 5000
   let dropNextAck = false
+  let coreEventsUrl = o.coreEventsUrl
 
   const impl = {
     async sessionHealth() {
@@ -75,7 +77,7 @@ export async function createFakeProfi(o: {
     let lastError: unknown
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await fetch(o.coreEventsUrl, {
+        const res = await fetch(coreEventsUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-sara-node-token': o.nodeToken },
           body: JSON.stringify(e),
@@ -121,6 +123,9 @@ export async function createFakeProfi(o: {
     },
     failNextAck() {
       dropNextAck = true
+    },
+    setCoreEventsUrl(url) {
+      coreEventsUrl = url
     },
     setHealth(h) {
       health = { ...health, ...h }
