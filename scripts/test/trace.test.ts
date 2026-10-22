@@ -18,6 +18,9 @@ const matrixMd = `
 | FR-SET-1 | M0 | FR-MEET-1 | M6 |
 | FR-MIND-1 | M0 каркас, M4 | FR-LEAD-4 | M3 |
 `
+// Built from parts so the trace script, which scans this file too, does not read them as real tests.
+const testCall = (title: string) => ['i', 't(', "'", title, "', () => {})"].join('')
+
 const fixture = {
   specMd,
   backlogMd,
@@ -42,10 +45,7 @@ describe('trace', () => {
   it('NFR-MAINT-2: unknown id in a test is reported', () => {
     const withBadId = {
       ...fixture,
-      testFiles: [
-        ...fixture.testFiles,
-        { path: 'x.test.ts', text: "it('FR-NOPE-1: ghost', () => {})" },
-      ],
+      testFiles: [...fixture.testFiles, { path: 'x.test.ts', text: testCall('FR-NOPE-1: ghost') }],
     }
     expect(buildTrace(withBadId).unknownIds).toEqual(['FR-NOPE-1'])
   })
