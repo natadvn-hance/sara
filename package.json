@@ -14,15 +14,19 @@
     "role:eval": "pnpm --filter @sara/core role:eval",
     "fake:order": "curl -s -X POST http://127.0.0.1:7070/fake/orders",
     "probe:claude": "pnpm --filter @sara/core probe:claude",
-    "trace": "tsx scripts/trace.ts"
+    "trace": "tsx scripts/trace.ts",
+    "mind:check": "tsx scripts/mind-check.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
     "@commitlint/cli": "21.2.4",
     "@commitlint/config-conventional": "21.2.4",
+    "@sara/shared": "workspace:*",
     "@types/node": "26.6.5",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
-    "vitest": "5.0.5"
+    "vitest": "5.0.5",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
   }
 }
