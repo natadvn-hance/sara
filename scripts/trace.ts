@@ -88,7 +88,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const root = resolve(import.meta.dirname, '..')
   const read = (p: string) => readFile(join(root, p), 'utf8')
   const files: { path: string; text: string }[] = []
-  for (const d of ['apps', 'packages', 'tests']) await testFiles(root, join(root, d), files)
+  for (const d of ['apps', 'packages', 'tests', 'scripts']) await testFiles(root, join(root, d), files)
   const r = buildTrace({
     specMd: await read('docs/spec/2026-10-22-sara-spec-v1.md'),
     backlogMd: await read('docs/product/backlog.md'),
