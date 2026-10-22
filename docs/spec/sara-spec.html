@@ -1,0 +1,1048 @@
+<title>Сара Hance: спецификация</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700&display=swap">
+<style>
+/* Layout: инженерная спецификация. Слева липкое оглавление разделов, справа документ: сводка, требования с номерами, архитектура C4, дизайн, данные, качество, процесс, вехи, решения. */
+:root {
+  --ground: #efefed;
+  --surface: #ffffff;
+  --ink: #1b1a19;
+  --muted: #6b6864;
+  --line: #e0ddd8;
+  --accent: #ec4b25;
+  --accent-ink: #c23a18;
+  --warn: #a86b12;
+  --minor: #8a8681;
+  --good: #2f7d4f;
+  --on-accent: #ffffff;
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #121211; --surface: #1c1b1a; --ink: #edebe7; --muted: #a39f99; --line: #34312e;
+    --accent: #ff6a45; --accent-ink: #ff825f; --warn: #e0a848; --minor: #8f8b85; --good: #5dbb84; --on-accent: #1a0d08;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #121211; --surface: #1c1b1a; --ink: #edebe7; --muted: #a39f99; --line: #34312e;
+  --accent: #ff6a45; --accent-ink: #ff825f; --warn: #e0a848; --minor: #8f8b85; --good: #5dbb84; --on-accent: #1a0d08;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { background: var(--ground); color: var(--ink); font: 400 16px/1.55 var(--font-body); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--ground); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+code { font-family: var(--font-mono); font-size: 0.82em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+.mark { display: inline-block; width: 22px; height: 16px; background: var(--accent); flex: none; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 64%, 40% 64%, 40% 36%, 0 36%); }
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--ground) 92%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 10px; display: flex; align-items: center; gap: 12px; }
+.topbar .now { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .now small { color: var(--muted); font-weight: 500; margin-right: 6px; }
+.navbtns { display: flex; gap: 6px; }
+.navbtn { font: 500 14px/1 var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+.navbtn:hover { border-color: var(--ink); }
+.navbtn:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
+.shell { max-width: 1260px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 64px; display: grid; grid-template-columns: 1fr; gap: 40px; }
+main { min-width: 0; }
+.toc { display: none; }
+@media (min-width: 1000px) {
+  .topbar { display: none; }
+  .shell { grid-template-columns: 240px minmax(0, 1fr); gap: 52px; }
+  .toc { display: flex; flex-direction: column; gap: 16px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 22px); align-self: start; max-height: calc(100vh - 44px); overflow: auto; padding-block: 22px 8px; }
+}
+.brand { display: flex; align-items: center; gap: 10px; font: 700 15px/1 var(--font-display); letter-spacing: -0.01em; }
+.brand .sub { font: 500 12px/1 var(--font-body); color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.toc a { display: grid; grid-template-columns: 26px 1fr; align-items: baseline; gap: 6px; text-decoration: none; padding: 5px 10px; border-radius: 9px; font-size: 13.5px; color: var(--muted); }
+.toc a:hover { background: var(--surface); color: var(--ink); }
+.toc a.on { background: var(--surface); color: var(--ink); font-weight: 600; }
+.toc .tn { font: 500 11px/1 var(--font-mono); color: var(--minor); font-variant-numeric: tabular-nums; }
+.toc a.on .tn { color: var(--accent-ink); }
+.toc-foot { font-size: 12px; color: var(--muted); line-height: 1.45; border-top: 1px solid var(--line); padding-top: 12px; }
+.chapter { padding-block: 52px; border-top: 1px solid var(--line); scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 64px); }
+.chapter:first-child { border-top: 0; padding-top: 36px; }
+@media (min-width: 1000px) { .chapter { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 8px); } .chapter:first-child { padding-top: 60px; } }
+.eyebrow { font: 500 12px/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.eyebrow .num { font-family: var(--font-mono); color: var(--accent-ink); letter-spacing: 0.02em; }
+.ch-head { display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px; max-width: 820px; }
+.ch-head h2 { font: 700 clamp(24px, 3.2vw, 34px)/1.15 var(--font-display); letter-spacing: -0.02em; }
+.ch-head .lead { color: var(--muted); font-size: 17px; max-width: 68ch; }
+.sub-h { font: 600 17px/1.3 var(--font-body); margin: 26px 0 10px; display: flex; gap: 10px; align-items: baseline; }
+.sub-h code { color: var(--accent-ink); font-size: 13px; }
+.note { font-size: 13px; color: var(--muted); }
+.stack-gap { display: flex; flex-direction: column; gap: 16px; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.hero h1 { font: 700 clamp(38px, 6.5vw, 70px)/1.03 var(--font-display); letter-spacing: -0.035em; }
+.hero h1 .v { color: var(--accent); }
+.hero .lead { font-size: clamp(17px, 2vw, 19px); color: var(--muted); max-width: 66ch; }
+.meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 24px; }
+.meta div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.meta span { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.meta b { font-size: 15px; }
+.how { margin-top: 20px; display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: var(--r); border: 1px dashed var(--line); color: var(--muted); font-size: 15px; max-width: 820px; }
+.how b { color: var(--ink); font-weight: 600; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel h3 { font: 600 17px/1.3 var(--font-body); }
+.panel ul, .panel ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.panel li { max-width: 68ch; }
+.kd { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.kd .c { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.kd .c .k { font: 600 11px/1 var(--font-mono); color: var(--accent-ink); }
+.kd .c b { font-size: 15px; }
+.kd .c span { font-size: 13.5px; color: var(--muted); }
+.st { display: inline-flex; font: 600 11px/1 var(--font-body); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+.st.b { background: color-mix(in srgb, var(--good) 14%, var(--surface)); color: var(--good); }
+.st.p { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--warn); }
+.fig { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; }
+.fig svg { display: block; width: 100%; min-width: 860px; height: auto; color: var(--ink); }
+.fig figcaption { font-size: 14px; color: var(--muted); max-width: 74ch; }
+svg .d-box { fill: var(--ground); stroke: var(--line); stroke-width: 1.5; }
+svg .d-hot { fill: color-mix(in srgb, var(--accent) 8%, var(--surface)); stroke: var(--accent); stroke-width: 2; }
+svg .d-soft { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+svg .d-person { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+svg .d-panel { fill: none; stroke: var(--minor); stroke-width: 1.2; stroke-dasharray: 6 5; }
+svg .d-t { fill: var(--ink); font: 600 15px var(--font-body); }
+svg .d-tb { fill: var(--ink); font: 700 16px var(--font-body); }
+svg .d-s { fill: var(--muted); font: 400 12.5px var(--font-body); }
+svg .d-l { fill: var(--muted); font: 500 12px var(--font-body); }
+svg .d-la { fill: var(--accent-ink); font: 600 12px var(--font-body); }
+svg .d-m { fill: var(--muted); font: 500 11.5px var(--font-mono); }
+svg .d-h { fill: var(--ink); font: 700 12.5px var(--font-body); letter-spacing: 0.04em; }
+svg .d-a { stroke: var(--ink); stroke-width: 1.5; fill: none; }
+svg .d-aa { stroke: var(--accent); stroke-width: 2; fill: none; }
+svg .d-dash { stroke: var(--minor); stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
+svg .mk { fill: var(--ink); }
+svg .mka { fill: var(--accent); }
+svg .mkg { fill: var(--minor); }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; font: 600 12px/1.2 var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+td.id { font: 500 12.5px/1.5 var(--font-mono); color: var(--accent-ink); white-space: nowrap; }
+td code { color: var(--accent-ink); }
+.lvl { font: 600 12px/1 var(--font-body); white-space: nowrap; }
+.lvl.h { color: var(--accent-ink); }
+.lvl.m { color: var(--warn); }
+.lvl.l { color: var(--good); }
+pre.code { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 18px; overflow-x: auto; font: 13px/1.6 var(--font-mono); color: var(--ink); }
+pre.code .c { color: var(--muted); }
+pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 20px; overflow-x: auto; margin: 0; font-family: var(--font-mono); font-size: 13px; color: var(--ink); }
+.pyr { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.pyr div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; text-align: center; font-size: 14px; }
+.pyr div b { display: block; font-size: 15px; }
+.pyr div span { color: var(--muted); font-size: 13px; }
+.pyr .p1 { width: min(100%, 360px); border-color: var(--accent); }
+.pyr .p2 { width: min(100%, 480px); }
+.pyr .p3 { width: min(100%, 600px); }
+.pyr .p4 { width: min(100%, 720px); }
+.pyr .p5 { width: 100%; max-width: 840px; }
+.cbtn { font: 500 13px/1 var(--font-body); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; }
+.cbtn:hover { border-color: var(--accent); color: var(--accent-ink); }
+.cbtn svg { width: 14px; height: 14px; }
+.foot { margin-top: 40px; font-size: 13px; color: var(--muted); }
+.foot a { color: var(--muted); }
+.selbtn { position: absolute; z-index: 20; font: 600 13px/1 var(--font-body); background: var(--ink); color: var(--surface); border: 0; border-radius: 10px; padding: 10px 13px; cursor: pointer; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); }
+</style>
+
+<div class="topbar" aria-label="Навигация по разделам">
+  <span class="mark" aria-hidden="true"></span>
+  <div class="now" id="now"><small>1</small>Сводка</div>
+  <div class="navbtns">
+    <button class="navbtn" type="button" id="prevTop">Назад</button>
+    <button class="navbtn" type="button" id="nextTop">Дальше</button>
+  </div>
+</div>
+
+<div class="shell">
+  <aside class="toc" aria-label="Оглавление">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><span>hance</span><span class="sub">спецификация</span></div>
+    <ol id="toc"></ol>
+    <div class="navbtns">
+      <button class="navbtn" type="button" id="prevSide">Назад</button>
+      <button class="navbtn" type="button" id="nextSide">Дальше</button>
+    </div>
+    <div class="toc-foot">Источник: ~/Sara-Hance/docs/spec/2026-10-22-sara-spec-v1.md. Стрелки ← и → листают разделы.</div>
+  </aside>
+
+  <main id="deck">
+
+    <section class="chapter hero" id="summary" data-title="Сводка" data-comment-target>
+      <div class="ch-head" style="max-width:none">
+        <div class="eyebrow"><span>Hance</span><span>·</span><span>спецификация продукта и системы</span><span>·</span><span>v1.0, 22.10.2026</span></div>
+        <h1>Сара Hance: <span class="v">спецификация</span></h1>
+        <p class="lead">Один ИИ-сотрудник продаж на Профи.ру. Приносит заявку меньше чем за 2 минуты, после «да» откликается за минуту, разговаривает голосом Бориса, договаривается о встрече, учится на тренажёре. Документ устроен как инженерная спецификация: требования с номерами, архитектура по модели C4, решения, вехи с критериями приёмки.</p>
+      </div>
+      <div class="meta">
+        <div><span>Статус</span><b>на утверждение</b></div>
+        <div><span>Владелец</span><b>Борис Мноян</b></div>
+        <div><span>Требований</span><b>около 90 с номерами</b></div>
+        <div><span>Решений</span><b>13 ADR</b></div>
+        <div><span>Вех</span><b>M0-M8</b></div>
+      </div>
+      <h3 class="sub-h">Ключевые решения</h3>
+      <div class="kd">
+        <div class="c"><span class="k">ADR-001 <span class="st b">Борис</span></span><b>Claude через CLI по подписке</b><span>без оплаты токенов</span></div>
+        <div class="c"><span class="k">ADR-002, 003</span><b>Профи.ру гибридно через Профи-MCP</b><span>события читать, интерфейсом действовать, экраном проверять</span></div>
+        <div class="c"><span class="k">ADR-004 <span class="st p">предложение</span></span><b>Два сервера</b><span>ядро за рубежом, узел в России, свой IP на аккаунт</span></div>
+        <div class="c"><span class="k">ADR-005 <span class="st p">предложение</span></span><b>Первичная запись в России</b><span>рабочая копия у ядра, уведомление в Роскомнадзор</span></div>
+        <div class="c"><span class="k">ADR-007, 008</span><b>Разум в git, без дообучения</b><span>знание, понимание, речь, суждение, память</span></div>
+        <div class="c"><span class="k">ADR-009 <span class="st b">Борис</span></span><b>Направления и маршрутизатор</b><span>аккаунты разного характера без конкуренции</span></div>
+        <div class="c"><span class="k">ADR-010 <span class="st p">предложение</span></span><b>Новый бот</b><span>v1 работает на старом до переключения</span></div>
+        <div class="c"><span class="k">ADR-012 <span class="st b">Борис</span></span><b>Без календаря</b><span>встречу отмечает Борис</span></div>
+      </div>
+      <div class="how" id="howto">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="flex:none;margin-top:2px"><path d="M4 5h16v11H9l-5 4z"/></svg>
+        <span id="howText"><b>Как комментировать.</b> Включи режим комментариев в просмотрщике и нажми на любой блок: комментарий привяжется к нему. Удобно ссылаться на номер требования, например FR-LEAD-7.</span>
+      </div>
+    </section>
+
+    <section class="chapter" id="goals" data-title="Цели и метрики">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 2</span></div>
+        <h2>Цели, метрики, границы</h2>
+        <p class="lead">Каждая цель измерима и проверяется по журналу событий, а не на ощущениях.</p>
+      </div>
+      <div class="stack-gap">
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>№</th><th>Цель</th><th>Метрика</th><th>Значение</th></tr></thead>
+            <tbody>
+              <tr><td class="id">G1</td><td>Быть среди первых откликов</td><td>от появления заявки до карточки у Бориса</td><td>меньше 2 минут у 90%</td></tr>
+              <tr><td class="id">G2</td><td>Решение исполняется сразу</td><td>от «да» до отклика в чате</td><td>меньше 60 секунд</td></tr>
+              <tr><td class="id">G3</td><td>Доводить до встречи</td><td>«клиент ответил → встреча»</td><td>от 25%</td></tr>
+              <tr><td class="id">G4</td><td>Говорить как Борис</td><td>слепой тест: Борис отличает свой ответ</td><td>около 50%, как угадывание</td></tr>
+              <tr><td class="id">G5</td><td>Снимать работу с Бориса</td><td>доля ответов без его участия</td><td>60% через два месяца после M5</td></tr>
+              <tr><td class="id">G6</td><td>Знать деньги</td><td>цена ответа, встречи, договора</td><td>каждый день по направлениям</td></tr>
+              <tr><td class="id">G7</td><td>Не ошибаться</td><td>дубли, выдуманные факты, потери данных</td><td>0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="two">
+          <div class="panel" data-comment-target>
+            <h3>Не цели первой версии</h3>
+            <ul><li>Лора, Ultimate Hance, календарь, ссылки на видеовстречи.</li><li>Звонки голосом, другие площадки, продажа коробки.</li><li>Дообучение весов модели.</li></ul>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Анти-цели: провал, даже если работает</h3>
+            <ul><li>Выдуманные факты, траты без решения Бориса.</li><li>Поток уведомлений, роботный тон.</li><li>Два аккаунта на одном заказе, дубль, ответ поверх ответа Бориса.</li><li>Потеря памяти после перезапуска.</li></ul>
+          </div>
+        </div>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>№</th><th>Сценарий: «Когда…, хочу…, чтобы…»</th></tr></thead>
+            <tbody>
+              <tr><td class="id">JS-1</td><td>Когда появилась подходящая заявка, хочу готовый отклик с кнопкой, чтобы откликнуться среди первых</td></tr>
+              <tr><td class="id">JS-2</td><td>Когда клиент ответил, хочу, чтобы Сара продолжила моим голосом и звала меня только по моим темам</td></tr>
+              <tr><td class="id">JS-3</td><td>Когда клиент согласился на созвон, хочу время и бриф, чтобы подготовиться</td></tr>
+              <tr><td class="id">JS-4</td><td>Когда Сара ответила не так, хочу поправить один раз, чтобы она запомнила</td></tr>
+              <tr><td class="id">JS-5</td><td>Когда есть 5 минут, хочу потренировать Сару на типовых клиентах</td></tr>
+              <tr><td class="id">JS-6</td><td>Когда завожу аккаунт, хочу описать направление словами и получить надёжную систему оценки</td></tr>
+              <tr><td class="id">JS-7</td><td>Когда что-то сломалось, хочу одно понятное сообщение и кнопку</td></tr>
+              <tr><td class="id">JS-8</td><td>Когда открываю пульт, хочу за 10 секунд понять, что ждёт меня и сколько это приносит</td></tr>
+              <tr><td class="id">JS-9</td><td>Когда ставлю систему с нуля, хочу шаги с инструкцией и проверкой</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="fr" data-title="Функциональные требования">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 4</span></div>
+        <h2>Функциональные требования</h2>
+        <p class="lead">У каждого требования номер и критерий приёмки. На номера ссылаются планы, тесты и приёмка вех.</p>
+      </div>
+      <div class="stack-gap">
+        <h3 class="sub-h">Первый запуск <code>FR-SET</code></h3>
+        <div class="table-wrap" data-comment-target><table><thead><tr><th>№</th><th>Требование</th><th>Приёмка</th></tr></thead><tbody>
+          <tr><td class="id">FR-SET-1</td><td>Мастер из 9 шагов с прогрессом, возвратом, пропуском необязательных</td><td>прерванный мастер продолжается с того же шага</td></tr>
+          <tr><td class="id">FR-SET-2</td><td>Telegram: бот по пошаговой инструкции или токен существующего, привязка чата по /start</td><td>понятная ошибка при неверном токене; приходит «Сара на связи»</td></tr>
+          <tr><td class="id">FR-SET-3</td><td>Claude: токен setup-token, проверка входа, пробный вызов, лимит</td><td>пробный вызов меньше 30 секунд</td></tr>
+          <tr><td class="id">FR-SET-4</td><td>Аккаунт Профи.ру через живой экран браузера</td><td>сессия жива, баланс виден, присутствие включено</td></tr>
+          <tr><td class="id">FR-SET-5</td><td>«Состояние системы» повторяет все проверки</td><td>у каждой проверки итог и что сделать</td></tr>
+        </tbody></table></div>
+
+        <h3 class="sub-h">Аккаунты и направления <code>FR-ACC</code></h3>
+        <div class="table-wrap" data-comment-target><table><thead><tr><th>№</th><th>Требование</th><th>Приёмка</th></tr></thead><tbody>
+          <tr><td class="id">FR-ACC-1</td><td>Несколько аккаунтов: свой профиль браузера, IP, лимиты, бюджет, пауза</td><td>данные и IP не смешиваются</td></tr>
+          <tr><td class="id">FR-ACC-2</td><td>Направление: описание, стоп-факторы, система оценки с версиями, формат отклика, кейсы, скорость</td><td>у системы оценки есть история</td></tr>
+          <tr><td class="id">FR-ACC-3</td><td>Онбординг: Claude структурирует слова Бориса и спрашивает «Правильно понимаю?»</td><td>черновик сохраняется на каждом шаге</td></tr>
+          <tr><td class="id">FR-ACC-4</td><td>Калибровка на 20 реальных заявках с предложениями поправок</td><td>включение при согласии от 85%</td></tr>
+          <tr><td class="id">FR-ACC-5</td><td>Пересчёт системы оценки на последних N заявках</td><td>видно, у каких заявок изменилось решение</td></tr>
+          <tr><td class="id">FR-ACC-6</td><td>Повторный вход живым экраном с телефона</td><td>без Мака и команд</td></tr>
+        </tbody></table></div>
+
+        <h3 class="sub-h">Заявки и отклики <code>FR-LEAD</code></h3>
+        <div class="table-wrap" data-comment-target><table><thead><tr><th>№</th><th>Требование</th><th>Приёмка</th></tr></thead><tbody>
+          <tr><td class="id">FR-LEAD-1</td><td>Заявка замечается по событиям, ленте раз в минуту, письмам</td><td>меньше 60 секунд у 90%</td></tr>
+          <tr><td class="id">FR-LEAD-2</td><td>Первый отбор правилами кода и Сортировщиком</td><td>чужие отсеяны без сильной модели</td></tr>
+          <tr><td class="id">FR-LEAD-3</td><td>Оценка системой каждого направления: балл, обоснование, уверенность, условия</td><td>у каждой оценки «почему N»</td></tr>
+          <tr><td class="id">FR-LEAD-4</td><td>Маршрутизатор: одно направление; оба подходят, одна карточка с выбором</td><td>два отклика на заказ невозможны</td></tr>
+          <tr><td class="id">FR-LEAD-5</td><td>Проверка заказа до отклика</td><td>закрытые не предлагаются</td></tr>
+          <tr><td class="id">FR-LEAD-6</td><td>Черновик в формате направления: приветствие, кейсы по тегам, до 500 знаков</td><td>приветствие в 100% откликов</td></tr>
+          <tr><td class="id">FR-LEAD-7</td><td>Карточка с кнопками Откликнуться за N ₽, Изменить, Пропустить</td><td>меньше 2 минут от появления заявки</td></tr>
+          <tr><td class="id">FR-LEAD-8</td><td>Отклик через интерфейс с проверкой экраном</td><td>меньше 60 секунд, трата на заказ</td></tr>
+          <tr><td class="id">FR-LEAD-9</td><td>Деньги: кошелёк, лимиты, потолок; автоотклик только по правилу направления, выключен</td><td>ни одной траты без «да» или правила</td></tr>
+          <tr><td class="id">FR-LEAD-10</td><td>Очередь по ценности, заявки старше суток не предлагаются</td><td></td></tr>
+        </tbody></table></div>
+
+        <h3 class="sub-h">Разговор с клиентом <code>FR-CONV</code></h3>
+        <div class="table-wrap" data-comment-target><table><thead><tr><th>№</th><th>Требование</th><th>Приёмка</th></tr></thead><tbody>
+          <tr><td class="id">FR-CONV-1</td><td>Сообщение замечается по событию, страховка раз в 10 минут</td><td>меньше 60 секунд у 95%</td></tr>
+          <tr><td class="id">FR-CONV-2</td><td>Сообщения с номером площадки, автором, временем, «прочитано»</td><td>автор у 100%, иначе действий нет</td></tr>
+          <tr><td class="id">FR-CONV-3</td><td>Цикл из 8 шагов, ответ содержит номера фактов</td><td></td></tr>
+          <tr><td class="id">FR-CONV-4</td><td>Проверка фактов, приветствия, роботности, длинного тире</td><td>0 фактов вне разума</td></tr>
+          <tr><td class="id">FR-CONV-5</td><td>Правила: пауза, тихие часы, владелец, самостоятельность</td><td></td></tr>
+          <tr><td class="id">FR-CONV-6</td><td>Перечитать чат перед отправкой</td><td>0 ответов поверх ответа Бориса</td></tr>
+          <tr><td class="id">FR-CONV-7</td><td>Ждать, пока клиент печатает; один ответ на несколько сообщений</td><td></td></tr>
+          <tr><td class="id">FR-CONV-8</td><td>Пауза 1-4 минуты, набор в интерфейсе, ночью только срочное</td><td></td></tr>
+          <tr><td class="id">FR-CONV-9</td><td>Ключ от повтора, своё сообщение найдено на странице</td><td>0 дублей</td></tr>
+          <tr><td class="id">FR-CONV-10</td><td>Борис написал сам: клиент его, черновик отменён</td><td></td></tr>
+          <tr><td class="id">FR-CONV-11</td><td>Беру сам, вернуть Саре с указанием, написать текст, закрыть</td><td>из пульта, бота, Mini App</td></tr>
+          <tr><td class="id">FR-CONV-12</td><td>Напоминания с учётом «прочитал или нет», застой 7 дней</td><td></td></tr>
+        </tbody></table></div>
+
+        <h3 class="sub-h">Речь, встречи, разум <code>FR-SPEECH · FR-MEET · FR-MIND</code></h3>
+        <div class="table-wrap" data-comment-target><table><thead><tr><th>№</th><th>Требование</th><th>Приёмка</th></tr></thead><tbody>
+          <tr><td class="id">FR-SPEECH-1</td><td>Портрет речи Бориса: форма, словарь, прагматика, темп</td><td>каждая черта с источниками</td></tr>
+          <tr><td class="id">FR-SPEECH-2</td><td>3-5 образцов Бориса по теме и тону на ход</td><td></td></tr>
+          <tr><td class="id">FR-SPEECH-3</td><td>Тон клиента на каждом ходе</td><td></td></tr>
+          <tr><td class="id">FR-SPEECH-4</td><td>Слепой тест раз в неделю</td><td>итог в «Экзаменах»</td></tr>
+          <tr><td class="id">FR-MEET-1</td><td>Свободное время Бориса в настройках</td><td></td></tr>
+          <tr><td class="id">FR-MEET-2</td><td>Процедура созвона: способ связи, 2-3 времени в разные дни, перенос</td><td>без пересечений</td></tr>
+          <tr><td class="id">FR-MEET-3</td><td>«Встреча назначена» в Telegram, напоминания утром и за 30 минут</td><td></td></tr>
+          <tr><td class="id">FR-MEET-4</td><td>«Прошла ли встреча?», договор с суммой</td><td>итог в аналитике</td></tr>
+          <tr><td class="id">FR-MIND-1</td><td>Разум в git: пять частей, общее и по направлениям</td><td>каждый ответ хранит версию разума</td></tr>
+          <tr><td class="id">FR-MIND-2</td><td>Поиск по-русски и локальные векторы</td><td>меньше 300 мс</td></tr>
+          <tr><td class="id">FR-MIND-3</td><td>Изменения только после «да», откат кнопкой</td><td></td></tr>
+          <tr><td class="id">FR-MIND-4</td><td>Интервью карточками для пробелов</td><td></td></tr>
+        </tbody></table></div>
+
+        <h3 class="sub-h">Обучение, самостоятельность <code>FR-TRAIN · FR-AUTO</code></h3>
+        <div class="table-wrap" data-comment-target><table><thead><tr><th>№</th><th>Требование</th><th>Приёмка</th></tr></thead><tbody>
+          <tr><td class="id">FR-TRAIN-1</td><td>Выгрузка всей истории чатов Профи.ру с авторами: клиент, Борис, Сара v1</td><td>сообщения Сары v1 не считаются голосом Бориса</td></tr>
+          <tr><td class="id">FR-TRAIN-2</td><td>Сценарии и персоны из истории Профи.ру, обезличенно <span class="st b">Борис</span></td><td>источник у каждой персоны</td></tr>
+          <tr><td class="id">FR-TRAIN-3</td><td>Тренажёр, пять режимов</td><td>тренировка не уходит клиентам</td></tr>
+          <tr><td class="id">FR-TRAIN-4</td><td>Панель Сары: её вариант, разница, «Запомнить», обсуждение</td><td></td></tr>
+          <tr><td class="id">FR-TRAIN-5</td><td>Итог тренировки и карта покрытия</td><td></td></tr>
+          <tr><td class="id">FR-TRAIN-6</td><td>Уроки из правок, карточки пачками по 5</td><td></td></tr>
+          <tr><td class="id">FR-TRAIN-7</td><td>Ночной учитель, черновики разума</td><td>ничего без «да»</td></tr>
+          <tr><td class="id">FR-TRAIN-8</td><td>Экзамен 60 сценариев как сторож выкладки</td><td>хуже прошлой версии: выкладки нет</td></tr>
+          <tr><td class="id">FR-TRAIN-9</td><td>Генератор диалогов для поиска дыр, синтетика не знание</td><td></td></tr>
+          <tr><td class="id">FR-AUTO-1..4</td><td>Уровни по темам; старт черновиком, цена и договор у Бориса <span class="st b">Борис</span>; повышение 10 из 10 решением Бориса; понижение после правки</td><td>Сара предлагает повышение сама</td></tr>
+        </tbody></table></div>
+
+        <h3 class="sub-h">Уведомления, пульт, аналитика, эксплуатация <code>FR-NOTIF · FR-UI · FR-ANL · FR-OPS</code></h3>
+        <div class="table-wrap" data-comment-target><table><thead><tr><th>№</th><th>Требование</th><th>Приёмка</th></tr></thead><tbody>
+          <tr><td class="id">FR-NOTIF-1</td><td>Шесть видов уведомлений, кнопки и ответы привязаны к задаче</td><td>на «да» без контекста Сара не гадает</td></tr>
+          <tr><td class="id">FR-NOTIF-2</td><td>С 23:00 до 9:00 без звука <span class="st b">Борис</span></td><td></td></tr>
+          <tr><td class="id">FR-NOTIF-3</td><td>Обычно не больше 10 в день и две сводки</td><td></td></tr>
+          <tr><td class="id">FR-NOTIF-4</td><td>Разговор с Сарой в боте</td><td></td></tr>
+          <tr><td class="id">FR-UI-1..6</td><td>14 разделов; карта сущностей; все состояния экранов; Mini App; «почему так»; решение в 1-2 нажатия</td><td>любая вещь открывается из любой плашки</td></tr>
+          <tr><td class="id">FR-ANL-1..4</td><td>Когорты, деньги по заказу, скорость, доля без Бориса, расход лимита</td><td></td></tr>
+          <tr><td class="id">FR-OPS-1..4</td><td>Паузы; разлогин и блокировка останавливают аккаунт; лимит; журнал «почему так»</td><td>пауза действует меньше чем за 10 секунд</td></tr>
+        </tbody></table></div>
+      </div>
+    </section>
+
+    <section class="chapter" id="nfr" data-title="Нефункциональные">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 5</span></div>
+        <h2>Нефункциональные требования</h2>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>№</th><th>Область</th><th>Требование</th></tr></thead>
+          <tbody>
+            <tr><td class="id">NFR-PERF-1</td><td>Скорость</td><td>цели G1, G2, FR-CONV-1</td></tr>
+            <tr><td class="id">NFR-PERF-2</td><td>Скорость</td><td>пульт открывается меньше чем за 2 секунды на телефоне</td></tr>
+            <tr><td class="id">NFR-REL-1</td><td>Надёжность</td><td>доступность ядра 99% в месяц</td></tr>
+            <tr><td class="id">NFR-REL-2</td><td>Надёжность</td><td>потеря данных не больше 5 минут, восстановление не дольше часа</td></tr>
+            <tr><td class="id">NFR-REL-3</td><td>Надёжность</td><td>перезапуск не теряет ожиданий, напоминаний, задач</td></tr>
+            <tr><td class="id">NFR-REL-4</td><td>Надёжность</td><td>0 дублей отправки при сбоях связи</td></tr>
+            <tr><td class="id">NFR-COST-1</td><td>Стоимость</td><td>серверы до 3500 ₽ в месяц, модель в пределах подписки</td></tr>
+            <tr><td class="id">NFR-COST-2</td><td>Стоимость</td><td>учёба и экзамены только ночью и при свободном лимите</td></tr>
+            <tr><td class="id">NFR-SEC-1</td><td>Безопасность</td><td>секреты не в репозитории, зашифрованы, права 600</td></tr>
+            <tr><td class="id">NFR-SEC-2</td><td>Безопасность</td><td>роли, видящие текст клиента, без инструментов</td></tr>
+            <tr><td class="id">NFR-PRIV-1</td><td>Данные</td><td>первичная запись данных клиентов в России</td></tr>
+            <tr><td class="id">NFR-PRIV-2</td><td>Данные</td><td>в разум и тренажёр только обезличенное</td></tr>
+            <tr><td class="id">NFR-OBS-1</td><td>Наблюдение</td><td>трасса каждого хода: вход, разум, модель, проверки, решение</td></tr>
+            <tr><td class="id">NFR-MAINT-1</td><td>Сопровождение</td><td>система поднимается одной командой, тесты меньше 5 минут</td></tr>
+            <tr><td class="id">NFR-MAINT-2</td><td>Сопровождение</td><td>каждое архитектурное решение записано как ADR</td></tr>
+            <tr><td class="id">NFR-UX-1</td><td>Язык</td><td>по-русски, простым языком, без длинного тире</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="c4context" data-title="C4: контекст">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 6.2</span><span>C4, уровень 1</span></div>
+        <h2>Сара и мир вокруг неё</h2>
+        <p class="lead">Модель C4 описывает систему уровнями, от общего к частному. Первый уровень: кто пользуется системой и с какими внешними системами она говорит.</p>
+      </div>
+      <figure class="fig" data-comment-target>
+        <div class="fig-scroll">
+          <svg viewBox="0 0 1000 340" role="img" aria-label="Контекст: Борис пользуется Сарой через пульт и Telegram; Сара работает с Профи.ру, почтой, Claude и бэкапами">
+            <defs><marker id="k-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker></defs>
+            <rect class="d-person" x="40" y="135" width="180" height="72" rx="36"/><text class="d-t" x="130" y="166" text-anchor="middle">Борис</text><text class="d-s" x="130" y="186" text-anchor="middle">владелец</text>
+            <rect class="d-soft" x="380" y="20" width="240" height="56" rx="10"/><text class="d-t" x="500" y="44" text-anchor="middle">Telegram</text><text class="d-s" x="500" y="63" text-anchor="middle">бот и Mini App</text>
+            <rect class="d-hot" x="380" y="130" width="240" height="90" rx="12"/><text class="d-tb" x="500" y="166" text-anchor="middle">Сара</text><text class="d-s" x="500" y="188" text-anchor="middle">ИИ-сотрудник продаж</text><text class="d-s" x="500" y="205" text-anchor="middle">на Профи.ру</text>
+            <rect class="d-soft" x="380" y="270" width="240" height="50" rx="10"/><text class="d-t" x="500" y="301" text-anchor="middle">Бэкапы</text>
+            <rect class="d-soft" x="760" y="40" width="210" height="64" rx="10"/><text class="d-t" x="865" y="67" text-anchor="middle">Профи.ру</text><text class="d-s" x="865" y="87" text-anchor="middle">заказы, чаты клиентов</text>
+            <rect class="d-soft" x="760" y="140" width="210" height="56" rx="10"/><text class="d-t" x="865" y="164" text-anchor="middle">Почта Профи.ру</text><text class="d-s" x="865" y="183" text-anchor="middle">резервный сигнал</text>
+            <rect class="d-soft" x="760" y="236" width="210" height="56" rx="10"/><text class="d-t" x="865" y="260" text-anchor="middle">Claude</text><text class="d-s" x="865" y="279" text-anchor="middle">CLI по подписке</text>
+            <line class="d-a" x1="220" y1="171" x2="376" y2="171" marker-end="url(#k-ah)"/><text class="d-l" x="298" y="162" text-anchor="middle">пульт в браузере</text>
+            <path class="d-a" d="M130 135 V48 H376" marker-end="url(#k-ah)"/><text class="d-l" x="250" y="40" text-anchor="middle">кнопки, разговор</text>
+            <line class="d-a" x1="500" y1="76" x2="500" y2="126" marker-end="url(#k-ah)"/><text class="d-l" x="508" y="106">уведомления</text>
+            <path class="d-a" d="M620 150 H690 V72 H756" marker-end="url(#k-ah)"/><text class="d-l" x="698" y="112">читает и</text><text class="d-l" x="698" y="126">действует</text>
+            <line class="d-a" x1="620" y1="168" x2="756" y2="168" marker-end="url(#k-ah)"/><text class="d-l" x="688" y="186" text-anchor="middle">письма</text>
+            <path class="d-a" d="M620 200 H690 V264 H756" marker-end="url(#k-ah)"/><text class="d-l" x="698" y="240">роли</text>
+            <line class="d-a" x1="500" y1="220" x2="500" y2="266" marker-end="url(#k-ah)"/><text class="d-l" x="508" y="248">архив</text>
+          </svg>
+        </div>
+        <figcaption>Клиенты Профи.ру с Сарой напрямую не связаны: они пишут в чат площадки, и только оттуда Сара их слышит.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter" id="c4containers" data-title="C4: контейнеры и узлы">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 6.3, 6.5</span><span>C4, уровень 2</span></div>
+        <h2>Из чего состоит Сара и где это работает</h2>
+        <p class="lead">Два сервера. Ядро за рубежом, где официально доступен Claude. Узел Профи.ру в России: его видит площадка, и на нём первая запись данных клиентов.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 380" role="img" aria-label="Контейнеры: на узле ядра бот, пульт, ядро, Claude CLI, база, разум; на узле Профи.ру Профи-MCP, вкладки аккаунтов и первичное хранилище; связь инструментами и событиями; копия данных в базу ядра">
+              <defs><marker id="n-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker><marker id="n-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker></defs>
+              <rect class="d-panel" x="20" y="30" width="540" height="330" rx="14"/><text class="d-h" x="34" y="22">УЗЕЛ ЯДРА · ЗА РУБЕЖОМ</text>
+              <rect class="d-panel" x="620" y="30" width="360" height="330" rx="14"/><text class="d-h" x="634" y="22">УЗЕЛ ПРОФИ.РУ · РОССИЯ</text>
+              <rect class="d-box" x="40" y="56" width="130" height="56" rx="9"/><text class="d-t" x="105" y="81" text-anchor="middle">Бот</text><text class="d-s" x="105" y="99" text-anchor="middle">grammY</text>
+              <rect class="d-box" x="190" y="56" width="130" height="56" rx="9"/><text class="d-t" x="255" y="81" text-anchor="middle">Пульт</text><text class="d-s" x="255" y="99" text-anchor="middle">React</text>
+              <rect class="d-hot" x="40" y="150" width="500" height="64" rx="11"/><text class="d-tb" x="290" y="178" text-anchor="middle">Ядро</text><text class="d-s" x="290" y="199" text-anchor="middle">домен · правила · процессы · шлюз модели · мозг · школа</text>
+              <rect class="d-box" x="40" y="260" width="160" height="60" rx="9"/><text class="d-t" x="120" y="286" text-anchor="middle">Claude CLI</text><text class="d-s" x="120" y="305" text-anchor="middle">по подписке</text>
+              <rect class="d-box" x="220" y="260" width="160" height="60" rx="9"/><text class="d-t" x="300" y="286" text-anchor="middle">База ядра</text><text class="d-s" x="300" y="305" text-anchor="middle">Postgres</text>
+              <rect class="d-box" x="400" y="260" width="140" height="60" rx="9"/><text class="d-t" x="470" y="286" text-anchor="middle">Разум</text><text class="d-s" x="470" y="305" text-anchor="middle">git sara-mind</text>
+              <line class="d-a" x1="105" y1="112" x2="105" y2="146" marker-end="url(#n-ah)"/><text class="d-l" x="113" y="134">события</text>
+              <line class="d-a" x1="255" y1="112" x2="255" y2="146" marker-end="url(#n-ah)"/><text class="d-l" x="263" y="134">API</text>
+              <line class="d-a" x1="120" y1="214" x2="120" y2="256" marker-end="url(#n-ah)"/><text class="d-l" x="128" y="240">роли</text>
+              <line class="d-a" x1="300" y1="214" x2="300" y2="256" marker-end="url(#n-ah)"/><text class="d-l" x="308" y="240">журнал</text>
+              <line class="d-a" x1="470" y1="214" x2="470" y2="256" marker-end="url(#n-ah)"/><text class="d-l" x="478" y="240">поиск</text>
+              <rect class="d-box" x="640" y="56" width="150" height="56" rx="9"/><text class="d-t" x="715" y="81" text-anchor="middle">Вкладка 1</text><text class="d-s" x="715" y="99" text-anchor="middle">свой IP</text>
+              <rect class="d-box" x="810" y="56" width="150" height="56" rx="9"/><text class="d-t" x="885" y="81" text-anchor="middle">Вкладка 2</text><text class="d-s" x="885" y="99" text-anchor="middle">свой IP</text>
+              <rect class="d-hot" x="640" y="150" width="320" height="64" rx="11"/><text class="d-tb" x="800" y="178" text-anchor="middle">Профи-MCP</text><text class="d-s" x="800" y="199" text-anchor="middle">события · чтение · действия · живой вход</text>
+              <rect class="d-box" x="640" y="260" width="320" height="60" rx="9"/><text class="d-t" x="800" y="286" text-anchor="middle">Первичное хранилище</text><text class="d-s" x="800" y="305" text-anchor="middle">первая запись данных клиентов</text>
+              <line class="d-a" x1="715" y1="150" x2="715" y2="116" marker-end="url(#n-ah)"/>
+              <line class="d-a" x1="885" y1="150" x2="885" y2="116" marker-end="url(#n-ah)"/><text class="d-l" x="893" y="138">управляет</text>
+              <line class="d-a" x1="540" y1="170" x2="636" y2="170" marker-end="url(#n-ah)"/><text class="d-l" x="588" y="162" text-anchor="middle">инструменты</text>
+              <line class="d-aa" x1="636" y1="196" x2="544" y2="196" marker-end="url(#n-aha)"/><text class="d-la" x="590" y="214" text-anchor="middle">события</text>
+              <line class="d-a" x1="800" y1="214" x2="800" y2="256" marker-end="url(#n-ah)"/><text class="d-l" x="808" y="240">первая запись</text>
+              <path class="d-dash" d="M640 300 H600 V344 H300 V324" marker-end="url(#n-ah)"/><text class="d-l" x="450" y="338" text-anchor="middle">копия, уведомление в Роскомнадзор</text>
+            </svg>
+          </div>
+          <figcaption>Между узлами WireGuard. Вкладки управляются только Профи-MCP: ядро никогда не трогает браузер напрямую. У каждого аккаунта своя вкладка и свой IP, а не свой сервер.</figcaption>
+        </figure>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Узел</th><th>Где</th><th>Размер</th><th>Ориентир цены</th></tr></thead>
+            <tbody>
+              <tr><td>Ядро</td><td>за рубежом, где доступен Claude</td><td>2 ядра, 4 ГБ, 40 ГБ</td><td>600-1200 ₽</td></tr>
+              <tr><td>Профи.ру</td><td>Россия</td><td>2 ядра, 4 ГБ, 30 ГБ</td><td>800-1500 ₽</td></tr>
+              <tr><td>IP на аккаунт</td><td>на узле Профи.ру</td><td>1 IPv4</td><td>150-250 ₽</td></tr>
+              <tr><td>Бэкапы</td><td>другой провайдер, S3</td><td></td><td>100-300 ₽</td></tr>
+              <tr><td colspan="3"><b>Итого</b></td><td><b>около 2000-3500 ₽ в месяц</b> плюс подписка Claude</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="c4components" data-title="C4: компоненты ядра">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 6.4</span><span>C4, уровень 3</span></div>
+        <h2>Что внутри ядра</h2>
+        <p class="lead">Ядро разбито на компоненты с границами: событие входит, разум понимает, правила решают, исполнение делает. Всё пишется в журнал.</p>
+      </div>
+      <figure class="fig" data-comment-target>
+        <div class="fig-scroll">
+          <svg viewBox="0 0 1000 330" role="img" aria-label="Компоненты ядра: входы, понимание, решение, исполнение; все пишут в журнал событий">
+            <defs><marker id="q-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker></defs>
+            <rect class="d-panel" x="20" y="30" width="210" height="226" rx="12"/><text class="d-h" x="34" y="22">ВХОДЫ</text>
+            <rect class="d-panel" x="270" y="30" width="210" height="226" rx="12"/><text class="d-h" x="284" y="22">ПОНИМАНИЕ</text>
+            <rect class="d-panel" x="520" y="30" width="210" height="226" rx="12"/><text class="d-h" x="534" y="22">РЕШЕНИЕ</text>
+            <rect class="d-panel" x="770" y="30" width="210" height="226" rx="12"/><text class="d-h" x="784" y="22">ИСПОЛНЕНИЕ</text>
+            <rect class="d-box" x="35" y="46" width="180" height="44" rx="8"/><text class="d-t" x="125" y="74" text-anchor="middle">api</text>
+            <rect class="d-box" x="35" y="100" width="180" height="44" rx="8"/><text class="d-t" x="125" y="128" text-anchor="middle">notify</text>
+            <rect class="d-box" x="35" y="154" width="180" height="44" rx="8"/><text class="d-t" x="125" y="182" text-anchor="middle">profi-client</text>
+            <rect class="d-box" x="35" y="208" width="180" height="40" rx="8"/><text class="d-s" x="125" y="233" text-anchor="middle">analytics читает журнал</text>
+            <rect class="d-hot" x="285" y="46" width="180" height="44" rx="8"/><text class="d-t" x="375" y="74" text-anchor="middle">brain</text>
+            <rect class="d-box" x="285" y="100" width="180" height="44" rx="8"/><text class="d-t" x="375" y="128" text-anchor="middle">mind</text>
+            <rect class="d-box" x="285" y="154" width="180" height="44" rx="8"/><text class="d-t" x="375" y="182" text-anchor="middle">directions</text>
+            <rect class="d-box" x="285" y="208" width="180" height="40" rx="8"/><text class="d-t" x="375" y="234" text-anchor="middle">school</text>
+            <rect class="d-hot" x="535" y="46" width="180" height="44" rx="8"/><text class="d-t" x="625" y="74" text-anchor="middle">policy</text>
+            <rect class="d-box" x="535" y="100" width="180" height="44" rx="8"/><text class="d-t" x="625" y="128" text-anchor="middle">domain</text>
+            <rect class="d-box" x="535" y="154" width="180" height="94" rx="8"/><text class="d-s" x="625" y="190" text-anchor="middle">машина состояний,</text><text class="d-s" x="625" y="208" text-anchor="middle">переходы только</text><text class="d-s" x="625" y="226" text-anchor="middle">через transition</text>
+            <rect class="d-box" x="785" y="46" width="180" height="44" rx="8"/><text class="d-t" x="875" y="74" text-anchor="middle">gateway</text>
+            <rect class="d-box" x="785" y="100" width="180" height="44" rx="8"/><text class="d-t" x="875" y="128" text-anchor="middle">workflows</text>
+            <rect class="d-box" x="785" y="154" width="180" height="44" rx="8"/><text class="d-t" x="875" y="182" text-anchor="middle">outbox</text>
+            <rect class="d-box" x="785" y="208" width="180" height="40" rx="8"/><text class="d-s" x="875" y="233" text-anchor="middle">→ Claude CLI, Профи-MCP</text>
+            <line class="d-a" x1="230" y1="140" x2="266" y2="140" marker-end="url(#q-ah)"/><text class="d-l" x="248" y="132" text-anchor="middle">событие</text>
+            <line class="d-a" x1="480" y1="140" x2="516" y2="140" marker-end="url(#q-ah)"/><text class="d-l" x="498" y="132" text-anchor="middle">ход</text>
+            <line class="d-a" x1="730" y1="140" x2="766" y2="140" marker-end="url(#q-ah)"/><text class="d-l" x="748" y="132" text-anchor="middle">можно</text>
+            <rect class="d-hot" x="20" y="280" width="960" height="40" rx="9"/><text class="d-t" x="500" y="305" text-anchor="middle">Журнал событий и база: каждое решение и действие оставляет событие</text>
+            <line class="d-dash" x1="125" y1="256" x2="125" y2="276"/>
+            <line class="d-dash" x1="375" y1="256" x2="375" y2="276"/>
+            <line class="d-dash" x1="625" y1="256" x2="625" y2="276"/>
+            <line class="d-dash" x1="875" y1="256" x2="875" y2="276"/>
+          </svg>
+        </div>
+        <figcaption>Модель живёт только в «понимании» (через gateway): она предлагает ход. Разрешает ход policy в коде. Поэтому никакой текст клиента не может заставить Сару потратить деньги или написать то, что запрещено.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter" id="design" data-title="Данные и процессы">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 7</span></div>
+        <h2>Модель данных, состояния, главные процессы</h2>
+      </div>
+      <div class="stack-gap">
+<pre class="mermaid" data-comment-target>
+erDiagram
+  ACCOUNT ||--|| DIRECTION : "имеет"
+  DIRECTION ||--o{ SCORING_VERSION : "версии оценки"
+  DIRECTION ||--o{ CASE_LINK : "кейсы"
+  ACCOUNT ||--o{ LEAD : "видит"
+  LEAD ||--o| DEAL : "становится клиентом"
+  LEAD ||--o{ SPEND : "траты"
+  DEAL ||--o{ MESSAGE : "переписка"
+  DEAL ||--o{ MEETING : "встречи"
+  DEAL ||--o{ TASK : "задачи"
+  DEAL ||--o{ COMMITMENT : "обещания"
+  MESSAGE }o--o{ MIND_ENTRY : "опирается на"
+  LESSON }o--|| MIND_ENTRY : "меняет"
+  TRAINING_SESSION ||--o{ LESSON : "даёт"
+  DEAL ||--o{ EVENT : "журнал"
+</pre>
+<pre class="mermaid" data-comment-target>
+stateDiagram-v2
+  direction LR
+  state "Заявка найдена" as found
+  state "Ждёт решения" as queued
+  state "Отклик отправлен" as bid
+  state "Диалог" as talking
+  state "Созвон предложен" as proposed
+  state "Встреча назначена" as booked
+  state "Время встречи прошло" as done
+  state "Договор" as won
+  state "Проиграно" as lost
+  state "Спит" as dormant
+  [*] --> found
+  found --> queued: подходит направлению
+  queued --> bid: кнопка Бориса
+  bid --> talking: клиент ответил
+  bid --> dormant: молчит
+  dormant --> talking: написал снова
+  talking --> proposed: согласен на звонок
+  proposed --> booked: выбрал время
+  booked --> proposed: перенос
+  booked --> done: время прошло
+  done --> won: Борис отметил договор
+  done --> lost: Борис отметил отказ
+  talking --> lost: выбрал другого
+</pre>
+<pre class="mermaid" data-comment-target>
+sequenceDiagram
+  participant P as Профи.ру
+  participant M as Профи-MCP
+  participant C as Ядро
+  participant G as Шлюз claude -p
+  participant B as Борис
+  P->>M: новая заявка
+  M->>C: order_seen
+  C->>G: Сортировщик и оценка по направлениям
+  C->>C: маршрутизатор
+  C->>M: get_order
+  C->>G: Аналитик пишет отклик
+  C->>B: карточка с кнопкой, до 2 минут
+  B->>C: Откликнуться за N рублей
+  C->>C: правила денег
+  C->>M: submit_bid с ключом от повтора
+  M->>P: набор и отправка в интерфейсе
+  M-->>C: отклик найден на странице
+</pre>
+<pre class="mermaid" data-comment-target>
+sequenceDiagram
+  participant B as Борис
+  participant W as Тренажёр
+  participant T as Тренер claude -p
+  participant K as Карточки
+  W->>T: персона из истории Профи.ру
+  T-->>W: реплика клиента
+  B->>W: ответ Бориса
+  W->>T: как ответила бы Сара
+  T-->>W: вариант Сары, разница, урок
+  B->>W: Запомнить
+  W->>K: карточка урока
+  K-->>B: подтверждение пачкой
+</pre>
+        <pre class="code" data-comment-target><span class="c"># контракт вызова роли (ADR-001)</span>
+claude -p --model &lt;haiku|sonnet|opus&gt; --fallback-model &lt;запасная&gt; \
+  --system-prompt-file roles/&lt;роль&gt;.md --append-system-prompt-file &lt;контекст&gt;.md \
+  --output-format json --json-schema &lt;схема&gt;.json --tools "" --strict-mcp-config \
+  --setting-sources project --permission-mode dontAsk --permission-prompts none \
+  --max-turns &lt;N&gt; --no-session-persistence</pre>
+        <div class="two">
+          <div class="table-wrap" data-comment-target>
+            <table>
+              <thead><tr><th>Профи-MCP</th><th>Назначение</th></tr></thead>
+              <tbody>
+                <tr><td><code>profi.session_health</code></td><td>вход, баланс, IP, присутствие</td></tr>
+                <tr><td><code>profi.list_feed</code> · <code>get_order</code></td><td>заявки и проверка заказа</td></tr>
+                <tr><td><code>profi.list_chats</code> · <code>read_chat</code></td><td>чаты с номерами и авторами</td></tr>
+                <tr><td><code>profi.submit_bid</code> · <code>send_message</code></td><td>через интерфейс, с ключом от повтора</td></tr>
+                <tr><td><code>profi.backfill_chats</code></td><td>история для разума, ночью</td></tr>
+                <tr><td>события</td><td><code>order_seen</code>, <code>client_message</code>, <code>client_typing</code>, <code>client_read</code>, <code>session_dead</code>, <code>profile_banned</code>, <code>layout_changed</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-wrap" data-comment-target>
+            <table>
+              <thead><tr><th>Правило</th><th>Где</th></tr></thead>
+              <tbody>
+                <tr><td>Пауза «Пишет клиентам»</td><td>любая отправка клиенту</td></tr>
+                <tr><td>Пауза денег и аккаунта</td><td>отклики</td></tr>
+                <tr><td>Кошелёк, лимиты, потолок, «да» или правило</td><td>отклики</td></tr>
+                <tr><td>Владелец клиента, самостоятельность</td><td>ответы клиенту</td></tr>
+                <tr><td>Тихие часы</td><td>напоминания, несрочное</td></tr>
+                <tr><td>Бережный режим, сессия жива, профиль не заблокирован</td><td>любые действия на площадке</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="data" data-title="Данные и закон">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 8</span><span>предложение</span></div>
+        <h2>Где хранить данные</h2>
+        <p class="lead">Закон о персональных данных (ст. 18 ч. 5): данные граждан России при сборе сначала записываются в базу в России, копию потом можно передать за рубеж с уведомлением Роскомнадзора. Штраф для юрлица и ИП 1-6 млн ₽. Claude для работы нужен текст в момент вызова, а не место хранения, поэтому одно другому не мешает.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 200" role="img" aria-label="Путь данных: клиент пишет на Профи.ру, узел в России делает первую запись, копия уходит в ядро за рубежом, ядро отправляет текст Claude для ответа">
+              <defs><marker id="d-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker><marker id="d-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker></defs>
+              <rect class="d-soft" x="20" y="50" width="190" height="64" rx="10"/><text class="d-t" x="115" y="78" text-anchor="middle">Профи.ру</text><text class="d-s" x="115" y="98" text-anchor="middle">клиент пишет в чат</text>
+              <rect class="d-hot" x="280" y="50" width="190" height="64" rx="10"/><text class="d-t" x="375" y="78" text-anchor="middle">Узел в России</text><text class="d-s" x="375" y="98" text-anchor="middle">первая запись</text>
+              <rect class="d-box" x="540" y="50" width="190" height="64" rx="10"/><text class="d-t" x="635" y="78" text-anchor="middle">Ядро за рубежом</text><text class="d-s" x="635" y="98" text-anchor="middle">работа Сары, база</text>
+              <rect class="d-soft" x="790" y="50" width="190" height="64" rx="10"/><text class="d-t" x="885" y="78" text-anchor="middle">Claude</text><text class="d-s" x="885" y="98" text-anchor="middle">ответ по роли</text>
+              <line class="d-a" x1="210" y1="82" x2="276" y2="82" marker-end="url(#d-ah)"/><text class="d-l" x="243" y="72" text-anchor="middle">событие</text>
+              <line class="d-aa" x1="470" y1="82" x2="536" y2="82" marker-end="url(#d-aha)"/><text class="d-la" x="503" y="72" text-anchor="middle">копия</text>
+              <line class="d-a" x1="730" y1="82" x2="786" y2="82" marker-end="url(#d-ah)"/><text class="d-l" x="758" y="72" text-anchor="middle">текст</text>
+              <text class="d-la" x="503" y="146" text-anchor="middle">трансграничная передача:</text>
+              <text class="d-l" x="503" y="162" text-anchor="middle">разовое уведомление в Роскомнадзор</text>
+            </svg>
+          </div>
+          <figcaption>Российский узел нужен в любом случае (Профи.ру режет зарубежные IP), поэтому соблюдение закона почти ничего не стоит. Перед запуском рекомендована короткая консультация юриста.</figcaption>
+        </figure>
+        <div class="two">
+          <div class="table-wrap" data-comment-target>
+            <table>
+              <thead><tr><th>Данные</th><th>Где нужны</th></tr></thead>
+              <tbody>
+                <tr><td>Имя клиента, переписка</td><td>ядро; в разум только обезличенно</td></tr>
+                <tr><td>Телефон для встречи</td><td>встреча; удаляется через 30 дней</td></tr>
+                <tr><td>Сессия Профи.ру</td><td>узел Профи.ру, зашифрованно</td></tr>
+                <tr><td>Токены Telegram и Claude</td><td>узел ядра, зашифрованно</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Правила хранения <span class="st p">предложение</span></h3>
+            <ul>
+              <li>Переписка закрытых клиентов хранится 2 года, затем удаляется.</li>
+              <li>В разум и тренажёр попадают только обезличенные тексты.</li>
+              <li>Удаление по просьбе клиента одной командой из пульта.</li>
+              <li>Уведомления в Роскомнадзор об обработке и о трансграничной передаче подаются один раз до запуска.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="quality" data-title="Безопасность и надёжность">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Разделы 9-12</span></div>
+        <h2>Безопасность, надёжность, наблюдение, тесты</h2>
+      </div>
+      <div class="stack-gap">
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Угроза</th><th>Мера</th></tr></thead>
+            <tbody>
+              <tr><td>Ловушка в сообщении клиента</td><td>роли без инструментов, ответ по схеме, действие решает код</td></tr>
+              <tr><td>Утечка секретов</td><td>sops и age, права 600, не в репозитории, смена при переезде</td></tr>
+              <tr><td>Захват пульта или бота</td><td>пароль, вход по подписи Telegram только для Бориса, команды только из его чата</td></tr>
+              <tr><td>Двойная трата</td><td>ключ от повтора, проверка экраном, лимиты</td></tr>
+              <tr><td>Блокировка аккаунта</td><td>бережный режим, интерфейс, отдельный IP, тревога сразу</td></tr>
+              <tr><td>Потеря данных</td><td>непрерывный архив, проверка восстановления раз в неделю</td></tr>
+              <tr><td>Сара правит код в работе</td><td>у ролей нет доступа к коду и командам</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="two">
+          <div class="panel" data-comment-target>
+            <h3>Режимы деградации</h3>
+            <ul>
+              <li><b>Нет Claude:</b> готовые тексты для срочного, черновики позже, одно сообщение.</li>
+              <li><b>Нет площадки:</b> ожидание и одно сообщение, без перегрузки сайта.</li>
+              <li><b>Нет Telegram:</b> очередь уведомлений, пульт работает.</li>
+              <li><b>Нет связи узлов:</b> очередь команд и досылка событий.</li>
+              <li><b>Разлогин или блокировка:</b> стоит только этот аккаунт.</li>
+            </ul>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Наблюдение</h3>
+            <ul>
+              <li><b>Трасса хода:</b> событие, отобранный разум, вызов модели, проверки, правило, итог.</li>
+              <li><b>Метрики:</b> время до карточки, до отклика, до ответа; доля без Бориса; лимит; ошибки по классам.</li>
+              <li><b>Тревоги Борису:</b> только то, что требует его действия.</li>
+              <li><b>Тревоги разработке:</b> GlitchTip, очереди, свежесть бэкапа, последнее событие площадки.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="panel" data-comment-target>
+          <h3>Пирамида тестов</h3>
+          <div class="pyr">
+            <div class="p1"><b>Слепой тест голоса</b><span>раз в неделю, Борис</span></div>
+            <div class="p2"><b>Экзамен 60 сценариев</b><span>перед каждой выкладкой, на сервере</span></div>
+            <div class="p3"><b>Фальшивый Профи.ру</b><span>весь путь заявка, отклик, разговор, в CI</span></div>
+            <div class="p4"><b>Тесты на образцах</b><span>события и страницы Профи.ру из калибровки, в CI</span></div>
+            <div class="p5"><b>Модульные тесты</b><span>домен, правила, машина состояний, разбор данных, на каждом изменении</span></div>
+          </div>
+        </div>
+        <div class="panel" data-comment-target>
+          <h3>Выход из режима тени (условия переключения с v1)</h3>
+          <ol>
+            <li>7 дней подряд все сообщения клиентов замечены меньше чем за 60 секунд.</li>
+            <li>0 действий при неуверенном авторе.</li>
+            <li>Черновики Сары совпадают с решениями Бориса не хуже 80% по экзамену.</li>
+            <li>Карточки заявок приходят меньше чем за 2 минуты у 90%.</li>
+            <li>Борис подтвердил переключение.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="process" data-title="Процесс разработки">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 13</span></div>
+        <h2>Как идёт разработка</h2>
+        <p class="lead">GitHub-аккаунт Бориса уже подключён на этом Маке (perpetumxcompany-alt). Код и разум живут в двух приватных репозиториях, каждое изменение проходит один и тот же путь.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 170" role="img" aria-label="Путь изменения: план вехи, ветка с тестами и кодом, пул-реквест и CI, проверка кода, тень на серверах, приёмка Бориса и работа">
+              <defs><marker id="w-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker></defs>
+              <rect class="d-box" x="10" y="40" width="130" height="70" rx="10"/><text class="d-t" x="75" y="70" text-anchor="middle">План вехи</text><text class="d-s" x="75" y="90" text-anchor="middle">задачи, критерии</text>
+              <rect class="d-box" x="178" y="40" width="130" height="70" rx="10"/><text class="d-t" x="243" y="70" text-anchor="middle">Ветка</text><text class="d-s" x="243" y="90" text-anchor="middle">тесты, затем код</text>
+              <rect class="d-box" x="346" y="40" width="130" height="70" rx="10"/><text class="d-t" x="411" y="70" text-anchor="middle">Пул-реквест</text><text class="d-s" x="411" y="90" text-anchor="middle">CI: тесты, типы</text>
+              <rect class="d-box" x="514" y="40" width="130" height="70" rx="10"/><text class="d-t" x="579" y="70" text-anchor="middle">Проверка кода</text><text class="d-s" x="579" y="90" text-anchor="middle">слияние в main</text>
+              <rect class="d-box" x="682" y="40" width="130" height="70" rx="10"/><text class="d-t" x="747" y="70" text-anchor="middle">Тень</text><text class="d-s" x="747" y="90" text-anchor="middle">экзамен, серверы</text>
+              <rect class="d-hot" x="850" y="40" width="140" height="70" rx="10"/><text class="d-t" x="920" y="70" text-anchor="middle">Приёмка</text><text class="d-s" x="920" y="90" text-anchor="middle">Борис, работа</text>
+              <line class="d-a" x1="140" y1="75" x2="174" y2="75" marker-end="url(#w-ah)"/>
+              <line class="d-a" x1="308" y1="75" x2="342" y2="75" marker-end="url(#w-ah)"/>
+              <line class="d-a" x1="476" y1="75" x2="510" y2="75" marker-end="url(#w-ah)"/>
+              <line class="d-a" x1="644" y1="75" x2="678" y2="75" marker-end="url(#w-ah)"/>
+              <line class="d-a" x1="812" y1="75" x2="846" y2="75" marker-end="url(#w-ah)"/>
+              <text class="d-l" x="500" y="140" text-anchor="middle">CI красный, проверка не пройдена или экзамен хуже: изменение возвращается в ветку</text>
+            </svg>
+          </div>
+          <figcaption>Экзамен с моделью идёт на нашем сервере, а не в GitHub: токен подписки остаётся у нас.</figcaption>
+        </figure>
+        <div class="two">
+<pre class="code" data-comment-target><span class="c"># репозиторий sara (приватный)</span>
+apps/core        ядро и бот
+apps/web         пульт и Mini App
+apps/profi-node  Профи-MCP и браузеры
+packages/shared  общие типы и схемы
+roles/           инструкции ролей и схемы
+infra/           docker compose, серверы, бэкапы
+docs/            спецификация, ADR, планы, справка
+tests/           фальшивый Профи.ру, образцы, экзамен
+
+<span class="c"># репозиторий sara-mind (приватный)</span>
+mind/shared/      общее для Hance
+mind/directions/  своё у направлений
+mind/proposals/   черновики до «да» Бориса</pre>
+          <div class="panel" data-comment-target>
+            <h3>Правила</h3>
+            <ul>
+              <li><b>main</b> защищена: только пул-реквест с зелёным CI.</li>
+              <li><b>CI</b> GitHub Actions: тесты, типы, сборка образов в GitHub Container Registry.</li>
+              <li><b>Выкладка:</b> сервер сам забирает нужную версию; откат одной командой.</li>
+              <li><b>Окружения:</b> Мак с фальшивым Профи.ру, тень на серверах, работа.</li>
+              <li><b>Секреты:</b> зашифрованы, никогда открыто в репозитории.</li>
+              <li><b>Задачи:</b> GitHub Project с вехами, задача плана это issue.</li>
+              <li><b>Решения:</b> ADR в <code>docs/adr</code>, документ передачи дел после каждого блока.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="two">
+          <div class="table-wrap" data-comment-target>
+            <table>
+              <thead><tr><th>Борис</th><th>Сара (сессии Claude Code)</th></tr></thead>
+              <tbody>
+                <tr><td>решения, отмеченные как предложения</td><td>планы, код, тесты, документы</td></tr>
+                <tr><td>GitHub, серверы, бот, подписка, вход на Профи.ру</td><td>настройка серверов по инструкции, выкладка</td></tr>
+                <tr><td>приёмка каждой вехи</td><td>проверка кода, экзамены, отчёт о вехе</td></tr>
+                <tr><td>интервью и тренировки</td><td>подготовка тренировок и карточек</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Готово, когда</h3>
+            <ul>
+              <li>требования с номерами задачи выполнены и проверены тестом;</li>
+              <li>закрыт чек-лист из 16 аспектов разработки;</li>
+              <li>CI зелёный, проверка кода пройдена;</li>
+              <li>документы и справка обновлены;</li>
+              <li>изменения поведения прошли экзамен.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="milestones" data-title="Вехи">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 16</span></div>
+        <h2>Вехи и критерии приёмки</h2>
+        <p class="lead">Каждая веха работает сама и принимается по критерию. Серверы нужны не сразу: M0 идёт на Маке, узел Профи.ру нужен с M1, ядро с M2.</p>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>Веха</th><th>Результат</th><th>Приёмка</th><th>Нужно</th></tr></thead>
+          <tbody>
+            <tr><td class="id">M0</td><td>Фундамент: репозитории, CI, база, журнал, мастер шаги 1-3, фальшивый Профи.ру</td><td>одна команда на Маке поднимает систему и мастер, CI зелёный</td><td>GitHub</td></tr>
+            <tr><td class="id">M1</td><td>Профи-MCP: живая вкладка, калибровка, чтение, живой вход, первичное хранилище</td><td>48 часов тени: все сообщения меньше чем за 60 секунд, автор у 100%</td><td>узел в России</td></tr>
+            <tr><td class="id">M2</td><td>Заявка в одно нажатие: шлюз, роли, правила, исходящая очередь, бот</td><td>карточка меньше чем за 2 минуты у 90%, пробный отклик по «да»</td><td>узел ядра, новый бот</td></tr>
+            <tr><td class="id">M3</td><td>Направления: онбординг, оценка, калибровка, формат, кейсы, маршрутизатор</td><td>маркетинг откалиброван от 85%</td><td>M2</td></tr>
+            <tr><td class="id">M4</td><td>Разум и разговор: история, знание, понимание, речь, цикл ответа</td><td>экзамен построен, черновики в тени сравниваются с Борисом</td><td>M1, M2</td></tr>
+            <tr><td class="id">M5</td><td>Тренажёр и обучение, самостоятельность</td><td>3 тренировки Бориса, уроки в разуме</td><td>M4</td></tr>
+            <tr><td class="id">M6</td><td>Встречи и итоги</td><td>итог встречи в цене договора</td><td>M4</td></tr>
+            <tr><td class="id">M7</td><td>Пульт и переключение с v1</td><td>условия выхода из тени</td><td>M1-M6</td></tr>
+            <tr><td class="id">M8</td><td>Второй аккаунт IT</td><td>два аккаунта, ни одного двойного отклика</td><td>M7</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="risks" data-title="Риски">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 17</span></div>
+        <h2>Риски</h2>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>Риск</th><th>Вероятность</th><th>Ущерб</th><th>Мера</th></tr></thead>
+          <tbody>
+            <tr><td>Блокировка аккаунта Профи.ру</td><td><span class="lvl m">средняя</span></td><td><span class="lvl h">высокий</span></td><td>бережный режим, интерфейс, отдельный IP, тревога</td></tr>
+            <tr><td>Смена сайта Профи.ру</td><td><span class="lvl h">высокая</span></td><td><span class="lvl m">средний</span></td><td>события и данные, образцы, ремонтник</td></tr>
+            <tr><td>Лимит подписки</td><td><span class="lvl m">средняя</span></td><td><span class="lvl h">высокий</span></td><td>шлюз, приоритеты, ночь, отдельная подписка</td></tr>
+            <tr><td>Правила Anthropic для claude -p</td><td><span class="lvl l">низкая</span></td><td><span class="lvl h">высокий</span></td><td>шлюз за интерфейсом, переход на API без переделки</td></tr>
+            <tr><td>Голос не похож на Бориса</td><td><span class="lvl m">средняя</span></td><td><span class="lvl m">средний</span></td><td>тренажёр, образцы, слепой тест</td></tr>
+            <tr><td>Закон о персональных данных</td><td><span class="lvl l">низкая</span></td><td><span class="lvl h">высокий</span></td><td>первая запись в России, уведомление, юрист</td></tr>
+            <tr><td>Потеря контекста между сессиями</td><td><span class="lvl m">средняя</span></td><td><span class="lvl m">средний</span></td><td>спецификация, ADR, планы, передача дел, тесты</td></tr>
+            <tr><td>Связь аккаунтов друг с другом</td><td><span class="lvl m">средняя</span></td><td><span class="lvl h">высокий</span></td><td>разные IP и профили, вопрос в поддержку</td></tr>
+            <tr><td>Мало времени Бориса на обучение</td><td><span class="lvl m">средняя</span></td><td><span class="lvl m">средний</span></td><td>тренировки по 5 минут в Mini App, карточки пачками</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="adr" data-title="Решения (ADR)">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 18</span></div>
+        <h2>Архитектурные решения</h2>
+        <p class="lead">Запись решения: что решили, почему, что рассмотрели и отвергли. Так через полгода видно, почему система устроена так.</p>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>№</th><th>Решение</th><th>Почему</th><th>Отвергнуто</th></tr></thead>
+          <tbody>
+            <tr><td class="id">ADR-001</td><td>Claude через CLI по подписке <span class="st b">Борис</span></td><td>без оплаты токенов, официальный инструмент</td><td>API по ключу: платно</td></tr>
+            <tr><td class="id">ADR-002</td><td>Профи.ру гибридно: события читать, интерфейсом действовать, экраном проверять</td><td>площадка сама решает, кому показывать; нужен вид живого специалиста</td><td>только экран: медленно; прямые запросы: риск; API приложения: защита и риск</td></tr>
+            <tr><td class="id">ADR-003</td><td>Профи-MCP как единственная граница площадки</td><td>один владелец браузера, понятные инструменты, тесты</td><td>браузер из разных мест: убил сессию 29.09</td></tr>
+            <tr><td class="id">ADR-004</td><td>Два узла, свой IP на аккаунт <span class="st p">предложение</span></td><td>Claude не работает из России, Профи.ру режет зарубежные IP</td><td>один сервер: конфликт стран; сервер на аккаунт: дорого без пользы; прокси: дорого и ненадёжно</td></tr>
+            <tr><td class="id">ADR-005</td><td>Первая запись в России, копия за рубежом <span class="st p">предложение</span></td><td>закон и удобство Claude одновременно</td><td>всё за рубежом: риск штрафа; всё в России: Claude недоступен</td></tr>
+            <tr><td class="id">ADR-006</td><td>Postgres, журнал событий, DBOS</td><td>надёжность, история, процессы без отдельного сервера</td><td>SQLite: одна запись за раз; Temporal: тяжело</td></tr>
+            <tr><td class="id">ADR-007</td><td>Разум как git-репозиторий файлов плюс индекс</td><td>версии, откат, нативно для Claude Code</td><td>только таблицы; отдельный граф знаний</td></tr>
+            <tr><td class="id">ADR-008</td><td>Обучение без дообучения модели</td><td>дообучать Claude нельзя; разум, образцы, экзамены дают эффект</td><td>своя модель: дорого и слабее</td></tr>
+            <tr><td class="id">ADR-009</td><td>Направления и маршрутизатор <span class="st b">Борис</span></td><td>аккаунты разного характера без конкуренции</td><td>одна оценка на всех</td></tr>
+            <tr><td class="id">ADR-010</td><td>Новый бот <span class="st p">предложение</span></td><td>v1 работает на старом до переключения</td><td>тот же бот: два приложения не читают одного бота</td></tr>
+            <tr><td class="id">ADR-011</td><td>TypeScript-монорепозиторий, React</td><td>один язык, общие типы, наработки v1</td><td>разные языки</td></tr>
+            <tr><td class="id">ADR-012</td><td>Без календаря <span class="st b">Борис</span></td><td>встречу отмечает Борис</td><td>Google Calendar сейчас</td></tr>
+            <tr><td class="id">ADR-013</td><td>Интерфейс по OOUX</td><td>связи разделов понятны без объяснений</td><td>экраны без карты сущностей</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="open" data-title="Что подтвердить">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 19</span></div>
+        <h2>Что подтвердить перед планом</h2>
+        <p class="lead">Всё, что отмечено как предложение. Можно ответить комментарием у пункта или одним сообщением.</p>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>№</th><th>Вопрос</th><th>Предложение</th></tr></thead>
+          <tbody>
+            <tr><td class="id">1</td><td>Серверы</td><td>два: ядро за рубежом, узел в России; свой IP на аккаунт, а не сервер на аккаунт</td></tr>
+            <tr><td class="id">2</td><td>Данные</td><td>первая запись в России, копия у ядра, уведомление в Роскомнадзор</td></tr>
+            <tr><td class="id">3</td><td>Подписка Claude</td><td>отдельная для Сары</td></tr>
+            <tr><td class="id">4</td><td>Бот</td><td>новый</td></tr>
+            <tr><td class="id">5</td><td>Репозитории</td><td><code>sara</code> и <code>sara-mind</code>, приватные, в аккаунте perpetumxcompany-alt</td></tr>
+            <tr><td class="id">6</td><td>Второй аккаунт Профи.ру</td><td>есть ли он; разрешено ли правилами площадки (вопрос в поддержку)</td></tr>
+            <tr><td class="id">7</td><td>Автоотклик для быстрого направления</td><td>выключен, только кнопка</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="foot">Подготовила Сара, 22.10.2026. Источник: ~/Sara-Hance/docs/spec/2026-10-22-sara-spec-v1.md. Основа: аудит и дизайн v3 в том же репозитории. Источники: <a href="https://c4model.com/">модель C4</a>, <a href="https://help.profi.ru/ru/articles/3077236">справка Профи.ру</a>, <a href="https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan">Anthropic о claude -p</a>, <a href="https://wcr-consulting.com/blog/2026/03/13/lokalizaciya-baz-dannyh-personalnyh-dannyh/">локализация данных</a>, <a href="https://journal.sovcombank.ru/biznesu/transgranicnaia-peredaca-personalnyx-dannyx">трансграничная передача</a>, <a href="https://blog.logrocket.com/ux-design/object-oriented-ux-ooux/">OOUX</a>.</p>
+    </section>
+
+  </main>
+</div>
+
+<button class="selbtn" type="button" id="selbtn" hidden>Комментировать выделенное</button>
+
+<script>
+(function () {
+  var chapters = Array.prototype.slice.call(document.querySelectorAll('section.chapter'));
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var toc = document.getElementById('toc');
+  chapters.forEach(function (ch, i) {
+    var li = document.createElement('li');
+    var a = document.createElement('a');
+    a.href = '#' + ch.id;
+    a.dataset.id = ch.id;
+    var tn = document.createElement('span'); tn.className = 'tn'; tn.textContent = String(i + 1);
+    var tt = document.createElement('span'); tt.textContent = ch.dataset.title;
+    a.appendChild(tn); a.appendChild(tt);
+    li.appendChild(a); toc.appendChild(li);
+  });
+  var current = 0;
+  function go(i) {
+    i = Math.max(0, Math.min(chapters.length - 1, i));
+    chapters[i].scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  }
+  toc.addEventListener('click', function (e) {
+    var a = e.target.closest('a');
+    if (!a) return;
+    e.preventDefault();
+    go(chapters.findIndex(function (c) { return c.id === a.dataset.id; }));
+  });
+  ['prevTop', 'prevSide'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { go(current - 1); }); });
+  ['nextTop', 'nextSide'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { go(current + 1); }); });
+  function setActive(i) {
+    current = i;
+    var ch = chapters[i];
+    toc.querySelectorAll('a').forEach(function (a) { a.classList.toggle('on', a.dataset.id === ch.id); });
+    var now = document.getElementById('now');
+    now.innerHTML = '';
+    var sm = document.createElement('small');
+    sm.textContent = (i + 1) + ' из ' + chapters.length;
+    now.appendChild(sm);
+    now.appendChild(document.createTextNode(ch.dataset.title));
+    ['prevTop', 'prevSide'].forEach(function (id) { document.getElementById(id).disabled = i === 0; });
+    ['nextTop', 'nextSide'].forEach(function (id) { document.getElementById(id).disabled = i === chapters.length - 1; });
+  }
+  setActive(0);
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) setActive(chapters.indexOf(en.target)); });
+    }, { rootMargin: '-35% 0px -60% 0px' });
+    chapters.forEach(function (c) { io.observe(c); });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); go(current + 1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(current - 1); }
+  });
+  var hash = (location.hash || '').slice(1);
+  if (hash && document.getElementById(hash)) {
+    setTimeout(function () { document.getElementById(hash).scrollIntoView({ block: 'start' }); }, 50);
+  }
+  var icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>';
+  var buttons = [];
+  var selbtn = document.getElementById('selbtn');
+  var savedRange = null;
+  function hideAll() { buttons.forEach(function (b) { b.hidden = true; }); selbtn.hidden = true; savedRange = null; }
+  function addButtons(comments) {
+    document.querySelectorAll('.panel[data-comment-target], .fig[data-comment-target], .table-wrap[data-comment-target], pre[data-comment-target]').forEach(function (target) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cbtn';
+      b.innerHTML = icon + '<span>Комментировать</span>';
+      b.addEventListener('click', function () {
+        comments.openComposer({ element: target }).catch(function (err) {
+          if (err && (err.code === 'unavailable' || err.code === 'not_granted' || err.code === 'capability_disabled' || err.code === 'capability_removed')) hideAll();
+        });
+      });
+      if (target.tagName === 'PRE' || target.classList.contains('table-wrap')) {
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;justify-content:flex-end;margin-top:6px';
+        wrap.appendChild(b);
+        target.insertAdjacentElement('afterend', wrap);
+      } else {
+        target.appendChild(b);
+      }
+      buttons.push(b);
+    });
+    document.getElementById('howText').innerHTML = '<b>Как комментировать.</b> Кнопка «Комментировать» у каждого блока, таблицы и схемы, или выдели текст и нажми «Комментировать выделенное». Удобно ссылаться на номер требования.';
+    function placeSel() {
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { selbtn.hidden = true; savedRange = null; return; }
+      var range = sel.getRangeAt(0);
+      if (!document.getElementById('deck').contains(range.commonAncestorContainer) || String(sel).trim().length < 3) { selbtn.hidden = true; savedRange = null; return; }
+      savedRange = range.cloneRange();
+      var rect = range.getBoundingClientRect();
+      selbtn.hidden = false;
+      var w = selbtn.offsetWidth;
+      var left = Math.max(12, Math.min(window.innerWidth - w - 12, rect.left + rect.width / 2 - w / 2));
+      selbtn.style.left = (left + window.scrollX) + 'px';
+      selbtn.style.top = (rect.bottom + window.scrollY + 10) + 'px';
+    }
+    var timer = null;
+    document.addEventListener('selectionchange', function () { clearTimeout(timer); timer = setTimeout(placeSel, 180); });
+    selbtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    selbtn.addEventListener('click', function () {
+      if (!savedRange) return;
+      var r = savedRange;
+      selbtn.hidden = true;
+      comments.openComposer({ range: r }).catch(function (err) {
+        if (err && (err.code === 'unavailable' || err.code === 'not_granted')) hideAll();
+      });
+    });
+  }
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('comments').then(function (comments) { if (comments) addButtons(comments); }).catch(function () {});
+  }
+})();
+</script>

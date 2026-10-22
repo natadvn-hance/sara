@@ -1,0 +1,1599 @@
+<title>Сара Hance: проект</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700&display=swap">
+<style>
+/* Layout: проект-колода в виде аудита. Слева липкое оглавление, справа главы: как Профи.ру выбирает, скорость, разум и речь Сары, обучение, аккаунты, устройство, интерфейс, качество. */
+:root {
+  --ground: #efefed;
+  --surface: #ffffff;
+  --ink: #1b1a19;
+  --muted: #6b6864;
+  --line: #e0ddd8;
+  --accent: #ec4b25;
+  --accent-ink: #c23a18;
+  --warn: #a86b12;
+  --minor: #8a8681;
+  --good: #2f7d4f;
+  --on-accent: #ffffff;
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #121211; --surface: #1c1b1a; --ink: #edebe7; --muted: #a39f99; --line: #34312e;
+    --accent: #ff6a45; --accent-ink: #ff825f; --warn: #e0a848; --minor: #8f8b85; --good: #5dbb84; --on-accent: #1a0d08;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #121211; --surface: #1c1b1a; --ink: #edebe7; --muted: #a39f99; --line: #34312e;
+  --accent: #ff6a45; --accent-ink: #ff825f; --warn: #e0a848; --minor: #8f8b85; --good: #5dbb84; --on-accent: #1a0d08;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { background: var(--ground); color: var(--ink); font: 400 16px/1.55 var(--font-body); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--ground); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+code { font-family: var(--font-mono); font-size: 0.82em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+.mark { display: inline-block; width: 22px; height: 16px; background: var(--accent); flex: none; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 64%, 40% 64%, 40% 36%, 0 36%); }
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--ground) 92%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 10px; display: flex; align-items: center; gap: 12px; }
+.topbar .now { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .now small { color: var(--muted); font-weight: 500; margin-right: 6px; }
+.navbtns { display: flex; gap: 6px; }
+.navbtn { font: 500 14px/1 var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+.navbtn:hover { border-color: var(--ink); }
+.navbtn:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
+.shell { max-width: 1260px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 64px; display: grid; grid-template-columns: 1fr; gap: 40px; }
+main { min-width: 0; }
+.toc { display: none; }
+@media (min-width: 1000px) {
+  .topbar { display: none; }
+  .shell { grid-template-columns: 240px minmax(0, 1fr); gap: 52px; }
+  .toc { display: flex; flex-direction: column; gap: 16px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 22px); align-self: start; max-height: calc(100vh - 44px); overflow: auto; padding-block: 22px 8px; }
+}
+.brand { display: flex; align-items: center; gap: 10px; font: 700 15px/1 var(--font-display); letter-spacing: -0.01em; }
+.brand .sub { font: 500 12px/1 var(--font-body); color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.toc a { display: grid; grid-template-columns: 24px 1fr; align-items: baseline; gap: 6px; text-decoration: none; padding: 5px 10px; border-radius: 9px; font-size: 13.5px; color: var(--muted); }
+.toc a:hover { background: var(--surface); color: var(--ink); }
+.toc a.on { background: var(--surface); color: var(--ink); font-weight: 600; }
+.toc .tn { font: 500 11px/1 var(--font-mono); color: var(--minor); font-variant-numeric: tabular-nums; }
+.toc a.on .tn { color: var(--accent-ink); }
+.toc-foot { font-size: 12px; color: var(--muted); line-height: 1.45; border-top: 1px solid var(--line); padding-top: 12px; }
+.chapter { padding-block: 56px; border-top: 1px solid var(--line); scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 64px); }
+.chapter:first-child { border-top: 0; padding-top: 36px; }
+@media (min-width: 1000px) { .chapter { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 8px); } .chapter:first-child { padding-top: 60px; } }
+.eyebrow { font: 500 12px/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.eyebrow .num { font-family: var(--font-mono); color: var(--accent-ink); letter-spacing: 0.02em; }
+.ch-head { display: flex; flex-direction: column; gap: 14px; margin-bottom: 26px; max-width: 820px; }
+.ch-head h2 { font: 700 clamp(26px, 3.4vw, 36px)/1.15 var(--font-display); letter-spacing: -0.02em; }
+.ch-head .lead { color: var(--muted); font-size: 17px; max-width: 68ch; }
+.note { font-size: 13px; color: var(--muted); }
+.stack-gap { display: flex; flex-direction: column; gap: 16px; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.hero h1 { font: 700 clamp(40px, 7vw, 76px)/1.02 var(--font-display); letter-spacing: -0.035em; }
+.hero h1 .v { color: var(--accent); }
+.hero .lead { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 64ch; }
+.thesis { font: 700 clamp(22px, 3vw, 34px)/1.22 var(--font-display); letter-spacing: -0.025em; max-width: 30ch; margin-top: 26px; }
+.thesis em { font-style: normal; color: var(--accent); }
+.changes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 30px; }
+.chg { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.chg .k { font: 600 11px/1 var(--font-mono); color: var(--accent-ink); letter-spacing: 0.02em; }
+.chg b { font-size: 15px; }
+.chg span { font-size: 14px; color: var(--muted); }
+.how { margin-top: 22px; display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: var(--r); border: 1px dashed var(--line); color: var(--muted); font-size: 15px; max-width: 820px; }
+.how b { color: var(--ink); font-weight: 600; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel h3 { font: 600 17px/1.3 var(--font-body); }
+.panel ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.panel li { max-width: 66ch; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card .k { font: 600 11px/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-ink); }
+.card h3 { font: 700 18px/1.2 var(--font-display); letter-spacing: -0.02em; }
+.card p { font-size: 14.5px; color: var(--muted); }
+.card p b { color: var(--ink); font-weight: 600; }
+.fig { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; }
+.fig svg { display: block; width: 100%; min-width: 860px; height: auto; color: var(--ink); }
+.fig figcaption { font-size: 14px; color: var(--muted); max-width: 74ch; }
+svg .d-box { fill: var(--ground); stroke: var(--line); stroke-width: 1.5; }
+svg .d-hot { fill: color-mix(in srgb, var(--accent) 8%, var(--surface)); stroke: var(--accent); stroke-width: 2; }
+svg .d-soft { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+svg .d-panel { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 5; }
+svg .d-draft { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 6 4; }
+svg .d-bar { fill: color-mix(in srgb, var(--ink) 16%, var(--surface)); stroke: none; }
+svg .d-barh { fill: color-mix(in srgb, var(--accent) 30%, var(--surface)); stroke: none; }
+svg .d-axis { stroke: var(--minor); stroke-width: 1; fill: none; }
+svg .d-t { fill: var(--ink); font: 600 15px var(--font-body); }
+svg .d-tb { fill: var(--ink); font: 700 16px var(--font-body); }
+svg .d-s { fill: var(--muted); font: 400 12.5px var(--font-body); }
+svg .d-l { fill: var(--muted); font: 500 12px var(--font-body); }
+svg .d-la { fill: var(--accent-ink); font: 600 12px var(--font-body); }
+svg .d-m { fill: var(--muted); font: 500 11.5px var(--font-mono); }
+svg .d-h { fill: var(--ink); font: 700 13px var(--font-body); letter-spacing: 0.02em; }
+svg .d-a { stroke: var(--ink); stroke-width: 1.5; fill: none; }
+svg .d-aa { stroke: var(--accent); stroke-width: 2; fill: none; }
+svg .d-dash { stroke: var(--minor); stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
+svg .mk { fill: var(--ink); }
+svg .mka { fill: var(--accent); }
+svg .mkg { fill: var(--minor); }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; font: 600 12px/1.2 var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+td code { color: var(--accent-ink); white-space: nowrap; }
+td.v-yes { color: var(--good); font-weight: 600; }
+td.v-no { color: var(--accent-ink); font-weight: 600; }
+td.v-later { color: var(--warn); font-weight: 600; }
+pre.code { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 18px; overflow-x: auto; font: 13px/1.6 var(--font-mono); color: var(--ink); }
+pre.code .c { color: var(--muted); }
+pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 20px; overflow-x: auto; margin: 0; font-family: var(--font-mono); font-size: 13px; color: var(--ink); }
+.entry { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.entry-h { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--ground); flex-wrap: wrap; }
+.entry-h b { font-size: 15px; }
+.entry dl { margin: 0; display: grid; grid-template-columns: 1fr; }
+.entry dl div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 14px; }
+.entry dl div:first-child { border-top: 0; }
+.entry dt { color: var(--muted); font-weight: 500; }
+.entry dd { margin: 0; }
+@media (max-width: 560px) { .entry dl div { grid-template-columns: 1fr; gap: 2px; } }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 12.5px; white-space: nowrap; }
+.chip.red { border-color: var(--accent); color: var(--accent-ink); }
+.chip.green { border-color: var(--good); color: var(--good); }
+.day { display: flex; flex-direction: column; }
+.ev { display: grid; grid-template-columns: 74px 1fr; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
+.ev:first-child { border-top: 0; }
+.ev time { font: 600 13px/1.5 var(--font-mono); color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.ev p { max-width: 68ch; }
+.ev .who { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 3px; }
+.ev .sys { font: 500 12px/1.5 var(--font-mono); color: var(--muted); margin-top: 4px; }
+.wire-scroll { overflow-x: auto; border-radius: var(--r); }
+.wire { min-width: 800px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); display: grid; grid-template-columns: 170px 1fr 1.3fr; min-height: 400px; overflow: hidden; font-size: 13px; }
+.wire.studio { grid-template-columns: 220px 1fr 300px; }
+.wire.setup { grid-template-columns: 260px 1fr; }
+.wire.dir { grid-template-columns: 170px 1fr; }
+.wnav { background: var(--ground); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 3px; }
+.wnav .brandline { display: flex; gap: 8px; align-items: center; font: 700 13px/1 var(--font-display); padding: 2px 8px 12px; }
+.wnav span { display: flex; justify-content: space-between; padding: 7px 9px; border-radius: 8px; color: var(--muted); }
+.wnav span.on { background: var(--surface); color: var(--ink); font-weight: 600; }
+.wnav span b { font: 600 11px/1.4 var(--font-mono); color: var(--accent-ink); }
+.wlist { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+.wlist .wh { padding: 14px 14px 10px; font-weight: 600; font-size: 15px; border-bottom: 1px solid var(--line); }
+.wtask { padding: 11px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.wtask.on { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); }
+.wtask .t { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tag { font: 600 11px/1 var(--font-body); padding: 4px 7px; border-radius: 6px; background: var(--ground); color: var(--muted); }
+.tag.red { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-ink); }
+.tag.green { background: color-mix(in srgb, var(--good) 14%, var(--surface)); color: var(--good); }
+.tag.amber { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--warn); }
+.wtask .s { color: var(--muted); font-size: 12px; }
+.wdetail { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.wdetail .wh2 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.wdetail .wh2 b { font-size: 15px; }
+.bub { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.4; }
+.bub small { display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 2px; letter-spacing: 0.03em; text-transform: uppercase; }
+.bub.client { background: var(--ground); align-self: flex-start; }
+.bub.sara { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); align-self: flex-end; }
+.bub.boris { background: color-mix(in srgb, var(--ink) 9%, var(--surface)); align-self: flex-end; }
+.bub.draft { border: 1.5px dashed var(--accent); background: var(--surface); align-self: flex-end; }
+.why { border-left: 2px solid var(--accent); padding: 4px 10px; font-size: 12px; color: var(--muted); }
+.why b { color: var(--ink); }
+.wbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.wbtn { font: 600 12px/1 var(--font-body); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); }
+.wbtn.main { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.wmeta { display: flex; gap: 6px; flex-wrap: wrap; }
+.objchip { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px/1 var(--font-body); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+.objchip i { width: 6px; height: 6px; border-radius: 2px; background: var(--accent); display: block; }
+.side-pane { padding: 14px; display: flex; flex-direction: column; gap: 10px; border-left: 1px solid var(--line); background: var(--ground); min-width: 0; }
+.side-pane .cap { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.box-mini { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 6px; }
+.box-mini b { font-size: 13px; }
+.box-mini input, .fakeinput { font: 12.5px var(--font-body); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface); color: var(--muted); }
+.stepper { padding: 14px 10px; background: var(--ground); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.stepper div { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--muted); }
+.stepper div.on { background: var(--surface); color: var(--ink); font-weight: 600; }
+.stepper i { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; font: 600 10px/1 var(--font-mono); font-style: normal; color: var(--muted); }
+.stepper i.ok { background: var(--good); border-color: var(--good); color: var(--surface); }
+.stepper i.cur { border-color: var(--accent); color: var(--accent-ink); }
+.check-ok { color: var(--good); font-weight: 600; font-size: 13px; }
+.tabsline { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding: 10px 14px 0; }
+.tabsline span { font-size: 12.5px; padding: 8px 10px; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabsline span.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.rub { width: 100%; font-size: 12.5px; border-collapse: collapse; }
+.rub td, .rub th { padding: 7px 10px; border-top: 1px solid var(--line); }
+.rub th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-top: 0; }
+.mind-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.mind-row b { font-weight: 600; }
+.mind-row span { color: var(--muted); font: 500 12px/1.6 var(--font-mono); }
+.mocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; align-items: start; }
+.tg { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.tg .cap { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.tgmsg { background: var(--ground); border-radius: 14px 14px 14px 4px; padding: 11px 13px; font-size: 14px; line-height: 1.45; }
+.tgmsg b { font-weight: 600; }
+.tgkb { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.tgkb span { text-align: center; font-size: 13px; font-weight: 500; padding: 9px 6px; border-radius: 9px; background: color-mix(in srgb, var(--ink) 7%, var(--surface)); }
+.tgkb span.full { grid-column: 1 / -1; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-ink); font-weight: 600; }
+.phone { width: 100%; max-width: 300px; justify-self: center; border: 8px solid var(--ink); border-radius: 34px; background: var(--ground); padding: 16px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.phone .ph-h { font: 700 18px/1.2 var(--font-display); letter-spacing: -0.02em; padding: 0 4px; }
+.ph-list { background: var(--surface); border-radius: 12px; overflow: hidden; }
+.ph-row { display: flex; justify-content: space-between; gap: 10px; padding: 11px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.ph-row:first-child { border-top: 0; }
+.ph-row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ph-row b.red { color: var(--accent-ink); }
+.ph-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 11px; text-align: center; color: var(--muted); padding-top: 4px; }
+.ph-tabs .on { color: var(--accent-ink); font-weight: 600; }
+.auto-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.auto-row:first-child { border-top: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg span { font-size: 12px; padding: 6px 9px; color: var(--muted); }
+.seg span.on { background: var(--ink); color: var(--surface); font-weight: 600; }
+.seg span.lock { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-ink); font-weight: 600; }
+.nfr { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.nfr .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.nfr .n { font: 700 26px/1 var(--font-display); letter-spacing: -0.02em; }
+.nfr .l { font-size: 13px; color: var(--muted); }
+.road { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.road li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); }
+.road li:first-child { border-top: 0; }
+.road .rn { font: 700 22px/1.1 var(--font-display); color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.road .rt { display: flex; flex-direction: column; gap: 4px; }
+.road .rt b { font-size: 16px; }
+.road .rt span { color: var(--muted); font-size: 14px; }
+.register { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.item { display: grid; grid-template-columns: 1fr; gap: 10px; padding: 18px 20px; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; }
+@media (min-width: 760px) { .item { grid-template-columns: 48px minmax(0, 1fr) 180px; gap: 18px; padding: 20px 24px; } }
+.item h3 { font: 600 16px/1.35 var(--font-body); margin-bottom: 6px; }
+.item .body p { max-width: 68ch; }
+.item .side { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.pri { font: 700 22px/1 var(--font-display); color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.cbtn { font: 500 13px/1 var(--font-body); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.cbtn:hover { border-color: var(--accent); color: var(--accent-ink); }
+.cbtn svg { width: 14px; height: 14px; }
+.foot { margin-top: 44px; font-size: 13px; color: var(--muted); }
+.foot a { color: var(--muted); }
+.selbtn { position: absolute; z-index: 20; font: 600 13px/1 var(--font-body); background: var(--ink); color: var(--surface); border: 0; border-radius: 10px; padding: 10px 13px; cursor: pointer; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); }
+</style>
+
+<div class="topbar" aria-label="Навигация по разделам">
+  <span class="mark" aria-hidden="true"></span>
+  <div class="now" id="now"><small>1</small>Обложка</div>
+  <div class="navbtns">
+    <button class="navbtn" type="button" id="prevTop">Назад</button>
+    <button class="navbtn" type="button" id="nextTop">Дальше</button>
+  </div>
+</div>
+
+<div class="shell">
+  <aside class="toc" aria-label="Оглавление">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><span>hance</span><span class="sub">проект Сары</span></div>
+    <ol id="toc"></ol>
+    <div class="navbtns">
+      <button class="navbtn" type="button" id="prevSide">Назад</button>
+      <button class="navbtn" type="button" id="nextSide">Дальше</button>
+    </div>
+    <div class="toc-foot">Стрелки ← и → листают главы. Полный текст: docs/superpowers/specs/2026-10-21-sara-hance-design.md</div>
+  </aside>
+
+  <main id="deck">
+
+    <section class="chapter hero" id="start" data-title="Обложка" data-comment-target>
+      <div class="ch-head" style="max-width:none">
+        <div class="eyebrow"><span>Hance</span><span>·</span><span>проект, версия 3</span><span>·</span><span>22.10.2026</span></div>
+        <h1>Сара Hance: <span class="v">проект</span></h1>
+        <p class="lead">Финальное описание продукта перед планом: как Сара видит заявку и успевает первой, говорит как ты, учится на тренажёре, работает с аккаунтами разного характера, что видишь ты и что происходит при каждом сбое.</p>
+      </div>
+      <p class="thesis">Заявка пришла, Сара подготовила, <em>ты сказал «да»</em>, отклик ушёл. Клиент ответил, Сара говорит <em>как ты</em>.</p>
+      <div class="changes">
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Только Сара</b><span>Лора и Ultimate Hance убраны из проекта</span></div>
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Экран и MCP вместе</b><span>события для скорости, интерфейс для действий, экран для проверки</span></div>
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Аккаунты разного характера</b><span>направления, онбординг с Claude, система оценки, без конкуренции</span></div>
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Тренажёр</b><span>Сара играет клиента, ты отвечаешь, вы разбираете разницу</span></div>
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Речь как у тебя</b><span>шутки, тон, темп, без роботности</span></div>
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Без календаря</b><span>«встреча назначена» в Telegram, итог отмечаешь ты</span></div>
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Первый запуск</b><span>мастер с инструкцией и проверкой на каждом шаге</span></div>
+        <div class="chg"><span class="k">по тебе 22.10</span><b>Карта сущностей</b><span>интерфейс по методу OOUX, понятные связи разделов</span></div>
+      </div>
+      <div class="how" id="howto">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="flex:none;margin-top:2px"><path d="M4 5h16v11H9l-5 4z"/></svg>
+        <span id="howText"><b>Как комментировать.</b> Включи режим комментариев в просмотрщике и нажми на любой блок или схему: комментарий привяжется к нему.</span>
+      </div>
+    </section>
+
+    <section class="chapter" id="glance" data-title="Продукт одним взглядом">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 1</span></div>
+        <h2>Продукт одним взглядом</h2>
+        <p class="lead">Одна петля. Сообщение клиента проходит цикл ответа, который опирается на разум. Правила решают, уйдёт ли ответ сам или к тебе. Твои правки и тренировки через учителя возвращаются в разум.</p>
+      </div>
+      <figure class="fig" data-comment-target>
+        <div class="fig-scroll">
+          <svg viewBox="0 0 1000 380" role="img" aria-label="Петля Сары: Профи-MCP передаёт сообщение в цикл ответа, цикл опирается на разум, движок правил отправляет ответ или черновик Борису, правки и тренировки через учителя возвращаются в разум">
+            <defs>
+              <marker id="g-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+              <marker id="g-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker>
+              <marker id="g-ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mkg"/></marker>
+            </defs>
+            <rect class="d-box" x="20" y="80" width="170" height="64" rx="10"/><text class="d-t" x="105" y="107" text-anchor="middle">Профи-MCP</text><text class="d-s" x="105" y="127" text-anchor="middle">слышит и действует</text>
+            <rect class="d-box" x="300" y="80" width="230" height="64" rx="10"/><text class="d-t" x="415" y="107" text-anchor="middle">Цикл ответа</text><text class="d-s" x="415" y="127" text-anchor="middle">понять, решить, сказать</text>
+            <rect class="d-box" x="640" y="80" width="170" height="64" rx="10"/><text class="d-t" x="725" y="107" text-anchor="middle">Движок правил</text><text class="d-s" x="725" y="127" text-anchor="middle">деньги, автономия</text>
+            <rect class="d-box" x="870" y="80" width="110" height="64" rx="10"/><text class="d-t" x="925" y="107" text-anchor="middle">Борис</text><text class="d-s" x="925" y="127" text-anchor="middle">Входящие</text>
+            <rect class="d-hot" x="300" y="240" width="230" height="96" rx="12"/><text class="d-tb" x="415" y="275" text-anchor="middle">Разум Сары</text><text class="d-s" x="415" y="297" text-anchor="middle">знание · понимание · речь</text><text class="d-s" x="415" y="316" text-anchor="middle">суждение · память</text>
+            <rect class="d-box" x="640" y="256" width="170" height="64" rx="10"/><text class="d-t" x="725" y="283" text-anchor="middle">Учитель</text><text class="d-s" x="725" y="303" text-anchor="middle">уроки, тренажёр, ночь</text>
+            <rect class="d-soft" x="20" y="256" width="170" height="64" rx="10"/><text class="d-t" x="105" y="283" text-anchor="middle">Claude CLI</text><text class="d-s" x="105" y="303" text-anchor="middle">роли по подписке</text>
+            <line class="d-a" x1="190" y1="112" x2="296" y2="112" marker-end="url(#g-ah)"/><text class="d-l" x="245" y="94" text-anchor="middle">сообщение</text><text class="d-l" x="245" y="106" text-anchor="middle">клиента</text>
+            <line class="d-a" x1="380" y1="144" x2="380" y2="236" marker-end="url(#g-ah)"/><text class="d-l" x="372" y="196" text-anchor="end">вспомнить</text>
+            <line class="d-a" x1="450" y1="240" x2="450" y2="148" marker-end="url(#g-ah)"/><text class="d-l" x="458" y="190">факты, типы</text><text class="d-l" x="458" y="204">вопросов, образцы</text>
+            <line class="d-a" x1="530" y1="112" x2="636" y2="112" marker-end="url(#g-ah)"/><text class="d-l" x="585" y="94" text-anchor="middle">ход</text><text class="d-l" x="585" y="106" text-anchor="middle">и текст</text>
+            <path class="d-aa" d="M725 80 V40 H105 V76" marker-end="url(#g-aha)"/><text class="d-la" x="415" y="33" text-anchor="middle">тема заработана: отправить самой</text>
+            <line class="d-a" x1="810" y1="112" x2="866" y2="112" marker-end="url(#g-ah)"/><text class="d-l" x="838" y="100" text-anchor="middle">черновик</text>
+            <path class="d-a" d="M925 144 V288 H814" marker-end="url(#g-ah)"/><text class="d-l" x="916" y="206" text-anchor="end">правки и</text><text class="d-l" x="916" y="220" text-anchor="end">тренировки</text>
+            <line class="d-a" x1="640" y1="288" x2="534" y2="288" marker-end="url(#g-ah)"/><text class="d-l" x="587" y="280" text-anchor="middle">после «да»</text>
+            <path class="d-dash" d="M105 256 V176 H330 V148" marker-end="url(#g-ahg)"/><text class="d-l" x="215" y="168" text-anchor="middle">роли через claude -p</text>
+          </svg>
+        </div>
+        <figcaption>Красная линия это самостоятельная отправка: она появляется только по темам, где ты много раз согласился без правок. Пока тема не заработана, ответ идёт черновиком к тебе.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter" id="rank" data-title="Как Профи.ру выбирает">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 2</span><span>твой вопрос</span></div>
+        <h2>Как Профи.ру решает, кому достанется заказ</h2>
+        <p class="lead">Справка Профи.ру: место отклика задаёт рейтинг анкеты, но <b>клиент видит отклики в порядке поступления</b>. А если заказ подходит многим, Профи.ру сначала показывает его тем, кто чаще договаривается с клиентами. Поэтому выигрывают скорость и эффективность.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 260" role="img" aria-label="Маховик: лучшие разговоры повышают эффективность, Профи.ру раньше показывает заказы, отклик среди первых, клиент видит отклики по порядку, больше разговоров">
+              <defs><marker id="f-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker></defs>
+              <rect class="d-hot" x="40" y="30" width="380" height="64" rx="12"/><text class="d-t" x="230" y="58" text-anchor="middle">Лучше разговоры</text><text class="d-s" x="230" y="78" text-anchor="middle">разум и цикл ответа доводят до созвона</text>
+              <rect class="d-box" x="580" y="30" width="380" height="64" rx="12"/><text class="d-t" x="770" y="58" text-anchor="middle">Выше эффективность аккаунта</text><text class="d-s" x="770" y="78" text-anchor="middle">больше договорённостей с клиентами</text>
+              <rect class="d-box" x="580" y="170" width="380" height="64" rx="12"/><text class="d-t" x="770" y="198" text-anchor="middle">Заказы видим раньше</text><text class="d-s" x="770" y="218" text-anchor="middle">Профи.ру показывает их тем, кто договаривается</text>
+              <rect class="d-box" x="40" y="170" width="380" height="64" rx="12"/><text class="d-t" x="230" y="198" text-anchor="middle">Отклик среди первых</text><text class="d-s" x="230" y="218" text-anchor="middle">заявка у тебя меньше чем за 2 минуты</text>
+              <line class="d-aa" x1="420" y1="62" x2="576" y2="62" marker-end="url(#f-ah)"/><text class="d-la" x="498" y="52" text-anchor="middle">договорённости</text>
+              <line class="d-aa" x1="770" y1="94" x2="770" y2="166" marker-end="url(#f-ah)"/><text class="d-la" x="780" y="134">показ раньше</text>
+              <line class="d-aa" x1="580" y1="202" x2="424" y2="202" marker-end="url(#f-ah)"/><text class="d-la" x="502" y="192" text-anchor="middle">скорость</text>
+              <line class="d-aa" x1="230" y1="170" x2="230" y2="98" marker-end="url(#f-ah)"/><text class="d-la" x="240" y="138">клиент видит по порядку</text>
+            </svg>
+          </div>
+          <figcaption>Маховик раскручивается в обе стороны: каждый удачный разговор повышает шансы увидеть следующий заказ раньше конкурентов.</figcaption>
+        </figure>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Рычаг</th><th>Почему важен</th><th>Что делает Сара</th></tr></thead>
+            <tbody>
+              <tr><td>Скорость</td><td>клиент видит отклики в порядке поступления</td><td>заявка у тебя меньше чем за 2 минуты, отклик сразу после «да»</td></tr>
+              <tr><td>Эффективность</td><td>заказ раньше показывают тем, кто чаще договаривается</td><td>разговоры доводятся до созвона, слабые заявки не берутся</td></tr>
+              <tr><td>Анкета</td><td>рейтинг анкеты задаёт место отклика</td><td>после договора задача тебе: попросить отзыв</td></tr>
+              <tr><td>Обычное поведение</td><td>площадка видит, как работает аккаунт</td><td>живая вкладка, клики и набор текста в интерфейсе, паузы, рабочие часы</td></tr>
+              <tr><td>Текст и примеры работ</td><td>по ним выбирает клиент</td><td>отклик в формате направления, со ссылками на кейсы, где уместно</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="speed" data-title="Скорость">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 3</span><span>твоя просьба</span></div>
+        <h2>От заявки до отклика</h2>
+        <p class="lead">Заявка пришла, Сара увидела, подготовила и прислала тебе меньше чем за 2 минуты. Ты нажал «Откликнуться», и меньше чем через минуту отклик в чате клиента.</p>
+      </div>
+      <figure class="fig" data-comment-target>
+        <div class="fig-scroll">
+          <svg viewBox="0 0 1000 240" role="img" aria-label="Шкала времени: заметить заявку до 60 секунд, оценка 10 секунд, проверка заказа 10 секунд, черновик до 40 секунд, карточка у Бориса к 2 минутам; после нажатия отправка до 60 секунд">
+            <rect class="d-bar" x="60" y="70" width="293" height="28" rx="4"/>
+            <rect class="d-bar" x="355" y="70" width="47" height="28" rx="4"/>
+            <rect class="d-bar" x="404" y="70" width="47" height="28" rx="4"/>
+            <rect class="d-barh" x="453" y="70" width="194" height="28" rx="4"/>
+            <text class="d-l" x="206" y="60" text-anchor="middle">заметить: события и лента раз в минуту</text>
+            <text class="d-l" x="378" y="60" text-anchor="middle">оценка</text>
+            <text class="d-l" x="427" y="116" text-anchor="middle">проверка</text>
+            <text class="d-l" x="550" y="60" text-anchor="middle">черновик в формате направления</text>
+            <line class="d-axis" x1="60" y1="130" x2="647" y2="130"/>
+            <line class="d-axis" x1="60" y1="126" x2="60" y2="134"/><text class="d-m" x="60" y="150" text-anchor="middle">0</text>
+            <line class="d-axis" x1="207" y1="126" x2="207" y2="134"/><text class="d-m" x="207" y="150" text-anchor="middle">30 с</text>
+            <line class="d-axis" x1="353" y1="126" x2="353" y2="134"/><text class="d-m" x="353" y="150" text-anchor="middle">60 с</text>
+            <line class="d-axis" x1="500" y1="126" x2="500" y2="134"/><text class="d-m" x="500" y="150" text-anchor="middle">90 с</text>
+            <line class="d-axis" x1="647" y1="126" x2="647" y2="134"/><text class="d-m" x="647" y="150" text-anchor="middle">2 мин</text>
+            <line class="d-aa" x1="647" y1="44" x2="647" y2="130"/>
+            <text class="d-la" x="655" y="54">карточка у тебя</text>
+            <text class="d-l" x="655" y="70">кнопка «Откликнуться за N ₽»</text>
+            <rect class="d-barh" x="700" y="180" width="240" height="28" rx="4"/>
+            <text class="d-l" x="820" y="172" text-anchor="middle">после «да»: набор, отправка, проверка</text>
+            <text class="d-la" x="820" y="226" text-anchor="middle">до 60 секунд</text>
+            <line class="d-aa" x1="700" y1="176" x2="700" y2="212"/>
+            <text class="d-l" x="692" y="198" text-anchor="end">ты нажал</text>
+          </svg>
+        </div>
+        <figcaption>Верхняя шкала в масштабе: от появления заявки до карточки у тебя. Нижняя полоса начинается в момент твоего нажатия, сколько бы ты ни думал. Для IT-направления заявки идут в очереди модели первыми.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter" id="mind" data-title="Разум Сары">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Основа</span><span>твоя идея</span></div>
+        <h2>Разум Сары из пяти частей</h2>
+        <p class="lead">Аргументация, не укоренённая в знании о продукте, остаётся пустым шелестом слов. Поэтому ответ клиенту это работа разума. У каждой части есть общее для Hance и своё для направления аккаунта.</p>
+      </div>
+      <div class="stack-gap">
+        <div class="three" data-comment-target>
+          <div class="card"><span class="k">знание</span><h3>Что правда о Hance</h3><p>Услуги, цены, порядок, оплата, сроки, кейсы, возражения. <b>У кейса два знания:</b> сам кейс и правило, когда и кому его показывать.</p></div>
+          <div class="card"><span class="k">понимание</span><h3>Банк типов вопросов</h3><p>Признаки, <b>твой ответ и почему ты ответил именно так</b>, условия, чего не делать.</p></div>
+          <div class="card"><span class="k">речь</span><h3>Твой голос</h3><p>Портрет стиля, <b>как ты отвечаешь на шутку, спешку, сомнение</b>, твой темп и твои образцы.</p></div>
+          <div class="card"><span class="k">суждение</span><h3>Какой ход правильный</h3><p>Процедуры этапов, самостоятельность, <b>система оценки заявок направления</b>, должностная инструкция Сары.</p></div>
+          <div class="card"><span class="k">память</span><h3>Что было с клиентом</h3><p>Вся переписка, заказ, отклик, твои указания, обещания, встречи, этап. Из журнала, на каждый ход.</p></div>
+          <div class="card"><span class="k">где живёт</span><h3>Папка mind/ в git</h3><p>Каждая запись небольшой файл с пометкой «общее» или «направление». <b>Версии, история, откат</b> бесплатно.</p></div>
+        </div>
+        <div class="two">
+          <div class="entry" data-comment-target>
+            <div class="entry-h"><b>Запись понимания: «А есть кейсы в нашей нише?»</b><span class="chip green">подтверждено тобой</span></div>
+            <dl>
+              <div><dt>Признаки</dt><dd>клиент спрашивает про опыт в своей отрасли, часто на 2-3 сообщении</dd></div>
+              <div><dt>Твой ответ</dt><dd>ближайший кейс по задаче одной фразой с результатом и возврат к вопросу клиента</dd></div>
+              <div><dt>Почему</dt><dd>клиенту важен результат в похожей ситуации; честность сильнее натяжки</dd></div>
+              <div><dt>Направление</dt><dd>маркетинг; в IT вместо этого ссылка на похожий сайт</dd></div>
+              <div><dt>Чего не делать</dt><dd>не перечислять все кейсы, не слать файлы без просьбы</dd></div>
+            </dl>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Поиск по разуму бесплатно</h3>
+            <ul>
+              <li>Полнотекстовый поиск Postgres по-русски и локальная модель смыслового поиска <code>multilingual-e5-small</code> на процессоре сервера.</li>
+              <li>На каждый ход: записи понимания, нужные факты, твои образцы, подобранные <b>по теме и по тону</b> сообщения клиента.</li>
+              <li>Каждый ответ помнит, на какой версии разума он написан.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="cycle" data-title="Цикл ответа">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 4</span><span>ядро продукта</span></div>
+        <h2>Цикл ответа клиенту</h2>
+        <p class="lead">Каждое сообщение клиента проходит 8 шагов. Шаги 2-4 работают на разуме, шаги 5-7 защищают клиента и тебя от ошибок и роботности.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 220" role="img" aria-label="Восемь шагов цикла ответа; провал проверки или правило ведут к черновику Борису; если клиент дописал или печатает, цикл начинается заново">
+              <defs>
+                <marker id="c-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+                <marker id="c-ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mkg"/></marker>
+              </defs>
+              <rect class="d-box" x="10" y="30" width="106" height="62" rx="9"/><text class="d-t" x="63" y="56" text-anchor="middle">1 Услышать</text><text class="d-s" x="63" y="76" text-anchor="middle">Профи-MCP</text>
+              <rect class="d-hot" x="134" y="30" width="106" height="62" rx="9"/><text class="d-t" x="187" y="56" text-anchor="middle">2 Вспомнить</text><text class="d-s" x="187" y="76" text-anchor="middle">досье и разум</text>
+              <rect class="d-hot" x="258" y="30" width="106" height="62" rx="9"/><text class="d-t" x="311" y="56" text-anchor="middle">3 Понять</text><text class="d-s" x="311" y="76" text-anchor="middle">смысл и тон</text>
+              <rect class="d-hot" x="382" y="30" width="106" height="62" rx="9"/><text class="d-t" x="435" y="56" text-anchor="middle">4 Сказать</text><text class="d-s" x="435" y="76" text-anchor="middle">твоим голосом</text>
+              <rect class="d-box" x="506" y="30" width="106" height="62" rx="9"/><text class="d-t" x="559" y="56" text-anchor="middle">5 Проверить</text><text class="d-s" x="559" y="76" text-anchor="middle">факты, робот</text>
+              <rect class="d-box" x="630" y="30" width="106" height="62" rx="9"/><text class="d-t" x="683" y="56" text-anchor="middle">6 Правила</text><text class="d-s" x="683" y="76" text-anchor="middle">автономия</text>
+              <rect class="d-box" x="754" y="30" width="106" height="62" rx="9"/><text class="d-t" x="807" y="56" text-anchor="middle">7 Отправить</text><text class="d-s" x="807" y="76" text-anchor="middle">пауза, набор</text>
+              <rect class="d-box" x="878" y="30" width="106" height="62" rx="9"/><text class="d-t" x="931" y="56" text-anchor="middle">8 Научиться</text><text class="d-s" x="931" y="76" text-anchor="middle">журнал</text>
+              <line class="d-a" x1="116" y1="61" x2="130" y2="61" marker-end="url(#c-ah)"/>
+              <line class="d-a" x1="240" y1="61" x2="254" y2="61" marker-end="url(#c-ah)"/>
+              <line class="d-a" x1="364" y1="61" x2="378" y2="61" marker-end="url(#c-ah)"/>
+              <line class="d-a" x1="488" y1="61" x2="502" y2="61" marker-end="url(#c-ah)"/>
+              <line class="d-a" x1="612" y1="61" x2="626" y2="61" marker-end="url(#c-ah)"/>
+              <line class="d-a" x1="736" y1="61" x2="750" y2="61" marker-end="url(#c-ah)"/>
+              <line class="d-a" x1="860" y1="61" x2="874" y2="61" marker-end="url(#c-ah)"/>
+              <path class="d-dash" d="M807 30 V14 H187 V26" marker-end="url(#c-ahg)"/>
+              <text class="d-l" x="497" y="10" text-anchor="middle">клиент печатает, дописал или ты ответил сам: ждать и начать заново со шага 2</text>
+              <rect class="d-draft" x="506" y="150" width="200" height="52" rx="9"/>
+              <text class="d-t" x="606" y="172" text-anchor="middle">Черновик тебе</text>
+              <text class="d-s" x="606" y="191" text-anchor="middle">Входящие и Telegram</text>
+              <line class="d-a" x1="545" y1="92" x2="545" y2="146" marker-end="url(#c-ah)"/><text class="d-l" x="539" y="124" text-anchor="end">не прошло</text>
+              <line class="d-a" x1="683" y1="92" x2="683" y2="146" marker-end="url(#c-ah)"/><text class="d-l" x="690" y="124">тема не заработана</text>
+              <path class="d-a" d="M706 176 H830 V96" marker-end="url(#c-ah)"/><text class="d-l" x="838" y="140">после «да»</text>
+            </svg>
+          </div>
+          <figcaption>Шаг 7 выдерживает человеческую паузу, ждёт, если клиент печатает, перечитывает чат, набирает текст в интерфейсе и находит своё сообщение на странице. Повтор после сбоя не создаёт дубль.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="chapter" id="speech" data-title="Речь как у Бориса">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 5</span><span>главный риск</span></div>
+        <h2>Речь как у тебя, без роботности</h2>
+        <p class="lead">Нейросети обычно звучат как вежливый робот: шаблонные вступления, списки, мгновенные ответы, невпопад на шутку. Здесь это разобрано по шагам, а канал событий Профи.ру даёт Саре то, что видит живой человек: «печатает» и «прочитал».</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 200" role="img" aria-label="Речь: сообщение клиента, определение смысла и тона, подбор твоих образцов по теме и тону, ответ по длине клиента, проверка на роботность, пауза и набор с ожиданием, пока клиент печатает">
+              <defs><marker id="s-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker></defs>
+              <rect class="d-box" x="10" y="40" width="150" height="64" rx="10"/><text class="d-t" x="85" y="67" text-anchor="middle">Клиент пишет</text><text class="d-m" x="85" y="88" text-anchor="middle">MSG_MESSAGE</text>
+              <rect class="d-hot" x="172" y="40" width="150" height="64" rx="10"/><text class="d-t" x="247" y="67" text-anchor="middle">Смысл и тон</text><text class="d-s" x="247" y="88" text-anchor="middle">шутка, спешка</text>
+              <rect class="d-hot" x="334" y="40" width="150" height="64" rx="10"/><text class="d-t" x="409" y="67" text-anchor="middle">Твои образцы</text><text class="d-s" x="409" y="88" text-anchor="middle">по теме и тону</text>
+              <rect class="d-hot" x="496" y="40" width="150" height="64" rx="10"/><text class="d-t" x="571" y="67" text-anchor="middle">Ответ</text><text class="d-s" x="571" y="88" text-anchor="middle">длина по клиенту</text>
+              <rect class="d-box" x="658" y="40" width="150" height="64" rx="10"/><text class="d-t" x="733" y="67" text-anchor="middle">Не робот?</text><text class="d-s" x="733" y="88" text-anchor="middle">шаблоны, списки</text>
+              <rect class="d-box" x="820" y="40" width="150" height="64" rx="10"/><text class="d-t" x="895" y="67" text-anchor="middle">Пауза и набор</text><text class="d-s" x="895" y="88" text-anchor="middle">1-4 минуты</text>
+              <line class="d-a" x1="160" y1="72" x2="168" y2="72" marker-end="url(#s-ah)"/>
+              <line class="d-a" x1="322" y1="72" x2="330" y2="72" marker-end="url(#s-ah)"/>
+              <line class="d-a" x1="484" y1="72" x2="492" y2="72" marker-end="url(#s-ah)"/>
+              <line class="d-a" x1="646" y1="72" x2="654" y2="72" marker-end="url(#s-ah)"/>
+              <line class="d-a" x1="808" y1="72" x2="816" y2="72" marker-end="url(#s-ah)"/>
+              <rect class="d-draft" x="660" y="140" width="310" height="44" rx="9"/>
+              <text class="d-m" x="815" y="160" text-anchor="middle">MSG_IS_WRITING_TO_CHAT</text>
+              <text class="d-s" x="815" y="176" text-anchor="middle">клиент печатает: ждать, ответить на всё сразу</text>
+              <line class="d-dash" x1="895" y1="140" x2="895" y2="108"/>
+            </svg>
+          </div>
+          <figcaption>Три подсвеченных шага держат голос: тон клиента определяет, какие твои ответы взять образцом. Образец сильнее описания, поэтому главный поставщик образцов это тренажёр.</figcaption>
+        </figure>
+        <div class="two">
+          <div class="panel" data-comment-target>
+            <h3>Портрет речи</h3>
+            <ul>
+              <li><b>Форма:</b> длина относительно клиента, абзацы, пунктуация, смайлы, «вы» или «ты», как начинаешь и заканчиваешь.</li>
+              <li><b>Словарь:</b> твои обороты и то, что ты никогда не пишешь («Отличный вопрос!», «Рад помочь»).</li>
+              <li><b>Прагматика:</b> как ты отвечаешь на шутку, раздражение, спешку, сомнение, комплимент, грубость, торг, молчание.</li>
+              <li><b>Темп:</b> как быстро ты обычно отвечаешь в разное время суток. Сара отвечает быстрее тебя, но не мгновенно.</li>
+            </ul>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Как ведёт себя в чате</h3>
+            <ul>
+              <li>На шутку коротко и в том же ключе, одной фразой, затем к делу; шутку не объяснять. Если неясно, шутка ли, тепло и нейтрально.</li>
+              <li>Пока клиент печатает, ждёт; на несколько сообщений подряд один ответ.</li>
+              <li>Текст набирается в поле ввода, клиент видит «печатает».</li>
+              <li>«Прочитал и молчит» и «не открывал» ведут к разным напоминаниям (<code>MSG_CHAT_WAS_READ</code>).</li>
+              <li>Проверка отсеивает шаблоны, списки в чате, повторы фраз, лишнюю вежливость, слова про ИИ.</li>
+              <li>Раз в неделю ты вслепую сравниваешь 5 пар «твой ответ или Сары».</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="learning" data-title="Обучение и тренажёр">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 6</span><span>твоя просьба</span></div>
+        <h2>Обучение одной системой и тренажёр</h2>
+        <p class="lead">Три источника опыта, одно место, где ты подтверждаешь выученное, один разум, куда всё попадает. Тренажёр это раздел приложения, а не код: Сара играет клиента, ты отвечаешь, Сара показывает, как ответила бы она, и вы разбираете разницу.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 330" role="img" aria-label="Источники обучения: работа, тренажёр, история чатов, ночной учитель предлагают карточки; Борис подтверждает; знания записываются в разум; экзамен пропускает изменения, только если не хуже">
+              <defs>
+                <marker id="l-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+                <marker id="l-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker>
+              </defs>
+              <rect class="d-box" x="20" y="20" width="320" height="60" rx="10"/><text class="d-t" x="38" y="46">Работа</text><text class="d-s" x="38" y="66">твои правки, отказы, «беру сам»</text>
+              <rect class="d-hot" x="20" y="95" width="320" height="60" rx="10"/><text class="d-t" x="38" y="121">Тренажёр</text><text class="d-s" x="38" y="141">пары «клиент → ты» с разбором</text>
+              <rect class="d-box" x="20" y="170" width="320" height="60" rx="10"/><text class="d-t" x="38" y="196">История</text><text class="d-s" x="38" y="216">все прошлые чаты Профи.ру и выбранные Telegram</text>
+              <rect class="d-box" x="20" y="245" width="320" height="60" rx="10"/><text class="d-t" x="38" y="271">Ночной учитель</text><text class="d-s" x="38" y="291">opus группирует и обобщает</text>
+              <path class="d-a" d="M340 50 H385 V128 H416" marker-end="url(#l-ah)"/>
+              <line class="d-a" x1="340" y1="148" x2="416" y2="148" marker-end="url(#l-ah)"/>
+              <path class="d-a" d="M340 200 H385 V168 H416" marker-end="url(#l-ah)"/>
+              <path class="d-a" d="M340 275 H385 V188 H416" marker-end="url(#l-ah)"/>
+              <text class="d-l" x="346" y="43">уроки</text>
+              <rect class="d-box" x="420" y="110" width="220" height="96" rx="10"/>
+              <text class="d-t" x="530" y="144" text-anchor="middle">Карточки</text>
+              <text class="d-t" x="530" y="164" text-anchor="middle">«Запомнить?»</text>
+              <text class="d-s" x="530" y="186" text-anchor="middle">ты подтверждаешь пачками</text>
+              <line class="d-aa" x1="640" y1="158" x2="716" y2="158" marker-end="url(#l-aha)"/>
+              <text class="d-la" x="678" y="150" text-anchor="middle">коммит</text>
+              <rect class="d-hot" x="720" y="108" width="260" height="100" rx="12"/>
+              <text class="d-tb" x="850" y="146" text-anchor="middle">Разум Сары</text>
+              <text class="d-s" x="850" y="168" text-anchor="middle">новая версия в mind/</text>
+              <text class="d-s" x="850" y="187" text-anchor="middle">общее и по направлениям</text>
+              <line class="d-a" x1="850" y1="208" x2="850" y2="262" marker-end="url(#l-ah)"/>
+              <text class="d-l" x="858" y="240">каждое изменение</text>
+              <rect class="d-draft" x="720" y="266" width="260" height="44" rx="9"/>
+              <text class="d-s" x="850" y="285" text-anchor="middle">экзамен: в работу, только</text>
+              <text class="d-s" x="850" y="301" text-anchor="middle">если не стало хуже</text>
+            </svg>
+          </div>
+          <figcaption>Тренажёр подсвечен: он быстрее всего даёт пары «сообщение клиента → твой ответ», которых сейчас мало, а без них голос Сары не станет твоим.</figcaption>
+        </figure>
+        <div class="wire-scroll" data-comment-target>
+          <div class="wire studio" aria-label="Схема экрана тренажёра">
+            <div class="side-pane" style="border-left:0;border-right:1px solid var(--line)">
+              <span class="cap">Сценарий</span>
+              <div class="box-mini"><b>Клиника, стоматология</b><span>Задача: пациенты не доходят до записи</span><span>Бюджет: средний, торгуется</span><span>Настроение: шутит, немного спешит</span><span class="tag amber" style="align-self:flex-start">сложность 3 из 5</span></div>
+              <span class="cap">Режим</span>
+              <div class="box-mini"><b>Клиент пишет, отвечаешь ты</b><span class="note">ещё: Угадай Бориса, Сара отвечает, Трудные случаи, Интервью</span></div>
+              <span class="cap">Покрытие</span>
+              <div class="box-mini"><span>Тренировано 31 из 57 типов вопросов</span><span class="note">не тренировались: торг, NDA, «позвоните сейчас»</span></div>
+            </div>
+            <div class="wdetail">
+              <div class="wh2"><b>Тренировка · 7 из 20 реплик</b><span class="tag">учебная, клиенту не уходит</span></div>
+              <div class="bub client"><small>Клиент (играет Сара)</small>Ну что, гуру маркетинга, спасёте наши пустые кресла? 😄 Только быстро, у нас сезон.</div>
+              <div class="bub boris"><small>Ты</small>Кресла спасём, это наш профиль. Начнём с того, где теряются звонки: удобно завтра 15 минут?</div>
+              <div class="bub client"><small>Клиент (играет Сара)</small>А сколько это будет стоить?</div>
+              <div class="fakeinput">Твой ответ…</div>
+            </div>
+            <div class="side-pane">
+              <span class="cap">Сара</span>
+              <div class="box-mini"><b>Я бы ответила так</b><span>Добрый день! Пустые кресла в сезон обидны, давайте разберёмся быстро. Удобно завтра созвониться на 15 минут?</span></div>
+              <div class="box-mini"><b>Разница</b><span>Ты ответил на шутку шуткой («кресла спасём») и не здоровался повторно в середине разговора. Я была формальнее.</span></div>
+              <div class="box-mini"><b>Запомнить?</b><span>«На шутку клиента отвечать в тон коротко, затем сразу к делу»</span><div class="wbtns"><span class="wbtn main">Запомнить</span><span class="wbtn">Не то</span><span class="wbtn">Обсудить</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Режим</th><th>Как идёт</th><th>Что получает Сара</th></tr></thead>
+            <tbody>
+              <tr><td>Клиент пишет, отвечаешь ты</td><td>Сара играет клиента по персоне из реальных; ты отвечаешь; Сара показывает свой ответ и разницу; обсуждаете</td><td>твой ответ, причину разницы, уроки</td></tr>
+              <tr><td>Угадай Бориса</td><td>реальный прошлый диалог: Сара предлагает ответ, открывается твой настоящий, разница обсуждается</td><td>точная настройка на твой голос по реальным случаям</td></tr>
+              <tr><td>Сара отвечает, ты оцениваешь</td><td>Сара играет и клиента, и себя; ты ставишь оценку и поправляешь</td><td>проверка готовности темы перед самостоятельностью</td></tr>
+              <tr><td>Трудные случаи</td><td>торг, грубость, шутка, «позвоните прямо сейчас», молчание, NDA</td><td>правила для редких ситуаций</td></tr>
+              <tr><td>Интервью</td><td>вопросы, на которые у Сары нет ответа</td><td>недостающие знания</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 170" role="img" aria-label="Самостоятельность по теме: зовёт Бориса, черновик, сама; повышение после 10 одобрений без правок по решению Бориса; понижение после существенной правки">
+              <defs>
+                <marker id="u-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+                <marker id="u-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker>
+              </defs>
+              <rect class="d-box" x="20" y="50" width="230" height="70" rx="10"/><text class="d-t" x="135" y="80" text-anchor="middle">Зовёт тебя</text><text class="d-s" x="135" y="101" text-anchor="middle">цена, договор, скидка, NDA</text>
+              <rect class="d-box" x="385" y="50" width="230" height="70" rx="10"/><text class="d-t" x="500" y="80" text-anchor="middle">Черновик</text><text class="d-s" x="500" y="101" text-anchor="middle">ждёт твоего «да»</text>
+              <rect class="d-hot" x="750" y="50" width="230" height="70" rx="10"/><text class="d-t" x="865" y="80" text-anchor="middle">Сама</text><text class="d-s" x="865" y="101" text-anchor="middle">отправляет, видно в сводке</text>
+              <line class="d-a" x1="254" y1="85" x2="381" y2="85" marker-start="url(#u-ah)" marker-end="url(#u-ah)"/><text class="d-l" x="317" y="77" text-anchor="middle">решаешь ты</text>
+              <line class="d-aa" x1="615" y1="70" x2="746" y2="70" marker-end="url(#u-aha)"/>
+              <text class="d-la" x="682" y="38" text-anchor="middle">10 из 10 без правок и проверка в тренажёре: решаешь ты</text>
+              <line class="d-a" x1="746" y1="104" x2="619" y2="104" marker-end="url(#u-ah)"/>
+              <text class="d-l" x="682" y="142" text-anchor="middle">одна существенная правка: назад сама</text>
+            </svg>
+          </div>
+          <figcaption>Старт: всё черновиком, кроме ответов целиком из подтверждённого понимания. Обучение бесплатно на той же подписке: дообучать Claude нельзя, а разум, образцы и экзамены дают тот же эффект и откатываются одной командой.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="chapter" id="accounts" data-title="Аккаунты и направления">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 7</span><span>твоя просьба</span></div>
+        <h2>Аккаунты разного характера</h2>
+        <p class="lead">Аккаунт это вход и браузер. Направление это характер: чем занимается, какие заявки берёт, как откликается, как быстро. Аккаунты не борются за одну заявку: её получает одно направление.</p>
+      </div>
+      <div class="stack-gap">
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Часть направления</th><th>Hance, маркетинг (сейчас)</th><th>IT, разработка (второй)</th></tr></thead>
+            <tbody>
+              <tr><td>Чем занимаемся</td><td>системный маркетинг, стратегия, воронки</td><td>сайты, приложения, интеграции</td></tr>
+              <tr><td>Стоп-факторы</td><td>узкий Директ, работа за процент, бюджет 0</td><td>правка чужого кода за копейки, «как у Авито за 10 тысяч»</td></tr>
+              <tr><td>Система оценки</td><td>критерии с весами, обязательные условия, балл с обоснованием</td><td>своя</td></tr>
+              <tr><td>Формат отклика</td><td>понимание ситуации и один диагностический вопрос</td><td>коротко суть, сроки и вилка, <b>2-3 ссылки на похожие сайты</b>, вопрос</td></tr>
+              <tr><td>Кейсы</td><td>кейсы маркетинга с правилами показа</td><td>портфолио сайтов со ссылками и тегами</td></tr>
+              <tr><td>Скорость</td><td>обычная</td><td>быстрая: первым в очереди модели, черновик сразу, уведомление со звуком</td></tr>
+              <tr><td>Голос</td><td colspan="2">общий: твой</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 260" role="img" aria-label="Маршрутизатор: заявку оценивают системы обоих направлений, маршрутизатор выбирает лучшее, Борис получает одну карточку от одного аккаунта">
+              <defs><marker id="r-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker><marker id="r-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker></defs>
+              <rect class="d-box" x="20" y="98" width="170" height="64" rx="10"/><text class="d-t" x="105" y="125" text-anchor="middle">Новая заявка</text><text class="d-s" x="105" y="145" text-anchor="middle">«сайт для клиники»</text>
+              <rect class="d-box" x="270" y="38" width="260" height="64" rx="10"/><text class="d-t" x="400" y="65" text-anchor="middle">Оценка: маркетинг</text><text class="d-s" x="400" y="85" text-anchor="middle">41 балл, не проходит условие</text>
+              <rect class="d-box" x="270" y="158" width="260" height="64" rx="10"/><text class="d-t" x="400" y="185" text-anchor="middle">Оценка: IT</text><text class="d-s" x="400" y="205" text-anchor="middle">84 балла, условия выполнены</text>
+              <path class="d-a" d="M190 130 H230 V70 H266" marker-end="url(#r-ah)"/>
+              <path class="d-a" d="M230 130 V190 H266" marker-end="url(#r-ah)"/>
+              <rect class="d-box" x="610" y="98" width="170" height="64" rx="10"/><text class="d-t" x="695" y="125" text-anchor="middle">Маршрутизатор</text><text class="d-s" x="695" y="145" text-anchor="middle">лучший балл и условия</text>
+              <path class="d-a" d="M530 70 H570 V130 H606" marker-end="url(#r-ah)"/>
+              <path class="d-a" d="M530 190 H570 V130"/>
+              <rect class="d-hot" x="830" y="98" width="150" height="64" rx="10"/><text class="d-t" x="905" y="125" text-anchor="middle">Одна карточка</text><text class="d-s" x="905" y="145" text-anchor="middle">от аккаунта IT</text>
+              <line class="d-aa" x1="780" y1="130" x2="826" y2="130" marker-end="url(#r-aha)"/>
+              <text class="d-l" x="695" y="196" text-anchor="middle">подходят оба: одна карточка</text>
+              <text class="d-l" x="695" y="212" text-anchor="middle">с выбором и рекомендацией</text>
+              <text class="d-l" x="695" y="236" text-anchor="middle">два отклика на заказ запрещены кодом</text>
+            </svg>
+          </div>
+          <figcaption>Направления не пересекаются по смыслу: онбординг второго показывает пересечения с первым и предлагает их развести.</figcaption>
+        </figure>
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 240" role="img" aria-label="Онбординг направления: твои слова, Claude строит систему оценки, калибровка на 20 реальных заявках, ты отмечаешь, Claude предлагает поправки, новая версия, пока согласие ниже 85 процентов">
+              <defs><marker id="o-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker><marker id="o-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker></defs>
+              <rect class="d-box" x="20" y="30" width="210" height="64" rx="10"/><text class="d-t" x="125" y="57" text-anchor="middle">Твои слова</text><text class="d-s" x="125" y="77" text-anchor="middle">текст или голос</text>
+              <rect class="d-box" x="270" y="30" width="210" height="64" rx="10"/><text class="d-t" x="375" y="57" text-anchor="middle">Claude строит</text><text class="d-s" x="375" y="77" text-anchor="middle">критерии, веса, условия</text>
+              <rect class="d-hot" x="520" y="30" width="210" height="64" rx="10"/><text class="d-t" x="625" y="57" text-anchor="middle">Система оценки</text><text class="d-s" x="625" y="77" text-anchor="middle">версия N</text>
+              <rect class="d-box" x="770" y="30" width="210" height="64" rx="10"/><text class="d-t" x="875" y="57" text-anchor="middle">Калибровка</text><text class="d-s" x="875" y="77" text-anchor="middle">20 реальных заявок</text>
+              <line class="d-a" x1="230" y1="62" x2="266" y2="62" marker-end="url(#o-ah)"/>
+              <line class="d-a" x1="480" y1="62" x2="516" y2="62" marker-end="url(#o-ah)"/>
+              <line class="d-a" x1="730" y1="62" x2="766" y2="62" marker-end="url(#o-ah)"/>
+              <rect class="d-box" x="770" y="150" width="210" height="64" rx="10"/><text class="d-t" x="875" y="177" text-anchor="middle">Ты отмечаешь</text><text class="d-s" x="875" y="197" text-anchor="middle">взяли бы, нет, не знаю</text>
+              <line class="d-a" x1="875" y1="94" x2="875" y2="146" marker-end="url(#o-ah)"/>
+              <rect class="d-box" x="520" y="150" width="210" height="64" rx="10"/><text class="d-t" x="625" y="177" text-anchor="middle">Расхождения</text><text class="d-s" x="625" y="197" text-anchor="middle">Claude предлагает поправки</text>
+              <line class="d-a" x1="770" y1="182" x2="734" y2="182" marker-end="url(#o-ah)"/>
+              <line class="d-aa" x1="625" y1="150" x2="625" y2="98" marker-end="url(#o-aha)"/>
+              <text class="d-la" x="633" y="128">пока согласие ниже 85%</text>
+              <text class="d-l" x="125" y="140" text-anchor="middle">на каждом шаге:</text>
+              <text class="d-l" x="125" y="156" text-anchor="middle">«Правильно понимаю?»</text>
+            </svg>
+          </div>
+          <figcaption>Подход взят у Clay: правила оценки записываются явно, модель их применяет, а калибровка идёт на заявках с известным ответом. Пересобрать систему можно в любой момент: «Пересчитать на последних 50 заявках» покажет, что изменится.</figcaption>
+        </figure>
+        <div class="wire-scroll" data-comment-target>
+          <div class="wire dir" aria-label="Схема экрана направления">
+            <nav class="wnav">
+              <div class="brandline"><span class="mark"></span>Сара</div>
+              <span>Сегодня</span><span>Входящие</span><span>Заявки</span><span>Клиенты</span><span>Встречи</span><span>Разум</span><span>Тренажёр</span><span class="on">Аккаунты</span><span>Настройки</span>
+            </nav>
+            <div style="display:flex;flex-direction:column;min-width:0">
+              <div class="wdetail" style="padding-bottom:0"><div class="wh2"><b>Аккаунт «IT» · направление «Разработка»</b><span class="wmeta"><span class="tag green">вход есть</span><span class="tag amber">калибровка</span></span></div></div>
+              <div class="tabsline"><span>Описание</span><span class="on">Система оценки</span><span>Калибровка</span><span>Формат отклика</span><span>Кейсы</span><span>Скорость и деньги</span></div>
+              <div class="wdetail">
+                <table class="rub">
+                  <thead><tr><th>Критерий</th><th>Вес</th><th>Как оценивается</th></tr></thead>
+                  <tbody>
+                    <tr><td><b>Обязательно</b></td><td></td><td>есть цель или ТЗ; не правка чужого кода; бюджет не ниже 40 тысяч</td></tr>
+                    <tr><td>Понятность задачи</td><td>30</td><td>описан результат, страницы, функции</td></tr>
+                    <tr><td>Бюджет</td><td>25</td><td>в вилке направления или выше</td></tr>
+                    <tr><td>Похожие кейсы</td><td>20</td><td>есть сайт из портфолио с теми же тегами</td></tr>
+                    <tr><td>Сроки</td><td>15</td><td>реальные, не «вчера»</td></tr>
+                    <tr><td>Зрелость клиента</td><td>10</td><td>работающий бизнес, сайт, соцсети</td></tr>
+                  </tbody>
+                </table>
+                <div class="why"><b>Калибровка:</b> 17 из 20 заявок, согласие с тобой 82%. Ты отклонил 3 заявки с бюджетом ниже 40 тысяч, порог добавлен в обязательные условия.</div>
+                <div class="wbtns"><span class="wbtn main">Продолжить калибровку</span><span class="wbtn">Пересчитать на 50 заявках</span><span class="wbtn">История версий</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="meetings" data-title="Встречи">
+      <div class="ch-head">
+        <div class="eyebrow"><span>По тебе</span><span>без календаря</span></div>
+        <h2>Встречи без календаря</h2>
+        <p class="lead">Сара договаривается о времени по твоему свободному времени из настроек и сообщает в Telegram. Где проходит встреча, решаешь ты; итог отмечаешь ты.</p>
+      </div>
+      <div class="two">
+        <div class="panel" data-comment-target>
+          <h3>Как это идёт</h3>
+          <ul>
+            <li>Свободное время в настройках: дни и часы созвонов, длительность, не больше N в день, исключения. Сара учитывает уже назначенные встречи.</li>
+            <li>Клиент согласен → Сара уточняет способ связи и предлагает 2-3 времени в разные дни → клиент выбирает.</li>
+            <li>Тебе в Telegram «📅 Встреча назначена» с телефоном и брифом в три строки.</li>
+            <li>Напоминания тебе утром и за 30 минут.</li>
+            <li>После встречи «Прошла ли встреча?»: договор с суммой, думает, отказ, не состоялась, перенесли.</li>
+            <li>Клиенту Сара не обещает то, чего система не делает.</li>
+          </ul>
+        </div>
+        <div class="tg" data-comment-target>
+          <span class="cap">Telegram · встреча</span>
+          <div class="tgmsg">📅 <b>Встреча назначена</b><br>Анна, стратегия для клиники<br>Четверг, 15:30 · телефон +7 9xx xxx-xx-xx<br>Бриф: сеть из 2 клиник, запись не успевает за рекламой, бюджет на диагностику есть.</div>
+          <div class="tgkb"><span>Переписка</span><span>Перенести</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="engine" data-title="Двигатель на подписке">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 8</span></div>
+        <h2>Двигатель на подписке Claude</h2>
+        <p class="lead">Все вызовы <code>claude -p</code> идут через шлюз, который бережёт лимит подписки: клиенты и быстрые заявки первыми, учёба только ночью.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 300" role="img" aria-label="Шлюз модели: четыре очереди по приоритету, два вызова одновременно, учёт лимита, вызов claude -p, проверка ответа; при окончании лимита пауза">
+              <defs><marker id="e-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker></defs>
+              <rect class="d-hot" x="20" y="24" width="250" height="46" rx="9"/><text class="d-t" x="36" y="52">P0 клиенты, ты, быстрые</text>
+              <rect class="d-box" x="20" y="80" width="250" height="46" rx="9"/><text class="d-t" x="36" y="108">P1 отклики, тренажёр</text>
+              <rect class="d-box" x="20" y="136" width="250" height="46" rx="9"/><text class="d-t" x="36" y="164">P2 лента</text>
+              <rect class="d-box" x="20" y="192" width="250" height="46" rx="9"/><text class="d-t" x="36" y="220">P3 учёба, только ночью</text>
+              <path class="d-a" d="M270 47 H310 V100 H346" marker-end="url(#e-ah)"/>
+              <path class="d-a" d="M270 103 H310 V100"/>
+              <path class="d-a" d="M270 159 H310 V130"/>
+              <path class="d-a" d="M270 215 H310 V160 H346" marker-end="url(#e-ah)"/>
+              <rect class="d-box" x="350" y="40" width="220" height="180" rx="12"/>
+              <text class="d-tb" x="460" y="88" text-anchor="middle">Шлюз модели</text>
+              <text class="d-s" x="460" y="114" text-anchor="middle">2 вызова одновременно</text>
+              <text class="d-s" x="460" y="136" text-anchor="middle">счётчик лимита: 5 ч и неделя</text>
+              <text class="d-s" x="460" y="158" text-anchor="middle">ночное окно 01:00-07:00</text>
+              <text class="d-s" x="460" y="180" text-anchor="middle">запасная модель</text>
+              <line class="d-a" x1="570" y1="100" x2="646" y2="100" marker-end="url(#e-ah)"/><text class="d-l" x="608" y="90" text-anchor="middle">задача роли</text>
+              <rect class="d-box" x="650" y="60" width="330" height="80" rx="10"/>
+              <text class="d-tb" x="815" y="88" text-anchor="middle">claude -p</text>
+              <text class="d-m" x="815" y="108" text-anchor="middle">--model · роль · --json-schema</text>
+              <text class="d-s" x="815" y="127" text-anchor="middle">у ролей для клиентов нет инструментов</text>
+              <line class="d-a" x1="815" y1="140" x2="815" y2="186" marker-end="url(#e-ah)"/><text class="d-m" x="823" y="168">structured_output</text>
+              <rect class="d-box" x="650" y="190" width="330" height="56" rx="10"/>
+              <text class="d-t" x="815" y="214" text-anchor="middle">Ядро проверяет ответ</text>
+              <text class="d-s" x="815" y="234" text-anchor="middle">нет поля: сбой, а не пустой ответ</text>
+              <line class="d-a" x1="460" y1="220" x2="460" y2="246" marker-end="url(#e-ah)"/><text class="d-l" x="468" y="238">лимит кончился</text>
+              <rect class="d-draft" x="280" y="250" width="360" height="46" rx="9"/>
+              <text class="d-s" x="460" y="269" text-anchor="middle">пауза до сброса, срочное уходит</text>
+              <text class="d-s" x="460" y="287" text-anchor="middle">готовыми текстами, клиенты первыми</text>
+            </svg>
+          </div>
+          <figcaption>Официальная справка Anthropic: <code>claude -p</code> расходует лимиты подписки, планы Max и Team с 07.10.2026 ещё и получают API-кредиты.</figcaption>
+        </figure>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Роль</th><th>Модель</th><th>Инструменты</th><th>Когда</th></tr></thead>
+            <tbody>
+              <tr><td>Сортировщик ленты</td><td>haiku</td><td>нет</td><td>на каждую новую заявку</td></tr>
+              <tr><td>Оценщик и маршрутизатор</td><td>haiku, sonnet при спорном</td><td>нет</td><td>на подходящие</td></tr>
+              <tr><td>Аналитик: отклик</td><td>sonnet</td><td>нет</td><td>на подходящие</td></tr>
+              <tr><td>Собеседник: ответ клиенту</td><td>sonnet, opus для трудных</td><td>нет</td><td>на сообщение клиента</td></tr>
+              <tr><td>Проверяющий</td><td>haiku</td><td>нет</td><td>на каждый ответ</td></tr>
+              <tr><td>Секретарь: разговор с тобой</td><td>sonnet</td><td>только внутренние инструменты Сары</td><td>на твои сообщения</td></tr>
+              <tr><td>Тренер: клиент и разбор</td><td>haiku и sonnet</td><td>нет</td><td>на реплику тренировки</td></tr>
+              <tr><td>Онбординг направления</td><td>sonnet, opus для системы оценки</td><td>нет</td><td>при настройке</td></tr>
+              <tr><td>Учитель</td><td>opus</td><td>только папка mind/proposals</td><td>ночью</td></tr>
+              <tr><td>Экзаменатор и генератор</td><td>haiku и sonnet</td><td>нет</td><td>ночью и перед выкладкой</td></tr>
+              <tr><td>Ремонтник вёрстки</td><td>opus</td><td>снимок страницы и тесты в песочнице</td><td>когда сайт изменился</td></tr>
+            </tbody>
+          </table>
+        </div>
+<pre class="code" data-comment-target><span class="c"># вызов роли: своя личность, ответ по схеме, без инструментов, без сессий на диске</span>
+claude -p --model sonnet --fallback-model haiku \
+  --system-prompt-file roles/sobesednik.md --append-system-prompt-file ctx/deal-123.md \
+  --output-format json --json-schema schema.json --tools "" --strict-mcp-config \
+  --setting-sources project --permission-mode dontAsk --permission-prompts none \
+  --max-turns 3 --no-session-persistence</pre>
+      </div>
+    </section>
+
+    <section class="chapter" id="profi" data-title="Профи.ру: экран и MCP">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 9</span><span>твой вопрос</span></div>
+        <h2>Профи.ру: глаза, руки и MCP вместе</h2>
+        <p class="lead">Ты прав: раз Профи.ру сам решает, кому и как показывать, Сара должна работать как живой специалист. Поэтому читаем быстро через события и данные сайта, а действуем через интерфейс и проверяем экраном.</p>
+      </div>
+      <div class="stack-gap">
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Задача</th><th>Чем делается</th><th>Почему</th></tr></thead>
+            <tbody>
+              <tr><td>Узнать, что произошло</td><td>события канала в живой вкладке</td><td>мгновенно, как у человека в открытом кабинете</td></tr>
+              <tr><td>Прочитать заказ или чат</td><td>данные из ответов сайта, разметка как запасной путь</td><td>точные номера, авторы, время</td></tr>
+              <tr><td>Сделать действие</td><td>интерфейс: клик, набор текста с человеческой скоростью</td><td>площадка видит обычного специалиста</td></tr>
+              <tr><td>Убедиться, что удалось</td><td>экран: отклик или сообщение найдены на странице, снимок сохранён</td><td>доказательство и защита от дублей</td></tr>
+              <tr><td>Присутствие</td><td>вкладка открыта в рабочие часы</td><td>специалист «онлайн», как настоящий</td></tr>
+              <tr><td>Прямые запросы к сайту без интерфейса</td><td class="v-no">не делаем</td><td>риск для сессии, аккаунта и показа заказов</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 300" role="img" aria-label="Сравнение: в v1 демон открывает 12 чатов каждые 3 минуты; теперь сервер Профи.ру присылает событие в живую вкладку">
+              <defs>
+                <marker id="p-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+                <marker id="p-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker>
+                <marker id="p-ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mkg"/></marker>
+              </defs>
+              <rect class="d-panel" x="10" y="36" width="480" height="220" rx="12"/>
+              <text class="d-h" x="250" y="26" text-anchor="middle">БЫЛО: ОТКРЫВАТЬ ЧАТЫ ПО ОЧЕРЕДИ</text>
+              <rect class="d-box" x="30" y="114" width="120" height="56" rx="9"/><text class="d-t" x="90" y="147" text-anchor="middle">Демон</text>
+              <line class="d-a" x1="150" y1="142" x2="236" y2="142" marker-end="url(#p-ah)"/>
+              <text class="d-l" x="193" y="132" text-anchor="middle">каждые 3 мин</text><text class="d-l" x="193" y="160" text-anchor="middle">12 страниц</text>
+              <rect class="d-soft" x="250" y="56" width="60" height="30" rx="6"/><text class="d-s" x="280" y="76" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="330" y="56" width="60" height="30" rx="6"/><text class="d-s" x="360" y="76" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="410" y="56" width="60" height="30" rx="6"/><text class="d-s" x="440" y="76" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="250" y="104" width="60" height="30" rx="6"/><text class="d-s" x="280" y="124" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="330" y="104" width="60" height="30" rx="6"/><text class="d-s" x="360" y="124" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="410" y="104" width="60" height="30" rx="6"/><text class="d-s" x="440" y="124" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="250" y="152" width="60" height="30" rx="6"/><text class="d-s" x="280" y="172" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="330" y="152" width="60" height="30" rx="6"/><text class="d-s" x="360" y="172" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="410" y="152" width="60" height="30" rx="6"/><text class="d-s" x="440" y="172" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="250" y="200" width="60" height="30" rx="6"/><text class="d-s" x="280" y="220" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="330" y="200" width="60" height="30" rx="6"/><text class="d-s" x="360" y="220" text-anchor="middle">чат</text>
+              <rect class="d-soft" x="410" y="200" width="60" height="30" rx="6"/><text class="d-s" x="440" y="220" text-anchor="middle">чат</text>
+              <text class="d-l" x="250" y="284" text-anchor="middle">до 3 минут задержки, около 40 таймаутов в неделю</text>
+              <rect class="d-panel" x="510" y="36" width="480" height="220" rx="12"/>
+              <text class="d-h" x="750" y="26" text-anchor="middle">СТАНЕТ: САЙТ САМ ПРИСЫЛАЕТ СОБЫТИЕ</text>
+              <rect class="d-box" x="540" y="56" width="220" height="56" rx="9"/><text class="d-t" x="650" y="82" text-anchor="middle">Сервер Профи.ру</text><text class="d-s" x="650" y="100" text-anchor="middle">online.profi.ru</text>
+              <rect class="d-hot" x="540" y="180" width="220" height="56" rx="9"/><text class="d-t" x="650" y="206" text-anchor="middle">Живая вкладка</text><text class="d-s" x="650" y="224" text-anchor="middle">одна на аккаунт</text>
+              <line class="d-aa" x1="580" y1="112" x2="580" y2="176" marker-end="url(#p-aha)"/><text class="d-m" x="588" y="148">MSG_CHAT_NOTIFY</text>
+              <path class="d-dash" d="M720 180 V116" marker-end="url(#p-ahg)"/><text class="d-l" x="728" y="142">сверка</text><text class="d-l" x="728" y="156">раз в 10 мин</text>
+              <rect class="d-box" x="820" y="180" width="160" height="56" rx="9"/><text class="d-t" x="900" y="213" text-anchor="middle">Ядро</text>
+              <line class="d-a" x1="760" y1="208" x2="816" y2="208" marker-end="url(#p-ah)"/><text class="d-m" x="790" y="252" text-anchor="middle">client_message</text>
+              <text class="d-l" x="750" y="284" text-anchor="middle">меньше минуты, страниц в десятки раз меньше</text>
+            </svg>
+          </div>
+          <figcaption>Меняется одна стрелка: вместо того чтобы Сара сама ходила по чатам, сайт присылает событие. Чат читается только тогда, когда в нём что-то появилось.</figcaption>
+        </figure>
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 300" role="img" aria-label="Профи-MCP: ядро вызывает инструменты; внутри события, ответы сайта и разметка для чтения; действия кликами и набором с проверкой экраном; события возвращаются в ядро">
+              <defs>
+                <marker id="m-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+                <marker id="m-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mka"/></marker>
+              </defs>
+              <rect class="d-box" x="20" y="100" width="180" height="96" rx="10"/><text class="d-t" x="110" y="140" text-anchor="middle">Ядро</text><text class="d-s" x="110" y="162" text-anchor="middle">движок правил</text>
+              <rect class="d-hot" x="290" y="30" width="400" height="240" rx="14"/>
+              <text class="d-tb" x="490" y="56" text-anchor="middle">Профи-MCP · живая вкладка аккаунта</text>
+              <rect class="d-soft" x="310" y="72" width="360" height="40" rx="8"/><text class="d-t" x="326" y="97">глаза 1: события __RTP</text>
+              <rect class="d-soft" x="310" y="122" width="360" height="40" rx="8"/><text class="d-t" x="326" y="147">глаза 2: данные из ответов сайта</text>
+              <rect class="d-soft" x="310" y="172" width="360" height="40" rx="8"/><text class="d-t" x="326" y="197">глаза 3: разметка, запасной путь</text>
+              <rect class="d-soft" x="310" y="222" width="360" height="36" rx="8"/><text class="d-s" x="326" y="245">руки: очередь, бережный режим, проверка экраном</text>
+              <rect class="d-box" x="790" y="72" width="190" height="186" rx="10"/>
+              <text class="d-t" x="885" y="150" text-anchor="middle">Профи.ру</text><text class="d-s" x="885" y="172" text-anchor="middle">кабинет и</text><text class="d-s" x="885" y="190" text-anchor="middle">online.profi.ru</text>
+              <line class="d-a" x1="200" y1="128" x2="286" y2="128" marker-end="url(#m-ah)"/><text class="d-l" x="243" y="119" text-anchor="middle">инструменты</text>
+              <line class="d-aa" x1="286" y1="170" x2="204" y2="170" marker-end="url(#m-aha)"/><text class="d-la" x="245" y="188" text-anchor="middle">события</text>
+              <line class="d-aa" x1="790" y1="92" x2="674" y2="92" marker-end="url(#m-aha)"/><text class="d-l" x="732" y="84" text-anchor="middle">вебсокет</text>
+              <line class="d-a" x1="790" y1="142" x2="674" y2="142" marker-end="url(#m-ah)"/><text class="d-l" x="732" y="134" text-anchor="middle">ответы сервера</text>
+              <line class="d-a" x1="790" y1="192" x2="674" y2="192" marker-end="url(#m-ah)"/><text class="d-l" x="732" y="184" text-anchor="middle">страница</text>
+              <line class="d-a" x1="670" y1="240" x2="786" y2="240" marker-end="url(#m-ah)"/><text class="d-l" x="728" y="232" text-anchor="middle">клики и набор</text>
+            </svg>
+          </div>
+          <figcaption>MCP это форма инструментов, а не способ попасть на сайт без браузера: внутри настоящая вкладка под аккаунтом. Так устроен whatsapp-web.js для WhatsApp Web.</figcaption>
+        </figure>
+        <div class="two">
+          <div class="table-wrap" data-comment-target>
+            <table>
+              <thead><tr><th>Событие канала</th><th>Что значит для Сары</th></tr></thead>
+              <tbody>
+                <tr><td><code>MSG_CHAT_NOTIFY</code>, <code>MSG_MESSAGE</code></td><td>новое сообщение</td></tr>
+                <tr><td><code>MSG_IS_WRITING_TO_CHAT</code></td><td>клиент печатает: подождать</td></tr>
+                <tr><td><code>MSG_CHAT_WAS_READ</code></td><td>клиент прочитал</td></tr>
+                <tr><td><code>MSG_CHAT_STATUS_CHANGED</code></td><td>чат закрыт или изменён</td></tr>
+                <tr><td><code>MSG_ORDER_CONTENT_CHANGED</code>, <code>ORDER_FORM_NOTIFY</code></td><td>изменения заказа, возможно новые заказы</td></tr>
+                <tr><td><code>MSG_BAN_PROFILE</code></td><td>профиль заблокирован: тревога сразу</td></tr>
+                <tr><td><code>GQL_EXEC</code></td><td>данные идут через этот же канал структурированно</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Откуда это известно и правила</h3>
+            <ul>
+              <li>Типы событий перечислены в публичном скрипте кабинета; проверено без входа в аккаунт.</li>
+              <li>Какие события приходят специалисту и что в полях, снимет калибровка самим узлом на своей сессии. Второй браузер никогда (29.09 он убил сессию).</li>
+              <li>Вызывает Профи-MCP только ядро через движок правил; разработка видит только инструменты чтения.</li>
+              <li>Бережный режим: лимит действий в час, паузы как у человека, рабочие часы, свой российский IP на аккаунт.</li>
+              <li>Письма Профи.ру о новых заказах как резервный сигнал.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="arch" data-title="Устройство и узлы">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 10</span></div>
+        <h2>Устройство и где что работает</h2>
+        <p class="lead">Два узла. Профи.ру видит российский IP, Claude вызывается оттуда, где он официально доступен. Выкладка с GitHub, Мак не участвует.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 250" role="img" aria-label="Два узла: ядро с разумом, базой, Claude CLI и ботом; узел Профи.ру в России с Профи-MCP; связь WireGuard">
+              <defs><marker id="t-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker></defs>
+              <rect class="d-box" x="20" y="30" width="420" height="150" rx="12"/>
+              <text class="d-tb" x="40" y="60">Узел ядра</text><text class="d-s" x="40" y="82">где официально доступен Claude</text>
+              <text class="d-t" x="40" y="112">ядро и разум · Postgres · журнал</text>
+              <text class="d-t" x="40" y="136">Claude CLI · бот · веб · Mini App</text>
+              <text class="d-s" x="40" y="162">2 ядра, 4 ГБ</text>
+              <rect class="d-hot" x="560" y="30" width="420" height="150" rx="12"/>
+              <text class="d-tb" x="580" y="60">Узел Профи.ру</text><text class="d-s" x="580" y="82">Россия, российский IP</text>
+              <text class="d-t" x="580" y="112">Профи-MCP · вкладка на аккаунт</text>
+              <text class="d-t" x="580" y="136">живой вход · калибровка</text>
+              <text class="d-s" x="580" y="162">2 ядра, 4 ГБ на один-два аккаунта</text>
+              <line class="d-a" x1="444" y1="105" x2="556" y2="105" marker-start="url(#t-ah)" marker-end="url(#t-ah)"/>
+              <text class="d-t" x="500" y="96" text-anchor="middle">WireGuard</text>
+              <text class="d-l" x="500" y="124" text-anchor="middle">инструменты</text><text class="d-l" x="500" y="138" text-anchor="middle">и события</text>
+              <rect class="d-soft" x="20" y="200" width="120" height="36" rx="8"/><text class="d-s" x="80" y="223" text-anchor="middle">Anthropic</text>
+              <rect class="d-soft" x="150" y="200" width="90" height="36" rx="8"/><text class="d-s" x="195" y="223" text-anchor="middle">Telegram</text>
+              <rect class="d-soft" x="250" y="200" width="100" height="36" rx="8"/><text class="d-s" x="300" y="223" text-anchor="middle">Почта</text>
+              <rect class="d-soft" x="360" y="200" width="80" height="36" rx="8"/><text class="d-s" x="400" y="223" text-anchor="middle">Бэкапы</text>
+              <line class="d-a" x1="80" y1="180" x2="80" y2="196" marker-end="url(#t-ah)"/>
+              <line class="d-a" x1="195" y1="180" x2="195" y2="196" marker-end="url(#t-ah)"/>
+              <line class="d-a" x1="300" y1="180" x2="300" y2="196" marker-end="url(#t-ah)"/>
+              <line class="d-a" x1="400" y1="180" x2="400" y2="196" marker-end="url(#t-ah)"/>
+              <rect class="d-soft" x="700" y="200" width="140" height="36" rx="8"/><text class="d-s" x="770" y="223" text-anchor="middle">Профи.ру</text>
+              <line class="d-a" x1="770" y1="180" x2="770" y2="196" marker-end="url(#t-ah)"/>
+            </svg>
+          </div>
+          <figcaption>Почта это резервный сигнал о новых заказах. Бэкапы лежат у другого провайдера: непрерывный архив базы и проверка восстановления раз в неделю.</figcaption>
+        </figure>
+        <div class="three" data-comment-target>
+          <div class="card"><span class="k">память</span><h3>Журнал событий</h3><p>Всё, что произошло, хранится навсегда. Экраны, аналитика и контекст Сары строятся из него.</p></div>
+          <div class="card"><span class="k">действия</span><h3>Исходящая очередь</h3><p>Намерение, действие, проверка экраном, отметка. Ключ от повтора: сбой связи не создаёт дубль.</p></div>
+          <div class="card"><span class="k">время</span><h3>Устойчивые процессы</h3><p>Напоминания, ожидание твоего решения, встречи живут в базе и переживают перезапуск.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="life" data-title="Жизнь клиента">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 11</span></div>
+        <h2>Жизнь клиента от заявки до договора</h2>
+        <p class="lead">Этап, владелец и чей ход. Эскалация меняет владельца, а не этап, поэтому чат никогда не перестаёт читаться.</p>
+      </div>
+      <div class="stack-gap">
+<pre class="mermaid" data-comment-target>
+stateDiagram-v2
+  direction LR
+  state "Заявка найдена" as found
+  state "Ждёт решения" as queued
+  state "Отклик отправлен" as bid
+  state "Диалог" as talking
+  state "Созвон предложен" as proposed
+  state "Встреча назначена" as booked
+  state "Время встречи прошло" as done
+  state "Договор" as won
+  state "Проиграно" as lost
+  state "Спит" as dormant
+  [*] --> found
+  found --> queued: подходит направлению
+  found --> [*]: не наш профиль
+  queued --> bid: твоя кнопка
+  bid --> talking: клиент ответил
+  bid --> dormant: молчит после напоминаний
+  dormant --> talking: написал снова
+  talking --> proposed: согласен на звонок
+  proposed --> booked: выбрал время
+  booked --> proposed: перенос
+  booked --> done: время прошло
+  done --> won: ты отметил договор
+  done --> lost: ты отметил отказ
+  talking --> lost: выбрал другого
+</pre>
+        <div class="panel" data-comment-target>
+          <h3>История одного клиента, как её видит система</h3>
+          <div class="day">
+            <div class="ev"><time>Пн 10:12</time><div><p class="who">заявка</p><p>Заказ «сайт для клиники». Оценка маркетинга 41, IT 84: маршрутизатор отдал IT. Черновик с двумя ссылками на похожие сайты готов через 70 секунд.</p><p class="sys">order_seen → triage(haiku) → score×2 → route: IT → draft(sonnet) → task: approve_bid</p></div></div>
+            <div class="ev"><time>Пн 10:13</time><div><p class="who">ты</p><p>Нажал «Откликнуться за 210 ₽». Через 40 секунд отклик в чате, Сара нашла его на странице, трата записана.</p><p class="sys">policy ok → outbox → profi.submit_bid (интерфейс) → проверка экраном → spend 210</p></div></div>
+            <div class="ev"><time>Пн 16:40</time><div><p class="who">клиент</p><p>«Ну что, сделаете красиво и быстро? 😄» Клиент ещё печатал, Сара подождала. Тема «сроки» заработана, ответ ушёл сам, коротко и в тон.</p><p class="sys">MSG_IS_WRITING_TO_CHAT → ждать → client_message → tone: шутка → exemplars → send</p></div></div>
+            <div class="ev"><time>Вт 11:05</time><div><p class="who">клиент</p><p>«Сколько стоит?» Цена всегда у тебя. Черновик с кнопками, ты поправил одно слово, ушло, урок предложен.</p><p class="sys">autonomy: зовёт → task: draft → edit → lesson</p></div></div>
+            <div class="ev"><time>Вт 11:40</time><div><p class="who">клиент</p><p>«Давайте созвонимся.» Сара предложила три времени из твоего свободного времени, клиент выбрал четверг, тебе «📅 Встреча назначена».</p><p class="sys">procedure: book_call → availability → meeting → reminders</p></div></div>
+            <div class="ev"><time>Чт 16:00</time><div><p class="who">ты</p><p>«Прошла ли встреча?» Ты отметил «Договор, 120 000». Аналитика пересчитала цену договора для IT-направления.</p><p class="sys">stage: won · revenue · cost per deal by direction</p></div></div>
+          </div>
+        </div>
+<pre class="mermaid" data-comment-target>
+sequenceDiagram
+  participant P as Профи.ру
+  participant M as Профи-MCP
+  participant C as Ядро
+  participant S as Собеседник
+  participant B as Борис
+  P->>M: MSG_IS_WRITING_TO_CHAT
+  M->>M: ждать, пока клиент печатает
+  P->>M: MSG_CHAT_NOTIFY
+  M->>C: client_message с номером и автором
+  C->>S: досье, разум, тон клиента
+  S-->>C: ход, текст, номера фактов
+  C->>C: проверка фактов, роботности, правил
+  alt тема заработана
+    C->>M: send_message с ключом от повтора
+    M->>P: пауза и набор в интерфейсе
+    M-->>C: сообщение найдено на странице
+  else черновик
+    C->>B: черновик с кнопками
+    B-->>C: Отправить или правка
+    C->>M: send_message
+  end
+</pre>
+      </div>
+    </section>
+
+    <section class="chapter" id="objects" data-title="Карта сущностей">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 12</span><span>метод OOUX</span></div>
+        <h2>Карта сущностей интерфейса</h2>
+        <p class="lead">Сначала договориться, из каких «вещей» состоит продукт и как они связаны, потом рисовать экраны. Тогда у каждой вещи один дом и одинаковый вид везде, где она встречается.</p>
+      </div>
+      <div class="stack-gap">
+        <figure class="fig" data-comment-target>
+          <div class="fig-scroll">
+            <svg viewBox="0 0 1000 380" role="img" aria-label="Карта сущностей: аккаунт и направление, заявки, клиенты, сообщения, встречи, задачи, знания, уроки, тренировки и их связи">
+              <defs><marker id="x-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker></defs>
+              <rect class="d-box" x="40" y="30" width="170" height="50" rx="10"/><text class="d-t" x="125" y="61" text-anchor="middle">Аккаунт</text>
+              <rect class="d-box" x="260" y="30" width="170" height="50" rx="10"/><text class="d-t" x="345" y="61" text-anchor="middle">Направление</text>
+              <rect class="d-hot" x="700" y="30" width="170" height="50" rx="10"/><text class="d-t" x="785" y="61" text-anchor="middle">Знание</text>
+              <rect class="d-box" x="40" y="150" width="170" height="50" rx="10"/><text class="d-t" x="125" y="181" text-anchor="middle">Заявка</text>
+              <rect class="d-hot" x="260" y="150" width="170" height="50" rx="10"/><text class="d-t" x="345" y="181" text-anchor="middle">Клиент</text>
+              <rect class="d-box" x="480" y="150" width="170" height="50" rx="10"/><text class="d-t" x="565" y="181" text-anchor="middle">Сообщение</text>
+              <rect class="d-box" x="700" y="150" width="170" height="50" rx="10"/><text class="d-t" x="785" y="181" text-anchor="middle">Урок</text>
+              <rect class="d-box" x="150" y="270" width="170" height="50" rx="10"/><text class="d-t" x="235" y="301" text-anchor="middle">Задача</text>
+              <rect class="d-box" x="370" y="270" width="170" height="50" rx="10"/><text class="d-t" x="455" y="301" text-anchor="middle">Встреча</text>
+              <rect class="d-box" x="700" y="270" width="170" height="50" rx="10"/><text class="d-t" x="785" y="301" text-anchor="middle">Тренировка</text>
+              <line class="d-a" x1="210" y1="55" x2="256" y2="55" marker-end="url(#x-ah)"/><text class="d-m" x="233" y="47" text-anchor="middle">1:1</text>
+              <line class="d-a" x1="125" y1="80" x2="125" y2="146" marker-end="url(#x-ah)"/><text class="d-m" x="133" y="118">1:N</text>
+              <line class="d-a" x1="210" y1="175" x2="256" y2="175" marker-end="url(#x-ah)"/><text class="d-m" x="233" y="167" text-anchor="middle">0..1</text>
+              <line class="d-a" x1="430" y1="175" x2="476" y2="175" marker-end="url(#x-ah)"/><text class="d-m" x="453" y="167" text-anchor="middle">1:N</text>
+              <path class="d-a" d="M390 200 V240 H455 V266" marker-end="url(#x-ah)"/><text class="d-m" x="462" y="236">1:N</text>
+              <path class="d-a" d="M300 200 V240 H235 V266" marker-end="url(#x-ah)"/><text class="d-m" x="243" y="236">1:N</text>
+              <path class="d-a" d="M150 295 H110 V204" marker-end="url(#x-ah)"/><text class="d-l" x="104" y="252" text-anchor="end">или к заявке</text>
+              <line class="d-a" x1="430" y1="55" x2="696" y2="55" marker-end="url(#x-ah)"/><text class="d-l" x="563" y="47" text-anchor="middle">своё и общее знание</text>
+              <path class="d-a" d="M600 150 V70 H696" marker-end="url(#x-ah)"/><text class="d-l" x="608" y="112">опирается на</text>
+              <line class="d-a" x1="785" y1="150" x2="785" y2="84" marker-end="url(#x-ah)"/><text class="d-l" x="793" y="122">меняет</text>
+              <line class="d-a" x1="700" y1="175" x2="654" y2="175" marker-end="url(#x-ah)"/><text class="d-l" x="677" y="167" text-anchor="middle">из правки</text>
+              <line class="d-a" x1="785" y1="270" x2="785" y2="204" marker-end="url(#x-ah)"/><text class="d-m" x="793" y="242">1:N</text>
+            </svg>
+          </div>
+          <figcaption>Входящие ничего не хранят: они собирают Задачи, а каждая Задача ведёт к своей вещи и решается на месте. В черновике Сары видны плашки Знаний и образцов, на которые он опирается.</figcaption>
+        </figure>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Вещь</th><th>Главное о ней</th><th>Что с ней можно сделать</th></tr></thead>
+            <tbody>
+              <tr><td>Заявка</td><td>тема, город, бюджет, балл и почему, направление, цена, место, сколько ждёт</td><td>Откликнуться, Изменить текст, Пропустить с причиной, Перепроверить</td></tr>
+              <tr><td>Клиент</td><td>имя, тема, этап, чей ход, сколько ждёт, аккаунт, сумма</td><td>Написать, Беру сам, Вернуть Саре, Назначить встречу, Отметить итог, Закрыть</td></tr>
+              <tr><td>Задача</td><td>что нужно, срок, к чему относится</td><td>решить на месте или открыть вещь</td></tr>
+              <tr><td>Встреча</td><td>клиент, время, способ связи, итог</td><td>Прошла, Перенести, Не состоялась</td></tr>
+              <tr><td>Знание</td><td>тип, текст, почему, условия, версия, где использовано</td><td>Подтвердить, Изменить, Устарело, История</td></tr>
+              <tr><td>Урок</td><td>было, стало, вывод</td><td>Да, Нет потому что, Не важно</td></tr>
+              <tr><td>Аккаунт</td><td>вход, присутствие, баланс, направление</td><td>Войти снова, Пауза, Настроить направление, Калибровать</td></tr>
+              <tr><td>Тренировка</td><td>режим, сценарий, сходство, выучено</td><td>Начать, Продолжить, Завершить</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel" data-comment-target>
+          <h3>Правила связей</h3>
+          <ul>
+            <li><b>Один дом у каждой вещи</b>, везде одинаковая плашка, нажатие ведёт в дом.</li>
+            <li><b>Связи видны:</b> плашки «Знание: Диагностика, версия 3» и «Образец: твой ответ от 14.10» в черновике; плашка Аккаунта на Заявке; ссылка на правку в Уроке.</li>
+            <li><b>Путь назад</b> у вложенных экранов, общий поиск по всем вещам.</li>
+            <li><b>Пустые состояния</b> объясняют, что здесь появится и что сделать первым; ошибки говорят, что случилось и как исправить.</li>
+            <li>В приложении иконки, эмодзи только в текстах Telegram.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="screens" data-title="Экраны">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 13</span><span>примерные данные</span></div>
+        <h2>Что видишь ты</h2>
+        <p class="lead">Главный экран работы это «Входящие». В черновике видно, почему Сара ответила именно так и на что опиралась.</p>
+      </div>
+      <div class="stack-gap">
+        <div class="wire-scroll" data-comment-target>
+          <div class="wire" aria-label="Схема экрана Входящие">
+            <nav class="wnav">
+              <div class="brandline"><span class="mark"></span>Сара</div>
+              <span>Сегодня</span><span class="on">Входящие <b>4</b></span><span>Заявки <b>6</b></span><span>Клиенты</span><span>Встречи</span><span>Разум <b>5</b></span><span>Тренажёр</span><span>Экзамены</span><span>Аналитика</span><span>Аккаунты</span><span>Настройки</span>
+            </nav>
+            <div class="wlist">
+              <div class="wh">Входящие</div>
+              <div class="wtask on"><div class="t"><span class="tag red">Откликнуться?</span><span class="tag">IT · 210 ₽</span></div><b>Сайт для клиники</b><span class="s">балл 84 · будет 2-м · ждёт 40 с</span></div>
+              <div class="wtask"><div class="t"><span class="tag red">Черновик</span><span class="tag">маркетинг</span></div><b>Анна · стратегия для клиники</b><span class="s">тема «цена» всегда у тебя</span></div>
+              <div class="wtask"><div class="t"><span class="tag amber">Встреча прошла?</span></div><b>Олег · отдел продаж</b><span class="s">вчера в 15:00</span></div>
+              <div class="wtask"><div class="t"><span class="tag green">Уроки</span><span class="tag">5</span></div><b>Сара предлагает выучить</b><span class="s">из правок и тренировки</span></div>
+            </div>
+            <div class="wdetail">
+              <div class="wh2"><b>Сайт для клиники</b><span class="wmeta"><span class="objchip"><i></i>Аккаунт IT</span><span class="tag">балл 84</span></span></div>
+              <div class="why"><b>Почему 84:</b> понятная задача (30), бюджет в вилке (25), есть два похожих сайта (20), сроки реальные (9 из 15). Маркетинг дал 41: не проходит условие.</div>
+              <div class="bub draft"><small>Черновик отклика</small>Добрый день! Сделаем сайт с записью онлайн за 3-4 недели, от 120 000 ₽. Похожие проекты: clinic-a.ru, dent-b.ru. Подскажите, запись должна идти в вашу CRM или в отдельный календарь?</div>
+              <div class="wmeta"><span class="objchip"><i></i>Кейс: clinic-a.ru</span><span class="objchip"><i></i>Кейс: dent-b.ru</span><span class="objchip"><i></i>Знание: цены сайтов, версия 2</span></div>
+              <div class="wbtns"><span class="wbtn main">Откликнуться за 210 ₽</span><span class="wbtn">Изменить</span><span class="wbtn">Пропустить</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="mocks">
+          <div class="tg" data-comment-target>
+            <span class="cap">Telegram · заявка, быстрое направление</span>
+            <div class="tgmsg">🔔 <b>IT · Сайт для клиники</b>, Краснодар<br>Балл 84 · отклик 210 ₽ · будешь 2-м<br>Черновик с двумя ссылками на кейсы готов</div>
+            <div class="tgkb"><span class="full">Откликнуться за 210 ₽</span><span>Изменить</span><span>Пропустить</span></div>
+          </div>
+          <div class="tg" data-comment-target>
+            <span class="cap">Telegram · после встречи</span>
+            <div class="tgmsg">📅 <b>Прошла ли встреча с Анной?</b><br>Отметь итог, чтобы аналитика знала цену договора.</div>
+            <div class="tgkb"><span class="full">Договор, ввести сумму</span><span>Думает</span><span>Отказ</span><span>Не состоялась</span><span>Перенесли</span></div>
+          </div>
+          <div class="phone" data-comment-target aria-label="Схема Mini App">
+            <div class="ph-h">Сегодня</div>
+            <div class="ph-list">
+              <div class="ph-row"><span>Ждут тебя</span><b class="red">4</b></div>
+              <div class="ph-row"><span>Кошелёк Hance · IT</span><b>540 · 820 ₽</b></div>
+              <div class="ph-row"><span>Лимит Claude</span><b>в норме</b></div>
+            </div>
+            <div class="ph-list">
+              <div class="ph-row"><span>До тебя заявка за</span><b>1 мин 20 с</b></div>
+              <div class="ph-row"><span>Ответили клиенты</span><b>67%</b></div>
+              <div class="ph-row"><span>Ответов без тебя</span><b>58%</b></div>
+              <div class="ph-row"><span>Тренировка на 5 минут</span><b class="red">начать</b></div>
+            </div>
+            <div class="ph-tabs"><span class="on">Сегодня</span><span>Входящие</span><span>Клиенты</span><span>Ещё</span></div>
+          </div>
+          <div class="panel" data-comment-target>
+            <h3>Самостоятельность по темам <span class="note">пример</span></h3>
+            <div>
+              <div class="auto-row"><span><b>Кейсы и примеры</b><br><span class="note">14 из 14 без правок</span></span><span class="seg"><span>зовёт</span><span>черновик</span><span class="on">сама</span></span></div>
+              <div class="auto-row"><span><b>Сроки и порядок работы</b><br><span class="note">8 из 10</span></span><span class="seg"><span>зовёт</span><span class="on">черновик</span><span>сама</span></span></div>
+              <div class="auto-row"><span><b>Цена, договор, скидка, NDA</b><br><span class="note">всегда у тебя</span></span><span class="seg"><span class="lock">зовёт</span><span>черновик</span><span>сама</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Раздел</th><th>Зачем</th><th>Что на экране</th></tr></thead>
+            <tbody>
+              <tr><td>Сегодня</td><td>день за 10 секунд</td><td>что ждёт, деньги по аккаунтам, воронка, цена ответа, созвона, договора, скорость, лимит, присутствие</td></tr>
+              <tr><td>Входящие</td><td>всё, что ждёт тебя</td><td>отклики, черновики с «почему так», уроки, итоги встреч, застой, повышение самостоятельности</td></tr>
+              <tr><td>Заявки</td><td>куда тратить</td><td>очередь по ценности, направление, балл и почему</td></tr>
+              <tr><td>Клиенты</td><td>каждый клиент</td><td>доска по этапам, переписка как в мессенджере, обещания, встречи, события</td></tr>
+              <tr><td>Встречи</td><td>что впереди</td><td>список встреч, свободное время</td></tr>
+              <tr><td>Разум</td><td>что знает и как говорит</td><td>знание, понимание, речь, суждение по направлениям, версии</td></tr>
+              <tr><td>Тренажёр</td><td>учить Сару</td><td>режимы, покрытие, история тренировок, сходство</td></tr>
+              <tr><td>Экзамены</td><td>готовность</td><td>последний экзамен, сравнение версий, провалы</td></tr>
+              <tr><td>Аналитика</td><td>деньги и воронка</td><td>когорты, по аккаунтам и направлениям, твоя скорость и скорость Сары</td></tr>
+              <tr><td>Аккаунты</td><td>площадки и направления</td><td>направление, система оценки, калибровка, формат, кейсы, вход</td></tr>
+              <tr><td>Настройки</td><td>правила</td><td>самостоятельность, лимиты, тихие часы, свободное время, уведомления</td></tr>
+              <tr><td>Состояние системы и Справка</td><td>всё ли работает, как пользоваться</td><td>проверки подключений, инструкции к каждому разделу</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="setup" data-title="Первый запуск">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Схема 14</span><span>твоя просьба</span></div>
+        <h2>Первый запуск системы</h2>
+        <p class="lead">Мастер ведёт по шагам. На каждом: зачем это, что сделать (готовые команды с кнопкой «Скопировать»), проверка с понятным результатом и как исправить, если не прошло. Необязательное можно пропустить и вернуться позже.</p>
+      </div>
+      <div class="stack-gap">
+        <div class="wire-scroll" data-comment-target>
+          <div class="wire setup" aria-label="Схема мастера первого запуска">
+            <div class="stepper">
+              <div><i class="ok">✓</i><span>Вход владельца</span></div>
+              <div class="on"><i class="cur">2</i><span>Telegram</span></div>
+              <div><i>3</i><span>Claude</span></div>
+              <div><i>4</i><span>Аккаунт Профи.ру</span></div>
+              <div><i>5</i><span>Направление</span></div>
+              <div><i>6</i><span>Знание о Hance</span></div>
+              <div><i>7</i><span>История переписки</span></div>
+              <div><i>8</i><span>Правила</span></div>
+              <div><i>9</i><span>Режим тени</span></div>
+            </div>
+            <div class="wdetail">
+              <div class="wh2"><b>Шаг 2 из 9 · Telegram</b><span class="tag">2 минуты</span></div>
+              <p class="note">Через бота Сара присылает заявки, черновики и встречи, а ты отвечаешь кнопками.</p>
+              <div class="box-mini"><b>Нет бота?</b><span>1. Открой @BotFather в Telegram. 2. Отправь /newbot. 3. Придумай имя и адрес, заканчивающийся на bot. 4. Скопируй токен из ответа.</span></div>
+              <div class="box-mini"><b>Уже есть бот?</b><span>Вставь его токен ниже, старые настройки бота не пострадают.</span></div>
+              <div class="fakeinput">Токен бота: 123456:ABC…</div>
+              <div class="check-ok">✓ Бот найден: @saraai_profi_bot. Теперь напиши боту /start.</div>
+              <div class="wbtns"><span class="wbtn main">Проверить</span><span class="wbtn">Назад</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Шаг</th><th>Что делаешь ты</th><th>Проверка</th></tr></thead>
+            <tbody>
+              <tr><td>1 Вход владельца</td><td>задаёшь пароль</td><td>вход работает</td></tr>
+              <tr><td>2 Telegram</td><td>создаёшь бота у @BotFather по шагам или вставляешь токен своего; пишешь /start</td><td>бот найден, чат привязан, пришло «Сара на связи»</td></tr>
+              <tr><td>3 Claude</td><td>на компьютере с браузером <code>claude setup-token</code>, вставляешь токен</td><td>вход есть, пробный вызов ответил, видно состояние лимита</td></tr>
+              <tr><td>4 Профи.ру</td><td>живой экран браузера, вход сам, код из СМС сам</td><td>сессия жива, баланс виден, присутствие включено</td></tr>
+              <tr><td>5 Направление</td><td>онбординг направления с калибровкой</td><td>согласие с тобой от 85%</td></tr>
+              <tr><td>6 Знание о Hance</td><td>интервью карточками, сайт, кейсы; можно позже</td><td>заполнено основное</td></tr>
+              <tr><td>7 История</td><td>ничего: Сара выгружает прошлые чаты</td><td>«найдено 23 диалога, 140 твоих сообщений»</td></tr>
+              <tr><td>8 Правила</td><td>деньги, свободное время, тихие часы, самостоятельность</td><td>нет противоречий</td></tr>
+              <tr><td>9 Режим тени</td><td>ничего</td><td>Сара наблюдает N дней и пишет черновики, ничего не отправляет</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="reliability" data-title="Надёжность">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Без дыр</span></div>
+        <h2>Цели и что делать, когда ломается</h2>
+        <p class="lead">Хороший продукт заранее знает, что делать при каждом сбое.</p>
+      </div>
+      <div class="stack-gap">
+        <div class="nfr" data-comment-target>
+          <div class="tile"><span class="n">&lt; 2 мин</span><span class="l">заявка у тебя на утверждении</span></div>
+          <div class="tile"><span class="n">&lt; 1 мин</span><span class="l">отклик после «да», узнать о сообщении клиента</span></div>
+          <div class="tile"><span class="n">1-4 мин</span><span class="l">ответ клиенту с человеческой паузой</span></div>
+          <div class="tile"><span class="n">0</span><span class="l">дублей и выдуманных фактов</span></div>
+          <div class="tile"><span class="n">5 мин</span><span class="l">максимум потери данных</span></div>
+          <div class="tile"><span class="n">1 час</span><span class="l">восстановление после аварии</span></div>
+        </div>
+        <div class="table-wrap" data-comment-target>
+          <table>
+            <thead><tr><th>Сбой</th><th>Что делает система</th></tr></thead>
+            <tbody>
+              <tr><td>Профи.ру разлогинил</td><td>стоит только этот аккаунт, 🚨 «Войти снова», живой вход с телефона</td></tr>
+              <tr><td>Профиль заблокирован</td><td>событие <code>MSG_BAN_PROFILE</code>: все действия аккаунта стоят сразу, 🚨 тебе</td></tr>
+              <tr><td>Сайт изменился</td><td>тесты на образцах видят, действия этого типа стоят, ремонтник предлагает исправление</td></tr>
+              <tr><td>Канал событий молчит</td><td>обновление ленты, сверка чатов, письма, переподключение</td></tr>
+              <tr><td>Лимит Claude</td><td>пауза по приоритетам, срочное готовыми текстами, одно сообщение</td></tr>
+              <tr><td>CLI или токен</td><td>запасная модель, проверка раз в сутки, предупреждение за месяц</td></tr>
+              <tr><td>Ответ модели не по схеме</td><td>один повтор, затем черновик тебе</td></tr>
+              <tr><td>Повтор после сбоя связи</td><td>ключ от повтора, поиск своего сообщения на странице</td></tr>
+              <tr><td>Клиент печатает или дописал</td><td>ждать, перечитать, цикл заново</td></tr>
+              <tr><td>Ты написал клиенту сам</td><td>автор распознан, клиент твой, черновик отменён</td></tr>
+              <tr><td>Выдуманный факт</td><td>проверка по номерам фактов, черновик тебе</td></tr>
+              <tr><td>Ловушка в сообщении клиента</td><td>у роли нет инструментов, действие решает код</td></tr>
+              <tr><td>Два аккаунта видят одну заявку</td><td>маршрутизатор, один отклик по номеру заказа</td></tr>
+              <tr><td>Нет денег на аккаунте</td><td>пауза платных откликов этого аккаунта, одно сообщение</td></tr>
+              <tr><td>Заказ закрылся до отклика</td><td>проверка страницы до оплаты</td></tr>
+              <tr><td>Сервер упал, связь ядро-узел</td><td>перезапуск, процессы продолжают, очередь команд, узел досылает события, тревога</td></tr>
+              <tr><td>Диск, база</td><td>предупреждение на 80%, восстановление из архива, проверка раз в неделю</td></tr>
+              <tr><td>Telegram недоступен</td><td>очередь уведомлений, приложение работает</td></tr>
+              <tr><td>Ты долго не отвечаешь</td><td>конечная лестница напоминаний, застой 7 дней</td></tr>
+              <tr><td>Обновление Claude Code, новая версия Сары хуже</td><td>закреплённая версия, экзамен, режим тени, откат</td></tr>
+              <tr><td>Учитель или тренажёр выучили не то</td><td>всё в черновиках разума до «да», откат версии</td></tr>
+              <tr><td>Тренажёр съедает лимит</td><td>тренировки в P1, предупреждение о лимите перед началом</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="checklist" data-title="Все аспекты разработки">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Чтобы ничего не упустить</span></div>
+        <h2>Все аспекты разработки</h2>
+        <p class="lead">Каждый шаг сборки принимается только если закрыт каждый пункт этого списка.</p>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>Аспект</th><th>Что должно быть</th></tr></thead>
+          <tbody>
+            <tr><td>Продукт</td><td>сценарий шага твоими словами, критерии приёмки, что ты увидишь</td></tr>
+            <tr><td>Интерфейс</td><td>вещи и связи по карте, пустые, загрузочные и ошибочные состояния, телефон и компьютер, обе темы, клавиатура</td></tr>
+            <tr><td>Тексты</td><td>простой язык, без длинного тире, ошибки говорят, что делать</td></tr>
+            <tr><td>Данные</td><td>таблицы и миграции, время UTC, срок хранения, обезличивание</td></tr>
+            <tr><td>Площадка</td><td>действия через интерфейс, проверка экраном, калибровка, тесты на образцах</td></tr>
+            <tr><td>Модель</td><td>роль, схема ответа, версия, кэш, приоритет в шлюзе, оценка расхода</td></tr>
+            <tr><td>Качество Сары</td><td>экзамен по затронутым темам, проверка роботности, слепое сравнение</td></tr>
+            <tr><td>Надёжность</td><td>устойчивые процессы, ключи от повтора, тайм-ауты, поведение при каждом сбое</td></tr>
+            <tr><td>Скорость</td><td>замер против целей</td></tr>
+            <tr><td>Безопасность</td><td>секреты, права, ловушки в тексте клиента, журнал</td></tr>
+            <tr><td>Наблюдение</td><td>«почему Сара сделала так» по каждому ходу, метрики, тревоги</td></tr>
+            <tr><td>Тесты</td><td>модульные, на образцах страниц, на фальшивом Профи.ру, режим тени</td></tr>
+            <tr><td>Выкладка</td><td>CI, миграции, флаги, откат, версия разума</td></tr>
+            <tr><td>Эксплуатация</td><td>бэкап и проверка восстановления, закреплённые версии, инструкции на случай сбоя</td></tr>
+            <tr><td>Документы</td><td>справка в приложении, документ передачи дел, записи архитектурных решений</td></tr>
+            <tr><td>Правила площадки и закон</td><td>риск для аккаунта, 152-ФЗ, удаление данных</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="solutions" data-title="41 решение">
+      <div class="ch-head">
+        <div class="eyebrow"><span>По аудиту</span></div>
+        <h2>Решение на каждую находку</h2>
+        <p class="lead">Коды совпадают с аудитом.</p>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>Код</th><th>Решение</th></tr></thead>
+          <tbody>
+            <tr><td><code>MEM-1</code></td><td>Сара не сессия Claude Code; разговор с тобой через бот ядра, память в журнале</td></tr>
+            <tr><td><code>MEM-2</code></td><td>досье клиента на каждый ход</td></tr>
+            <tr><td><code>MEM-3</code></td><td>сообщения с номерами площадки, выгрузка прошлых чатов</td></tr>
+            <tr><td><code>MEM-4</code></td><td>знание в разуме, факты только из него</td></tr>
+            <tr><td><code>MEM-5</code></td><td>твои решения как события, уроки, тренажёр</td></tr>
+            <tr><td><code>CAL-1</code></td><td>согласие на звонок запускает процедуру созвона</td></tr>
+            <tr><td><code>CAL-2</code></td><td>обещания только с таймером, клиенту не обещаем то, чего нет</td></tr>
+            <tr><td><code>CAL-3</code></td><td>этап «встреча назначена» читается, переносы распознаются</td></tr>
+            <tr><td><code>CAL-4</code></td><td>свободное время в настройках, варианты в разные дни</td></tr>
+            <tr><td><code>CAL-5</code></td><td>встреча записана в системе, «встреча назначена» в Telegram, итог от тебя</td></tr>
+            <tr><td><code>ANL-1</code></td><td>итог встречи от тебя с суммой</td></tr>
+            <tr><td><code>ANL-2</code></td><td>журнал трат с заявкой и аккаунтом</td></tr>
+            <tr><td><code>ANL-3</code></td><td>встреча по записи Сары или твоей отметке</td></tr>
+            <tr><td><code>ANL-4</code></td><td>когорты по неделе отклика</td></tr>
+            <tr><td><code>ANL-5</code></td><td>замеры скорости, твоей и Сары</td></tr>
+            <tr><td><code>ANL-6</code></td><td>вызовы модели с оценкой расхода</td></tr>
+            <tr><td><code>BID-1</code></td><td>заявка у тебя меньше чем за 2 минуты, кнопка в уведомлении</td></tr>
+            <tr><td><code>BID-2</code></td><td>системы оценки направлений, очередь по ценности</td></tr>
+            <tr><td><code>BID-3</code></td><td>напоминания по теме и по «прочитал или нет»</td></tr>
+            <tr><td><code>BID-4</code></td><td>застой 7 дней, 9 старых закрываются при переезде</td></tr>
+            <tr><td><code>ONE-1</code></td><td>один разум, одно ядро</td></tr>
+            <tr><td><code>ONE-2</code></td><td>кнопки и ответы привязаны к задачам</td></tr>
+            <tr><td><code>ONE-3</code></td><td>три лица на одном API, карта сущностей, шесть видов уведомлений</td></tr>
+            <tr><td><code>ONE-4</code></td><td>у Сары в проде только инструменты ядра</td></tr>
+            <tr><td><code>LLM-1</code></td><td>шлюз с приоритетами и учётом лимита</td></tr>
+            <tr><td><code>LLM-2</code></td><td>роли с моделями по задачам</td></tr>
+            <tr><td><code>LLM-3</code></td><td>роли без инструментов, ответы по схеме, кэш</td></tr>
+            <tr><td><code>LLM-4</code></td><td>без сохранения сессий CLI</td></tr>
+            <tr><td><code>OPS-1</code></td><td>непрерывный архив и проверка восстановления</td></tr>
+            <tr><td><code>OPS-2</code></td><td>два узла</td></tr>
+            <tr><td><code>OPS-3</code></td><td>узел Профи.ру в России</td></tr>
+            <tr><td><code>OPS-4</code></td><td>выкладка с GitHub</td></tr>
+            <tr><td><code>OPS-5</code></td><td>канал событий, данные сайта, проверка экраном</td></tr>
+            <tr><td><code>OPS-6</code></td><td>ошибки по классам</td></tr>
+            <tr><td><code>CODE-1</code></td><td>модули, машина состояний, устойчивые процессы</td></tr>
+            <tr><td><code>CODE-2</code></td><td>разум в файлах с версиями, экзамен</td></tr>
+            <tr><td><code>CODE-3</code></td><td>один репозиторий, v1 и v2 в архив после переезда</td></tr>
+            <tr><td><code>CODE-4</code></td><td>должностная инструкция это суждение в разуме</td></tr>
+            <tr><td><code>SEC-1</code></td><td>смена и шифрование секретов</td></tr>
+            <tr><td><code>SEC-2</code></td><td>аккаунты разных направлений, маршрутизатор, бережный режим</td></tr>
+            <tr><td><code>SEC-3</code></td><td>роли в базе, шифрование бэкапов</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="ideas" data-title="Грандиозные идеи">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Проверено изнутри</span></div>
+        <h2>Что из грандиозного реально</h2>
+      </div>
+      <div class="table-wrap" data-comment-target>
+        <table>
+          <thead><tr><th>Идея</th><th>Вывод</th></tr></thead>
+          <tbody>
+            <tr><td>Сара пишет как ты, включая шутки и темп</td><td class="v-yes">делаем: портрет речи, прагматика, образцы, тренажёр, слепая проверка</td></tr>
+            <tr><td>Тренажёр, где Сара играет клиента</td><td class="v-yes">делаем: главный источник твоих образцов</td></tr>
+            <tr><td>Онбординг направления, где Claude строит систему оценки</td><td class="v-yes">делаем, с калибровкой на реальных заявках</td></tr>
+            <tr><td>Аккаунты разного характера без конкуренции</td><td class="v-yes">делаем: маршрутизатор</td></tr>
+            <tr><td>Быть первым откликом</td><td class="v-yes">делаем: меньше 2 минут до тебя</td></tr>
+            <tr><td>Обучение без оплаты</td><td class="v-yes">делаем на подписке</td></tr>
+            <tr><td>Профи.ру через MCP вместо экрана</td><td class="v-yes">делаем гибрид: MCP-форма, события и данные для чтения, интерфейс для действий</td></tr>
+            <tr><td>Профи.ру совсем без браузера</td><td class="v-no">не делаем: риск для аккаунта и показа заказов</td></tr>
+            <tr><td>Закрытый API мобильного приложения</td><td class="v-no">не делаем</td></tr>
+            <tr><td>Ценность заявки в рублях заранее</td><td class="v-later">после 100 итогов</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="road" data-title="Порядок сборки">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Дальше</span></div>
+        <h2>Порядок сборки</h2>
+        <p class="lead">Каждый шаг работает сам и принимается по чек-листу. Новая Сара сначала в режиме тени: читает и пишет черновики, ничего не отправляет.</p>
+      </div>
+      <div class="panel" data-comment-target>
+        <ol class="road">
+          <li><span class="rn">0</span><div class="rt"><b>Фундамент и мастер запуска</b><span>репозиторий, Postgres, журнал, CI, бэкапы, два узла, шаги мастера 1-3.</span></div></li>
+          <li><span class="rn">1</span><div class="rt"><b>Профи-MCP</b><span>живая вкладка, события, чтение, действия через интерфейс, проверка экраном, живой вход, калибровка.</span></div></li>
+          <li><span class="rn">2</span><div class="rt"><b>Шлюз, роли, правила, бот с кнопками</b><span>заявка у тебя меньше чем за 2 минуты, отклик в одно нажатие.</span></div></li>
+          <li><span class="rn">3</span><div class="rt"><b>Направления</b><span>онбординг с системой оценки, калибровка, формат отклика, кейсы, маршрутизатор.</span></div></li>
+          <li><span class="rn">4</span><div class="rt"><b>Разум и цикл ответа</b><span>корпус, знание, понимание, речь с прагматикой, темп.</span></div></li>
+          <li><span class="rn">5</span><div class="rt"><b>Тренажёр и обучение</b><span>режимы, уроки, учитель, экзамены, самостоятельность.</span></div></li>
+          <li><span class="rn">6</span><div class="rt"><b>Встречи и итоги</b><span>созвоны назначаются, договоры видны.</span></div></li>
+          <li><span class="rn">7</span><div class="rt"><b>Веб-приложение и Mini App</b><span>по карте сущностей, со справкой.</span></div></li>
+          <li><span class="rn">8</span><div class="rt"><b>Второй аккаунт IT</b><span>через онбординг, два направления без конкуренции.</span></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="chapter" id="questions" data-title="Вопросы к тебе">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Решаешь ты</span><span>по важности</span></div>
+        <h2>Что осталось решить</h2>
+        <p class="lead">Ответь комментарием у вопроса или одним сообщением в чате.</p>
+      </div>
+      <div class="register">
+        <div class="item" data-comment-target><span class="pri">1</span><div class="body"><h3>Подписка для Сары</h3><p>Отдельная, Max (у него ещё и API-кредиты) или общая с Лорой? В общей Сара будет медленнее в часы твоей работы с Лорой.</p></div><div class="side"></div></div>
+        <div class="item" data-comment-target><span class="pri">2</span><div class="body"><h3>Хостинг</h3><p>Два сервера, ядро и российский узел, примерно 1500-3000 ₽ в месяц вместе?</p></div><div class="side"></div></div>
+        <div class="item" data-comment-target><span class="pri">3</span><div class="body"><h3>Корпус</h3><p>Можно ли брать выбранные чаты с клиентами из твоего Telegram? Вместе с тренажёром это главный источник твоего голоса.</p></div><div class="side"></div></div>
+        <div class="item" data-comment-target><span class="pri">4</span><div class="body"><h3>Самостоятельность с первого дня</h3><p>Всё черновиком, кроме ответов целиком из подтверждённого понимания; цена, договор, скидки, NDA всегда у тебя?</p></div><div class="side"></div></div>
+        <div class="item" data-comment-target><span class="pri">5</span><div class="body"><h3>Второй аккаунт IT</h3><p>Он уже есть или его нужно завести? Правила Профи.ру о нескольких аккаунтах лучше уточнить в поддержке.</p></div><div class="side"></div></div>
+        <div class="item" data-comment-target><span class="pri">6</span><div class="body"><h3>Персональные данные</h3><p>База в России или рядом с ядром (152-ФЗ)? Нужен ответ юриста.</p></div><div class="side"></div></div>
+        <div class="item" data-comment-target><span class="pri">7</span><div class="body"><h3>Быстрый режим IT</h3><p>Только кнопка, или ты захочешь включать правило автоотклика для этого направления?</p></div><div class="side"></div></div>
+        <div class="item" data-comment-target><span class="pri">8</span><div class="body"><h3>Ночные заявки</h3><p>Будить уведомлением со звуком для горячих заявок ночью или копить до утра?</p></div><div class="side"></div></div>
+      </div>
+      <p class="foot">Подготовила Сара, 22.10.2026. Полный текст: ~/Sara-Hance/docs/superpowers/specs/2026-10-21-sara-hance-design.md. Источники: <a href="https://help.profi.ru/ru/articles/3077236">справка Профи.ру о рейтинге отклика</a>, <a href="https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan">Anthropic о claude -p</a>, <a href="https://code.claude.com/docs/en/cli-reference">флаги CLI</a>, <a href="https://docs.wwebjs.dev/">whatsapp-web.js</a>, <a href="https://www.hyperbound.ai/uses/sales-roleplay-software">Hyperbound</a>, <a href="https://help.gigradar.io/en/articles/8746356-information-about-scanners">GigRadar</a>, <a href="https://clay.com/blog/lead-scoring-in-clay">Clay</a>, <a href="https://blog.logrocket.com/ux-design/object-oriented-ux-ooux/">OOUX</a>, <a href="https://arxiv.org/html/2509.14543v1">подражание стилю</a>, <a href="https://aisel.aisnet.org/ecis2018_rp/113/">паузы и человечность</a>, <a href="https://develop.kde.org/hig/simple_by_default/">мастера запуска</a>.</p>
+    </section>
+
+  </main>
+</div>
+
+<button class="selbtn" type="button" id="selbtn" hidden>Комментировать выделенное</button>
+
+<script>
+(function () {
+  var chapters = Array.prototype.slice.call(document.querySelectorAll('section.chapter'));
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var toc = document.getElementById('toc');
+  chapters.forEach(function (ch, i) {
+    var li = document.createElement('li');
+    var a = document.createElement('a');
+    a.href = '#' + ch.id;
+    a.dataset.id = ch.id;
+    var tn = document.createElement('span'); tn.className = 'tn'; tn.textContent = String(i + 1);
+    var tt = document.createElement('span'); tt.textContent = ch.dataset.title;
+    a.appendChild(tn); a.appendChild(tt);
+    li.appendChild(a); toc.appendChild(li);
+  });
+  var current = 0;
+  function go(i) {
+    i = Math.max(0, Math.min(chapters.length - 1, i));
+    chapters[i].scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  }
+  toc.addEventListener('click', function (e) {
+    var a = e.target.closest('a');
+    if (!a) return;
+    e.preventDefault();
+    go(chapters.findIndex(function (c) { return c.id === a.dataset.id; }));
+  });
+  ['prevTop', 'prevSide'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { go(current - 1); }); });
+  ['nextTop', 'nextSide'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { go(current + 1); }); });
+  function setActive(i) {
+    current = i;
+    var ch = chapters[i];
+    toc.querySelectorAll('a').forEach(function (a) { a.classList.toggle('on', a.dataset.id === ch.id); });
+    var now = document.getElementById('now');
+    now.innerHTML = '';
+    var sm = document.createElement('small');
+    sm.textContent = (i + 1) + ' из ' + chapters.length;
+    now.appendChild(sm);
+    now.appendChild(document.createTextNode(ch.dataset.title));
+    ['prevTop', 'prevSide'].forEach(function (id) { document.getElementById(id).disabled = i === 0; });
+    ['nextTop', 'nextSide'].forEach(function (id) { document.getElementById(id).disabled = i === chapters.length - 1; });
+  }
+  setActive(0);
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) setActive(chapters.indexOf(en.target)); });
+    }, { rootMargin: '-35% 0px -60% 0px' });
+    chapters.forEach(function (c) { io.observe(c); });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); go(current + 1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(current - 1); }
+  });
+  var hash = (location.hash || '').slice(1);
+  if (hash && document.getElementById(hash)) {
+    setTimeout(function () { document.getElementById(hash).scrollIntoView({ block: 'start' }); }, 50);
+  }
+
+  var icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>';
+  var buttons = [];
+  var selbtn = document.getElementById('selbtn');
+  var savedRange = null;
+  function hideAll() { buttons.forEach(function (b) { b.hidden = true; }); selbtn.hidden = true; savedRange = null; }
+  function addButtons(comments) {
+    document.querySelectorAll('.item[data-comment-target], .panel[data-comment-target], .fig[data-comment-target], .entry[data-comment-target], .tg[data-comment-target]').forEach(function (target) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cbtn';
+      b.innerHTML = icon + '<span>Комментировать</span>';
+      b.addEventListener('click', function () {
+        comments.openComposer({ element: target }).catch(function (err) {
+          if (err && (err.code === 'unavailable' || err.code === 'not_granted' || err.code === 'capability_disabled' || err.code === 'capability_removed')) hideAll();
+        });
+      });
+      var side = target.querySelector('.side');
+      if (side) side.appendChild(b);
+      else { b.style.alignSelf = 'flex-start'; target.appendChild(b); }
+      buttons.push(b);
+    });
+    document.getElementById('howText').innerHTML = '<b>Как комментировать.</b> Нажми «Комментировать» у любого блока или схемы, или выдели текст и нажми «Комментировать выделенное».';
+    function placeSel() {
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { selbtn.hidden = true; savedRange = null; return; }
+      var range = sel.getRangeAt(0);
+      if (!document.getElementById('deck').contains(range.commonAncestorContainer) || String(sel).trim().length < 3) { selbtn.hidden = true; savedRange = null; return; }
+      savedRange = range.cloneRange();
+      var rect = range.getBoundingClientRect();
+      selbtn.hidden = false;
+      var w = selbtn.offsetWidth;
+      var left = Math.max(12, Math.min(window.innerWidth - w - 12, rect.left + rect.width / 2 - w / 2));
+      selbtn.style.left = (left + window.scrollX) + 'px';
+      selbtn.style.top = (rect.bottom + window.scrollY + 10) + 'px';
+    }
+    var timer = null;
+    document.addEventListener('selectionchange', function () { clearTimeout(timer); timer = setTimeout(placeSel, 180); });
+    selbtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    selbtn.addEventListener('click', function () {
+      if (!savedRange) return;
+      var r = savedRange;
+      selbtn.hidden = true;
+      comments.openComposer({ range: r }).catch(function (err) {
+        if (err && (err.code === 'unavailable' || err.code === 'not_granted')) hideAll();
+      });
+    });
+  }
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('comments').then(function (comments) { if (comments) addButtons(comments); }).catch(function () {});
+  }
+})();
+</script>

@@ -1,0 +1,1057 @@
+<title>Аудит Сары v1</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700&display=swap">
+<style>
+/* Layout: аудиторский реестр-колода. Слева липкое оглавление разделов со счётчиками находок, справа разделы подряд; находки строками реестра: важность, суть, доказательство, комментарий. */
+:root {
+  --ground: #efefed;
+  --surface: #ffffff;
+  --ink: #1b1a19;
+  --muted: #6b6864;
+  --line: #e0ddd8;
+  --accent: #ec4b25;
+  --accent-ink: #c23a18;
+  --warn: #a86b12;
+  --minor: #8a8681;
+  --good: #2f7d4f;
+  --on-accent: #ffffff;
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #121211;
+    --surface: #1c1b1a;
+    --ink: #edebe7;
+    --muted: #a39f99;
+    --line: #2f2d2b;
+    --accent: #ff6a45;
+    --accent-ink: #ff825f;
+    --warn: #e0a848;
+    --minor: #8f8b85;
+    --good: #5dbb84;
+    --on-accent: #1a0d08;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #121211;
+  --surface: #1c1b1a;
+  --ink: #edebe7;
+  --muted: #a39f99;
+  --line: #2f2d2b;
+  --accent: #ff6a45;
+  --accent-ink: #ff825f;
+  --warn: #e0a848;
+  --minor: #8f8b85;
+  --good: #5dbb84;
+  --on-accent: #1a0d08;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 16px/1.55 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
+  z-index: 10; background: var(--ground);
+}
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+a { color: inherit; }
+code, .mono { font-family: var(--font-mono); font-size: 0.82em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+.mark {
+  display: inline-block; width: 22px; height: 16px; background: var(--accent); flex: none;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 64%, 40% 64%, 40% 36%, 0 36%);
+}
+
+/* Mobile top bar */
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: color-mix(in srgb, var(--ground) 92%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 10px;
+  display: flex; align-items: center; gap: 12px;
+}
+.topbar .now { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .now small { color: var(--muted); font-weight: 500; margin-right: 6px; }
+.navbtns { display: flex; gap: 6px; }
+.navbtn {
+  font: 500 14px/1 var(--font-body); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; cursor: pointer;
+}
+.navbtn:hover { border-color: var(--ink); }
+.navbtn:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
+
+.shell {
+  max-width: 1240px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+  display: grid; grid-template-columns: 1fr; gap: 40px;
+}
+main { min-width: 0; }
+
+/* Sidebar table of contents */
+.toc { display: none; }
+@media (min-width: 1000px) {
+  .topbar { display: none; }
+  .shell { grid-template-columns: 250px minmax(0, 1fr); gap: 56px; }
+  .toc {
+    display: flex; flex-direction: column; gap: 20px;
+    position: sticky; top: calc(env(safe-area-inset-top, 0px) + 28px); align-self: start;
+    max-height: calc(100vh - 56px); overflow: auto; padding-block: 28px 8px;
+  }
+}
+.brand { display: flex; align-items: center; gap: 10px; font: 700 15px/1 var(--font-display); letter-spacing: -0.01em; }
+.brand span.sub { font: 500 12px/1 var(--font-body); color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.toc a {
+  display: grid; grid-template-columns: 26px 1fr auto; align-items: baseline; gap: 6px;
+  text-decoration: none; padding: 7px 10px; border-radius: 10px; font-size: 14px; color: var(--muted);
+}
+.toc a:hover { background: var(--surface); color: var(--ink); }
+.toc a.on { background: var(--surface); color: var(--ink); font-weight: 600; }
+.toc .tn { font: 500 11px/1 var(--font-mono); color: var(--minor); font-variant-numeric: tabular-nums; }
+.toc a.on .tn { color: var(--accent-ink); }
+.toc .tc { font: 500 11px/1 var(--font-mono); color: var(--minor); font-variant-numeric: tabular-nums; }
+.toc .tc.hot { color: var(--accent-ink); }
+.toc-foot { font-size: 12px; color: var(--muted); line-height: 1.45; border-top: 1px solid var(--line); padding-top: 14px; }
+
+/* Chapters */
+.chapter { padding-block: 56px; border-top: 1px solid var(--line); scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 64px); }
+.chapter:first-child { border-top: 0; padding-top: 36px; }
+@media (min-width: 1000px) { .chapter { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 8px); } .chapter:first-child { padding-top: 64px; } }
+.eyebrow { font: 500 12px/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.eyebrow .num { font-family: var(--font-mono); color: var(--accent-ink); letter-spacing: 0.02em; }
+.ch-head { display: flex; flex-direction: column; gap: 14px; margin-bottom: 28px; max-width: 760px; }
+.ch-head h2 { font: 700 clamp(26px, 3.4vw, 36px)/1.15 var(--font-display); letter-spacing: -0.02em; }
+.ch-head .lead { color: var(--muted); font-size: 17px; max-width: 62ch; }
+.counts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Severity chips: form encodes state too (filled, outlined, plain) */
+.sev {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px;
+  font: 600 12px/1 var(--font-body); letter-spacing: 0.02em; white-space: nowrap; width: max-content;
+}
+.sev.k { background: var(--accent); color: var(--on-accent); }
+.sev.v { border: 1.5px solid var(--warn); color: var(--warn); }
+.sev.m { border: 1px dashed var(--minor); color: var(--muted); }
+.sev.d { border: 1.5px solid var(--ink); color: var(--ink); }
+
+/* The register */
+.register { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.item {
+  display: grid; grid-template-columns: 1fr; gap: 10px; padding: 20px;
+  border-top: 1px solid var(--line);
+}
+.item:first-child { border-top: 0; }
+@media (min-width: 760px) {
+  .item { grid-template-columns: 112px minmax(0, 1fr) 220px; gap: 20px; padding: 22px 24px; }
+}
+.item h3 { font: 600 17px/1.35 var(--font-body); margin-bottom: 6px; }
+.item .body { min-width: 0; }
+.item .body p { color: var(--ink); max-width: 64ch; }
+.item .side { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; min-width: 0; }
+.ev { font: 400 12px/1.45 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.pri { font: 700 22px/1 var(--font-display); color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+
+.cbtn {
+  font: 500 13px/1 var(--font-body); color: var(--ink); background: transparent;
+  border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.cbtn:hover { border-color: var(--accent); color: var(--accent-ink); }
+.cbtn svg { width: 14px; height: 14px; }
+
+/* Title chapter */
+.hero h1 { font: 700 clamp(40px, 7vw, 76px)/1.02 var(--font-display); letter-spacing: -0.035em; }
+.hero h1 .v { color: var(--accent); }
+.hero .lead { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 58ch; }
+.hero-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 36px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+.tile .n { font: 700 clamp(34px, 4.4vw, 48px)/1 var(--font-display); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.tile .l { font-size: 14px; color: var(--muted); }
+.tile.k .n { color: var(--accent); }
+.tile.v .n { color: var(--warn); }
+.how {
+  margin-top: 24px; display: flex; gap: 14px; align-items: flex-start;
+  padding: 16px 18px; border-radius: var(--r); border: 1px dashed var(--line); color: var(--muted); font-size: 15px; max-width: 760px;
+}
+.how b { color: var(--ink); font-weight: 600; }
+
+/* Verdict */
+.thesis { font: 700 clamp(26px, 3.6vw, 40px)/1.2 var(--font-display); letter-spacing: -0.025em; max-width: 22ch; }
+.thesis em { font-style: normal; color: var(--accent); }
+.big3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 32px; }
+.big3 .tile .n { font-size: clamp(44px, 6vw, 64px); }
+.big3 .tile.good .n { color: var(--good); }
+.causes { margin-top: 28px; }
+.causes .item { grid-template-columns: 1fr; }
+@media (min-width: 760px) { .causes .item { grid-template-columns: 200px minmax(0, 1fr) auto; align-items: baseline; } }
+.causes h3 { margin: 0; }
+
+/* Funnel charts */
+.charts { display: grid; gap: 14px; }
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px 24px; display: flex; flex-direction: column; gap: 16px; }
+.chart-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.chart h3 { font: 600 17px/1.3 var(--font-body); }
+.chart .note { font-size: 14px; color: var(--muted); }
+.bars { display: flex; flex-direction: column; gap: 12px; }
+.bar-row { display: grid; grid-template-columns: minmax(120px, 190px) minmax(0, 1fr); gap: 14px; align-items: center; }
+.bar-row .bl { font-size: 14px; }
+.bar-track { position: relative; height: 30px; background: color-mix(in srgb, var(--line) 45%, transparent); border-radius: 6px; }
+.bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--ink); border-radius: 6px; min-width: 3px; }
+.bar-fill.fit { background: var(--accent); }
+.bar-val { position: absolute; top: 50%; transform: translateY(-50%); font: 600 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar-val.in { left: 10px; color: var(--surface); }
+.bar-val.out { color: var(--ink); }
+@media (max-width: 520px) { .bar-row { grid-template-columns: 1fr; gap: 6px; } }
+
+.stack { display: flex; height: 38px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.stack span { height: 100%; }
+.s-exp { background: var(--accent); }
+.s-closed { background: color-mix(in srgb, var(--ink) 38%, var(--surface)); }
+.s-gone { background: var(--warn); }
+.s-fail { background: color-mix(in srgb, var(--minor) 55%, var(--surface)); }
+.s-resp { background: var(--good); }
+.s-wait { background: repeating-linear-gradient(135deg, var(--line) 0 4px, transparent 4px 8px); }
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 18px; margin: 0; padding: 0; list-style: none; }
+.legend li { display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: center; font-size: 14px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: block; }
+.legend b { font: 600 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.step { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; position: relative; }
+.step .n { font: 700 36px/1 var(--font-display); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.step.zero .n { color: var(--accent); }
+.step .l { font-size: 14px; color: var(--muted); }
+
+/* Lists in the keep chapter */
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel h3 { font: 600 17px/1.3 var(--font-body); }
+.panel ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.panel li { max-width: 60ch; }
+.panel li code { color: var(--muted); }
+.panel .cbtn { align-self: flex-start; }
+
+/* Brief flow */
+.flow { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 18px; }
+@media (min-width: 860px) { .flow { grid-template-columns: 1fr 28px 1fr 28px 1fr; align-items: stretch; } }
+.layer { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 20px 22px; display: flex; flex-direction: column; gap: 8px; }
+.layer .k { font: 500 12px/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-ink); }
+.layer h3 { font: 700 20px/1.2 var(--font-display); letter-spacing: -0.02em; }
+.layer p { color: var(--muted); font-size: 15px; }
+.arrow { display: flex; align-items: center; justify-content: center; color: var(--minor); font: 500 20px/1 var(--font-body); }
+@media (max-width: 859px) { .arrow { transform: rotate(90deg); height: 18px; } }
+.quote { font-size: 15px; color: var(--muted); border-left: 2px solid var(--accent); padding-left: 14px; max-width: 62ch; margin-bottom: 26px; }
+
+/* MCP scheme */
+.scheme { display: flex; flex-direction: column; gap: 8px; }
+.tier { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tier .lab { font: 500 12px/1 var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); width: 100%; }
+.node { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: 14px; background: var(--ground); }
+.node.main { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); font-weight: 600; }
+.node.code { border-style: dashed; }
+.down { color: var(--minor); font-size: 14px; padding-left: 4px; }
+
+/* Next */
+.next-list { counter-reset: n; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
+.next-list li { counter-increment: n; display: grid; grid-template-columns: 44px 1fr; gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); }
+.next-list li:first-child { border-top: 0; }
+.next-list li::before { content: counter(n); font: 700 20px/1.2 var(--font-display); color: var(--accent-ink); }
+.next-list li.now b { color: var(--accent-ink); }
+.ask { margin-top: 22px; font: 700 clamp(20px, 2.6vw, 26px)/1.3 var(--font-display); letter-spacing: -0.02em; max-width: 30ch; }
+
+.foot { margin-top: 48px; font-size: 13px; color: var(--muted); }
+
+/* Floating selection comment */
+.selbtn {
+  position: absolute; z-index: 20; font: 600 13px/1 var(--font-body);
+  background: var(--ink); color: var(--surface); border: 0; border-radius: 10px; padding: 10px 13px; cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+</style>
+
+<div class="topbar" aria-label="Навигация по разделам">
+  <span class="mark" aria-hidden="true"></span>
+  <div class="now" id="now"><small>Раздел</small>Обложка</div>
+  <div class="navbtns">
+    <button class="navbtn" type="button" id="prevTop" aria-label="Предыдущий раздел">Назад</button>
+    <button class="navbtn" type="button" id="nextTop" aria-label="Следующий раздел">Дальше</button>
+  </div>
+</div>
+
+<div class="shell">
+  <aside class="toc" aria-label="Оглавление">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><span>hance</span><span class="sub">аудит Сары</span></div>
+    <ol id="toc"></ol>
+    <div class="navbtns">
+      <button class="navbtn" type="button" id="prevSide">Назад</button>
+      <button class="navbtn" type="button" id="nextSide">Дальше</button>
+    </div>
+    <div class="toc-foot">Стрелки ← и → листают разделы. Цифра справа: сколько находок в разделе, красная, если есть критичные.</div>
+  </aside>
+
+  <main id="deck">
+
+    <section class="chapter hero" id="start" data-title="Обложка" data-comment-target>
+      <div class="ch-head" style="max-width:none">
+        <div class="eyebrow"><span>Hance</span><span>·</span><span>Сара, ассистент продаж на Профи.ру</span><span>·</span><span>21.10.2026</span></div>
+        <h1>Аудит Сары <span class="v">v1</span></h1>
+        <p class="lead">Что мешает Саре стать цельным продуктом. Проверены код и документы v1, вторая версия, живая база и логи на сервере. Только чтение, на сервере ничего не менялось, данных клиентов здесь нет.</p>
+      </div>
+      <div class="hero-grid">
+        <div class="tile"><span class="n" id="cntAll">41</span><span class="l">находка</span></div>
+        <div class="tile k"><span class="n" id="cntK">12</span><span class="l">критичных: мешают продукту работать</span></div>
+        <div class="tile v"><span class="n" id="cntV">23</span><span class="l">важных</span></div>
+        <div class="tile"><span class="n" id="cntM">6</span><span class="l">мелочей</span></div>
+      </div>
+      <div class="how" id="howto">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="flex:none;margin-top:2px"><path d="M4 5h16v11H9l-5 4z" fill="none"/></svg>
+        <span id="howText"><b>Как комментировать.</b> Включи режим комментариев в просмотрщике и нажми на любой пункт: комментарий привяжется к нему.</span>
+      </div>
+    </section>
+
+    <section class="chapter" id="verdict" data-title="Главное" data-comment-target>
+      <div class="ch-head" style="max-width:none">
+        <div class="eyebrow"><span>Главное</span></div>
+        <p class="thesis">Первое сообщение работает. Воронка рвётся <em>до отклика</em> и <em>после ответа клиента</em>.</p>
+      </div>
+      <div class="big3">
+        <div class="tile good" data-comment-target><span class="n">70%</span><span class="l">клиентов отвечают на отклик Сары: 16 из 23</span></div>
+        <div class="tile k" data-comment-target><span class="n">65%</span><span class="l">подходящих заявок сгорели или исчезли без отклика: 256 из 394</span></div>
+        <div class="tile k" data-comment-target><span class="n">0</span><span class="l">встреч назначила Сара за 6 недель, договоров в базе тоже 0</span></div>
+      </div>
+      <div class="register causes">
+        <div class="item" data-comment-target>
+          <h3>Нет памяти</h3>
+          <p>Сара не видит диалог целиком и ничего не знает о Hance, поэтому зовёт тебя почти на каждый вопрос.</p>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <h3>Нет итогов</h3>
+          <p>База не знает, чем закончился хоть один разговор. Порог балла, промпты и цены настраиваются на ощущениях.</p>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <h3>Нет одного целого</h3>
+          <p>Два мозга (демон и чат) и пять пультов. Одно действие живёт в разных местах по-разному.</p>
+          <div class="side"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="funnel" data-title="Воронка в цифрах" data-num="1">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 1</span><span>09.09-21.10, 42 дня</span></div>
+        <h2>Воронка в цифрах</h2>
+        <p class="lead">Средняя цена отклика по подходящим заявкам 192 ₽. На кошельке сейчас 23 ₽.</p>
+      </div>
+      <div class="charts">
+        <div class="chart" data-comment-target>
+          <div class="chart-head"><h3>Верх воронки</h3><span class="note">3537 заявок отсеяны по короткому описанию, до открытия страницы</span></div>
+          <div class="bars">
+            <div class="bar-row"><span class="bl">Увидено</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div><span class="bar-val in">4369</span></div></div>
+            <div class="bar-row"><span class="bl">Разобрано полностью</span><div class="bar-track"><div class="bar-fill" style="width:19.04%"></div><span class="bar-val out" style="left:calc(19.04% + 10px)">832</span></div></div>
+            <div class="bar-row"><span class="bl">Подошли по баллу</span><div class="bar-track"><div class="bar-fill fit" style="width:9.02%"></div><span class="bar-val out" style="left:calc(9.02% + 10px)">394</span></div></div>
+          </div>
+        </div>
+        <div class="chart" data-comment-target>
+          <div class="chart-head"><h3>Куда делись 394 подходящие заявки</h3><span class="note">доля от 394</span></div>
+          <div class="stack" role="img" aria-label="213 сгорели, 74 закрыты, 43 исчезли, 31 сбой, 23 с откликом, 10 ждут">
+            <span class="s-exp" style="width:54.06%"></span><span class="s-closed" style="width:18.78%"></span><span class="s-gone" style="width:10.91%"></span><span class="s-fail" style="width:7.87%"></span><span class="s-resp" style="width:5.84%"></span><span class="s-wait" style="width:2.54%"></span>
+          </div>
+          <ul class="legend">
+            <li><i class="s-exp"></i><span>Сгорели: сутки без отклика</span><b>213</b></li>
+            <li><i class="s-closed"></i><span>Закрыты</span><b>74</b></li>
+            <li><i class="s-gone"></i><span>Исчезли до отклика</span><b>43</b></li>
+            <li><i class="s-fail"></i><span>Сбой</span><b>31</b></li>
+            <li><i class="s-resp"></i><span>С откликом</span><b>23</b></li>
+            <li><i class="s-wait"></i><span>Ждут сейчас</span><b>10</b></li>
+          </ul>
+        </div>
+        <div class="chart" data-comment-target>
+          <div class="chart-head"><h3>После отклика</h3><span class="note">26 оплат на 3277 ₽</span></div>
+          <div class="steps">
+            <div class="step"><span class="n">23</span><span class="l">откликнулись</span></div>
+            <div class="step"><span class="n">16</span><span class="l">клиент ответил</span></div>
+            <div class="step zero"><span class="n">0</span><span class="l">встреч назначила Сара</span></div>
+            <div class="step zero"><span class="n">0</span><span class="l">договоров в базе: поля для этого нет</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="memory" data-title="Память" data-num="2">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 2</span></div>
+        <h2>Память</h2>
+        <p class="lead">Главная причина, почему почти всё уходит к тебе.</p>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Сара в Telegram каждый раз начинает с нуля</h3><p>Лаунчер запускает новую сессию без продолжения прошлой. Плановых перезапусков 4 в сутки, плюс аварийные: за 7 дней плагин Telegram 122 раза не поднялся, и сессия начиналась заново. От разговора с тобой остаются только CLAUDE.md и база.</p></div>
+          <div class="side"><span class="ev">deploy/server/telegram-channel-launcher.sh</span></div>
+        </div>
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>В переписке Сара не видит диалог</h3><p>Переговорщику уходят описание заявки, первый отклик и последние слова клиента. Своих прошлых ответов и всей переписки он не видит.</p></div>
+          <div class="side"><span class="ev">src/negotiator/negotiatorPrompt.js</span></div>
+        </div>
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Переписка нигде не хранится</h3><p>В базе одно поле, туда склеиваются последние слова клиента. По всем 23 диалогам слова «кейс», «цена», «оплата» в сохранённом не встречаются ни разу. Учиться пока не на чем.</p></div>
+          <div class="side"><span class="ev">leads.customer_reply</span></div>
+        </div>
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Знаний о Hance у Сары нет</h3><p>Услуг, цен, порядка работы, условий оплаты и кейсов в v1 нет совсем. В v2 база знаний начата, но наполовину пустая: цены не заполнены, вместо ответов «ЗАПОЛНИТЬ».</p></div>
+          <div class="side"><span class="ev">SaraAI-v2ТИМ/knowledge/</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Твои правки и решения не копятся</h3><p>Таблица оценок за 42 дня получила одну запись. Почему ты отклонил заявку или переписал ответ, система не знает.</p></div>
+          <div class="side"><span class="ev">verdicts: 1 запись</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="calendar" data-title="Календарь" data-num="3">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 3</span></div>
+        <h2>Календарь</h2>
+        <p class="lead">Ноль встреч за 6 недель объясняется устройством, а не случаем.</p>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Встречу почти невозможно назначить</h3><p>Бронь работает только по узкому сценарию: «первая или вторая половина дня?», три слота, клиент выбирает номер. Но то же задание велит звать тебя, как только клиент соглашается на звонок или даёт номер. Это правило срабатывает раньше.</p></div>
+          <div class="side"><span class="ev">src/negotiator/negotiatorPrompt.js</span></div>
+        </div>
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Клиенту обещано то, чего нет</h3><p>После брони клиенту уходит «Скину напоминание накануне», а кода такого напоминания нет.</p></div>
+          <div class="side"><span class="ev">src/daemon.js:1331</span></div>
+        </div>
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>После брони чат больше не читается</h3><p>Забронированные заявки не входят ни в один цикл проверки. Если клиент попросит перенести или отменит встречу, этого никто не увидит.</p></div>
+          <div class="side"><span class="ev">status = scheduled</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Слоты неудобные</h3><p>Берутся первые три свободных получаса подряд, обычно в одно утро. Время считается по поясу машины: без московского пояса слоты съезжают на 3 часа.</p></div>
+          <div class="side"><span class="ev">src/calendar/findAvailableSlots.js</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Бронь без проверки и без данных</h3><p>Перед записью слот заново не проверяется на занятость. В событии нет телефона клиента, ссылки на звонок, участников. Проверяется только один из твоих календарей.</p></div>
+          <div class="side"><span class="ev">src/calendar/scheduling.js</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="analytics" data-title="Аналитика" data-num="4">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 4</span></div>
+        <h2>Аналитика</h2>
+        <p class="lead">Цену ответа и цену договора сейчас посчитать нельзя даже задним числом.</p>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Договоры и выручка всегда ноль</h3><p>В коде экрана «Сегодня» эти два числа зашиты нулём.</p></div>
+          <div class="side"><span class="ev">src/admin/appViews.js</span></div>
+        </div>
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Деньги не привязаны к заявкам</h3><p>В журнале оплат нет номера заявки, только время и сумма. А время отклика в самой заявке переписывается каждым нашим сообщением.</p></div>
+          <div class="side"><span class="ev">response_log, responded_at</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Созвоны считаются только по брони Сары</h3><p>Брони ни разу не было. Созвоны, которые ты провёл сам, не видны.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Доля ответивших сравнивает разное</h3><p>Ответы считаются по дате заявки, отклики по дате оплаты. Цифры за неделю несопоставимы.</p></div>
+          <div class="side"><span class="ev">periodStats</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Нет скорости</h3><p>Сколько прошло от заявки до отклика и от слов клиента до ответа Сары, нигде не видно, хотя ты просил.</p></div>
+          <div class="side"><span class="ev">требования 06.10</span></div>
+        </div>
+        <div class="item" data-sev="m" data-comment-target>
+          <span class="sev m">Мелочь</span>
+          <div class="body"><h3>Нет расхода Claude и твоего времени</h3><p>Сколько вызовов модели и сколько твоих решений ушло на одну заявку, не считается.</p></div>
+          <div class="side"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="money" data-title="Отклики и деньги" data-num="5">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 5</span></div>
+        <h2>Отклики и деньги</h2>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Решение по очереди ждёт часами</h3><p>С 18.10 в очередь попало 25 заявок, решение есть по 9: один отклик и 8 отказов. Обычное ожидание около 2,5 часа, одна заявка ждала 8,5 часа. На Профи.ру ранний отклик стоит выше.</p></div>
+          <div class="side"><span class="ev">decisions: 9 записей</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Цены в очереди выросли</h3><p>230-310 ₽ в среднем против 192 ₽ раньше. Отказы в основном по дорогим заявкам.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Напоминания клиенту навязчивые в начале</h3><p>Три напоминания подряд, через сутки каждое, потом через 10 и через 30 дней.</p></div>
+          <div class="side"><span class="ev">PING_SCHEDULE_MS</span></div>
+        </div>
+        <div class="item" data-sev="m" data-comment-target>
+          <span class="sev m">Мелочь</span>
+          <div class="body"><h3>9 эскалаций висят 33 дня</h3><p>Без решения с 18.09, их чаты всё ещё читаются раз в 30 минут.</p></div>
+          <div class="side"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="onesara" data-title="Сара как одно целое" data-num="6">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 6</span></div>
+        <h2>Сара как одно целое</h2>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Два мозга без общей памяти</h3><p>Демон ведёт жёсткий сценарий, сессия Claude Code разговаривает с тобой. Они общаются через базу и команды, правила стыковки лежат в CLAUDE.md на 35 КБ.</p></div>
+          <div class="side"><span class="ev">CLAUDE.md, 35 КБ</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Короткое «да» без контекста</h3><p>Плагин Telegram не сообщает, на какое сообщение ты ответил. Отсюда правила вида «спроси, про что он».</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Пять пультов</h3><p>Уведомления, чат с Сарой, Mini App, старая панель и команда статуса. Одно действие доступно в разных местах по-разному.</p></div>
+          <div class="side"><span class="ev">34 вида уведомлений</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Сара на сервере может править код</h3><p>Она работает в режиме auto с правом менять файлы. 30.09 она сама поправила рабочий код на сервере.</p></div>
+          <div class="side"><span class="ev">--permission-mode auto</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="model" data-title="Модель и лимиты" data-num="7">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 7</span></div>
+        <h2>Модель и лимиты</h2>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Всё на одной подписке Pro</h3><p>Ключ API на сервере пустой, все вызовы идут по подписке, общей с Лорой, Норой и разработкой. С 25.09 в логе 415 сообщений о лимите, на прошлой неделе снова кончался недельный. Лимит кончился, и встаёт всё.</p></div>
+          <div class="side"><span class="ev">src/analyzer/runClaudeCli.js</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Нет выбора модели</h3><p>Пакетный разбор ленты, где хватило бы дешёвой модели, идёт на той же модели, что и переговоры.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Каждый вызов запускает целый Claude Code</h3><p>Тяжёлый запуск на одном ядре сервера ради одного ответа модели.</p></div>
+          <div class="side"><span class="ev">claude -p</span></div>
+        </div>
+        <div class="item" data-sev="m" data-comment-target>
+          <span class="sev m">Мелочь</span>
+          <div class="body"><h3>Журналы сессий Claude занимают 479 МБ</h3><p>Они лежат на сервере, где диск занят на 77%.</p></div>
+          <div class="side"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="server" data-title="Сервер и эксплуатация" data-num="8">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 8</span></div>
+        <h2>Сервер и эксплуатация</h2>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="k" data-comment-target>
+          <span class="sev k">Критично</span>
+          <div class="body"><h3>Бэкапов базы нет</h3><p>Ни расписания, ни таймера. Шесть недель данных лежат одной копией на одном диске.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Сервер на пределе</h3><p>1 ядро, 1 ГБ памяти, нагрузка около 2, диск занят на 77%.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>IP сервера в Болгарии</h3><p>08.10 защита Профи.ру 48 минут не пускала сервер.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Выкладка вручную</h3><p>На сервере нет git, 258 КБ шли 50 минут кусками по 3 КБ.</p></div>
+          <div class="side"><span class="ev">deploy/server/push-files.sh</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Ответ клиента ловится по числу сообщений</h3><p>Надёжного признака по номеру сообщения нет. Таймауты открытия чатов продолжаются, около 40 за неделю.</p></div>
+          <div class="side"><span class="ev">src/watcher/checkReply.js</span></div>
+        </div>
+        <div class="item" data-sev="m" data-comment-target>
+          <span class="sev m">Мелочь</span>
+          <div class="body"><h3>Повторяющиеся ошибки в логе</h3><p>За неделю правка закреплённого сообщения о лимите 31 раз отклонена Telegram, снятие закрепа 7 раз не дошло.</p></div>
+          <div class="side"><span class="ev">[claude-gate] edit failed</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="code" data-title="Код и данные" data-num="9">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 9</span></div>
+        <h2>Код и данные</h2>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Монолит</h3><p>Главный файл демона 1695 строк, цикл переписки около 800. В таблице заявок 45 колонок, из них 28 отметок времени. Кто сейчас ведёт клиента, выводится из сочетания полей.</p></div>
+          <div class="side"><span class="ev">src/daemon.js, src/db.js</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Промпты копят датированные правила</h3><p>Вставки вида «Борис, 20.10» без разделения на знания, правила и стиль.</p></div>
+          <div class="side"><span class="ev">src/analyzer/prompt.js</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Несколько копий проекта</h3><p>Папка «ТИМ», вторая версия на 12 тысяч строк (ни разу не запускалась), архив на 440 МБ в домашней папке, незакоммиченная синхронизация с Plane.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="m" data-comment-target>
+          <span class="sev m">Мелочь</span>
+          <div class="body"><h3>Устаревшие документы</h3><p>Должностная инструкция говорит про кейсы и самостоятельные отклики, первая спецификация называет агентство «Perpetuum».</p></div>
+          <div class="side"><span class="ev">docs/dolzhnostnaya-instrukciya-sara.md</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="security" data-title="Безопасность" data-num="10">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 10</span></div>
+        <h2>Безопасность</h2>
+        <p class="lead">Вход в Mini App и в браузерную версию сделан правильно. Риски в другом.</p>
+        <div class="counts"></div>
+      </div>
+      <div class="register">
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Секреты в копиях</h3><p>Ключи и сессия Профи.ру скопированы в папку «ТИМ», смена секретов не сделана. Архив на 440 МБ скорее всего содержит их же, пересылать его нельзя.</p></div>
+          <div class="side"><span class="ev">пункт П-101</span></div>
+        </div>
+        <div class="item" data-sev="v" data-comment-target>
+          <span class="sev v">Важно</span>
+          <div class="body"><h3>Один аккаунт и один источник заявок</h3><p>Автоматизация аккаунта Профи.ру может кончиться блокировкой, запасного канала нет.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-sev="m" data-comment-target>
+          <span class="sev m">Мелочь</span>
+          <div class="body"><h3>База читается всеми пользователями сервера</h3><p>Права на файл открыты на чтение всем.</p></div>
+          <div class="side"><span class="ev">chmod 644</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="keep" data-title="Что забрать" data-num="11">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 11</span></div>
+        <h2>Что забрать в новую версию</h2>
+        <p class="lead">Многое в v1 сделано хорошо и проверено жизнью. Пересборка не значит начинать с пустого места.</p>
+      </div>
+      <div class="two">
+        <div class="panel" data-comment-target>
+          <h3>Из v1</h3>
+          <ul>
+            <li>Деньги только по твоему решению, проверка кошелька и способа оплаты <code>paymentPanel.js</code></li>
+            <li>Проверка, открыт ли заказ, до оплаты <code>orderAvailability.js</code></li>
+            <li>Определение автора сообщения по вёрстке <code>messageDom.js</code></li>
+            <li>Очистка текста перед отправкой клиенту и обязательное приветствие <code>clientText.js</code>, <code>greeting.js</code></li>
+            <li>Одно сообщение об ошибке вместо потока <code>errorPolicy.js</code></li>
+            <li>Перенос сессии Профи.ру с Мака на сервер с проверкой <code>pushSession.js</code></li>
+            <li>Аварийный выключатель исходящих</li>
+            <li>715 тестов и сохранённые страницы Профи.ру для них</li>
+          </ul>
+        </div>
+        <div class="panel" data-comment-target>
+          <h3>Из v2</h3>
+          <ul>
+            <li>Машина состояний клиента: этап и чей ход</li>
+            <li>Структура базы знаний: компания, услуги, кейсы, частые вопросы, правила</li>
+            <li>Протоколы и сценарии: что делать при любой неопределённости</li>
+            <li>Принцип: неясно, кто написал или ушло ли сообщение, значит действие останавливается и ты узнаёшь об этом</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="growth" data-title="Точки роста" data-num="12">
+      <div class="ch-head">
+        <div class="eyebrow"><span class="num">Раздел 12</span><span>решаешь ты</span></div>
+        <h2>Точки роста</h2>
+        <p class="lead">По важности. Оставь комментарий у каждой: берём, не берём или позже.</p>
+      </div>
+      <div class="register">
+        <div class="item" data-comment-target>
+          <span class="pri">1</span>
+          <div class="body"><h3>Середина воронки</h3><p>70% клиентов отвечают на отклик, а встреч ноль. Самый большой рост здесь: память о диалоге, знания о Hance и работающий календарь.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">2</span>
+          <div class="body"><h3>Скорость отклика</h3><p>Решение по очереди ждёт около 2,5 часа. Варианты: правило «до N ₽ и балл от M, откликайся сама» или решение одной кнопкой прямо в уведомлении.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">3</span>
+          <div class="body"><h3>Деньги на отклики</h3><p>65% подходящих заявок сгорели или исчезли. Когда появится цена договора, будет видно, сколько пополнять и какие заявки стоят своих денег.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">4</span>
+          <div class="body"><h3>База знаний из твоих ответов</h3><p>Твоя идея с брифом: ответы на типовые вопросы без тебя. Подробно в следующем разделе.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">5</span>
+          <div class="body"><h3>Напоминания реже и по делу</h3><p>С учётом того, о чём шла речь, вместо трёх одинаковых подряд.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">6</span>
+          <div class="body"><h3>Отзывы на Профи.ру после сделки</h3><p>Рейтинг влияет на место отклика, а место влияет на ответы.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">7</span>
+          <div class="body"><h3>Возврат замолчавших</h3><p>Клиенты, которые ответили и пропали, уже знают Hance. Их проще вернуть, чем найти новых.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">8</span>
+          <div class="body"><h3>Другие площадки</h3><p>Задел для коробки: один модуль на площадку, остальная Сара общая.</p></div>
+          <div class="side"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="brief" data-title="Идея с брифом">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Твоя идея</span></div>
+        <h2>Бриф как горизонт понимания</h2>
+        <p class="lead">Нравится. Аудит её подтверждает: главная дыра Сары ровно здесь, она ничего не знает о Hance.</p>
+      </div>
+      <p class="quote">Знание становится памятью, память пониманием, понимание речью. Твои три слоя хорошо ложатся на устройство системы.</p>
+      <div class="flow">
+        <div class="layer" data-comment-target><span class="k">Знание</span><h3>Бриф</h3><p>Услуги, цены, порядок работы, кейсы. У каждого кейса правило: когда и кому его уместно показать.</p></div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="layer" data-comment-target><span class="k">Понимание</span><h3>Банк вопросов</h3><p>Типичные вопросы клиентов, к каждому твой ответ и причина, почему ты ответил именно так.</p></div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="layer" data-comment-target><span class="k">Речь</span><h3>Твой стиль</h3><p>Как ты пишешь: длина, тон, обороты. Без него ответ верный, но не твой.</p></div>
+      </div>
+      <div class="register">
+        <div class="item" data-comment-target>
+          <span class="pri">1</span>
+          <div class="body"><h3>Сначала собрать корпус</h3><p>Сейчас в базе ноль сохранённых диалогов. Источники: полные чаты на Профи.ру (демон может их прочитать), твоя переписка с клиентами в Telegram, сайт и кейсы. Плюс короткое интервью с тобой по пробелам.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">2</span>
+          <div class="body"><h3>Причину подтверждаешь ты</h3><p>Почему ты ответил именно так, модель будет угадывать. Угаданную причину стоит показывать тебе, иначе Сара уверенно выучит неверное правило.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">3</span>
+          <div class="body"><h3>Каждая правка становится записью</h3><p>Ты исправил ответ Сары, и после твоего «да» правка уходит в банк. Так банк растёт сам.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">4</span>
+          <div class="body"><h3>Пока банк небольшой, он целиком в контексте</h3><p>Это буквально твой горизонт понимания: модель видит всё сразу, сложный поиск по базе не нужен.</p></div>
+          <div class="side"></div>
+        </div>
+        <div class="item" data-comment-target>
+          <span class="pri">5</span>
+          <div class="body"><h3>Для коробки это сменная часть</h3><p>Движок один, а бриф и банк у каждой компании свои.</p></div>
+          <div class="side"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="mcp" data-title="MCP для Профи.ру">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Твой вопрос</span></div>
+        <h2>MCP для Профи.ру</h2>
+        <p class="lead">Идея верная наполовину. Подробно разберём на архитектуре.</p>
+      </div>
+      <div class="two">
+        <div class="panel" data-comment-target>
+          <h3>Что хорошо</h3>
+          <ul>
+            <li>Профи.ру становится одним модулем с понятными действиями: лента, заявка, отклик, чат, отправка.</li>
+            <li>Модуль единственный владелец браузера. Пропадает вечное «не трогай браузер демона».</li>
+            <li>Одна Сара и разговаривает с тобой, и работает одними и теми же руками.</li>
+            <li>MCP даёт эти действия Claude Code и Лоре без отдельной работы.</li>
+          </ul>
+        </div>
+        <div class="panel" data-comment-target>
+          <h3>Почему не ядро</h3>
+          <ul>
+            <li>Работе 24/7 нужен свой планировщик: MCP сам ничего не запускает.</li>
+            <li>Деньги и отправку клиенту должен проверять код, а не модель.</li>
+            <li>Если ядро живёт внутри сессии Claude Code, оно унаследует её перезапуски и лимиты.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px" data-comment-target>
+        <h3>Набросок, как это может сложиться</h3>
+        <div class="scheme">
+          <div class="tier"><span class="lab">Кто пользуется</span><span class="node">Сара: один агент</span><span class="node">Веб-версия и Mini App</span><span class="node">Claude Code и Лора через MCP</span></div>
+          <div class="down">↓</div>
+          <div class="tier"><span class="lab">Ядро</span><span class="node">Планировщик 24/7</span><span class="node code">Проверки кодом: деньги, отправка, пауза</span><span class="node">Память и база знаний</span></div>
+          <div class="down">↓</div>
+          <div class="tier"><span class="lab">Руки</span><span class="node main">Модуль Профи.ру: единственный владелец браузера</span><span class="node">Календарь</span><span class="node">Telegram</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="next" data-title="Дальше">
+      <div class="ch-head">
+        <div class="eyebrow"><span>Дальше</span></div>
+        <h2>Порядок работы</h2>
+        <p class="lead">Всё строится в новой папке ~/Sara-Hance. Старая папка и сервер остаются как есть.</p>
+      </div>
+      <div class="panel" data-comment-target>
+        <ol class="next-list">
+          <li class="now"><div><b>Твой ответ на вопрос ниже</b> и комментарии к этой презентации.</div></li>
+          <li><div>Архитектура бэкенда и фронтенда: веб-версия как основная, Mini App урезанная, одна Сара, модуль Профи.ру, календарь.</div></li>
+          <li><div>Письменный дизайн. Его сначала читает проверяющий, потом ты.</div></li>
+          <li><div>План по шагам, каждый шаг работает сам.</div></li>
+          <li><div>Сборка с тестами. Переезд со старой Сары только когда новая прошла проверку.</div></li>
+        </ol>
+      </div>
+      <p class="ask">Расскажи, как выглядит обычный день, когда новая Сара работает идеально: где ты с ней общаешься, что она делает сама и в какой момент зовёт тебя?</p>
+      <p class="foot">Подготовила Сара, 21.10.2026. Полный текст аудита: ~/Sara-Hance/docs/audit/2026-10-21-audit-sara-v1.md</p>
+    </section>
+
+  </main>
+</div>
+
+<button class="selbtn" type="button" id="selbtn" hidden>Комментировать выделенное</button>
+
+<script>
+(function () {
+  var chapters = Array.prototype.slice.call(document.querySelectorAll('section.chapter'));
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Counts on the cover and per chapter
+  var all = document.querySelectorAll('[data-sev]');
+  var tally = { k: 0, v: 0, m: 0 };
+  all.forEach(function (el) { tally[el.dataset.sev] += 1; });
+  document.getElementById('cntAll').textContent = all.length;
+  document.getElementById('cntK').textContent = tally.k;
+  document.getElementById('cntV').textContent = tally.v;
+  document.getElementById('cntM').textContent = tally.m;
+
+  var names = { k: ['критичная', 'критичных', 'критичных'], v: ['важная', 'важных', 'важных'], m: ['мелочь', 'мелочи', 'мелочей'] };
+  function plural(n, f) {
+    var a = n % 10, b = n % 100;
+    if (a === 1 && b !== 11) return f[0];
+    if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return f[1];
+    return f[2];
+  }
+
+  // Table of contents
+  var toc = document.getElementById('toc');
+  chapters.forEach(function (ch) {
+    var n = ch.querySelectorAll('[data-sev]').length;
+    var k = ch.querySelectorAll('[data-sev="k"]').length;
+    var li = document.createElement('li');
+    var a = document.createElement('a');
+    a.href = '#' + ch.id;
+    a.dataset.id = ch.id;
+    var tn = document.createElement('span'); tn.className = 'tn'; tn.textContent = ch.dataset.num || '';
+    var tt = document.createElement('span'); tt.textContent = ch.dataset.title;
+    var tc = document.createElement('span'); tc.className = 'tc' + (k ? ' hot' : ''); tc.textContent = n ? String(n) : '';
+    a.appendChild(tn); a.appendChild(tt); a.appendChild(tc);
+    li.appendChild(a); toc.appendChild(li);
+
+    var box = ch.querySelector('.counts');
+    if (box && n) {
+      ['k', 'v', 'm'].forEach(function (s) {
+        var c = ch.querySelectorAll('[data-sev="' + s + '"]').length;
+        if (!c) return;
+        var chip = document.createElement('span');
+        chip.className = 'sev ' + s;
+        chip.textContent = c + ' ' + plural(c, names[s]);
+        box.appendChild(chip);
+      });
+    }
+  });
+
+  var current = 0;
+  function go(i) {
+    i = Math.max(0, Math.min(chapters.length - 1, i));
+    chapters[i].scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  }
+  toc.addEventListener('click', function (e) {
+    var a = e.target.closest('a');
+    if (!a) return;
+    e.preventDefault();
+    go(chapters.findIndex(function (c) { return c.id === a.dataset.id; }));
+  });
+  ['prevTop', 'prevSide'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { go(current - 1); }); });
+  ['nextTop', 'nextSide'].forEach(function (id) { document.getElementById(id).addEventListener('click', function () { go(current + 1); }); });
+
+  function setActive(i) {
+    current = i;
+    var ch = chapters[i];
+    toc.querySelectorAll('a').forEach(function (a) { a.classList.toggle('on', a.dataset.id === ch.id); });
+    var now = document.getElementById('now');
+    now.innerHTML = '';
+    var sm = document.createElement('small');
+    sm.textContent = ch.dataset.num ? 'Раздел ' + ch.dataset.num : (i + 1) + ' из ' + chapters.length;
+    now.appendChild(sm);
+    now.appendChild(document.createTextNode(ch.dataset.title));
+    ['prevTop', 'prevSide'].forEach(function (id) { document.getElementById(id).disabled = i === 0; });
+    ['nextTop', 'nextSide'].forEach(function (id) { document.getElementById(id).disabled = i === chapters.length - 1; });
+  }
+  setActive(0);
+
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) setActive(chapters.indexOf(en.target));
+      });
+    }, { rootMargin: '-35% 0px -60% 0px' });
+    chapters.forEach(function (c) { io.observe(c); });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); go(current + 1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(current - 1); }
+  });
+
+  var hash = (location.hash || '').slice(1);
+  if (hash && document.getElementById(hash)) {
+    setTimeout(function () { document.getElementById(hash).scrollIntoView({ block: 'start' }); }, 50);
+  }
+
+  // Comments: open the viewer's own composer from the page
+  var icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>';
+  var buttons = [];
+  var selbtn = document.getElementById('selbtn');
+  var savedRange = null;
+
+  function hideAll() {
+    buttons.forEach(function (b) { b.hidden = true; });
+    selbtn.hidden = true;
+    savedRange = null;
+  }
+
+  function addButtons(comments) {
+    document.querySelectorAll('.item[data-comment-target], .panel[data-comment-target], .chart[data-comment-target], .layer[data-comment-target]').forEach(function (target) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cbtn';
+      b.innerHTML = icon + '<span>Комментировать</span>';
+      b.addEventListener('click', function () {
+        comments.openComposer({ element: target }).catch(function (err) {
+          if (err && (err.code === 'unavailable' || err.code === 'not_granted' || err.code === 'capability_disabled' || err.code === 'capability_removed')) hideAll();
+        });
+      });
+      var side = target.querySelector('.side');
+      if (side) side.appendChild(b);
+      else if (target.classList.contains('chart')) target.querySelector('.chart-head').appendChild(b);
+      else target.appendChild(b);
+      buttons.push(b);
+    });
+
+    var how = document.getElementById('howText');
+    how.innerHTML = '<b>Как комментировать.</b> Нажми «Комментировать» у любого пункта или выдели текст и нажми «Комментировать выделенное». Комментарий привяжется к этому месту.';
+
+    function placeSel() {
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { selbtn.hidden = true; savedRange = null; return; }
+      var range = sel.getRangeAt(0);
+      var deck = document.getElementById('deck');
+      if (!deck.contains(range.commonAncestorContainer) || String(sel).trim().length < 3) { selbtn.hidden = true; savedRange = null; return; }
+      savedRange = range.cloneRange();
+      var rect = range.getBoundingClientRect();
+      selbtn.hidden = false;
+      var w = selbtn.offsetWidth;
+      var left = Math.max(12, Math.min(window.innerWidth - w - 12, rect.left + rect.width / 2 - w / 2));
+      selbtn.style.left = (left + window.scrollX) + 'px';
+      selbtn.style.top = (rect.bottom + window.scrollY + 10) + 'px';
+    }
+    var timer = null;
+    document.addEventListener('selectionchange', function () {
+      clearTimeout(timer);
+      timer = setTimeout(placeSel, 180);
+    });
+    selbtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    selbtn.addEventListener('click', function () {
+      if (!savedRange) return;
+      var r = savedRange;
+      selbtn.hidden = true;
+      comments.openComposer({ range: r }).catch(function (err) {
+        if (err && (err.code === 'unavailable' || err.code === 'not_granted')) hideAll();
+      });
+    });
+  }
+
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('comments').then(function (comments) {
+      if (comments) addButtons(comments);
+    }).catch(function () {});
+  }
+})();
+</script>
