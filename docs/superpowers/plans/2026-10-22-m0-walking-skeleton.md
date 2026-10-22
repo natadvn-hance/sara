@@ -116,7 +116,7 @@ it('NFR-UX-1: passes clean files and skips docs', async () => {
 **Interfaces:**
 - `ci.yml` на `pull_request` и `push` в `main`, задачи: `check` (`pnpm check`), `test` (служба Postgres `pgvector/pgvector:pg16`, `POSTGRES_USER=sara`, `POSTGRES_PASSWORD=sara`, порт `54329:5432`, `DATABASE_URL=postgres://sara:sara@localhost:54329/sara`, затем `pnpm test`), `build` (`pnpm -r build` там, где есть сборка: web), `secrets` (`gitleaks/gitleaks-action@v2`), `commits` (только на PR: `commitlint --from base.sha --to head.sha`), `trace` (из Task 16; до Task 16 задача отсутствует). Действия закреплены по мажорной версии: `actions/checkout@v4`, `actions/setup-node@v4` (node 24, кэш pnpm), `pnpm/action-setup@v4`.
 - `release.yml`: `googleapis/release-please-action@v4` на `push` в `main`, `release-type: node`, один пакет `.`, манифест `{".": "0.0.0"}`, права `contents: write`, `pull-requests: write`.
-- Включить право действий создавать пул-реквесты: `gh api -X PUT repos/perpetumxcompany-alt/sara/actions/permissions/workflow -f default_workflow_permissions=write -F can_approve_pull_request_reviews=true`.
+- Включить право действий создавать пул-реквесты: `gh api -X PUT repos/natadvn-hance/sara/actions/permissions/workflow -f default_workflow_permissions=write -F can_approve_pull_request_reviews=true`.
 
 - [ ] **Step 1:** Открыть ветку `st-m0-02-ci`, добавить файлы, открыть пул-реквест.
 - [ ] **Step 2: Verify** в пул-реквесте задачи `check`, `test`, `build`, `secrets`, `commits` зелёные (`gh pr checks`).
@@ -741,7 +741,7 @@ it('FR-MIND-1: wrong status names the file and the field', async () => {
 ```
 
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS
-- [ ] **Step 5:** `gh repo clone perpetumxcompany-alt/sara-mind ~/sara-mind`, добавить папки и README, `pnpm mind:check ~/sara-mind/mind` → без ошибок, коммит `chore: mind skeleton` и push в `sara-mind`.
+- [ ] **Step 5:** `gh repo clone natadvn-hance/sara-mind ~/sara-mind`, добавить папки и README, `pnpm mind:check ~/sara-mind/mind` → без ошибок, коммит `chore: mind skeleton` и push в `sara-mind`.
 - [ ] **Step 6: Commit** (в `sara`) `feat: mind frontmatter check`
 
 ---
