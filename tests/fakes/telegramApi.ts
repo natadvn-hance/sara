@@ -54,6 +54,10 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           return reply({ id: 1, is_bot: true, first_name: 'Сара', username: 'sara_dev_bot' })
         case 'getUpdates': {
           const offset = params.offset ?? 0
+          // Like Telegram: updates below the offset are confirmed and never sent again.
+          for (let i = updates.length - 1; i >= 0; i--) {
+            if ((updates[i]?.update_id as number) < offset) updates.splice(i, 1)
+          }
           const until = Date.now() + 200
           while (Date.now() < until && !updates.some((u) => (u.update_id as number) >= offset)) {
             await new Promise((r) => setTimeout(r, 20))

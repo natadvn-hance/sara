@@ -153,15 +153,25 @@ async function processOrder(e: EventEnvelope): Promise<void> {
 
   await DBOS.runStep(
     async () => {
-      const m = await d().notifier.sendLeadCard({
-        taskId,
-        title: order.title,
-        city: order.city,
-        verdict: sorted.verdict === 'reject' ? null : sorted.verdict,
-        reason: sorted.reason,
-        bidPriceRub: order.bid_price_rub,
-      })
-      await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
+      try {
+        const m = await d().notifier.sendLeadCard({
+          taskId,
+          title: order.title,
+          city: order.city,
+          verdict: sorted.verdict === 'reject' ? null : sorted.verdict,
+          reason: sorted.reason,
+          bidPriceRub: order.bid_price_rub,
+        })
+        await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
+      } catch (err) {
+        // The lead and its task stay; the failure is journaled instead of losing the order.
+        await appendEvent(d().db, {
+          ...ev('task.created', { kind: 'task', id: taskId }, correlationId, 'sara'),
+          type: 'notify.failed',
+          reason: err instanceof Error ? err.message.slice(0, 200) : 'card was not sent',
+          payload: { channel: 'telegram', what: 'lead_card' },
+        })
+      }
     },
     { name: 'card' },
   )

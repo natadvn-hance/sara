@@ -28,7 +28,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     databaseUrl: env.DATABASE_URL ?? 'postgres://sara:sara@localhost:54329/sara',
     dataDir: resolve(env.SARA_DATA_DIR ?? resolve(ROOT, '.sara')),
-    port: Number(env.SARA_PORT ?? 3000),
+    port: Number(env.SARA_PORT ?? 3300),
     publicUrl: env.SARA_PUBLIC_URL ?? 'http://localhost:5173',
     profiMcpUrl: env.SARA_PROFI_MCP_URL ?? 'http://localhost:7070/mcp',
     nodeToken: required('SARA_NODE_TOKEN', 'dev-node-token'),

@@ -15,7 +15,10 @@
     "fake:order": "curl -s -X POST http://127.0.0.1:7070/fake/orders",
     "probe:claude": "pnpm --filter @sara/core probe:claude",
     "trace": "tsx scripts/trace.ts",
-    "mind:check": "tsx scripts/mind-check.ts"
+    "mind:check": "tsx scripts/mind-check.ts",
+    "dev": "tsx scripts/dev.ts",
+    "smoke:claude-container": "bash scripts/smoke-claude-container.sh",
+    "report:speed": "pnpm --filter @sara/core report:speed"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",

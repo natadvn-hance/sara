@@ -32,7 +32,29 @@ tests/           фальшивый Профи.ру, образцы, экзам�
 
 ## Быстрый старт
 
-Появится в вехе M0 (история ST-M0-03): `pnpm install`, `pnpm dev`.
+Нужны Node 24, pnpm (через `corepack enable`) и Docker (OrbStack или
+Docker Desktop).
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Пульт откроется на http://localhost:5173, ядро на порту 3300, фальшивый
+Профи.ру на 7070. Мастер запуска проведёт через пароль, бота и Claude.
+
+| Команда | Что делает |
+|---|---|
+| `pnpm fake:order` | фальшивая заявка уходит в ядро |
+| `pnpm test` | все тесты (база в Docker должна быть запущена) |
+| `pnpm --filter @sara/web e2e` | проверка пульта в браузере |
+| `pnpm check` | форматирование, линтер, типы, длинное тире |
+| `pnpm trace` | отчёт «требование → история → тест» |
+| `pnpm report:speed` | время «заявка → карточка» и «да → отклик» |
+| `pnpm probe:claude` | один пробный вызов Claude |
+| `pnpm role:eval sorter` | Сортировщик на 10 образцах, настоящий Claude |
+| `pnpm smoke:claude-container` | Claude внутри контейнера ядра |
+| `pnpm mind:check <папка>` | проверка записей разума |
 
 ## Участие в разработке
 

@@ -196,6 +196,16 @@ describe('walking skeleton', () => {
     expect(fake.bids).toHaveLength(0)
   })
 
+  it('FR-NOTIF-1: card that cannot be sent is journaled and the lead is kept', async () => {
+    await app.bot.stop()
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(async () => (await count('notify.failed')) === 1)
+    const [l] = await db.select().from(lead).where(eq(lead.id, id))
+    expect(l?.status).toBe('queued')
+    await app.bot.start(tg.token)
+  })
+
   it('G1, G2: speed report has both timings for the passed order', async () => {
     await fake.emitOrder({ order_id: orderId() })
     await until(() => cards().length === 1)

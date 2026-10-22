@@ -3,7 +3,7 @@ import { createFakeProfi } from './fakeProfi'
 import { sampleOrders } from './sampleOrders'
 
 const port = Number(process.env.SARA_FAKE_PROFI_PORT ?? 7070)
-const coreUrl = process.env.SARA_CORE_URL ?? 'http://127.0.0.1:3000'
+const coreUrl = process.env.SARA_CORE_URL ?? 'http://127.0.0.1:3300'
 
 let emit: ((o?: { order_id?: string }) => Promise<string>) | undefined
 const fake = await createFakeProfi({

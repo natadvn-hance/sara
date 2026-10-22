@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+.sara
+.git
+.superpowers
+reports
+docs
+playwright-report
+test-results
