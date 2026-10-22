@@ -1,0 +1,10 @@
+node_modules/
+.sara/
+.env
+reports/
+dist/
+playwright-report/
+test-results/
+.superpowers/
+*.log
+.DS_Store
