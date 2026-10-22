@@ -1,0 +1,22 @@
+// Fake Telegram on a fixed port for Playwright: POST /_control/start {"chatId": 111} simulates /start.
+import { createServer } from 'node:http'
+import { createFakeTelegram } from './telegramApi'
+
+const port = Number(process.env.FAKE_TELEGRAM_PORT ?? 18081)
+const controlPort = Number(process.env.FAKE_TELEGRAM_CONTROL_PORT ?? 18082)
+const tg = await createFakeTelegram(port)
+createServer((req, res) => {
+  let body = ''
+  req.on('data', (c) => {
+    body += c
+  })
+  req.on('end', () => {
+    if (req.method === 'POST' && req.url === '/_control/start') {
+      tg.pushStart(Number(JSON.parse(body).chatId))
+      return res.writeHead(200).end('ok')
+    }
+    if (req.url === '/_control/health') return res.writeHead(200).end('ok')
+    res.writeHead(404).end()
+  })
+}).listen(controlPort, '127.0.0.1')
+console.log(`Фальшивый Telegram: ${tg.apiRoot}, управление на ${controlPort}`)
