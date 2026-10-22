@@ -11,7 +11,8 @@
     "check": "biome check . && pnpm -r typecheck && tsx scripts/check-dash.ts",
     "test": "vitest run",
     "format": "biome check --write .",
-    "role:eval": "pnpm --filter @sara/core role:eval"
+    "role:eval": "pnpm --filter @sara/core role:eval",
+    "fake:order": "curl -s -X POST http://127.0.0.1:7070/fake/orders"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
