@@ -30,6 +30,18 @@ process.stdin.on('end', async () => {
     process.stdout.write('Claude AI usage limit reached\n')
     process.exit(1)
   }
+  if (mode === 'auth_error') {
+    // What CLI 2.1.308 prints when the token is expired or wrong (checked on 22.10.2026).
+    process.stdout.write(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        result: 'Failed to authenticate: OAuth session expired and could not be refreshed',
+      }),
+    )
+    process.exit(1)
+  }
   if (mode === 'bad_json') {
     process.stdout.write('not json')
     return

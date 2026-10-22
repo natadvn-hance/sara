@@ -1,0 +1,42 @@
+[
+  {
+    "order": "90000001.json",
+    "expected": "fit"
+  },
+  {
+    "order": "90000002.json",
+    "expected": "fit"
+  },
+  {
+    "order": "90000003.json",
+    "expected": "fit"
+  },
+  {
+    "order": "90000004.json",
+    "expected": "fit"
+  },
+  {
+    "order": "90000005.json",
+    "expected": "fit"
+  },
+  {
+    "order": "90000006.json",
+    "expected": "fit"
+  },
+  {
+    "order": "90000007.json",
+    "expected": "reject"
+  },
+  {
+    "order": "90000008.json",
+    "expected": "reject"
+  },
+  {
+    "order": "90000009.json",
+    "expected": "reject"
+  },
+  {
+    "order": "90000010.json",
+    "expected": "reject"
+  }
+]

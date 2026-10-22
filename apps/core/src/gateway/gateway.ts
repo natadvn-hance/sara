@@ -36,6 +36,7 @@ export type Gateway = {
 }
 
 const LIMIT_TEXT = /usage limit|rate limit/i
+const AUTH_TEXT = /failed to authenticate|invalid api key|oauth|not logged in|please run \/login/i
 
 function classify<T>(
   run: CliRun,
@@ -47,6 +48,8 @@ function classify<T>(
     const text = `${run.stdout}\n${run.stderr}`
     if (LIMIT_TEXT.test(text))
       return { ok: false, errorClass: 'limit_reached', message: text.trim().slice(0, 300) }
+    if (AUTH_TEXT.test(text))
+      return { ok: false, errorClass: 'not_connected', message: text.trim().slice(0, 300) }
     return { ok: false, errorClass: 'cli_failed', message: text.trim().slice(0, 300) }
   }
   let parsed: { structured_output?: unknown }

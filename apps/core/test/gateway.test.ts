@@ -115,6 +115,14 @@ describe('model gateway', () => {
     expect(await calls()).toHaveLength(0)
   })
 
+  it('FR-SET-3: expired or wrong token reported by the CLI gives not_connected', async () => {
+    const gw = await gateway({ FAKE_CLAUDE_MODE: 'auth_error' })
+    expect(await gw.call('probe', 'x', ProbeOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'not_connected',
+    })
+  })
+
   it('FR-OPS-3: limit text gives limit_reached', async () => {
     const gw = await gateway({ FAKE_CLAUDE_MODE: 'limit' })
     expect(await gw.call('probe', 'x', ProbeOutput)).toMatchObject({
