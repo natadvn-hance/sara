@@ -13,7 +13,8 @@
     "format": "biome check --write .",
     "role:eval": "pnpm --filter @sara/core role:eval",
     "fake:order": "curl -s -X POST http://127.0.0.1:7070/fake/orders",
-    "probe:claude": "pnpm --filter @sara/core probe:claude"
+    "probe:claude": "pnpm --filter @sara/core probe:claude",
+    "trace": "tsx scripts/trace.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
