@@ -181,9 +181,10 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
         <div class="eyebrow"><span>Hance</span><span>·</span><span>спецификация продукта и системы</span><span>·</span><span>v1.0, 22.10.2026</span></div>
         <h1>Сара Hance: <span class="v">спецификация</span></h1>
         <p class="lead">Один ИИ-сотрудник продаж на Профи.ру. Приносит заявку меньше чем за 2 минуты, после «да» откликается за минуту, разговаривает голосом Бориса, договаривается о встрече, учится на тренажёре. Документ устроен как инженерная спецификация: требования с номерами, архитектура по модели C4, решения, вехи с критериями приёмки.</p>
+        <p class="lead"><b>Обновление 22.10.2026, версия 1.1.</b> Борис утвердил спецификацию и решил: один сервер за рубежом, как у v1, без узла в России (ADR-021), данные клиентов на нём (ADR-022). Схемы с двумя узлами ниже устарели. Актуальный текст: <code>docs/spec/2026-10-22-sara-spec-v1.md</code>, схема серверов: <code>docs/architecture/deployment.md</code>, обзор пакета: https://claude.ai/artifact/KXoo2adn79MZiuDjMbYdBk</p>
       </div>
       <div class="meta">
-        <div><span>Статус</span><b>на утверждение</b></div>
+        <div><span>Статус</span><b>утверждена 22.10</b></div>
         <div><span>Владелец</span><b>Борис Мноян</b></div>
         <div><span>Требований</span><b>около 90 с номерами</b></div>
         <div><span>Решений</span><b>13 ADR</b></div>
@@ -193,8 +194,8 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
       <div class="kd">
         <div class="c"><span class="k">ADR-001 <span class="st b">Борис</span></span><b>Claude через CLI по подписке</b><span>без оплаты токенов</span></div>
         <div class="c"><span class="k">ADR-002, 003</span><b>Профи.ру гибридно через Профи-MCP</b><span>события читать, интерфейсом действовать, экраном проверять</span></div>
-        <div class="c"><span class="k">ADR-004 <span class="st p">предложение</span></span><b>Два сервера</b><span>ядро за рубежом, узел в России, свой IP на аккаунт</span></div>
-        <div class="c"><span class="k">ADR-005 <span class="st p">предложение</span></span><b>Первичная запись в России</b><span>рабочая копия у ядра, уведомление в Роскомнадзор</span></div>
+        <div class="c"><span class="k">ADR-021 <span class="st b">Борис</span></span><b>Один сервер за рубежом</b><span>как у v1, отдельный; свой IP на аккаунт</span></div>
+        <div class="c"><span class="k">ADR-022 <span class="st b">Борис</span></span><b>Данные клиентов на сервере</b><span>обезличивание перед моделью, сроки, юрист до M1</span></div>
         <div class="c"><span class="k">ADR-007, 008</span><b>Разум в git, без дообучения</b><span>знание, понимание, речь, суждение, память</span></div>
         <div class="c"><span class="k">ADR-009 <span class="st b">Борис</span></span><b>Направления и маршрутизатор</b><span>аккаунты разного характера без конкуренции</span></div>
         <div class="c"><span class="k">ADR-010 <span class="st p">предложение</span></span><b>Новый бот</b><span>v1 работает на старом до переключения</span></div>

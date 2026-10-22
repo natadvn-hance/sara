@@ -1,0 +1,546 @@
+<title>Пакет к разработке Сары</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column 1080px; sections divided by hairlines; wide tables and diagrams scroll inside their own boxes */
+:root{
+  --bg:#f6f5f3; --surface:#ffffff; --ink:#1b1918; --muted:#6a6460; --line:#e4dfda;
+  --accent:#ec4b25; --accent-soft:#fde8e1; --accent-ink:#ffffff;
+  --sara:#9a3b22; --launch:#1b1918;
+  --was:#4a6fa5; --was-soft:#e6edf7;
+  --ext:#a46a12; --ext-soft:#f8eedb;
+  --new:#c23d1c; --new-soft:#fde8e1;
+  --later:#5f6b7a; --later-soft:#e9ecf0;
+  --no:#8a8580; --no-soft:#efedea;
+  --f-display:"Unbounded","Golos Text",system-ui,sans-serif;
+  --f-body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141312; --surface:#1d1b1a; --ink:#f1eeea; --muted:#a39d97; --line:#302d2a;
+  --accent:#ff6a45; --accent-soft:#3a201a; --accent-ink:#1b0f0b;
+  --sara:#e08a6d; --launch:#d8d3cd;
+  --was:#8fb0de; --was-soft:#1f2836;
+  --ext:#e0b05a; --ext-soft:#33281a;
+  --new:#ff8a6b; --new-soft:#3a201a;
+  --later:#a9b3bf; --later-soft:#262a30;
+  --no:#8f8984; --no-soft:#252321;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141312; --surface:#1d1b1a; --ink:#f1eeea; --muted:#a39d97; --line:#302d2a;
+  --accent:#ff6a45; --accent-soft:#3a201a; --accent-ink:#1b0f0b;
+  --sara:#e08a6d; --launch:#d8d3cd;
+  --was:#8fb0de; --was-soft:#1f2836;
+  --ext:#e0b05a; --ext-soft:#33281a;
+  --new:#ff8a6b; --new-soft:#3a201a;
+  --later:#a9b3bf; --later-soft:#262a30;
+  --no:#8f8984; --no-soft:#252321;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1080px;margin:0 auto;padding-block:40px 64px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;font-weight:500}
+h1{font-size:clamp(28px,5vw,46px);line-height:1.1;letter-spacing:-.01em}
+h2{font-size:clamp(20px,3vw,26px);line-height:1.2}
+h3{font-size:16px;line-height:1.3;font-weight:500}
+p{margin:0}
+.mono{font-family:var(--f-mono);font-size:.82em;overflow-wrap:anywhere}
+.muted{color:var(--muted)}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+header.top{display:grid;gap:16px;padding-bottom:28px}
+.lede{max-width:68ch;font-size:18px;color:var(--ink)}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:8px}
+.stat{background:var(--surface);padding:14px 16px;display:grid;gap:2px;min-width:0}
+.stat b{font-family:var(--f-display);font-weight:500;font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat span{font-size:13px;color:var(--muted)}
+.stat.s-was b{color:var(--was)} .stat.s-ext b{color:var(--ext)} .stat.s-new b{color:var(--new)} .stat.s-later b{color:var(--later)} .stat.s-no b{color:var(--no)}
+
+section{border-top:1px solid var(--line);padding-block:40px;display:grid;gap:20px}
+.shead{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:12px}
+.shead .t{display:grid;gap:6px;min-width:0}
+.cbtn{font:500 13px var(--f-body);color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+.cbtn:hover{color:var(--ink);border-color:var(--muted)}
+.intro{max-width:70ch;color:var(--muted)}
+
+/* findings */
+.finds{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.find{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:grid;gap:8px;min-width:0}
+.find .k{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.find .fix{font-size:14px;color:var(--muted)}
+.find.decide{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.v-was{color:var(--was);background:var(--was-soft)}
+.v-ext{color:var(--ext);background:var(--ext-soft)}
+.v-new{color:var(--new);background:var(--new-soft)}
+.v-later{color:var(--later);background:var(--later-soft)}
+.v-no{color:var(--no);background:var(--no-soft)}
+
+/* filter */
+.filter{display:flex;flex-wrap:wrap;gap:8px}
+.filter button{font:500 13px var(--f-body);border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;cursor:pointer;font-variant-numeric:tabular-nums}
+.filter button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+
+/* artifact matrix */
+.stage{display:grid;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.stage + .stage{margin-top:14px}
+.stage-h{display:flex;gap:10px;align-items:baseline;padding:12px 16px;border-bottom:1px solid var(--line)}
+.stage-h .n{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.stage-h h3{font-size:15px}
+.stage-h .q{font-size:13px;color:var(--muted);margin-left:auto;text-align:right}
+.art{display:grid;grid-template-columns:minmax(0,1.05fr) 112px minmax(0,2fr) minmax(0,1.1fr);gap:14px;padding:12px 16px;border-top:1px solid var(--line);align-items:start}
+.stage-h + .art{border-top:0}
+.art .nm{font-weight:500}
+.art .nm small{display:block;font-weight:400;color:var(--muted);font-size:12.5px}
+.art .wh{font-size:14.5px}
+.art .fl{font-size:12.5px;color:var(--muted)}
+
+/* extras */
+.extras{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.ex{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:6px;align-content:start;min-width:0}
+.ex .src{font-size:12.5px;color:var(--muted)}
+
+/* scroll boxes */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.scroll svg{display:block;min-width:760px;width:100%;height:auto}
+svg text{font-family:var(--f-body);fill:var(--ink)}
+svg .sm{font-size:11.5px;fill:var(--muted)}
+svg .lb{font-size:12.5px}
+svg .grid{stroke:var(--line);stroke-width:1}
+svg .b-base{fill:var(--accent)} svg .b-sara{fill:var(--sara)} svg .b-launch{fill:var(--launch)}
+svg .mk{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4}
+svg .mk2{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:4 4}
+svg .node{fill:var(--bg);stroke:var(--line);stroke-width:1.2}
+svg .svc{fill:var(--surface);stroke:var(--line)}
+svg .ext{fill:var(--surface);stroke:var(--muted);stroke-dasharray:3 3}
+svg .wire{stroke:var(--muted);stroke-width:1.5;fill:none}
+svg .wire-a{stroke:var(--accent);stroke-width:2;fill:none}
+svg .ah{fill:var(--muted)} svg .ah-a{fill:var(--accent)}
+svg .pyr{stroke:var(--surface);stroke-width:2}
+svg .p1{fill:var(--accent-soft)} svg .p2{fill:var(--ext-soft)} svg .p3{fill:var(--was-soft)}
+svg .ttl{font-family:var(--f-display);font-size:13px}
+
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;font-size:12.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;background:var(--bg)}
+tr:last-child td{border-bottom:0}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.tbl.wide table{min-width:900px}
+.tbl td.r0{background:var(--accent-soft)}
+.who{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:5px}
+.who.b{background:var(--ink);color:var(--bg)} .who.s{background:var(--accent-soft);color:var(--new)}
+
+/* sequence */
+.seq{display:grid;gap:0;counter-reset:s;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.step{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:12px;padding:12px 16px;border-top:1px solid var(--line);align-items:baseline}
+.step:first-child{border-top:0}
+.step .n{font-family:var(--f-display);font-size:18px;color:var(--accent);font-variant-numeric:tabular-nums}
+.step .d{font-size:13px;color:var(--muted);white-space:nowrap}
+.step.gate{background:var(--accent-soft)}
+.two{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
+.side{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:10px}
+.side ul{margin:0;padding-left:18px;display:grid;gap:6px;font-size:14.5px}
+.list2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+
+footer{border-top:1px solid var(--line);padding-top:24px;font-size:13px;color:var(--muted);display:grid;gap:8px}
+footer ul{margin:0;padding-left:18px;display:grid;gap:4px}
+
+@media (max-width:760px){
+  .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .finds,.two,.list2{grid-template-columns:1fr}
+  .art{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
+  .art .wh,.art .fl{grid-column:1 / -1}
+  .stage-h{flex-wrap:wrap}.stage-h .q{margin-left:0;text-align:left;width:100%}
+  .step{grid-template-columns:32px minmax(0,1fr)}
+  .step .d{grid-column:2}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow">Сара Hance · 22.10.2026 · к старту разработки</span>
+  <h1>Пакет к разработке</h1>
+  <p class="lede">Я сверила твой список из 33 артефактов с тем, что у нас уже было, сделала недостающее и добавила то, что нужно именно продукту на ИИ. Все документы лежат в <span class="mono">~/Sara-Hance/docs</span>, спецификация обновлена до версии 1.1. Ниже итог сверки, главные находки, дорожная карта и порядок старта.</p>
+  <div class="stats" aria-label="Итог сверки 33 артефактов">
+    <div class="stat s-was"><b>5</b><span>уже были</span></div>
+    <div class="stat s-ext"><b>5</b><span>дописала</span></div>
+    <div class="stat s-new"><b>18</b><span>сделала новые</span></div>
+    <div class="stat s-later"><b>3</b><span>позже, в своей вехе</span></div>
+    <div class="stat s-no"><b>2</b><span>не нужны</span></div>
+  </div>
+</header>
+
+<section id="finds" data-comment-target>
+  <div class="shead"><div class="t"><span class="eyebrow">Главное</span><h2>Что нашлось, пока делала документы</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <div class="finds">
+    <div class="find" data-comment-target>
+      <span class="k">Данные клиентов</span>
+      <p>Сервер за рубежом, как у старой Сары (твоё решение 22.10). Закон требует первой записи данных в России, этот риск ты принял. Плюс вызов Claude передаёт текст в США.</p>
+      <p class="fix">Меры: перед вызовом модели имена, телефоны и почта заменяются метками (ADR-016); минимум данных и сроки хранения; сырые данные площадки лежат отдельно и при необходимости переносятся в Россию без переделки (ADR-022). Юрист до M1.</p>
+    </div>
+    <div class="find" data-comment-target>
+      <span class="k">Аккаунт Профи.ру</span>
+      <p>На время тени у одного аккаунта будет две сессии: старая Сара на своём сервере и новая на своём. Не известно, выбивают ли они друг друга.</p>
+      <p class="fix">Решение: проверяем в первые 48 часов M1. Если выбивают, новая Сара до переключения только читает по расписанию.</p>
+    </div>
+    <div class="find" data-comment-target>
+      <span class="k">Требования</span>
+      <p>У 32 из 76 требований спецификации не было критерия приёмки, то есть было непонятно, как проверить, что сделано.</p>
+      <p class="fix">Решение: заполнила все 32, спецификация стала версией 1.1.</p>
+    </div>
+    <div class="find" data-comment-target>
+      <span class="k">Первая веха</span>
+      <p>M0 строил фундамент, но не проверял главный риск: работает ли <span class="mono">claude -p</span> по подписке в контейнере. Это всплыло бы только в M2.</p>
+      <p class="fix">Решение: M0 стал «ходячим скелетом». Фальшивая заявка проходит весь путь до карточки в боте, «да» и отклика (ADR-015).</p>
+    </div>
+    <div class="find decide" data-comment-target>
+      <span class="k">Нужно твоё решение к концу M3</span>
+      <p>По плану польза до тебя доходит только в феврале, после переключения в M7. Отклики можно переключить раньше, в середине декабря, сразу после M3.</p>
+      <p class="fix">Цена: до M4 переписку после отклика ведёшь сам, новая Сара пересылает каждое сообщение клиента. Старая Сара в это время на паузе исходящих.</p>
+    </div>
+    <div class="find" data-comment-target>
+      <span class="k">Твои решения 22.10</span>
+      <p>Записано: один сервер за рубежом, как у старой Сары, данные клиентов на нём, отдельная подписка, новый бот, репозитории <span class="mono">sara</span> и <span class="mono">sara-mind</span>, автоотклик выключен.</p>
+      <p class="fix">Открытым остаётся второй аккаунт: есть ли он и разрешён ли, вопрос в поддержку Профи.ру до M8.</p>
+    </div>
+  </div>
+</section>
+
+<section id="matrix">
+  <div class="shead"><div class="t"><span class="eyebrow">Сверка</span><h2>33 артефакта: что было, что сделано, что не нужно</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <p class="intro">По шести этапам из твоего списка. Нажми на итог, чтобы оставить только его. Пути файлов от папки <span class="mono">docs/</span>.</p>
+  <div class="filter" role="group" aria-label="Фильтр по итогу">
+    <button type="button" data-f="all" aria-pressed="true">Все · 33</button>
+    <button type="button" data-f="was" aria-pressed="false">Были · 5</button>
+    <button type="button" data-f="ext" aria-pressed="false">Дописала · 5</button>
+    <button type="button" data-f="new" aria-pressed="false">Новые · 18</button>
+    <button type="button" data-f="later" aria-pressed="false">Позже · 3</button>
+    <button type="button" data-f="no" aria-pressed="false">Не нужны · 2</button>
+  </div>
+
+  <div id="stages">
+  <div class="stage">
+    <div class="stage-h"><span class="n">1</span><h3>Продукт и стратегия</h3><span class="q">что делаем, зачем и для кого</span></div>
+    <div class="art" data-v="no" data-comment-target><div class="nm">Lean Canvas, Business Model Canvas</div><div><span class="chip v-no">не нужен</span></div><div class="wh">Сара не продаётся, у неё один заказчик. Вместо холста страница экономики воронки: цена отклика, ответа, созвона, договора.</div><div class="fl mono">product/vision-and-scope.md, раздел 5</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Vision and Scope<small>видение и границы</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Видение одной фразой, пресс-релиз из будущего, главная метрика, что входит и что точно нет, 7 предположений с проверкой, кто что решает.</div><div class="fl mono">product/vision-and-scope.md</div></div>
+    <div class="art" data-v="ext" data-comment-target><div class="nm">Product Roadmap<small>дорожная карта</small></div><div><span class="chip v-ext">дописала</span></div><div class="wh">Вехи были. Добавила аппетит каждой вехи, ориентир по месяцам, что нужно от тебя до старта и вариант раннего переключения.</div><div class="fl mono">product/roadmap.md</div></div>
+    <div class="art" data-v="was" data-comment-target><div class="nm">PRD<small>продуктовые требования</small></div><div><span class="chip v-was">был</span></div><div class="wh">Спецификация, разделы 0-4: цели, сценарии, 76 функциональных требований.</div><div class="fl mono">spec/2026-10-22-sara-spec-v1.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">User Story Mapping<small>карта историй</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Десять шагов работы по горизонтали, шесть срезов выпусков по вертикали. Первая строка это ходячий скелет M0.</div><div class="fl mono">product/story-map.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Product Backlog<small>бэклог</small></div><div><span class="chip v-new">новый</span></div><div class="wh">16 историй M0 полностью, с критериями «Дано, Когда, Тогда»; 23 истории M1-M2; эпики M3-M8. В GitHub переносится после твоего «да».</div><div class="fl mono">product/backlog.md</div></div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-h"><span class="n">2</span><h3>Исследования и интерфейс</h3><span class="q">как ты и клиенты взаимодействуют с продуктом</span></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">User Persona<small>профили</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Твой профиль и 6 архетипов клиентов. Архетипы это гипотезы: проверим на истории чатов в M4, они же станут персонами тренажёра.</div><div class="fl mono">product/journeys.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">CJM<small>карта пути клиента</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Путь клиента на Профи.ру с местами, где теряла старая Сара (213 сгоревших заявок, 0 встреч), и твой день с новой Сарой.</div><div class="fl mono">product/journeys.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">User Flow<small>потоки</small></div><div><span class="chip v-new">новый</span></div><div class="wh">8 потоков: мастер, вход в аккаунт, онбординг направления, заявка, сообщение клиента, тренировка, созвон, разлогин.</div><div class="fl mono">ux/user-flows.md</div></div>
+    <div class="art" data-v="later" data-comment-target><div class="nm">Wireframes<small>каркасы экранов</small></div><div><span class="chip v-later">позже</span></div><div class="wh">Рисуются перед вехой, где строится экран (это правило «готово к работе»): мастер в M0, карточки в M2, тренажёр в M5, пульт в M7.</div><div class="fl mono">по вехам</div></div>
+    <div class="art" data-v="later" data-comment-target><div class="nm">Interactive Prototype<small>кликабельный прототип</small></div><div><span class="chip v-later">позже</span></div><div class="wh">Прототип тренажёра перед M5 и пульта перед M7: ты пробуешь с телефона до того, как пишется код.</div><div class="fl mono">по вехам</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Design System, UI Kit<small>дизайн-система</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Основа: цвета Hance для светлой и тёмной темы, шрифты, 13 компонентов, правила текста. Растёт вместе с экранами.</div><div class="fl mono">ux/design-system.md</div></div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-h"><span class="n">3</span><h3>Системный анализ</h3><span class="q">логика и правила работы системы</span></div>
+    <div class="art" data-v="no" data-comment-target><div class="nm">BRD<small>бизнес-требования</small></div><div><span class="chip v-no">не нужен</span></div><div class="wh">Бизнес-цели уже в видении и в спецификации. Третий документ о том же начнёт с ними расходиться.</div><div class="fl mono">нет</div></div>
+    <div class="art" data-v="was" data-comment-target><div class="nm">SRS<small>технические требования</small></div><div><span class="chip v-was">был</span></div><div class="wh">Требования и нефункциональные цели были в спецификации. У 32 из 76 не хватало критерия приёмки: заполнила, версия 1.1.</div><div class="fl mono">spec/2026-10-22-sara-spec-v1.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">OpenAPI, Swagger<small>контракт API</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Шире, чем OpenAPI: каталог 8 контрактов (журнал, Профи-MCP, роли Claude, API пульта, кнопки, разум, настройки, доставка событий). OpenAPI генерируется из кода (ADR-014).</div><div class="fl mono">architecture/contracts.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">RTM<small>матрица трассируемости</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Правило связей «требование → история → тест» и стартовая матрица всех 76 требований по вехам. С M0 строится автоматически.</div><div class="fl mono">quality/traceability.md</div></div>
+    <div class="art" data-v="ext" data-comment-target><div class="nm">Data Dictionary, ERD<small>словарь данных</small></div><div><span class="chip v-ext">дописала</span></div><div class="wh">Схема связей была. Добавила все поля, класс данных (обычные, персональные, контакт, секрет), где первая запись и сколько хранится.</div><div class="fl mono">architecture/data-dictionary.md</div></div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-h"><span class="n">4</span><h3>Архитектура</h3><span class="q">как устроено внутри, чтобы не сломалось</span></div>
+    <div class="art" data-v="was" data-comment-target><div class="nm">RFC, Design Doc</div><div><span class="chip v-was">был</span></div><div class="wh">Дизайн v3 и есть design doc. Добавила шаблон RFC для будущих крупных изменений.</div><div class="fl mono">superpowers/specs/…, templates/rfc.md</div></div>
+    <div class="art" data-v="was" data-comment-target><div class="nm">ADR<small>записи решений</small></div><div><span class="chip v-was">был</span></div><div class="wh">13 решений жили таблицей. Разложила по файлам в формате MADR и добавила новые: ADR-014..022.</div><div class="fl mono">adr/</div></div>
+    <div class="art" data-v="was" data-comment-target><div class="nm">C4 Model</div><div><span class="chip v-was">был</span></div><div class="wh">Уровни 1-3 в спецификации и на её странице. Уровень 4 (код) не нужен, его показывает редактор кода.</div><div class="fl mono">spec/…, раздел 6</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Tech Radar<small>технологический радар</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Берём, пробуем, изучаем, не берём. Новая библиотека только отсюда, иначе через ADR. Так сессии не тащат случайные зависимости.</div><div class="fl mono">architecture/tech-radar.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Threat Model<small>модель угроз</small></div><div><span class="chip v-new">новый</span></div><div class="wh">15 угроз по границам доверия (метод STRIDE), сверка с OWASP Top 10 для LLM, вопросы юристу, тяжесть сбоев S1-S3.</div><div class="fl mono">architecture/threat-model.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Data Migration Plan<small>перенос данных</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Что берём из базы старой Сары, как отделить твои сообщения от её сообщений, переключение по частям и откат за минуту.</div><div class="fl mono">ops/migration-and-cutover.md</div></div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-h"><span class="n">5</span><h3>Качество и процессы</h3><span class="q">как пишем, проверяем и сдаём</span></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">DoR<small>готово к работе</small></div><div><span class="chip v-new">новый</span></div><div class="wh">9 условий, без которых история не берётся в работу: требования, критерии, контракты, класс данных, макет, тестовые данные.</div><div class="fl mono">quality/definition-of-ready-and-done.md</div></div>
+    <div class="art" data-v="ext" data-comment-target><div class="nm">DoD<small>готово</small></div><div><span class="chip v-ext">дописала</span></div><div class="wh">Был абзац. Стало три уровня: история, веха, включение в работу после тени.</div><div class="fl mono">тот же файл</div></div>
+    <div class="art" data-v="ext" data-comment-target><div class="nm">Test Plan, Test Strategy</div><div><span class="chip v-ext">дописала</span></div><div class="wh">Пирамида из 7 уровней, 15 обязательных сквозных сценариев и план оценки Сары: критерии, 60 сценариев экзамена, золотой набор, классы ошибок.</div><div class="fl mono">quality/test-strategy.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Test Cases, Checklists</div><div><span class="chip v-new">новый</span></div><div class="wh">Критерии в каждой истории и чек-лист приёмки вехи для тебя. Для M0 готов: 12 шагов, около 15 минут.</div><div class="fl mono">quality/acceptance/M0.md</div></div>
+    <div class="art" data-v="later" data-comment-target><div class="nm">Traceability Coverage<small>отчёт покрытия</small></div><div><span class="chip v-later">позже</span></div><div class="wh">Строится сам в CI с вехи M0 (история ST-M0-14) и прикладывается к каждой проверке.</div><div class="fl mono">CI</div></div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-h"><span class="n">6</span><h3>Эксплуатация</h3><span class="q">как продукт живёт на серверах</span></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">CONTRIBUTING.md, Onboarding</div><div><span class="chip v-new">новый</span></div><div class="wh">README, правила разработки и CLAUDE.md: с чего начинает любая новая сессия Claude, как работает, что ей нельзя.</div><div class="fl mono">../README.md, ../CONTRIBUTING.md, ../CLAUDE.md</div></div>
+    <div class="art" data-v="ext" data-comment-target><div class="nm">Deployment Diagrams<small>схема развёртывания</small></div><div><span class="chip v-ext">дописала</span></div><div class="wh">Была таблица серверов. Стали окружения, службы и порты на одном сервере, свой IP на аккаунт, выкладка и откат, бэкапы.</div><div class="fl mono">architecture/deployment.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Runbooks<small>инструкции на случай сбоя</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Каталог 15 инструкций и шаблон. 8 написаны черновиком, остальные пишутся в своих вехах и проверяются на тени.</div><div class="fl mono">ops/runbooks.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Release Notes, Changelog</div><div><span class="chip v-new">новый</span></div><div class="wh">CHANGELOG ведёт release-please по коммитам. Тебе после каждого выпуска «Что нового» простым языком, до 10 строк.</div><div class="fl mono">../CHANGELOG.md, templates/release-notes.md</div></div>
+    <div class="art" data-v="new" data-comment-target><div class="nm">Post-Mortem<small>разбор сбоя</small></div><div><span class="chip v-new">новый</span></div><div class="wh">Шаблон разбора без поиска виноватых. Обязателен для сбоя S1: трата без «да», дубль клиенту, выдуманный факт, потеря данных.</div><div class="fl mono">templates/postmortem.md</div></div>
+  </div>
+  </div>
+</section>
+
+<section id="extras">
+  <div class="shead"><div class="t"><span class="eyebrow">Сверх списка</span><h2>Что добавила, потому что Сара это продукт на ИИ</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <p class="intro">В классическом списке нет артефактов про поведение модели, а у Сары главный риск именно там. Эти семь закрывают его.</p>
+  <div class="extras">
+    <div class="ex" data-comment-target><h3>Пресс-релиз из будущего</h3><p>Заметка о готовой Саре, написанная до начала работы. Если она не звучит убедительно, продукт ещё не придуман.</p><span class="src">метод Amazon Working Backwards · видение, раздел 2</span></div>
+    <div class="ex" data-comment-target><h3>План оценки Сары</h3><p>Критерии успеха, 60 сценариев экзамена, золотой набор из 20 твоих ответов, классы ошибок S1-S3. Модель-судья допускается только после сверки с твоими оценками.</p><span class="src">руководство Anthropic по проверкам · стратегия тестирования, раздел 4</span></div>
+    <div class="ex" data-comment-target><h3>Цели надёжности и бюджет ошибок</h3><p>8 показателей из журнала. Если бюджет кончился, новые возможности стоят, пока надёжность не вернётся.</p><span class="src">Google SRE · ops/slo.md</span></div>
+    <div class="ex" data-comment-target><h3>Обезличивание перед моделью</h3><p>Имена, телефоны, почта и ссылки не уходят в Claude. Плюс список вопросов юристу по 152-ФЗ.</p><span class="src">ADR-016 · модель угроз, раздел 5</span></div>
+    <div class="ex" data-comment-target><h3>Ходячий скелет</h3><p>Первая неделя даёт тонкий, но сквозной путь через все части. Главные риски видны сразу, а не через месяц.</p><span class="src">Алистер Кокберн · ADR-015</span></div>
+    <div class="ex" data-comment-target><h3>Роли Claude как контракты</h3><p>У каждой роли инструкция, схема ответа, модель, приоритет и свои проверки, с номером версии.</p><span class="src">контракт C3</span></div>
+    <div class="ex" data-comment-target><h3>Флаги переключения</h3><p>Отклики и переписка включаются по отдельности, откат за минуту. В каждый момент клиенту пишет одна Сара.</p><span class="src">развёртывание, перенос и переключение</span></div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="shead"><div class="t"><span class="eyebrow">Дорожная карта</span><h2>Девять вех, около 16-18 недель</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <p class="intro">Даты ориентировочные, от старта 27.10 и без новогодних праздников. У каждой вехи фиксировано время, а объём гибкий: если не успеваем, режем второстепенное.</p>
+  <div class="scroll" data-comment-target>
+    <svg viewBox="0 0 960 388" role="img" aria-label="Вехи M0-M8 на шкале с конца октября 2026 по февраль 2027">
+      <line class="grid" x1="232" y1="30" x2="232" y2="336"/><text class="sm" x="232" y="22" text-anchor="middle">1 ноя</text>
+      <line class="grid" x1="426" y1="30" x2="426" y2="336"/><text class="sm" x="426" y="22" text-anchor="middle">1 дек</text>
+      <line class="grid" x1="626" y1="30" x2="626" y2="336"/><text class="sm" x="626" y="22" text-anchor="middle">1 янв</text>
+      <line class="grid" x1="826" y1="30" x2="826" y2="336"/><text class="sm" x="826" y="22" text-anchor="middle">1 фев</text>
+      <text class="lb" x="8" y="65">M0 Фундамент</text><rect class="b-base" x="200" y="51" width="58" height="18" rx="3"/>
+      <text class="lb" x="8" y="97">M1 Профи-MCP</text><rect class="b-base" x="258" y="83" width="90" height="18" rx="3"/>
+      <text class="lb" x="8" y="129">M2 Заявка в одно нажатие</text><rect class="b-base" x="348" y="115" width="90" height="18" rx="3"/>
+      <text class="lb" x="8" y="161">M3 Направления</text><rect class="b-sara" x="439" y="147" width="64" height="18" rx="3"/>
+      <text class="lb" x="8" y="193">M4 Разум и разговор</text><rect class="b-sara" x="503" y="179" width="135" height="18" rx="3"/>
+      <text class="lb" x="8" y="225">M5 Тренажёр</text><rect class="b-sara" x="639" y="211" width="90" height="18" rx="3"/>
+      <text class="lb" x="8" y="257">M6 Встречи и итоги</text><rect class="b-sara" x="729" y="243" width="45" height="18" rx="3"/>
+      <text class="lb" x="8" y="289">M7 Пульт и переключение</text><rect class="b-launch" x="774" y="275" width="116" height="18" rx="3"/>
+      <text class="lb" x="8" y="321">M8 Второй аккаунт</text><rect class="b-launch" x="890" y="307" width="45" height="18" rx="3"/>
+      <line class="mk" x1="503" y1="40" x2="503" y2="364"/>
+      <line class="mk2" x1="890" y1="40" x2="890" y2="348"/>
+      <text class="sm" x="886" y="358" text-anchor="end">переключение с v1, около 11.02</text>
+      <text class="sm" x="507" y="378">вариант: отклики после M3, около 13.12</text>
+    </svg>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Когда</th><th>Что нужно от тебя</th><th>Время</th></tr></thead>
+      <tbody>
+        <tr><td>до M0</td><td>прочитать пакет, «да» или комментарии</td><td>30-60 минут</td></tr>
+        <tr><td>до M0</td><td>бот для разработки у @BotFather и <span class="mono">claude setup-token</span> на Маке</td><td>5 минут</td></tr>
+        <tr><td>до M1</td><td>сервер за рубежом с 2 IP, как у старой Сары, но отдельный (дам требования и инструкцию); юрист по 152-ФЗ</td><td>20 минут и встреча</td></tr>
+        <tr><td>до M2</td><td>отдельная подписка Claude, бот для работы</td><td>15 минут</td></tr>
+        <tr><td>M3</td><td>калибровка направления на 20 заявках; решение о раннем переключении</td><td>20 минут</td></tr>
+        <tr><td>M4-M5</td><td>интервью о Hance карточками; 3 тренировки</td><td>около часа</td></tr>
+        <tr><td>M7</td><td>решение о переключении</td><td></td></tr>
+        <tr><td>до M8</td><td>вопрос в поддержку Профи.ру о втором аккаунте</td><td>10 минут</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="storymap">
+  <div class="shead"><div class="t"><span class="eyebrow">Карта историй</span><h2>Путь работы и срезы выпусков</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <p class="intro">Каждая веха даёт законченный кусок пути, а не набор деталей. Первый столбец это ходячий скелет M0: тонкий, но через всю систему.</p>
+  <div class="tbl wide" data-comment-target>
+    <table>
+      <thead><tr><th>Шаг работы</th><th>R0 · M0</th><th>R1 · M1-M2</th><th>R2 · M3-M4</th><th>R3 · M5-M6</th><th>R4 · M7</th><th>R5 · M8</th></tr></thead>
+      <tbody>
+        <tr><td>Поставить систему</td><td class="r0">мастер: пароль, бот, Claude</td><td></td><td>знание, история чатов</td><td>правила</td><td>тень, справка</td><td></td></tr>
+        <tr><td>Подключить аккаунт</td><td class="r0">фальшивый Профи.ру</td><td>живой вход, баланс, присутствие</td><td></td><td></td><td></td><td>второй аккаунт, свой IP</td></tr>
+        <tr><td>Настроить направление</td><td class="r0"></td><td>одно по умолчанию</td><td>онбординг, калибровка, маршрутизатор</td><td></td><td>экран «Аккаунты»</td><td>IT, быстрый режим</td></tr>
+        <tr><td>Заметить и оценить заявку</td><td class="r0">фальшивая заявка, Сортировщик</td><td>события, лента, «почему N»</td><td>оценка направления</td><td></td><td></td><td>маршрутизатор на двух</td></tr>
+        <tr><td>Решить и откликнуться</td><td class="r0">карточка, «да», фальшивый отклик</td><td>черновик, деньги, отклик с проверкой экраном</td><td>формат и кейсы</td><td></td><td>очередь в пульте</td><td></td></tr>
+        <tr><td>Вести разговор</td><td class="r0"></td><td>сообщения замечены, автор определён</td><td>цикл ответа, голос, черновики</td><td>самостоятельность по темам</td><td>переписка в пульте</td><td></td></tr>
+        <tr><td>Договориться о созвоне</td><td class="r0"></td><td></td><td></td><td>процедура созвона, итоги</td><td>«Встречи»</td><td></td></tr>
+        <tr><td>Учить Сару</td><td class="r0"></td><td></td><td>история, разум, экзамен</td><td>тренажёр, уроки, учитель</td><td>тренировка в Mini App</td><td></td></tr>
+        <tr><td>Видеть день и деньги</td><td class="r0">журнал</td><td>скорость, траты</td><td></td><td>воронка, цена договора</td><td>«Сегодня», сводки</td><td>деньги по аккаунтам</td></tr>
+        <tr><td>Чинить сбои</td><td class="r0">«Состояние системы»</td><td>разлогин, блокировка, лимит, паузы</td><td></td><td></td><td>инструкции в справке</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="start">
+  <div class="shead"><div class="t"><span class="eyebrow">Порядок старта</span><h2>От твоего «да» до первой вехи</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <div class="two">
+    <div class="seq" data-comment-target>
+      <div class="step"><span class="n">1</span><div>Читаешь пакет и оставляешь комментарии здесь <span class="who b">ты</span></div><span class="d">30-60 мин</span></div>
+      <div class="step"><span class="n">2</span><div>Вношу правки по комментариям <span class="who s">Сара</span></div><span class="d">1 блок</span></div>
+      <div class="step gate"><span class="n">3</span><div><b>Твоё «да» на старт</b> <span class="who b">ты</span></div><span class="d">получено 22.10</span></div>
+      <div class="step"><span class="n">4</span><div>Создаю приватные репозитории <span class="mono">sara</span> и <span class="mono">sara-mind</span>, переношу документы, защищаю <span class="mono">main</span> <span class="who s">Сара</span></div><span class="d">15 мин</span></div>
+      <div class="step"><span class="n">5</span><div>GitHub Project с вехами, истории M0-M2 становятся задачами <span class="who s">Сара</span></div><span class="d">30 мин</span></div>
+      <div class="step"><span class="n">6</span><div>Бот для разработки у @BotFather и <span class="mono">claude setup-token</span> на Маке <span class="who b">ты</span></div><span class="d">5 мин</span></div>
+      <div class="step"><span class="n">7</span><div>План M0 по шагам с тестами <span class="who s">Сара</span></div><span class="d">1 блок</span></div>
+      <div class="step"><span class="n">8</span><div>Сборка M0: 16 историй, тесты первыми <span class="who s">Сара</span></div><span class="d">1-1,5 недели</span></div>
+      <div class="step gate"><span class="n">9</span><div><b>Приёмка M0</b> по чек-листу из 12 шагов <span class="who b">ты</span></div><span class="d">15 мин</span></div>
+    </div>
+    <div class="side" data-comment-target>
+      <h3>Параллельно, до M1 и M2</h3>
+      <ul>
+        <li>Юрист по 152-ФЗ: вопросы уже собраны в модели угроз</li>
+        <li>Сервер за рубежом с 2 IP, как у старой Сары, но отдельный; хранилище бэкапов</li>
+        <li>Отдельная подписка Claude для Сары</li>
+        <li>Бот для работы</li>
+        <li>Вопрос в поддержку Профи.ру о втором аккаунте, текст подготовлю</li>
+      </ul>
+      <p class="muted" style="font-size:14px">Старая Сара работает как сейчас до переключения. Её папку и сервер я не трогаю.</p>
+    </div>
+  </div>
+</section>
+
+<section id="arch">
+  <div class="shead"><div class="t"><span class="eyebrow">Как это будет жить</span><h2>Один сервер за рубежом и где проходят данные клиентов</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <p class="intro">Всё на одном сервере за рубежом, как у старой Сары, но на отдельном. Служба Профи-MCP с браузерами аккаунтов и ядро работают рядом и говорят только по контракту. В Claude уходит обезличенный текст. Снаружи открыт только HTTPS.</p>
+  <div class="scroll" data-comment-target>
+    <svg viewBox="0 0 960 400" role="img" aria-label="Схема развёртывания: один сервер за рубежом со службой Профи-MCP и ядром, внешние системы">
+      <rect class="ext" x="16" y="120" width="150" height="70" rx="8"/>
+      <text class="lb" x="91" y="150" text-anchor="middle">Профи.ру</text>
+      <text class="sm" x="91" y="170" text-anchor="middle">заказы и чаты</text>
+
+      <rect class="node" x="196" y="30" width="604" height="350" rx="10"/>
+      <text class="ttl" x="212" y="56">Сервер за рубежом · как у v1, отдельный</text>
+
+      <rect class="svc" x="212" y="74" width="230" height="48" rx="6"/><text class="lb" x="224" y="94">profi-mcp</text><text class="sm" x="224" y="112">MCP, Playwright, вкладки</text>
+      <rect class="svc" x="212" y="132" width="230" height="48" rx="6"/><text class="lb" x="224" y="152">socks-ip1 · socks-ip2</text><text class="sm" x="224" y="170">свой IP у каждого аккаунта</text>
+      <rect class="svc" x="212" y="190" width="230" height="48" rx="6"/><text class="lb" x="224" y="210">схема node</text><text class="sm" x="224" y="228">сырые данные площадки, 30 дней</text>
+      <rect class="ext" x="212" y="306" width="230" height="48" rx="6"/><text class="lb" x="224" y="326">caddy · HTTPS 443</text><text class="sm" x="224" y="344">единственный вход снаружи</text>
+
+      <rect class="svc" x="546" y="74" width="238" height="48" rx="6"/><text class="lb" x="558" y="94">core</text><text class="sm" x="558" y="112">API, процессы, шлюз, Claude CLI</text>
+      <rect class="svc" x="546" y="132" width="238" height="48" rx="6"/><text class="lb" x="558" y="152">bot · web</text><text class="sm" x="558" y="170">Telegram, пульт, Mini App</text>
+      <rect class="svc" x="546" y="190" width="238" height="48" rx="6"/><text class="lb" x="558" y="210">схема core + pgvector</text><text class="sm" x="558" y="228">журнал, данные, индекс разума</text>
+      <rect class="svc" x="546" y="248" width="238" height="48" rx="6"/><text class="lb" x="558" y="268">mind</text><text class="sm" x="558" y="286">git sara-mind, копия на GitHub</text>
+      <rect class="svc" x="546" y="306" width="238" height="48" rx="6"/><text class="lb" x="558" y="326">бэкап</text><text class="sm" x="558" y="344">архив базы, другой провайдер</text>
+
+      <path class="wire" d="M166 156 H212"/>
+      <path class="wire-a" d="M442 90 H540"/><path class="ah-a" d="M546 90 l-8 -5 v10 z"/>
+      <path class="wire" d="M546 108 H448"/><path class="ah" d="M442 108 l8 -5 v10 z"/>
+      <text class="sm" x="494" y="82" text-anchor="middle">события</text>
+      <text class="sm" x="494" y="128" text-anchor="middle">команды</text>
+      <path class="wire" d="M442 214 H546" stroke-dasharray="4 4"/>
+      <text class="sm" x="494" y="206" text-anchor="middle">один</text>
+      <text class="sm" x="494" y="232" text-anchor="middle">Postgres</text>
+
+      <rect class="ext" x="830" y="66" width="114" height="56" rx="8"/><text class="lb" x="887" y="90" text-anchor="middle">Claude · США</text><text class="sm" x="887" y="108" text-anchor="middle">обезличено</text>
+      <rect class="ext" x="830" y="146" width="114" height="56" rx="8"/><text class="lb" x="887" y="170" text-anchor="middle">Telegram</text><text class="sm" x="887" y="188" text-anchor="middle">бот, Mini App</text>
+      <rect class="ext" x="830" y="226" width="114" height="56" rx="8"/><text class="lb" x="887" y="250" text-anchor="middle">Борис</text><text class="sm" x="887" y="268" text-anchor="middle">телефон, браузер</text>
+      <rect class="ext" x="830" y="306" width="114" height="56" rx="8"/><text class="lb" x="887" y="330" text-anchor="middle">S3</text><text class="sm" x="887" y="348" text-anchor="middle">бэкапы</text>
+      <path class="wire" d="M784 94 H830"/><path class="wire" d="M784 174 H830"/><path class="wire" d="M784 254 H830"/><path class="wire" d="M784 334 H830"/>
+    </svg>
+  </div>
+  <div class="list2">
+    <div class="tbl" data-comment-target>
+      <table>
+        <thead><tr><th colspan="2">Главные угрозы и защита</th></tr></thead>
+        <tbody>
+          <tr><td>Ловушка в тексте клиента</td><td>у ролей нет инструментов, деньги и отправку решает код</td></tr>
+          <tr><td>Дубль при обрыве связи</td><td>ключ от повтора, проверка экраном</td></tr>
+          <tr><td>Данные клиента в США</td><td>обезличивание перед вызовом</td></tr>
+          <tr><td>Выдуманный факт</td><td>ответ ссылается на записи разума, иначе черновик тебе</td></tr>
+          <tr><td>Команда не от тебя</td><td>бот слушает только твой чат</td></tr>
+          <tr><td>Отравление разума</td><td>в разум только после твоего «да»</td></tr>
+          <tr><td>Профи.ру не пускает IP сервера</td><td>ожидание, повтор с паузой, одно 🌐; запасной путь: российский прокси на выход</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tbl" data-comment-target>
+      <table>
+        <thead><tr><th>Цель надёжности</th><th>Порог</th></tr></thead>
+        <tbody>
+          <tr><td>Заявка у тебя</td><td>90% меньше 2 минут</td></tr>
+          <tr><td>Отклик после «да»</td><td>95% меньше 60 секунд</td></tr>
+          <tr><td>Сообщение клиента замечено</td><td>95% меньше 60 секунд</td></tr>
+          <tr><td>Ядро доступно</td><td>99% в месяц</td></tr>
+          <tr><td>Уведомлений в день</td><td>не больше 10, плюс сводки</td></tr>
+          <tr><td>Дубли, траты без «да», выдуманные факты</td><td>ноль</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="tests">
+  <div class="shead"><div class="t"><span class="eyebrow">Качество</span><h2>Как проверяем код и поведение Сары</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <p class="intro">Нижние уровни проверяют код и идут на каждом изменении. Верхние проверяют поведение Сары: экзамен перед каждой выкладкой, тень на живой площадке без отправки и слепой тест, где ты угадываешь, кто писал.</p>
+  <div class="scroll" data-comment-target>
+    <svg viewBox="0 0 960 330" role="img" aria-label="Пирамида тестов из семи уровней">
+      <rect class="pyr p3" x="320" y="10" width="320" height="40" rx="4"/><text class="lb" x="480" y="35" text-anchor="middle">Слепой тест Бориса · раз в неделю</text>
+      <rect class="pyr p3" x="275" y="54" width="410" height="40" rx="4"/><text class="lb" x="480" y="79" text-anchor="middle">Режим тени · живая площадка без отправки</text>
+      <rect class="pyr p1" x="230" y="98" width="500" height="40" rx="4"/><text class="lb" x="480" y="123" text-anchor="middle">Экзамен Сары · 60 сценариев перед выкладкой</text>
+      <rect class="pyr p2" x="185" y="142" width="590" height="40" rx="4"/><text class="lb" x="480" y="167" text-anchor="middle">Сквозные · фальшивый Профи.ру, 15 сценариев · CI</text>
+      <rect class="pyr p2" x="140" y="186" width="680" height="40" rx="4"/><text class="lb" x="480" y="211" text-anchor="middle">Контракты и записанные образцы · CI</text>
+      <rect class="pyr p2" x="95" y="230" width="770" height="40" rx="4"/><text class="lb" x="480" y="255" text-anchor="middle">Интеграционные с Postgres · CI</text>
+      <rect class="pyr p2" x="50" y="274" width="860" height="40" rx="4"/><text class="lb" x="480" y="299" text-anchor="middle">Модульные: правила денег, машина состояний, разбор событий · каждое изменение</text>
+    </svg>
+  </div>
+</section>
+
+<section id="files">
+  <div class="shead"><div class="t"><span class="eyebrow">Где лежит</span><h2>Карта документов в репозитории</h2></div><button class="cbtn" data-c>Комментировать</button></div>
+  <div class="tbl" data-comment-target>
+    <table>
+      <thead><tr><th>Этап</th><th>Документы</th><th>Папка</th></tr></thead>
+      <tbody>
+        <tr><td>Вход</td><td>карта документов, README, правила разработки, правила для сессий Claude</td><td class="mono">docs/README.md, корень</td></tr>
+        <tr><td>Продукт</td><td>видение и границы, дорожная карта, карта историй, бэклог, пути пользователей, порядок старта</td><td class="mono">docs/product/</td></tr>
+        <tr><td>Интерфейс</td><td>потоки, дизайн-система</td><td class="mono">docs/ux/</td></tr>
+        <tr><td>Требования</td><td>спецификация 1.1</td><td class="mono">docs/spec/</td></tr>
+        <tr><td>Архитектура</td><td>контракты, словарь данных, техрадар, модель угроз, развёртывание, ADR-000..022</td><td class="mono">docs/architecture/, docs/adr/</td></tr>
+        <tr><td>Качество</td><td>стратегия тестирования и оценка Сары, DoR и DoD, трассируемость, приёмка M0</td><td class="mono">docs/quality/</td></tr>
+        <tr><td>Эксплуатация</td><td>цели надёжности, инструкции на случай сбоя, перенос и переключение</td><td class="mono">docs/ops/</td></tr>
+        <tr><td>Шаблоны</td><td>RFC, разбор сбоя, «Что нового», ADR, задачи и пул-реквесты GitHub</td><td class="mono">docs/templates/, .github/</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <span>Источники методов</span>
+  <ul>
+    <li>OWASP Top 10 для приложений с LLM, 2025: <a href="https://genai.owasp.org/llm-top-10/">genai.owasp.org</a></li>
+    <li>Anthropic, критерии успеха и проверки: <a href="https://platform.claude.com/docs/en/test-and-evaluate/develop-tests">platform.claude.com</a></li>
+    <li>MADR, формат записей решений: <a href="https://adr.github.io/madr/">adr.github.io/madr</a></li>
+    <li>Ходячий скелет, Алистер Кокберн: <a href="https://www.mattblodgett.com/2020/09/start-with-walking-skeleton.html">обзор</a></li>
+    <li>Google SRE Workbook, SLO и бюджет ошибок: <a href="https://www.oreilly.com/library/view/the-site-reliability/9781492029496/">O'Reilly</a></li>
+    <li>Amazon Working Backwards, PR/FAQ: <a href="https://coda.io/@colin-bryar/working-backwards-how-write-an-amazon-pr-faq">шаблон Колина Брайара</a></li>
+    <li>Diátaxis, устройство документации: <a href="https://ubuntu.com/blog/diataxis-a-new-foundation-for-canonical-documentation">Canonical</a></li>
+  </ul>
+</footer>
+</div>
+
+<script>
+(function(){
+  var btns = document.querySelectorAll('.filter button');
+  var rows = document.querySelectorAll('.art');
+  var stages = document.querySelectorAll('.stage');
+  btns.forEach(function(b){
+    b.addEventListener('click', function(){
+      var f = b.getAttribute('data-f');
+      btns.forEach(function(x){ x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      rows.forEach(function(r){ r.hidden = !(f === 'all' || r.getAttribute('data-v') === f); });
+      stages.forEach(function(s){
+        var any = s.querySelector('.art:not([hidden])');
+        s.hidden = !any;
+      });
+    });
+  });
+
+  var cbtns = document.querySelectorAll('[data-c]');
+  cbtns.forEach(function(b){ b.hidden = true; });
+  var c = window.claude;
+  if (!c || typeof c.use !== 'function') return;
+  c.use('comments').then(function(comments){
+    if (!comments) return;
+    cbtns.forEach(function(b){
+      b.hidden = false;
+      b.addEventListener('click', function(){
+        var sec = b.closest('section');
+        comments.openComposer({ element: sec }).catch(function(){});
+      });
+    });
+  }).catch(function(){});
+})();
+</script>
