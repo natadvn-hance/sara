@@ -10,10 +10,11 @@ afterAll(close)
 
 const WORKER = resolve(import.meta.dirname, 'decisionWaitWorker.ts')
 
-function spawnWorker(args: string[]): Promise<ChildProcess> {
+function spawnWorker(args: string[], env: Record<string, string> = {}): Promise<ChildProcess> {
   // One node process (no tsx wrapper), so SIGKILL really kills the worker.
   const child = spawn(process.execPath, ['--import', 'tsx', WORKER, ...args], {
     stdio: ['ignore', 'pipe', 'ignore'],
+    env: { ...process.env, ...env },
   })
   return new Promise((ok, fail) => {
     child.stdout?.on('data', (b: Buffer) => {
@@ -41,6 +42,16 @@ describe('decision wait', () => {
     const second = await spawnWorker([taskId, '3000'])
     await waitForCount(taskId, 1, 15000)
     await sleep(2000)
+    expect(await countEvents(db, 'task.reminded', taskId)).toBe(1)
+    second.kill('SIGKILL')
+  }, 40000)
+
+  it('NFR-REL-3: reminder survives a restart with changed code (a deploy)', async () => {
+    const taskId = newEventId()
+    const first = await spawnWorker([taskId, '3000'])
+    first.kill('SIGKILL')
+    const second = await spawnWorker([taskId, '3000'], { WORKER_CHANGED_CODE: '1' })
+    await waitForCount(taskId, 1, 15000)
     expect(await countEvents(db, 'task.reminded', taskId)).toBe(1)
     second.kill('SIGKILL')
   }, 40000)

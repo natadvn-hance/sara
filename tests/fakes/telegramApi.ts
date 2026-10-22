@@ -16,6 +16,8 @@ export type FakeTelegram = {
   answers: { callback_query_id: string; text?: string }[]
   pushStart(chatId: number): void
   pushPress(chatId: number, data: string): string
+  /** Simulates another program polling the same bot: getUpdates answers 409. */
+  setConflict(on: boolean): void
   close(): Promise<void>
 }
 
@@ -28,6 +30,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   let nextUpdate = 1
   let nextMessage = 100
   let nextCallback = 1
+  let conflict = false
   const now = () => Math.floor(Date.now() / 1000)
 
   const server = createServer((req, res) => {
@@ -53,6 +56,15 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
         case 'getMe':
           return reply({ id: 1, is_bot: true, first_name: 'Сара', username: 'sara_dev_bot' })
         case 'getUpdates': {
+          if (conflict) {
+            return res.writeHead(409, { 'content-type': 'application/json' }).end(
+              JSON.stringify({
+                ok: false,
+                error_code: 409,
+                description: 'Conflict: terminated by other getUpdates request',
+              }),
+            )
+          }
           const offset = params.offset ?? 0
           // Like Telegram: updates below the offset are confirmed and never sent again.
           for (let i = updates.length - 1; i >= 0; i--) {
@@ -121,6 +133,9 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
         },
       })
       return id
+    },
+    setConflict(on) {
+      conflict = on
     },
     close: () => new Promise((r) => server.close(() => r())),
   }

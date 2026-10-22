@@ -7,7 +7,7 @@ import type { Config } from './config'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
 import { createGateway } from './gateway/gateway'
-import { setOutboxDeps } from './leads/outbox'
+import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type BotControl, createBotControl } from './notify/botControl'
 import { createProfiClient } from './profi/client'
@@ -30,6 +30,8 @@ export type RunningApp = {
 export type StartOptions = {
   claudeEnv?: () => Record<string, string>
   retryDelaysMs?: number[]
+  remindAfterMs?: () => Promise<number>
+  notifyRetry?: { maxAttempts: number; intervalSeconds: number }
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -57,7 +59,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     db,
     gateway,
     notifier: bot.notifier,
-    remindAfterMs: async () => (await getSetting(db, 'reminder.decision_after_min')) * 60_000,
+    remindAfterMs:
+      o.remindAfterMs ??
+      (async () => (await getSetting(db, 'reminder.decision_after_min')) * 60_000),
+    notifyRetry: o.notifyRetry,
   })
   const lp = pipeline
   setOutboxDeps({
@@ -65,9 +70,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     notifier: bot.notifier,
     retryDelaysMs: o.retryDelaysMs ?? [1000, 2000, 4000, 8000, 16000],
+    resendCard: (taskId) => lp.resendCard(taskId),
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   await launchDbos(config.databaseUrl)
+  // Bids whose delivery never started (a crash right after Boris's press) are picked up now.
+  await resumeQueuedOutbox(db)
 
   const deps: AppDeps = {
     db,

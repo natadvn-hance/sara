@@ -9,6 +9,8 @@ import type { Notifier } from './notifier'
 export type TelegramRuntime = {
   start(): Promise<void>
   stop(): Promise<void>
+  /** Why polling stopped by itself (revoked token, another program on the same bot), in plain words. */
+  lastError(): string | null
   botUsername(): string | null
   notifier: Notifier
 }
@@ -86,18 +88,47 @@ export function createTelegramRuntime(d: {
   }
 
   let running: Promise<void> | null = null
+  let lastError: string | null = null
+
+  function explain(err: unknown): string {
+    const code = (err as { error_code?: number }).error_code
+    if (code === 409) {
+      return 'Этого бота уже читает другая программа (например, старая Сара). Создай отдельного бота или останови другую программу.'
+    }
+    if (code === 401)
+      return 'Telegram больше не принимает токен бота. Выпусти новый у @BotFather и вставь его в мастере.'
+    return `Бот перестал получать сообщения: ${err instanceof Error ? err.message : String(err)}`
+  }
 
   return {
     async start() {
       await bot.init()
-      await new Promise<void>((ready) => {
-        running = bot.start({ onStart: () => ready() })
+      lastError = null
+      await new Promise<void>((ready, fail) => {
+        // Polling errors must never become an unhandled rejection: that would stop the whole core.
+        running = bot.start({ onStart: () => ready() }).catch(async (err) => {
+          lastError = explain(err)
+          fail(err)
+          await appendEvent(d.db, {
+            type: 'health.check_failed',
+            v: 1,
+            entity: { kind: 'telegram_bot', id: bot.botInfo.username },
+            account_id: null,
+            actor: 'system',
+            occurred_at: new Date().toISOString(),
+            causation_id: null,
+            correlation_id: newEventId(),
+            reason: lastError,
+            payload: { error_code: (err as { error_code?: number }).error_code ?? null },
+          }).catch(() => {})
+        })
       })
     },
     async stop() {
       if (bot.isRunning()) await bot.stop()
       await running
     },
+    lastError: () => lastError,
     botUsername: () => (bot.isInited() ? bot.botInfo.username : null),
     notifier: {
       async sendLeadCard(c) {

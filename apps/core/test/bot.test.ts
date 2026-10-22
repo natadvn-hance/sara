@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFakeTelegram, type FakeTelegram } from '../../../tests/fakes/telegramApi'
 import { boundChat } from '../src/notify/binding'
+import { createBotControl } from '../src/notify/botControl'
 import { createTelegramRuntime, type TelegramRuntime } from '../src/notify/telegram'
 import { getMe } from '../src/notify/telegramApi'
 import { openTestDb, resetDb } from './helpers/db'
@@ -86,6 +87,20 @@ describe('telegram bot', () => {
     })
     expect(tg.sent[1]?.chat_id).toBe(111)
     expect(tg.sent[1]?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toBe(`t:${taskId}:bid`)
+  })
+
+  it('FR-OPS-2: another program polling the same bot does not crash the core and is reported', async () => {
+    await bot.stop()
+    tg.setConflict(true)
+    const control = createBotControl({ db, apiRoot: tg.apiRoot, onPress })
+    await control.start(tg.token).catch(() => {})
+    const end = Date.now() + 3000
+    while (Date.now() < end && !control.lastError()) await new Promise((r) => setTimeout(r, 50))
+    expect(control.lastError()).toMatch(/другая программа/)
+    await control.stop()
+    tg.setConflict(false)
+    bot = createTelegramRuntime({ token: tg.token, apiRoot: tg.apiRoot, db, onPress })
+    await bot.start()
   })
 
   it('FR-SET-2: getMe tells a working token from an unknown one', async () => {

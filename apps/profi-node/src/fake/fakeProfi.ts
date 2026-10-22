@@ -17,6 +17,7 @@ export type FakeProfi = {
   emitOrder(o?: Partial<ProfiOrder>): Promise<string>
   redeliver(eventId: string): Promise<void>
   failNextAck(): void
+  failAcks(n: number): void
   setCoreEventsUrl(url: string): void
   setHealth(h: Partial<SessionHealthOutput>): void
   close(): Promise<void>
@@ -42,7 +43,7 @@ export async function createFakeProfi(o: {
     egress_ip: '127.0.0.1',
   }
   let balance = 5000
-  let dropNextAck = false
+  let dropAcks = 0
   let coreEventsUrl = o.coreEventsUrl
 
   const impl = {
@@ -53,18 +54,16 @@ export async function createFakeProfi(o: {
       if (!verifyPermit(o.permitSecret, i.idempotency_key, i.permit)) {
         throw new ProfiToolError('INTERNAL', 'permit does not match idempotency_key')
       }
-      const done = results.get(i.idempotency_key)
-      if (done) return done
-      balance -= 210
-      const out: SubmitBidOutput = {
-        found_on_page: true,
-        spent_rub: 210,
-        balance_after_rub: balance,
+      let out = results.get(i.idempotency_key)
+      if (!out) {
+        balance -= 210
+        out = { found_on_page: true, spent_rub: 210, balance_after_rub: balance }
+        bids.push(i)
+        results.set(i.idempotency_key, out)
       }
-      bids.push(i)
-      results.set(i.idempotency_key, out)
-      if (dropNextAck) {
-        dropNextAck = false
+      // A lost answer: the bid is on the site, the caller never hears back.
+      if (dropAcks > 0) {
+        dropAcks--
         throw new Error('connection reset after the bid went out')
       }
       return out
@@ -122,7 +121,10 @@ export async function createFakeProfi(o: {
       await deliver(e)
     },
     failNextAck() {
-      dropNextAck = true
+      dropAcks = 1
+    },
+    failAcks(n) {
+      dropAcks = n
     },
     setCoreEventsUrl(url) {
       coreEventsUrl = url

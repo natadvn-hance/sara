@@ -76,6 +76,10 @@ export function runClaude(o: {
       clearTimeout(timer)
       done({ code, stdout, stderr, timedOut, durationMs: Date.now() - started })
     })
+    // A CLI that dies before reading its input must not crash the core (EPIPE).
+    child.stdin.on('error', (e) => {
+      stderr += `stdin: ${String(e)}`
+    })
     child.stdin.end(o.input)
   })
 }

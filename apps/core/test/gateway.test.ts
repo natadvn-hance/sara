@@ -148,6 +148,22 @@ describe('model gateway', () => {
     expect(r.durationMs).toBeLessThan(5000)
   })
 
+  it('LLM-1: a CLI that exits without reading its input is cli_failed and does not crash the process', async () => {
+    const secrets = createSecretStore(join(dir, 'data'))
+    await secrets.set('claude_oauth_token', 'tok')
+    const gw = createGateway({
+      db,
+      secrets,
+      claudeBin: '/usr/bin/false',
+      rolesDir: join(dir, 'roles'),
+      dataDir: join(dir, 'data'),
+    })
+    expect(await gw.call('probe', 'x'.repeat(200_000), ProbeOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'cli_failed',
+    })
+  })
+
   it('LLM-1: runs at most two calls at once', async () => {
     const gw = await gateway({ FAKE_CLAUDE_MODE: 'sleep', FAKE_CLAUDE_SLEEP_MS: '400' })
     await Promise.all(Array.from({ length: 5 }, () => gw.call('probe', 'x', ProbeOutput)))

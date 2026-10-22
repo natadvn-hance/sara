@@ -9,6 +9,7 @@ export type BotControl = {
   stop(): Promise<void>
   isBound(): Promise<boolean>
   botUsername(): string | null
+  lastError(): string | null
   notifier: Notifier
 }
 
@@ -35,6 +36,7 @@ export function createBotControl(d: {
     },
     isBound: async () => (await boundChat(d.db)) !== null,
     botUsername: () => runtime?.botUsername() ?? null,
+    lastError: () => runtime?.lastError() ?? null,
     notifier: {
       sendLeadCard: (c) => current().notifier.sendLeadCard(c),
       sendText: (t) => current().notifier.sendText(t),

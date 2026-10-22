@@ -26,6 +26,11 @@ setReminderHandler(async (id) => {
     payload: {},
   })
 })
+if (process.env.WORKER_CHANGED_CODE === '1') {
+  // Simulates a deploy: one more registered workflow changes the code DBOS sees.
+  const { DBOS } = await import('@dbos-inc/dbos-sdk')
+  DBOS.registerWorkflow(async () => 'new', { name: 'addedInNextRelease' })
+}
 await launchDbos(testDatabaseUrl())
 await startDecisionWait(taskId, Number(remindAfterMs))
 console.log('started')

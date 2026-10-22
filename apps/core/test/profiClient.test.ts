@@ -13,6 +13,7 @@ afterAll(close)
 let app: FastifyInstance
 let fake: FakeProfi
 let seen: EventEnvelope[]
+let failNextOnEvent = false
 
 beforeEach(async () => {
   await resetDb(db)
@@ -23,6 +24,10 @@ beforeEach(async () => {
     nodeToken: 'node-tok',
     onEvent: async (e) => {
       seen.push(e)
+      if (failNextOnEvent) {
+        failNextOnEvent = false
+        throw new Error('core crashed before the workflow started')
+      }
     },
   })
   const coreUrl = await app.listen({ port: 0, host: '127.0.0.1' })
@@ -80,10 +85,19 @@ describe('profi client and event intake', () => {
     expect(await client.sessionHealth('hance-marketing')).toMatchObject({ alive: true })
   })
 
-  it('C8: the same order_seen delivered twice is accepted once', async () => {
+  it('C8: the same order_seen delivered twice is journaled once and reported as a duplicate', async () => {
     const id = await fake.emitOrder({ order_id: '555' })
     await fake.redeliver(id)
-    expect(seen).toHaveLength(1)
+    expect(await countEvents(db, 'profi.order_seen')).toBe(1)
+    // Processing is triggered again on purpose (it is idempotent); one lead, one card is checked in e2e.
+    expect(seen).toHaveLength(2)
+  })
+
+  it('C8: an order whose processing failed is processed again on redelivery', async () => {
+    failNextOnEvent = true
+    const id = await fake.emitOrder({ order_id: '556' }).catch(() => '')
+    if (id) await fake.redeliver(id)
+    expect(seen.filter((e) => e.entity.id === '556').length).toBeGreaterThanOrEqual(2)
     expect(await countEvents(db, 'profi.order_seen')).toBe(1)
   })
 

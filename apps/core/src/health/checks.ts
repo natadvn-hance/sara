@@ -46,6 +46,8 @@ async function telegramCheck(d: AppDeps): Promise<HealthCheck> {
       fix: 'Открой мастер запуска, шаг Telegram, и вставь токен заново.',
     }
   }
+  const polling = d.bot.lastError()
+  if (polling) return { ...base, ok: false, detail: 'Бот не получает сообщения', fix: polling }
   if (!(await d.bot.isBound())) {
     return {
       ...base,
