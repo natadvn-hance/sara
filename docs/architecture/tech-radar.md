@@ -21,6 +21,7 @@
 | Tailwind CSS + shadcn/ui + Lucide | дизайн-система |
 | Playwright (Chromium) | живые вкладки Профи-MCP и тесты пульта |
 | MCP TypeScript SDK | Профи-MCP |
+| `ws`, `@fastify/websocket` | живой экран вкладки аккаунта (ADR-023) |
 | Vitest | тесты |
 | Biome | форматирование и линтер одним инструментом |
 | pino | журнал работы процессов |
