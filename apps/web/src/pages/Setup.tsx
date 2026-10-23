@@ -148,6 +148,41 @@ function ClaudeStep({ done }: { done: () => void }) {
   )
 }
 
+function ProfiStep({ done }: { done: () => void }) {
+  const a = useAction()
+  return (
+    <Card>
+      <h2 className="font-display text-lg">Шаг 4. Профи.ру</h2>
+      <p>
+        Сара входит в твой аккаунт Профи.ру на своём сервере. Ты входишь сам на живом экране:
+        телефон и код из СМС, как на сайте. Можно с телефона.
+      </p>
+      <a
+        className="text-accent underline"
+        href="/accounts/hance-marketing/login"
+        onClick={(e) => {
+          e.preventDefault()
+          go('/accounts/hance-marketing/login')
+        }}
+      >
+        Открыть живой экран
+      </a>
+      <Button
+        variant="secondary"
+        disabled={a.busy}
+        onClick={() =>
+          a.run(async () => {
+            await api('/api/setup/profi/later', {})
+            done()
+          })
+        }
+      >
+        Сделать позже
+      </Button>
+    </Card>
+  )
+}
+
 export function SetupPage() {
   const qc = useQueryClient()
   const state = useQuery({ queryKey: ['setup'], queryFn: () => api<SetupState>('/api/setup') })
@@ -157,10 +192,11 @@ export function SetupPage() {
   return (
     <main className="mx-auto grid max-w-xl gap-4 px-4 py-6">
       <h1 className="font-display text-2xl">Мастер запуска</h1>
-      <p className="text-muted">{`Готово шагов: ${completed.length} из 3`}</p>
+      <p className="text-muted">{`Готово шагов: ${completed.length} из 4`}</p>
       {next === 'password' ? <PasswordStep done={refresh} /> : null}
       {next === 'telegram' ? <TelegramStep done={refresh} /> : null}
       {next === 'claude' ? <ClaudeStep done={refresh} /> : null}
+      {next === 'profi' ? <ProfiStep done={refresh} /> : null}
       {next === 'done' ? (
         <Card>
           <p className="text-lg">Готово. Сара на связи.</p>

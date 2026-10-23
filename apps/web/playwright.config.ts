@@ -16,6 +16,12 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      command: 'pnpm exec tsx e2e/standInProfi.ts',
+      url: 'http://127.0.0.1:18083/_control/health',
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
       command: `pnpm exec tsx e2e/prepareDb.ts && pnpm --filter @sara/core exec tsx src/main.ts`,
       url: 'http://127.0.0.1:3100/api/setup',
       reuseExistingServer: false,
@@ -24,6 +30,7 @@ export default defineConfig({
         SARA_PORT: '3100',
         SARA_DATA_DIR: `${ROOT}/.sara/web-e2e`,
         SARA_TELEGRAM_API_ROOT: 'http://127.0.0.1:18081',
+        SARA_PROFI_MCP_URL: 'http://127.0.0.1:7171/mcp',
         SARA_CLAUDE_BIN: `${ROOT}/tests/fakes/fake-claude.mjs`,
         SARA_TEST_CLAUDE_ENV: JSON.stringify({
           FAKE_CLAUDE_MODE: 'ok',

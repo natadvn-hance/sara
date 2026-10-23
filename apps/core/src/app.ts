@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify'
+import { seedAccounts } from './accounts/accounts'
+import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
 import { speedReport } from './analytics/speed'
 import type { AppDeps } from './api/deps'
 import { buildServer } from './api/server'
@@ -12,6 +14,7 @@ import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type BotControl, createBotControl } from './notify/botControl'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
+import { registerScreenProxy } from './screen/screenProxy'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
@@ -73,6 +76,11 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     resendCard: (taskId) => lp.resendCard(taskId),
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
+  const accountEvents = createProfiEventDispatcher({
+    db,
+    notifier: bot.notifier,
+    publicUrl: config.publicUrl,
+  })
   await launchDbos(config.databaseUrl)
   // Bids whose delivery never started (a crash right after Boris's press) are picked up now.
   await resumeQueuedOutbox(db)
@@ -85,18 +93,28 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     production: config.production,
     telegramApiRoot: config.telegramApiRoot,
+    accounts: config.accounts,
   }
+  await seedAccounts(db, config.accounts)
   const app = await buildServer(deps)
+  await registerScreenProxy(app, {
+    profiScreenUrl: config.profiScreenUrl,
+    nodeToken: config.nodeToken,
+  })
   registerProfiEventsRoute(app, {
     db,
     nodeToken: config.nodeToken,
-    onEvent: (e) => lp.onOrderSeen(e),
+    onEvent: (e) =>
+      routeProfiEvent(
+        { db, onOrderSeen: (x) => lp.onOrderSeen(x), onAccountEvent: accountEvents },
+        e,
+      ),
   })
   app.register(async (scoped) => {
     scoped.addHook('preHandler', requireSession)
     scoped.get('/api/metrics/speed', async () => speedReport(db))
   })
-  const url = await app.listen({ port: config.port, host: '127.0.0.1' })
+  const url = await app.listen({ port: config.port, host: config.host })
 
   const token = await secrets.get('telegram_bot_token')
   if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))

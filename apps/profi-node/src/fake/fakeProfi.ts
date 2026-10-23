@@ -50,6 +50,19 @@ export async function createFakeProfi(o: {
     async sessionHealth() {
       return health
     },
+    // The fake keeps no feed or chats: read tools answer empty, as a fresh account would.
+    async listFeed() {
+      return { orders: [] }
+    },
+    async getOrder(i: { order_id: string }): Promise<never> {
+      throw new ProfiToolError('NOT_FOUND', `order ${i.order_id} is not known to the fake`)
+    },
+    async listChats() {
+      return { chats: [] }
+    },
+    async readChat(i: { chat_id: string }): Promise<never> {
+      throw new ProfiToolError('NOT_FOUND', `chat ${i.chat_id} is not known to the fake`)
+    },
     async submitBid(i: SubmitBidInput) {
       if (!verifyPermit(o.permitSecret, i.idempotency_key, i.permit)) {
         throw new ProfiToolError('INTERNAL', 'permit does not match idempotency_key')

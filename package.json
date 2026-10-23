@@ -19,9 +19,13 @@
     "dev": "tsx scripts/dev.ts",
     "smoke:claude-container": "bash scripts/smoke-claude-container.sh",
     "report:speed": "pnpm --filter @sara/core report:speed",
-    "bids:on": "pnpm --filter @sara/core bids on",
-    "bids:off": "pnpm --filter @sara/core bids off",
-    "claude:token": "bash scripts/save-claude-token.sh"
+    "bids:on": "pnpm --filter @sara/core bids bids on",
+    "bids:off": "pnpm --filter @sara/core bids bids off",
+    "claude:token": "bash scripts/save-claude-token.sh",
+    "leads:on": "pnpm --filter @sara/core bids leads on",
+    "leads:off": "pnpm --filter @sara/core bids leads off",
+    "check:ports": "tsx scripts/check-ports.ts",
+    "deploy": "bash scripts/deploy.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",

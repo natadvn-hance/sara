@@ -4,8 +4,11 @@ export type Config = {
   databaseUrl: string
   dataDir: string
   port: number
+  host: string
   publicUrl: string
   profiMcpUrl: string
+  profiScreenUrl: string
+  accounts: { id: string; title: string; egressIp: string }[]
   nodeToken: string
   permitSecret: string
   claudeBin: string
@@ -29,8 +32,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databaseUrl: env.DATABASE_URL ?? 'postgres://sara:sara@localhost:54329/sara',
     dataDir: resolve(env.SARA_DATA_DIR ?? resolve(ROOT, '.sara')),
     port: Number(env.SARA_PORT ?? 3300),
+    host: env.SARA_HOST ?? '127.0.0.1',
     publicUrl: env.SARA_PUBLIC_URL ?? 'http://localhost:5173',
     profiMcpUrl: env.SARA_PROFI_MCP_URL ?? 'http://localhost:7070/mcp',
+    profiScreenUrl:
+      env.SARA_PROFI_SCREEN_URL ??
+      (env.SARA_PROFI_MCP_URL ?? 'http://localhost:7070/mcp')
+        .replace(/^http/, 'ws')
+        .replace(/\/mcp$/, ''),
+    accounts: JSON.parse(
+      env.SARA_ACCOUNTS ??
+        '[{"id":"hance-marketing","title":"Hance маркетинг","egressIp":"127.0.0.1"}]',
+    ),
     nodeToken: required('SARA_NODE_TOKEN', 'dev-node-token'),
     permitSecret: required('SARA_PERMIT_SECRET', 'dev-permit-secret'),
     claudeBin: env.SARA_CLAUDE_BIN ?? 'claude',

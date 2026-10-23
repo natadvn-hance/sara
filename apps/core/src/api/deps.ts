@@ -13,4 +13,8 @@ export type AppDeps = {
   production: boolean
   telegramApiRoot?: string
   accountId?: string
+  /** Accounts of this server with the IP each must go out from (FR-ACC-1). */
+  accounts?: AccountConfig[]
 }
+
+export type AccountConfig = { id: string; title: string; egressIp: string }

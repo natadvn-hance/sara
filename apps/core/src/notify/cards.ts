@@ -24,6 +24,15 @@ export const TEXTS = {
   bidsPausedPress: 'Отправка откликов на паузе. Включи её и нажми снова.',
   bidSent: (title: string, priceRub: number) =>
     `✅ Отклик отправлен: ${title}, ${formatRub(priceRub)}`,
+  sessionDead: (title: string, loginUrl: string) =>
+    `🔴 Профи.ру разлогинил аккаунт ${title}. Пока ты не войдёшь, я ничего не вижу на этом аккаунте.\nВойти: ${loginUrl}`,
+  banned: (title: string) =>
+    `🚫 Профи.ру заблокировал профиль ${title}. Действия аккаунта остановлены.`,
+  sessionAlive: (title: string) =>
+    `🟢 Сессия ${title} снова живая. Сверяю, что пришло за время простоя.`,
+  connectionLost: (sinceMsk: string) =>
+    `🌐 Нет связи с Профи.ру с ${sinceMsk}. Пробую раз в 5 минут.`,
+  connectionBack: '🌐 Связь с Профи.ру вернулась. Сверяю, что пришло.',
   reminder: (title: string) => `⏰ Заявка ждёт решения: ${title}`,
 }
 

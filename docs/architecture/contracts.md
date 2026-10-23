@@ -96,6 +96,12 @@ Code, и единственное, что их связывает, это кон
 `client_message`, `client_typing`, `client_read`, `chat_closed`,
 `session_dead`, `profile_banned`, `layout_changed`, `balance_changed`.
 
+Добавлено в M1: `session_alive` (вход снова жив, с временем, когда умер),
+`author_unclear` (автор сообщения не определён, действий по чату нет),
+`connection_lost` и `connection_back` (площадка недоступна дольше 30
+минут и снова доступна). В событиях о сообщениях нет текста клиента:
+только номера, время и автор (ADR-022); текст лежит в схеме `node`.
+
 **Классы ошибок:** `SESSION_DEAD`, `BANNED`, `LAYOUT_CHANGED`,
 `NOT_FOUND`, `ORDER_CLOSED`, `NO_MONEY`, `RATE_LIMITED`, `UNCERTAIN`
 (действие могло пройти, нужна проверка), `INTERNAL`.

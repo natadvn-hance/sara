@@ -57,6 +57,10 @@ describe('fake Profi-MCP', () => {
     const c = await mcp()
     const tools = await c.listTools()
     expect(tools.tools.map((t) => t.name).sort()).toEqual([
+      'profi.get_order',
+      'profi.list_chats',
+      'profi.list_feed',
+      'profi.read_chat',
       'profi.session_health',
       'profi.submit_bid',
     ])

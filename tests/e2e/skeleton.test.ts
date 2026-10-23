@@ -106,6 +106,8 @@ beforeEach(async () => {
   tg.pushStart(111)
   await until(() => tg.sent.length === 1)
   await setSetting(db, 'outbound.bids', true, 'boris')
+  // M0 path: leads go to Boris as cards (on the server in shadow they are only journaled).
+  await setSetting(db, 'pipeline.leads', true, 'boris')
 })
 
 describe('walking skeleton', () => {

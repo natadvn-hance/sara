@@ -1,4 +1,9 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import {
+  createServer,
+  type Server as HttpServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http'
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 
@@ -23,7 +28,8 @@ export async function serveMcp(
   make: () => Server,
   port: number,
   extra?: ExtraRoute,
-): Promise<{ url: string; close(): Promise<void> }> {
+  host = '127.0.0.1',
+): Promise<{ url: string; http: HttpServer; close(): Promise<void> }> {
   const http = createServer(async (req, res) => {
     const body = await readBody(req)
     if (req.url?.startsWith('/mcp')) {
@@ -43,10 +49,15 @@ export async function serveMcp(
     if (extra && (await extra(req, body, res))) return
     res.writeHead(404).end()
   })
-  await new Promise<void>((r) => http.listen(port, '127.0.0.1', r))
+  await new Promise<void>((r) => http.listen(port, host, r))
   const actual = (http.address() as { port: number }).port
   return {
     url: `http://127.0.0.1:${actual}/mcp`,
-    close: () => new Promise((r) => http.close(() => r())),
+    http,
+    close: () =>
+      new Promise((r) => {
+        http.closeAllConnections()
+        http.close(() => r())
+      }),
   }
 }

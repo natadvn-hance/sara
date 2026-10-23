@@ -57,6 +57,19 @@ export const lead = core.table('lead', {
   createdAt: ts('created_at').notNull().defaultNow(),
 })
 
+export const account = core.table('account', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  profiProfileId: text('profi_profile_id'),
+  loginState: text('login_state').notNull().default('unknown'),
+  presence: boolean('presence').notNull().default(false),
+  egressIp: text('egress_ip').notNull(),
+  balanceRub: integer('balance_rub'),
+  balanceAt: ts('balance_at'),
+  paused: boolean('paused').notNull().default(false),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+
 export const deal = core.table('deal', {
   id: uuid('id').primaryKey(),
   leadId: text('lead_id')
