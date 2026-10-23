@@ -3,7 +3,16 @@
 # so only short commands cross the slow link from the Mac (ADR-021).
 set -euo pipefail
 HOST="${1:?Укажи сервер: pnpm deploy sara@<адрес>}"
-SSH="ssh -o BatchMode=yes -o ConnectTimeout=40 -o ServerAliveInterval=5 $HOST"
+# The link from the Mac loses packets: every call is retried a few times before giving up.
+SSH=ssh_retry
+ssh_retry() {
+  for i in 1 2 3 4 5 6; do
+    ssh -o BatchMode=yes -o ConnectTimeout=40 -o ServerAliveInterval=5 "$HOST" "$@" && return 0
+    [ $? -ne 255 ] && return 1
+    sleep 5
+  done
+  return 255
+}
 $SSH 'cd /opt/sara && git fetch -q origin && git checkout -q --detach origin/main && git log --oneline -1
   nohup sh -c "docker compose -f infra/compose.prod.yml --env-file .env up -d --build --remove-orphans && echo DEPLOY-OK || echo DEPLOY-FAILED" > /tmp/deploy.log 2>&1 &'
 echo "Сборка идёт на сервере; ход: ssh $HOST tail -f /tmp/deploy.log"
