@@ -52,38 +52,47 @@ export function createEyes(o: {
         presence = s.on
         continue
       }
-      await o.db.transaction(async (tx) => {
-        if (s.t === 'order') {
-          const isNew = await upsertOrder(tx, {
-            accountId: o.accountId,
-            order: s.order,
-            body: { ...s.order, published_at: s.published_at },
-          })
-          if (!isNew) return
+      // One broken signal (an odd date, a missing field) must not stop the rest of the batch; its raw record stays.
+      await o.db
+        .transaction(async (tx) => {
+          if (s.t === 'order') {
+            const isNew = await upsertOrder(tx, {
+              accountId: o.accountId,
+              order: s.order,
+              body: { ...s.order, published_at: s.published_at },
+            })
+            if (!isNew) return
+            await queueEvent(tx, {
+              type: 'profi.order_seen',
+              accountId: o.accountId,
+              entity: { kind: 'order', id: s.order.order_id },
+              payload: s.order,
+            })
+            return
+          }
+          const m = s.message
+          const isNew = await upsertMessage(tx, { accountId: o.accountId, message: m })
+          if (!isNew || m.author === 'specialist' || m.author === 'system') return
           await queueEvent(tx, {
-            type: 'profi.order_seen',
+            type: m.author === 'client' ? 'profi.client_message' : 'profi.author_unclear',
             accountId: o.accountId,
-            entity: { kind: 'order', id: s.order.order_id },
-            payload: s.order,
+            entity: { kind: 'chat', id: m.chat_id },
+            payload: {
+              chat_id: m.chat_id,
+              order_id: m.order_id,
+              platform_message_id: m.platform_message_id,
+              sent_at: m.sent_at,
+              author: m.author,
+            },
           })
-          return
-        }
-        const m = s.message
-        const isNew = await upsertMessage(tx, { accountId: o.accountId, message: m })
-        if (!isNew || m.author === 'specialist' || m.author === 'system') return
-        await queueEvent(tx, {
-          type: m.author === 'client' ? 'profi.client_message' : 'profi.author_unclear',
-          accountId: o.accountId,
-          entity: { kind: 'chat', id: m.chat_id },
-          payload: {
-            chat_id: m.chat_id,
-            order_id: m.order_id,
-            platform_message_id: m.platform_message_id,
-            sent_at: m.sent_at,
-            author: m.author,
-          },
         })
-      })
+        .catch((err) =>
+          console.error(
+            'signal skipped',
+            s.t,
+            err instanceof Error ? err.message.slice(0, 120) : err,
+          ),
+        )
     }
   }
 

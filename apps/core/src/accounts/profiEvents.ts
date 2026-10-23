@@ -53,12 +53,19 @@ export async function handleProfiEvent(d: ProfiEventDeps, e: EventEnvelope): Pro
   }
 }
 
-const moscowTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString('ru-RU', {
+const moscowDay = (d: Date) =>
+  d.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit' })
+
+/** Time in Moscow; the date too when it was not today, so an outage over midnight is not ambiguous. */
+const moscowTime = (iso: string) => {
+  const d = new Date(iso)
+  const time = d.toLocaleTimeString('ru-RU', {
     timeZone: 'Europe/Moscow',
     hour: '2-digit',
     minute: '2-digit',
   })
+  return moscowDay(d) === moscowDay(new Date()) ? time : `${moscowDay(d)} ${time}`
+}
 
 let deps: ProfiEventDeps | null = null
 

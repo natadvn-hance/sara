@@ -187,4 +187,31 @@ describe('eyes', () => {
     await e.checkSilence(Date.now(), true)
     expect(await events('profi.layout_changed')).toHaveLength(0)
   })
+
+  it('FR-CONV-1: one broken signal does not stop the others in the same batch', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const msg = (id: string, sentAt: string) => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: 'c-b',
+        order_id: null,
+        author: 'client' as const,
+        sent_at: sentAt,
+        text: 'x',
+        read: false,
+      },
+    })
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'chat',
+        signals: [msg('bad', ''), msg('good', new Date().toISOString())],
+      },
+      'dom',
+    )
+    expect(
+      (await events('profi.client_message')).map((x) => x.payload.platform_message_id),
+    ).toEqual(['good'])
+  })
 })
