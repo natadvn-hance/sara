@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { seedAccounts } from './accounts/accounts'
 import { speedReport } from './analytics/speed'
 import type { AppDeps } from './api/deps'
 import { buildServer } from './api/server'
@@ -12,6 +13,7 @@ import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type BotControl, createBotControl } from './notify/botControl'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
+import { registerScreenProxy } from './screen/screenProxy'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
@@ -85,8 +87,14 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     production: config.production,
     telegramApiRoot: config.telegramApiRoot,
+    accounts: config.accounts,
   }
+  await seedAccounts(db, config.accounts)
   const app = await buildServer(deps)
+  await registerScreenProxy(app, {
+    profiScreenUrl: config.profiScreenUrl,
+    nodeToken: config.nodeToken,
+  })
   registerProfiEventsRoute(app, {
     db,
     nodeToken: config.nodeToken,

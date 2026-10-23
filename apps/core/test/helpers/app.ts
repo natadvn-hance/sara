@@ -12,6 +12,13 @@ import { createSecretStore } from '../../src/secrets/store'
 
 export const ROOT = resolve(import.meta.dirname, '../../../..')
 
+export type TestHealth = {
+  alive: boolean
+  balance_rub: number | null
+  presence: boolean
+  egress_ip: string | null
+}
+
 export type TestApp = {
   app: FastifyInstance
   tg: FakeTelegram
@@ -23,6 +30,9 @@ export type TestApp = {
 export async function buildTestApp(
   db: Db,
   claudeEnv: Record<string, string> = {},
+  health: { current: TestHealth } = {
+    current: { alive: true, balance_rub: 5000, presence: true, egress_ip: '127.0.0.1' },
+  },
 ): Promise<TestApp> {
   const dir = await mkdtemp(join(tmpdir(), 'app-'))
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
@@ -37,12 +47,7 @@ export async function buildTestApp(
     extraEnv: { FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT: '{"ok":true}', ...claudeEnv },
   })
   const profi: ProfiClient = {
-    sessionHealth: async () => ({
-      alive: true,
-      balance_rub: 5000,
-      presence: true,
-      egress_ip: '127.0.0.1',
-    }),
+    sessionHealth: async () => health.current,
     submitBid: async () => {
       throw new Error('not used here')
     },
@@ -56,6 +61,7 @@ export async function buildTestApp(
     bot,
     production: false,
     telegramApiRoot: tg.apiRoot,
+    accounts: [{ id: 'hance-marketing', title: 'Hance маркетинг', egressIp: '127.0.0.1' }],
   })
   let sessionCookie = ''
   app.addHook('onSend', async (_req, reply, payload) => {

@@ -20,7 +20,10 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
   return data as T
 }
 
-export type SetupState = { next: 'password' | 'telegram' | 'claude' | 'done'; completed: string[] }
+export type SetupState = {
+  next: 'password' | 'telegram' | 'claude' | 'profi' | 'done'
+  completed: string[]
+}
 export type HealthCheck = {
   id: string
   ok: boolean
