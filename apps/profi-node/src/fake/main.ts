@@ -15,7 +15,9 @@ const fake = await createFakeProfi({
     if (req.method !== 'POST' || req.url !== '/fake/orders' || !emit) return false
     const orders = sampleOrders()
     const pick = orders[Math.floor(Math.random() * orders.length)]
-    const id = await emit({ ...pick, order_id: `${Date.now()}` })
+    // seen_at is left out so the order is seen now, not at the sample's date.
+    const { seen_at: _seenAt, ...order } = pick ?? {}
+    const id = await emit({ ...order, order_id: `${Date.now()}` })
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ eventId: id }))
     return true
   },
