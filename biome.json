@@ -11,7 +11,9 @@
       "!.superpowers",
       "!**/drizzle/meta",
       "!playwright-report",
-      "!test-results"
+      "!test-results",
+      "!.release-please-manifest.json",
+      "!CHANGELOG.md"
     ]
   },
   "formatter": {
