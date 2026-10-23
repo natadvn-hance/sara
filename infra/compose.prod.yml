@@ -6,7 +6,8 @@ services:
   caddy:
     build: { context: .., dockerfile: infra/docker/web.Dockerfile }
     restart: unless-stopped
-    ports: ["443:443", "80:80"]
+    # 8080 only on the tunnel address: the entry server in front of us reaches the panel through it.
+    ports: ["443:443", "80:80", "${FRONT_TUNNEL_BIND:-127.0.0.1}:8080:8080"]
     environment:
       SARA_DOMAIN: ${SARA_DOMAIN}
     volumes: [caddy-data:/data]
@@ -23,7 +24,8 @@ services:
       SARA_DATA_DIR: /data
       SARA_PORT: "3300"
       SARA_HOST: 0.0.0.0
-      SARA_PUBLIC_URL: https://${SARA_DOMAIN}
+      # The address Boris opens: the entry server when there is one (alarm links point there).
+      SARA_PUBLIC_URL: https://${SARA_PUBLIC_DOMAIN:-${SARA_DOMAIN}}
       SARA_PROFI_MCP_URL: http://profi-node:7070/mcp
       SARA_NODE_TOKEN: ${SARA_NODE_TOKEN}
       SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET}

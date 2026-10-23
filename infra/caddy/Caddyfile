@@ -1,4 +1,4 @@
-{$SARA_DOMAIN} {
+(sara) {
 	encode zstd gzip
 	# /internal is only for Profi-MCP inside Docker; never from outside (T4).
 	@internal path /internal/*
@@ -11,4 +11,13 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+{$SARA_DOMAIN} {
+	import sara
+}
+
+# Plain HTTP for the entry server only, over the WireGuard tunnel (infra/front); bound to the tunnel address.
+http://:8080 {
+	import sara
 }

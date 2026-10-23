@@ -1,0 +1,9 @@
+# Entry server (213.155.28.126): the panel for Boris from Russia, passed through the tunnel to the main server.
+{$FRONT_DOMAIN} {
+	reverse_proxy 10.77.0.1:8080 {
+		# Long-lived live screen and slow tunnel moments.
+		transport http {
+			dial_timeout 10s
+		}
+	}
+}
