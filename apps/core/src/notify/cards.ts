@@ -30,6 +30,9 @@ export const TEXTS = {
     `🚫 Профи.ру заблокировал профиль ${title}. Действия аккаунта остановлены.`,
   sessionAlive: (title: string) =>
     `🟢 Сессия ${title} снова живая. Сверяю, что пришло за время простоя.`,
+  connectionLost: (sinceMsk: string) =>
+    `🌐 Нет связи с Профи.ру с ${sinceMsk}. Пробую раз в 5 минут.`,
+  connectionBack: '🌐 Связь с Профи.ру вернулась. Сверяю, что пришло.',
   reminder: (title: string) => `⏰ Заявка ждёт решения: ${title}`,
 }
 

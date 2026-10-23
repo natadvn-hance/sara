@@ -97,3 +97,14 @@ describe('routing of Profi events', () => {
     expect(calls).toEqual(['pipeline', 'account'])
   })
 })
+
+describe('connection messages', () => {
+  it('ADR-021: lost and back give one 🌐 each in plain words', async () => {
+    await handleProfiEvent(d(), ev('profi.connection_lost', { since: '2026-10-23T07:00:00.000Z' }))
+    await handleProfiEvent(d(), ev('profi.connection_back', { since: '2026-10-23T07:00:00.000Z' }))
+    expect(sent).toEqual([
+      '🌐 Нет связи с Профи.ру с 10:00. Пробую раз в 5 минут.',
+      '🌐 Связь с Профи.ру вернулась. Сверяю, что пришло.',
+    ])
+  })
+})

@@ -40,10 +40,25 @@ export async function handleProfiEvent(d: ProfiEventDeps, e: EventEnvelope): Pro
       await d.notifier.sendText(TEXTS.sessionAlive(title))
       return
     }
+    case 'profi.connection_lost': {
+      const since = String((e.payload as { since?: string }).since ?? e.occurred_at)
+      await d.notifier.sendText(TEXTS.connectionLost(moscowTime(since)))
+      return
+    }
+    case 'profi.connection_back':
+      await d.notifier.sendText(TEXTS.connectionBack)
+      return
     default:
       return
   }
 }
+
+const moscowTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 
 let deps: ProfiEventDeps | null = null
 
@@ -92,4 +107,6 @@ const ACCOUNT_EVENTS = new Set<string>([
   'profi.session_dead',
   'profi.profile_banned',
   'profi.session_alive',
+  'profi.connection_lost',
+  'profi.connection_back',
 ])
