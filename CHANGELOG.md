@@ -4,6 +4,13 @@
 по [SemVer](https://semver.org/lang/ru/). С вехи M0 файл ведёт
 release-please по сообщениям коммитов.
 
+## 0.1.0 (2026-10-23)
+
+
+### Features
+
+* M0 walking skeleton ([#40](https://github.com/natadvn-hance/sara/issues/40)) ([1d0568b](https://github.com/natadvn-hance/sara/commit/1d0568b0327a14390e258bab9c3ddd99e3b8c28c))
+
 ## [Не выпущено]
 
 ### Документы
