@@ -1,0 +1,76 @@
+import { type EventEnvelope, newEventId } from '@sara/shared'
+import { eq } from 'drizzle-orm'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { seedAccounts } from '../src/accounts/accounts'
+import { handleProfiEvent } from '../src/accounts/profiEvents'
+import { account } from '../src/db/schema'
+import { openTestDb, resetDb } from './helpers/db'
+
+const { db, close } = openTestDb()
+afterAll(close)
+
+let sent: string[]
+const notifier = {
+  sendText: async (t: string) => {
+    sent.push(t)
+  },
+  sendLeadCard: async () => ({ messageId: 1 }),
+}
+beforeEach(async () => {
+  await resetDb(db)
+  sent = []
+  await seedAccounts(db, [
+    { id: 'hance-marketing', title: 'Hance маркетинг', egressIp: '127.0.0.1' },
+  ])
+})
+
+const ev = (type: EventEnvelope['type'], payload: Record<string, unknown> = {}): EventEnvelope => ({
+  id: newEventId(),
+  type,
+  v: 1,
+  entity: { kind: 'account', id: 'hance-marketing' },
+  account_id: 'hance-marketing',
+  actor: 'profi',
+  occurred_at: new Date().toISOString(),
+  causation_id: null,
+  correlation_id: newEventId(),
+  reason: null,
+  payload,
+})
+const d = () => ({ db, notifier, publicUrl: 'https://sara.example' })
+const state = async () =>
+  (await db.select().from(account).where(eq(account.id, 'hance-marketing')))[0]?.loginState
+
+describe('Profi events in the core', () => {
+  it('FR-OPS-2: logout marks the account dead and sends one alarm with the way back in', async () => {
+    await handleProfiEvent(d(), ev('profi.session_dead'))
+    expect(await state()).toBe('dead')
+    expect(sent).toEqual([
+      '🔴 Профи.ру разлогинил аккаунт Hance маркетинг. Пока ты не войдёшь, я ничего не вижу на этом аккаунте.\nВойти: https://sara.example/accounts/hance-marketing/login',
+    ])
+  })
+
+  it('FR-OPS-2: a ban marks the account banned and sends one alarm', async () => {
+    await handleProfiEvent(d(), ev('profi.profile_banned'))
+    expect(await state()).toBe('banned')
+    expect(sent).toEqual([
+      '🚫 Профи.ру заблокировал профиль Hance маркетинг. Действия аккаунта остановлены.',
+    ])
+  })
+
+  it('F8: the session back sends one green message', async () => {
+    await handleProfiEvent(d(), ev('profi.session_dead'))
+    await handleProfiEvent(d(), ev('profi.session_alive', { dead_since: new Date().toISOString() }))
+    expect(await state()).toBe('alive')
+    expect(sent.at(-1)).toBe(
+      '🟢 Сессия Hance маркетинг снова живая. Сверяю, что пришло за время простоя.',
+    )
+  })
+
+  it('NFR-UX-1: Profi event texts have no long dash', async () => {
+    for (const t of ['profi.session_dead', 'profi.profile_banned'] as const)
+      await handleProfiEvent(d(), ev(t))
+    await handleProfiEvent(d(), ev('profi.session_alive', { dead_since: null }))
+    for (const t of sent) expect(t).not.toContain(String.fromCharCode(0x2014))
+  })
+})

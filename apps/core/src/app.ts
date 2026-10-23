@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
+import { createProfiEventDispatcher } from './accounts/profiEvents'
 import { speedReport } from './analytics/speed'
 import type { AppDeps } from './api/deps'
 import { buildServer } from './api/server'
@@ -75,6 +76,11 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     resendCard: (taskId) => lp.resendCard(taskId),
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
+  const accountEvents = createProfiEventDispatcher({
+    db,
+    notifier: bot.notifier,
+    publicUrl: config.publicUrl,
+  })
   await launchDbos(config.databaseUrl)
   // Bids whose delivery never started (a crash right after Boris's press) are picked up now.
   await resumeQueuedOutbox(db)
@@ -98,7 +104,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   registerProfiEventsRoute(app, {
     db,
     nodeToken: config.nodeToken,
-    onEvent: (e) => lp.onOrderSeen(e),
+    onEvent: (e) => (e.type === 'profi.order_seen' ? lp.onOrderSeen(e) : accountEvents(e)),
   })
   app.register(async (scoped) => {
     scoped.addHook('preHandler', requireSession)
