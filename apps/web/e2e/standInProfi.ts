@@ -16,7 +16,8 @@ const ab = await openAccountBrowser({
   profileDir: await mkdtemp(join(tmpdir(), 'web-e2e-profile-')),
   proxy: null,
   headless: true,
-  databaseUrl: 'postgres://sara:sara@localhost:54329/sara_web',
+  // The lock needs only a database that always exists; sara_web is created by the core's start in parallel.
+  databaseUrl: 'postgres://sara:sara@localhost:54329/postgres',
 })
 await ab.page.goto(`${site.url}/login`)
 const no = () => Promise.reject(new Error('not used in panel tests'))
