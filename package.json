@@ -25,7 +25,8 @@
     "leads:on": "pnpm --filter @sara/core bids leads on",
     "leads:off": "pnpm --filter @sara/core bids leads off",
     "check:ports": "tsx scripts/check-ports.ts",
-    "deploy": "bash scripts/deploy.sh"
+    "deploy": "bash scripts/deploy.sh",
+    "profi:samples": "tsx scripts/profi-samples.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
