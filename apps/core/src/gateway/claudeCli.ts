@@ -1,5 +1,15 @@
 import { spawn } from 'node:child_process'
 import type { RoleMeta } from '@sara/shared'
+import { type ZodType, z } from 'zod'
+
+/**
+ * JSON Schema of a role's answer for `--json-schema`. Zod marks it as draft 2020-12, which the
+ * CLI's validator does not know (checked on CLI 2.1.309), so the marker is dropped.
+ */
+export function roleJsonSchema(schema: ZodType): object {
+  const { $schema: _draft, ...rest } = z.toJSONSchema(schema) as Record<string, unknown>
+  return rest
+}
 
 /** The CLI contract for a role call (spec 7.4). `--max-turns` is not used: CLI 2.1.308 no longer lists it. */
 export function buildClaudeArgs(meta: RoleMeta, promptPath: string, jsonSchema: object): string[] {

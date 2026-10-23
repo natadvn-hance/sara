@@ -6,7 +6,7 @@ import type { Db } from '../db/client'
 import { modelCall } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { SecretStore } from '../secrets/store'
-import { buildClaudeArgs, type CliRun, runClaude } from './claudeCli'
+import { buildClaudeArgs, type CliRun, roleJsonSchema, runClaude } from './claudeCli'
 import { loadRole, type RoleName } from './roles'
 
 export type GatewayErrorClass =
@@ -113,7 +113,7 @@ export function createGateway(d: {
           await mkdir(cwd, { recursive: true })
           const run = await runClaude({
             bin: d.claudeBin,
-            args: buildClaudeArgs(meta, promptPath, z.toJSONSchema(schema)),
+            args: buildClaudeArgs(meta, promptPath, roleJsonSchema(schema)),
             input,
             token,
             cwd,

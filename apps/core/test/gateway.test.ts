@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { ProbeOutput } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { buildClaudeArgs } from '../src/gateway/claudeCli'
+import { buildClaudeArgs, roleJsonSchema } from '../src/gateway/claudeCli'
 import { createGateway } from '../src/gateway/gateway'
 import { createSecretStore } from '../src/secrets/store'
 import { openTestDb, resetDb } from './helpers/db'
@@ -80,6 +80,12 @@ describe('model gateway', () => {
       'none',
       '--no-session-persistence',
     ])
+  })
+
+  it('LLM-3: the answer schema has no $schema draft marker the CLI cannot read', () => {
+    const schema = roleJsonSchema(ProbeOutput)
+    expect(schema).not.toHaveProperty('$schema')
+    expect(schema).toMatchObject({ type: 'object', required: ['ok'] })
   })
 
   it('FR-SET-3: returns validated structured output and records model_call', async () => {

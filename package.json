@@ -20,7 +20,8 @@
     "smoke:claude-container": "bash scripts/smoke-claude-container.sh",
     "report:speed": "pnpm --filter @sara/core report:speed",
     "bids:on": "pnpm --filter @sara/core bids on",
-    "bids:off": "pnpm --filter @sara/core bids off"
+    "bids:off": "pnpm --filter @sara/core bids off",
+    "claude:token": "bash scripts/save-claude-token.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
