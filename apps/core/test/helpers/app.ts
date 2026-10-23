@@ -25,6 +25,7 @@ export type TestHealth = {
 
 export type TestApp = {
   app: FastifyInstance
+  secrets: ReturnType<typeof createSecretStore>
   tg: FakeTelegram
   close(): Promise<void>
   cookie(): string
@@ -75,6 +76,7 @@ export async function buildTestApp(
   })
   return {
     app,
+    secrets,
     tg,
     cookie: () => sessionCookie,
     async close() {

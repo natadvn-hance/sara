@@ -27,6 +27,9 @@ export const SETUP_ERRORS = {
   claudeLimit: 'Лимит подписки Claude исчерпан. Шаг можно пройти позже.',
 } as const
 
+/** Tokens never contain spaces; a token copied from a wrapped terminal line carries line breaks inside. */
+const cleanToken = (t: string) => t.replace(/\s+/g, '')
+
 const TOKEN_FORMAT = /^\d+:[A-Za-z0-9_-]{30,}$/
 const PasswordBody = z.object({ password: z.string() })
 const TokenBody = z.object({ token: z.string() })
@@ -82,7 +85,7 @@ export function registerSetupRoutes(app: FastifyInstance, d: AppDeps): void {
     scoped.addHook('preHandler', requireSession)
 
     scoped.post('/api/setup/telegram', async (req, reply) => {
-      const token = TokenBody.parse(req.body).token.trim()
+      const token = cleanToken(TokenBody.parse(req.body).token)
       if (!TOKEN_FORMAT.test(token))
         return reply.code(400).send({ error: SETUP_ERRORS.tokenFormat })
       const me = await getMe(token, d.telegramApiRoot)
@@ -105,7 +108,7 @@ export function registerSetupRoutes(app: FastifyInstance, d: AppDeps): void {
     }))
 
     scoped.post('/api/setup/claude', async (req, reply) => {
-      const token = TokenBody.parse(req.body).token.trim()
+      const token = cleanToken(TokenBody.parse(req.body).token)
       // An empty field means: check the token already saved on this Mac (pnpm claude:token).
       if (token) await d.secrets.set('claude_oauth_token', token)
       else if (!(await d.secrets.get('claude_oauth_token'))) {

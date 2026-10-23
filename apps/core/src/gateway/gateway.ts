@@ -99,7 +99,8 @@ export function createGateway(d: {
       const { meta, promptPath } = await loadRole(d.rolesDir, role)
       const id = newEventId()
       const startedAt = new Date().toISOString()
-      const token = await d.secrets.get('claude_oauth_token')
+      // Whitespace is never part of a token (one saved before the wizard cleaned it may carry a line break).
+      const token = (await d.secrets.get('claude_oauth_token'))?.replace(/\s+/g, '') || null
       let result:
         | { ok: true; output: unknown }
         | { ok: false; errorClass: GatewayErrorClass; message: string }

@@ -135,4 +135,11 @@ describe('setup wizard API', () => {
     expect(r.statusCode).toBe(400)
     expect(r.json().error).toMatch(/claude setup-token/)
   })
+
+  it('FR-SET-3: a Claude token copied with a line break from the terminal is saved without it', async () => {
+    await post('/api/setup/password', { password: 'длинныйпароль1' }, false)
+    const r = await post('/api/setup/claude', { token: 'sk-ant-oat01-abc\ndef ghi\r\n' })
+    expect(r.statusCode).toBe(200)
+    expect(await t.secrets.get('claude_oauth_token')).toBe('sk-ant-oat01-abcdefghi')
+  })
 })
