@@ -92,10 +92,18 @@ export async function startProfiService(
       if (!closing) o.onBrowserGone(acc.id)
     })
     const eyes = createEyes({ accountId: acc.id, db, parsers })
+    const accountIdOf = acc.id
     await attachRecorder(ab, {
       accountId: acc.id,
       rtpHost: c.rtpHost,
       profiHosts: [baseHost],
+      // Not while logged out (login answers carry tokens) or on a wrong IP (ADR-022, FR-ACC-1).
+      shouldRecord: () => {
+        const acc = accounts.get(accountIdOf)
+        return (
+          !!acc && acc.egress.ok && acc.watch.state() !== 'dead' && acc.watch.state() !== 'banned'
+        )
+      },
       onRaw: (r) => eyes.onRaw(r),
     })
     const viewers = { n: 0 }
