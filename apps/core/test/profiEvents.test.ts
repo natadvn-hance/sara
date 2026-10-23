@@ -100,11 +100,29 @@ describe('routing of Profi events', () => {
 
 describe('connection messages', () => {
   it('ADR-021: lost and back give one 🌐 each in plain words', async () => {
-    await handleProfiEvent(d(), ev('profi.connection_lost', { since: '2026-10-23T07:00:00.000Z' }))
-    await handleProfiEvent(d(), ev('profi.connection_back', { since: '2026-10-23T07:00:00.000Z' }))
+    // Now, so the outage is always today (a past moment could fall on yesterday near midnight).
+    const since = new Date()
+    const hhmm = since.toLocaleTimeString('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    await handleProfiEvent(d(), ev('profi.connection_lost', { since: since.toISOString() }))
+    await handleProfiEvent(d(), ev('profi.connection_back', { since: since.toISOString() }))
     expect(sent).toEqual([
-      '🌐 Нет связи с Профи.ру с 10:00. Пробую раз в 5 минут.',
+      `🌐 Нет связи с Профи.ру с ${hhmm}. Пробую раз в 5 минут.`,
       '🌐 Связь с Профи.ру вернулась. Сверяю, что пришло.',
     ])
+  })
+
+  it('ADR-021: an outage that began on another day shows the date too', async () => {
+    const yesterday = new Date(Date.now() - 26 * 3600_000).toISOString()
+    await handleProfiEvent(d(), ev('profi.connection_lost', { since: yesterday }))
+    const day = new Date(yesterday).toLocaleDateString('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      day: '2-digit',
+      month: '2-digit',
+    })
+    expect(sent.at(-1)).toContain(day)
   })
 })

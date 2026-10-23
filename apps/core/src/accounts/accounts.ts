@@ -30,8 +30,14 @@ export async function syncAccount(
   h: SessionHealthOutput | null,
 ): Promise<AccountView> {
   const now = new Date().toISOString()
-  const loginState = h === null ? 'unknown' : h.alive ? 'alive' : 'dead'
   await seedAccounts(db, [a])
+  const [before] = await db
+    .select({ state: account.loginState })
+    .from(account)
+    .where(eq(account.id, a.id))
+  // A ban comes only from the service's event; a plain 'not alive' must not turn it into 'dead'.
+  const loginState =
+    h === null ? 'unknown' : h.alive ? 'alive' : before?.state === 'banned' ? 'banned' : 'dead'
   await db
     .update(account)
     .set({

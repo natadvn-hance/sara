@@ -10,6 +10,7 @@ type Status = { alive: boolean; ipOk: boolean; balance_rub: number | null }
 export function LiveScreenPage({ accountId }: { accountId: string }) {
   const [frame, setFrame] = useState<string | null>(null)
   const [text, setText] = useState('')
+  const [hidden, setHidden] = useState(false)
   const [status, setStatus] = useState<Status | null>(null)
   const [lost, setLost] = useState(false)
   const ws = useRef<WebSocket | null>(null)
@@ -71,10 +72,15 @@ export function LiveScreenPage({ accountId }: { accountId: string }) {
       <Card>
         <Input
           label="Набрать текст"
+          type={hidden ? 'password' : 'text'}
           value={text}
           onChange={(e) => setText(e.target.value)}
           autoComplete="off"
         />
+        <label className="flex items-center gap-2 text-sm text-muted">
+          <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+          Скрывать набираемое
+        </label>
         <div className="flex flex-wrap gap-2">
           <Button
             onClick={() => {

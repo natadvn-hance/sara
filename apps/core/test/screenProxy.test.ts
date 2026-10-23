@@ -11,6 +11,7 @@ afterAll(close)
 let t: TestApp
 let base: string
 let received: string[]
+let slowUpgrade = false
 let service: ReturnType<typeof createServer>
 
 beforeEach(async () => {
@@ -23,10 +24,14 @@ beforeEach(async () => {
       socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
       return
     }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.send(JSON.stringify({ frame: 'AAAA', w: 10, h: 10 }))
-      ws.on('message', (m) => received.push(String(m)))
-    })
+    setTimeout(
+      () =>
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          ws.send(JSON.stringify({ frame: 'AAAA', w: 10, h: 10 }))
+          ws.on('message', (m) => received.push(String(m)))
+        }),
+      slowUpgrade ? 800 : 0,
+    )
   })
   await new Promise<void>((r) => service.listen(0, '127.0.0.1', r))
   const port = (service.address() as { port: number }).port
@@ -73,5 +78,15 @@ describe('live screen proxy', () => {
 
   it('T11: the live screen without a panel session is refused', async () => {
     await expect(open(null)).rejects.toThrow(/401/)
+  })
+
+  it('T11: input sent before the service answers is kept only up to a limit', async () => {
+    slowUpgrade = true
+    const ws = await open(t.cookie())
+    for (let i = 0; i < 300; i++) ws.send(JSON.stringify({ t: 'key', key: 'a' }))
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(received.length).toBe(100)
+    ws.close()
+    slowUpgrade = false
   })
 })

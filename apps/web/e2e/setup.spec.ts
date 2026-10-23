@@ -82,6 +82,9 @@ test('FR-ACC-6: login on a 360 px phone screen by tapping and typing', async ({ 
     timeout: 15_000,
   })
   await expect(page.getByText('Пароль и код из СМС никуда не сохраняются')).toBeVisible()
+  await page.getByLabel('Скрывать набираемое').check()
+  await expect(page.getByLabel('Набрать текст')).toHaveAttribute('type', 'password')
+  await page.getByLabel('Скрывать набираемое').uncheck()
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )

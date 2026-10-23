@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { completeStep } from '../src/setup/progress'
 import { buildTestApp, type TestApp, type TestHealth } from './helpers/app'
@@ -71,5 +72,13 @@ describe('accounts', () => {
       next: 'done',
       completed: ['password', 'telegram', 'claude'],
     })
+  })
+
+  it('FR-OPS-2: a banned profile stays banned in the list while the session is not alive', async () => {
+    await get('/api/accounts')
+    await db.execute(
+      sql`update core.account set login_state = 'banned' where id = 'hance-marketing'`,
+    )
+    expect((await get('/api/accounts')).json().accounts[0].login_state).toBe('banned')
   })
 })
