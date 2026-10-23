@@ -51,7 +51,8 @@ services:
     volumes: [profiles:/profiles]
     shm_size: 1gb
     depends_on: [postgres, socks-ip1]
-    # internal has no way out; the only way out is the account's network, through its SOCKS.
+    # internal has no way out; the tab goes out through the account's SOCKS, and anything else from
+    # profi-node leaves through egress-ip1 too, so from the account's IP either way.
     networks: [internal, egress-ip1]
 
   # SOCKS on a network whose outgoing traffic leaves from the account's own IPv4 (FR-ACC-1).
