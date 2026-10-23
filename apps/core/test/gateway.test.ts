@@ -96,6 +96,13 @@ describe('model gateway', () => {
     expect((await calls())[0]?.token).toBe('tok')
   })
 
+  it('FR-SET-3: a token saved with a line break inside reaches the CLI without it', async () => {
+    const gw = await gateway({ FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT: '{"ok":true}' })
+    await createSecretStore(join(dir, 'data')).set('claude_oauth_token', 'to\nk ')
+    await gw.call('probe', 'x', ProbeOutput)
+    expect((await calls())[0]?.token).toBe('tok')
+  })
+
   it('LLM-3: missing structured_output is bad_output, not an empty answer', async () => {
     const gw = await gateway({ FAKE_CLAUDE_MODE: 'no_structured' })
     expect(await gw.call('probe', 'x', ProbeOutput)).toMatchObject({
