@@ -100,6 +100,10 @@ function TelegramStep({ done }: { done: () => void }) {
 function ClaudeStep({ done }: { done: () => void }) {
   const [token, setToken] = useState('')
   const a = useAction()
+  const saved = useQuery({
+    queryKey: ['claude-token'],
+    queryFn: () => api<{ tokenSaved: boolean }>('/api/setup/claude'),
+  })
   const command = 'claude setup-token'
   return (
     <Card>
@@ -116,7 +120,11 @@ function ClaudeStep({ done }: { done: () => void }) {
           Скопировать
         </Button>
       </div>
-      <p>Вставь токен, который она покажет.</p>
+      <p>
+        {saved.data?.tokenSaved
+          ? 'Токен Claude уже сохранён на этом Маке. Можно сразу нажать «Проверить Claude» или вставить новый.'
+          : 'Вставь токен, который она покажет.'}
+      </p>
       <Input
         label="Токен Claude"
         value={token}

@@ -116,6 +116,17 @@ describe('setup wizard API', () => {
     expect((await get('/api/setup')).json().completed).toContain('claude')
   })
 
+  it('FR-SET-3: a token saved earlier on the Mac is checked without pasting it again', async () => {
+    await post('/api/setup/password', { password: 'длинныйпароль1' }, false)
+    expect((await get('/api/setup/claude')).json()).toEqual({ tokenSaved: false })
+    expect((await post('/api/setup/claude', { token: '' })).statusCode).toBe(400)
+    await post('/api/setup/claude', { token: 'claude-token' })
+    expect((await get('/api/setup/claude')).json()).toEqual({ tokenSaved: true })
+    const r = await post('/api/setup/claude', { token: '' })
+    expect(r.statusCode).toBe(200)
+    expect(r.json().ok).toBe(true)
+  })
+
   it('FR-SET-3: token refused by Claude gives the setup-token hint', async () => {
     await t.close()
     t = await buildTestApp(db, { FAKE_CLAUDE_MODE: 'auth_error' })

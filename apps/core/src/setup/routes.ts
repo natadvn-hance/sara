@@ -21,6 +21,7 @@ export const SETUP_ERRORS = {
   telegramNetwork: 'Не получилось связаться с Telegram. Проверь интернет и попробуй ещё раз.',
   claudeRefused:
     'Claude не принял токен. Запусти на Маке claude setup-token ещё раз и вставь новый токен.',
+  claudeMissing: 'Вставь токен Claude: его показывает команда claude setup-token.',
   claudeTimeout:
     'Claude не ответил за 30 секунд. Попробуй ещё раз; если повторится, проверь лимит подписки.',
   claudeLimit: 'Лимит подписки Claude исчерпан. Шаг можно пройти позже.',
@@ -99,9 +100,17 @@ export function registerSetupRoutes(app: FastifyInstance, d: AppDeps): void {
       return { bound, botUsername: d.bot.botUsername() }
     })
 
+    scoped.get('/api/setup/claude', async () => ({
+      tokenSaved: (await d.secrets.get('claude_oauth_token')) !== null,
+    }))
+
     scoped.post('/api/setup/claude', async (req, reply) => {
       const token = TokenBody.parse(req.body).token.trim()
-      await d.secrets.set('claude_oauth_token', token)
+      // An empty field means: check the token already saved on this Mac (pnpm claude:token).
+      if (token) await d.secrets.set('claude_oauth_token', token)
+      else if (!(await d.secrets.get('claude_oauth_token'))) {
+        return reply.code(400).send({ error: SETUP_ERRORS.claudeMissing })
+      }
       const r = await d.gateway.call('probe', 'Проверка связи.', ProbeOutput)
       if (r.ok) {
         await completeStep(d.db, 'claude')
