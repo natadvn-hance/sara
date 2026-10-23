@@ -97,6 +97,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     if (isOffline) return req.socket.destroy()
     const url = new URL(req.url ?? '/', 'http://x')
     const p = url.pathname
+    // Echo of the caller's IP, standing in for an outside service like ipify (no login needed).
+    if (p === '/ip') return res.writeHead(200).end(req.socket.remoteAddress ?? '')
     if (p === '/login' && req.method === 'GET') return html(res, loginPage())
     if (p === '/login/phone') return json(res, { sent: true })
     if (p === '/login/code') {
@@ -133,7 +135,6 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     if (p === '/chats') return html(res, chatsPage())
     if (p.startsWith('/chats/'))
       return html(res, chatPage(rtp.url, p.slice('/chats/'.length), layout))
-    if (p === '/ip') return res.writeHead(200).end(req.socket.remoteAddress ?? '')
     res.writeHead(404).end()
   })
   site.on('connection', (s) => {
