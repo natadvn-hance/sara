@@ -6,7 +6,7 @@ import {
   MessageAuthor,
   type ProfiOrder,
 } from '@sara/shared'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
 import { rawMessage, rawOrder } from '../db/schema'
 import { ProfiToolError, type ProfiToolsImpl } from '../mcp/server'
@@ -89,22 +89,23 @@ export function createReadTools(o: {
 
     async listChats({ account_id }) {
       alive(account_id)
-      const rows = await o.db.select().from(rawMessage).where(eq(rawMessage.accountId, account_id))
-      const chats = new Map<string, ChatSummary>()
-      for (const m of rows) {
-        const c = chats.get(m.chatId) ?? {
-          chat_id: m.chatId,
-          order_id: m.orderId,
-          last_message_at: null,
-          unread: 0,
-        }
-        if (!c.last_message_at || m.sentAt > c.last_message_at)
-          c.last_message_at = new Date(m.sentAt).toISOString()
-        if (!m.read && m.author === 'client') c.unread++
-        c.order_id ??= m.orderId
-        chats.set(m.chatId, c)
-      }
-      return { chats: [...chats.values()] }
+      // Aggregated in the database: the last time is compared as time, not as text.
+      const rows = await o.db.execute<{
+        chat_id: string
+        order_id: string | null
+        last_at: string | null
+        unread: number
+      }>(sql`
+        select chat_id, max(order_id) as order_id, max(sent_at) as last_at,
+          count(*) filter (where not read and author = 'client')::int as unread
+        from node.raw_message where account_id = ${account_id} group by chat_id`)
+      const chats: ChatSummary[] = rows.rows.map((r) => ({
+        chat_id: r.chat_id,
+        order_id: r.order_id,
+        last_message_at: r.last_at === null ? null : new Date(r.last_at).toISOString(),
+        unread: r.unread,
+      }))
+      return { chats }
     },
 
     async readChat({ account_id, chat_id }) {

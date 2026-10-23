@@ -120,4 +120,33 @@ describe('read tools', () => {
       egress_ok: true,
     })
   })
+
+  it('C2: list_chats gives per chat the last message time and unread client messages', async () => {
+    await upsertMessage(db, {
+      accountId: 'hance-marketing',
+      message: msg('a1', 'client', '2026-10-23T08:00:00.000Z'),
+    })
+    await upsertMessage(db, {
+      accountId: 'hance-marketing',
+      message: msg('a2', 'specialist', '2026-10-23T08:05:00.000Z'),
+    })
+    await upsertMessage(db, {
+      accountId: 'hance-marketing',
+      message: {
+        ...msg('b1', 'client', '2026-10-23T09:00:00.000Z'),
+        chat_id: 'c-2',
+        order_id: null,
+      },
+    })
+    const r = await tools().listChats({ account_id: 'hance-marketing' })
+    expect(r.chats.sort((x, y) => x.chat_id.localeCompare(y.chat_id))).toEqual([
+      {
+        chat_id: 'c-1',
+        order_id: '95147898',
+        last_message_at: '2026-10-23T08:05:00.000Z',
+        unread: 1,
+      },
+      { chat_id: 'c-2', order_id: null, last_message_at: '2026-10-23T09:00:00.000Z', unread: 1 },
+    ])
+  })
 })

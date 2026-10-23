@@ -7,6 +7,8 @@ import { requireSession } from '../auth/session'
  * The panel's live screen of an account tab (ADR-023): a plain relay to Profi-MCP on the internal
  * network. Nothing from it is stored or logged: Boris types his password and SMS code here.
  */
+const MAX_PENDING = 100
+
 export async function registerScreenProxy(
   app: FastifyInstance,
   d: { profiScreenUrl: string; nodeToken: string },
@@ -33,7 +35,8 @@ export async function registerScreenProxy(
         upstream.on('error', () => panel.close(1011, 'Служба Профи-MCP не отвечает'))
         panel.on('message', (m: WebSocket.RawData) => {
           if (upstream.readyState === upstream.OPEN) upstream.send(m)
-          else pending.push(m)
+          // Taps typed before the service answers are kept, but not without limit.
+          else if (pending.length < MAX_PENDING) pending.push(m)
         })
         panel.on('close', () => upstream.close())
       },
