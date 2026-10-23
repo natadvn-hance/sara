@@ -1,9 +1,9 @@
 import { sql } from 'drizzle-orm'
 import { createNodeDb, type NodeDb } from '../../src/db/client'
 
-export function nodeTestUrl(): string {
+export function nodeTestUrl(name = 'sara_node_test'): string {
   const u = new URL(process.env.DATABASE_URL ?? 'postgres://sara:sara@localhost:54329/sara')
-  u.pathname = '/sara_node_test'
+  u.pathname = `/${name}`
   return u.toString()
 }
 

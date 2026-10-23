@@ -52,6 +52,17 @@ describe('event shipping', () => {
     expect((await shipperHealth(db)).queued).toBe(0)
   })
 
+  it('ADR-019: an event that waits for its retry holds back the events after it', async () => {
+    core.down()
+    await queueEvent(db, ev(1))
+    const s = createShipper({ db, coreEventsUrl: core.url, nodeToken: 't', backoffMs: [60000] })
+    await s.flush()
+    await queueEvent(db, ev(2))
+    core.up()
+    await s.flush()
+    expect(core.received).toHaveLength(0)
+  })
+
   it('ADR-019: a restart in the middle of the queue sends nothing twice', async () => {
     for (const n of [1, 2]) await queueEvent(db, ev(n))
     await shipper().flush()

@@ -23,7 +23,9 @@
     "bids:off": "pnpm --filter @sara/core bids bids off",
     "claude:token": "bash scripts/save-claude-token.sh",
     "leads:on": "pnpm --filter @sara/core bids leads on",
-    "leads:off": "pnpm --filter @sara/core bids leads off"
+    "leads:off": "pnpm --filter @sara/core bids leads off",
+    "check:ports": "tsx scripts/check-ports.ts",
+    "deploy": "bash scripts/deploy.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",

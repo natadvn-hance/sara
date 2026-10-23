@@ -3,9 +3,8 @@ import { migrateNode } from '../src/db/migrate'
 import { nodeTestUrl } from './helpers/db'
 
 /** profi-node tests use their own database, so they do not race the core tests on migrations. */
-export default async function setup() {
-  const url = new URL(nodeTestUrl())
-  const name = url.pathname.slice(1)
+export async function prepareNodeTestDatabase(name: string): Promise<void> {
+  const url = new URL(nodeTestUrl(name))
   const admin = new URL(url)
   admin.pathname = '/postgres'
   const client = new pg.Client({ connectionString: admin.toString() })
@@ -15,3 +14,5 @@ export default async function setup() {
   await client.end()
   await migrateNode(url.toString())
 }
+
+export default () => prepareNodeTestDatabase('sara_node_test')

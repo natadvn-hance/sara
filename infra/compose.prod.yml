@@ -1,0 +1,83 @@
+# Production on the one server abroad (ADR-021, docs/architecture/deployment.md).
+# Secrets come from /opt/sara/.env (decrypted with sops); nothing secret is in this file.
+name: sara
+
+services:
+  caddy:
+    build: { context: .., dockerfile: infra/docker/web.Dockerfile }
+    restart: unless-stopped
+    ports: ["443:443", "80:80"]
+    environment:
+      SARA_DOMAIN: ${SARA_DOMAIN}
+    volumes: [caddy-data:/data]
+    depends_on: [core]
+    networks: [edge]
+
+  core:
+    build: { context: .., dockerfile: infra/docker/core.Dockerfile }
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://sara:${POSTGRES_PASSWORD}@postgres:5432/sara
+      SARA_DATA_DIR: /data
+      SARA_PORT: "3300"
+      SARA_HOST: 0.0.0.0
+      SARA_PUBLIC_URL: https://${SARA_DOMAIN}
+      SARA_PROFI_MCP_URL: http://profi-node:7070/mcp
+      SARA_NODE_TOKEN: ${SARA_NODE_TOKEN}
+      SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET}
+      SARA_ACCOUNTS: ${SARA_ACCOUNTS}
+    volumes: [sara-data:/data]
+    depends_on: [postgres]
+    networks: [edge, internal]
+
+  profi-node:
+    build: { context: .., dockerfile: infra/docker/profi-node.Dockerfile }
+    restart: unless-stopped
+    # Long grace period: a clean stop flushes the browser profiles.
+    stop_grace_period: 60s
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://sara:${POSTGRES_PASSWORD}@postgres:5432/sara
+      SARA_CORE_EVENTS_URL: http://core:3300/internal/profi/events
+      SARA_NODE_TOKEN: ${SARA_NODE_TOKEN}
+      SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET}
+      PROFI_DATA_DIR: /profiles
+      PROFI_ACCOUNTS: ${PROFI_ACCOUNTS}
+    volumes: [profiles:/profiles]
+    shm_size: 1gb
+    depends_on: [postgres, socks-ip1]
+    # internal has no way out; the only way out is the account's network, through its SOCKS.
+    networks: [internal, egress-ip1]
+
+  # SOCKS on a network whose outgoing traffic leaves from the account's own IPv4 (FR-ACC-1).
+  socks-ip1:
+    build: { context: .., dockerfile: infra/docker/socks.Dockerfile }
+    restart: unless-stopped
+    networks: [egress-ip1]
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: sara
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [internal]
+
+networks:
+  edge: {}
+  internal:
+    internal: true
+  # Bound to the account's IPv4 on the host (docs/ops/server-setup.md, step 5).
+  egress-ip1:
+    driver: bridge
+    driver_opts:
+      com.docker.network.host_ipv4: ${ACCOUNT_IP_1}
+
+volumes:
+  caddy-data: {}
+  sara-data: {}
+  profiles: {}
+  pgdata: {}

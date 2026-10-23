@@ -1,4 +1,4 @@
-import { and, asc, count, isNotNull, isNull, lte, min, sql } from 'drizzle-orm'
+import { and, asc, count, isNotNull, isNull, min, sql } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
 import { outboxNode } from '../db/schema'
 
@@ -22,19 +22,20 @@ export function createShipper(o: {
 
   async function flushOnce(): Promise<number> {
     const due = await o.db
-      .select()
+      .select({
+        eventId: outboxNode.eventId,
+        payload: outboxNode.payload,
+        attempts: outboxNode.attempts,
+        isDue: sql<boolean>`${outboxNode.nextTryAt} <= now()`,
+      })
       .from(outboxNode)
-      .where(
-        and(
-          isNull(outboxNode.confirmedAt),
-          isNull(outboxNode.deadReason),
-          lte(outboxNode.nextTryAt, sql`now()`),
-        ),
-      )
+      .where(and(isNull(outboxNode.confirmedAt), isNull(outboxNode.deadReason)))
       .orderBy(asc(outboxNode.eventId))
       .limit(100)
     let sent = 0
     for (const row of due) {
+      // The oldest unsent event goes first; while it waits for its retry, the ones after it wait too.
+      if (!row.isDue) break
       let status = 0
       try {
         const res = await fetch(o.coreEventsUrl, {
@@ -60,10 +61,14 @@ export function createShipper(o: {
           .where(where)
         continue
       }
-      const next = new Date(Date.now() + delayFor(row.attempts)).toISOString()
+      // The database clock decides when a row is due, so Node's and Postgres' clocks never disagree.
+      const delay = delayFor(row.attempts)
       await o.db
         .update(outboxNode)
-        .set({ attempts: row.attempts + 1, nextTryAt: next })
+        .set({
+          attempts: row.attempts + 1,
+          nextTryAt: sql`now() + ${delay} * interval '1 millisecond'`,
+        })
         .where(where)
       // Keep the order: later events wait until this one is through.
       break

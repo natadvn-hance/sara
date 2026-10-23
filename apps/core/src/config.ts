@@ -4,6 +4,7 @@ export type Config = {
   databaseUrl: string
   dataDir: string
   port: number
+  host: string
   publicUrl: string
   profiMcpUrl: string
   profiScreenUrl: string
@@ -31,6 +32,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databaseUrl: env.DATABASE_URL ?? 'postgres://sara:sara@localhost:54329/sara',
     dataDir: resolve(env.SARA_DATA_DIR ?? resolve(ROOT, '.sara')),
     port: Number(env.SARA_PORT ?? 3300),
+    host: env.SARA_HOST ?? '127.0.0.1',
     publicUrl: env.SARA_PUBLIC_URL ?? 'http://localhost:5173',
     profiMcpUrl: env.SARA_PROFI_MCP_URL ?? 'http://localhost:7070/mcp',
     profiScreenUrl:

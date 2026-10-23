@@ -114,7 +114,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     scoped.addHook('preHandler', requireSession)
     scoped.get('/api/metrics/speed', async () => speedReport(db))
   })
-  const url = await app.listen({ port: config.port, host: '127.0.0.1' })
+  const url = await app.listen({ port: config.port, host: config.host })
 
   const token = await secrets.get('telegram_bot_token')
   if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))
