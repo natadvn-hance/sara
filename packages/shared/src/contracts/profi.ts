@@ -51,9 +51,95 @@ export const PROFI_ERROR_CLASSES = [
 ] as const
 export type ProfiErrorClass = (typeof PROFI_ERROR_CLASSES)[number]
 
-/** C2: tools of Profi-MCP available in M0. */
+export const MessageAuthor = z.enum(['client', 'specialist', 'system', 'unknown'])
+export type MessageAuthor = z.infer<typeof MessageAuthor>
+
+const since = z.iso.datetime().optional()
+
+export const FeedOrder = z.object({
+  order_id: z.string().min(1),
+  title: z.string(),
+  city: z.string(),
+  budget_text: z.string().nullable(),
+  bid_price_rub: z.number().int().nonnegative().nullable(),
+  published_at: z.iso.datetime().nullable(),
+})
+export type FeedOrder = z.infer<typeof FeedOrder>
+export const ListFeedInput = z.object({ account_id: z.string().min(1), since })
+export const ListFeedOutput = z.object({ orders: z.array(FeedOrder) })
+
+export const GetOrderInput = z.object({
+  account_id: z.string().min(1),
+  order_id: z.string().min(1),
+})
+export const GetOrderOutput = ProfiOrder.extend({
+  open: z.boolean(),
+  published_at: z.iso.datetime().nullable(),
+})
+export type GetOrderOutput = z.infer<typeof GetOrderOutput>
+
+export const ChatSummary = z.object({
+  chat_id: z.string().min(1),
+  order_id: z.string().nullable(),
+  last_message_at: z.iso.datetime().nullable(),
+  unread: z.number().int().nonnegative(),
+})
+export type ChatSummary = z.infer<typeof ChatSummary>
+export const ListChatsInput = z.object({ account_id: z.string().min(1), since })
+export const ListChatsOutput = z.object({ chats: z.array(ChatSummary) })
+
+export const ChatMessage = z.object({
+  platform_message_id: z.string().min(1),
+  chat_id: z.string().min(1),
+  author: MessageAuthor,
+  sent_at: z.iso.datetime(),
+  text: z.string(),
+  read: z.boolean(),
+})
+export type ChatMessage = z.infer<typeof ChatMessage>
+export const ReadChatInput = z.object({ account_id: z.string().min(1), chat_id: z.string().min(1) })
+export const ReadChatOutput = z.object({ messages: z.array(ChatMessage) })
+
+export type ListFeedInput = z.infer<typeof ListFeedInput>
+export type ListFeedOutput = z.infer<typeof ListFeedOutput>
+export type GetOrderInput = z.infer<typeof GetOrderInput>
+export type ListChatsInput = z.infer<typeof ListChatsInput>
+export type ListChatsOutput = z.infer<typeof ListChatsOutput>
+export type ReadChatInput = z.infer<typeof ReadChatInput>
+export type ReadChatOutput = z.infer<typeof ReadChatOutput>
+
+/** C2: tools of Profi-MCP. Mutating tools take an idempotency key and the core's permit. */
 export const PROFI_TOOLS = {
   'profi.session_health': { input: SessionHealthInput, output: SessionHealthOutput },
+  'profi.list_feed': { input: ListFeedInput, output: ListFeedOutput },
+  'profi.get_order': { input: GetOrderInput, output: GetOrderOutput },
+  'profi.list_chats': { input: ListChatsInput, output: ListChatsOutput },
+  'profi.read_chat': { input: ReadChatInput, output: ReadChatOutput },
   'profi.submit_bid': { input: SubmitBidInput, output: SubmitBidOutput },
 } as const
+
+const MessageRef = z
+  .object({
+    chat_id: z.string().min(1),
+    order_id: z.string().nullable(),
+    platform_message_id: z.string().min(1),
+    sent_at: z.iso.datetime(),
+    author: MessageAuthor,
+  })
+  .strict()
+
+/** C2 notifications, Profi-MCP → core over C8. Payloads never carry a client's text (ADR-022). */
+export const PROFI_EVENT_PAYLOADS = {
+  'profi.order_seen': ProfiOrder,
+  'profi.client_message': MessageRef,
+  'profi.author_unclear': MessageRef,
+  'profi.session_dead': z.object({}).strict(),
+  'profi.session_alive': z.object({ dead_since: z.iso.datetime().nullable() }).strict(),
+  'profi.profile_banned': z.object({}).strict(),
+  'profi.layout_changed': z.object({ what: z.enum(['rtp', 'response', 'dom']) }).strict(),
+  'profi.balance_changed': z.object({ balance_rub: z.number().int() }).strict(),
+  'profi.connection_lost': z.object({ since: z.iso.datetime() }).strict(),
+  'profi.connection_back': z.object({ since: z.iso.datetime() }).strict(),
+} as const
+export type ProfiEventType = keyof typeof PROFI_EVENT_PAYLOADS
 export type ProfiToolName = keyof typeof PROFI_TOOLS

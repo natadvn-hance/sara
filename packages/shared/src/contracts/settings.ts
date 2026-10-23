@@ -7,6 +7,8 @@ export type SetupStep = (typeof SETUP_STEPS)[number]
 export const SETTINGS = {
   'outbound.bids': { schema: z.boolean(), default: false },
   'outbound.messages': { schema: z.boolean(), default: false },
+  /** Shadow (M1): leads are journaled but not sent as cards, so they do not double v1's summaries. */
+  'pipeline.leads': { schema: z.boolean(), default: false },
   'setup.progress': {
     schema: z.object({ completed: z.array(z.enum(SETUP_STEPS)) }),
     default: { completed: [] as SetupStep[] },
