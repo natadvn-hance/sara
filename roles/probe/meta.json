@@ -1,0 +1,1 @@
+{ "name": "probe", "version": 1, "model": "haiku", "priority": "P0", "timeoutMs": 30000 }

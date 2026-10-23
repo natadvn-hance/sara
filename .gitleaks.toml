@@ -1,0 +1,7 @@
+# Default gitleaks rules plus one exception: the example config holds variable names only, no values.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Example configuration without secret values"
+paths = ['''(^|/)\.env\.example$''']

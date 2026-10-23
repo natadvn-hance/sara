@@ -1,0 +1,19 @@
+{
+  "name": "@sara/profi-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "fake": "tsx src/fake/main.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@sara/shared": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "exports": {
+    "./fake": "./src/fake/fakeProfi.ts",
+    "./mcp": "./src/mcp/server.ts"
+  }
+}
