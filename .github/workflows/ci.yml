@@ -48,8 +48,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      # Chromium first: the Profi-MCP tests drive a real browser too.
       - run: pnpm --filter @sara/web exec playwright install --with-deps chromium
+      - run: pnpm test
       - run: pnpm --filter @sara/web e2e
 
   build:
