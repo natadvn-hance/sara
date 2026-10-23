@@ -10,7 +10,7 @@ import { startInsurance } from '../src/eyes/insurance'
 import { standInParsers } from '../src/eyes/parsers'
 import { attachRecorder } from '../src/eyes/recorder'
 import { createConnectionGuard, probeSite } from '../src/watch/connectionGuard'
-import { openNodeTestDb, resetNodeDb } from './helpers/db'
+import { nodeTestUrl, openNodeTestDb, resetNodeDb } from './helpers/db'
 import { loginStandIn } from './helpers/site'
 
 const { db, close } = openNodeTestDb()
@@ -86,6 +86,7 @@ describe('outage with the stand-in site', () => {
       profileDir: await mkdtemp(join(tmpdir(), 'guard-')),
       proxy: null,
       headless: true,
+      databaseUrl: nodeTestUrl(),
     })
   }, 60000)
   afterAll(async () => {

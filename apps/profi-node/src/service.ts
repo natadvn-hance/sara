@@ -64,6 +64,7 @@ export async function startProfiService(
       profileDir: join(c.dataDir, 'profiles', acc.id),
       proxy: acc.proxy,
       headless: c.headless,
+      databaseUrl: c.databaseUrl,
     })
     browsers.set(acc.id, ab)
     const eyes = createEyes({ accountId: acc.id, db, parsers })

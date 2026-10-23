@@ -8,4 +8,5 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 ENV SARA_ROLES_DIR=/app/roles SARA_DATA_DIR=/data
 VOLUME ["/data"]
-CMD ["pnpm", "--filter", "@sara/core", "exec", "tsx", "src/main.ts"]
+# node runs directly (not under pnpm), so SIGTERM reaches it and the core stops cleanly.
+CMD ["node", "--import", "tsx", "apps/core/src/main.ts"]

@@ -16,6 +16,7 @@ const ab = await openAccountBrowser({
   profileDir: await mkdtemp(join(tmpdir(), 'web-e2e-profile-')),
   proxy: null,
   headless: true,
+  databaseUrl: 'postgres://sara:sara@localhost:54329/sara_web',
 })
 await ab.page.goto(`${site.url}/login`)
 const no = () => Promise.reject(new Error('not used in panel tests'))

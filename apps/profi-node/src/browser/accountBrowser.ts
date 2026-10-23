@@ -1,5 +1,5 @@
 import { type BrowserContext, chromium, type Page } from 'playwright'
-import { acquireProfileLock } from './lock'
+import { acquireAccountLock } from './lock'
 
 export type AccountBrowser = { context: BrowserContext; page: Page; close(): Promise<void> }
 
@@ -9,8 +9,9 @@ export async function openAccountBrowser(o: {
   profileDir: string
   proxy: string | null
   headless: boolean
+  databaseUrl: string
 }): Promise<AccountBrowser> {
-  const release = await acquireProfileLock(o.profileDir)
+  const release = await acquireAccountLock(o.databaseUrl, o.accountId)
   let context: BrowserContext
   try {
     context = await chromium.launchPersistentContext(o.profileDir, {

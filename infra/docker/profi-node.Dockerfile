@@ -5,4 +5,5 @@ RUN corepack enable
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile
-CMD ["pnpm", "--filter", "@sara/profi-node", "exec", "tsx", "src/main.ts"]
+# node runs directly (not under pnpm), so SIGTERM reaches it and the browsers close cleanly.
+CMD ["node", "--import", "tsx", "apps/profi-node/src/main.ts"]

@@ -16,6 +16,7 @@ services:
   core:
     build: { context: .., dockerfile: infra/docker/core.Dockerfile }
     restart: unless-stopped
+    init: true
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://sara:${POSTGRES_PASSWORD}@postgres:5432/sara
@@ -34,6 +35,9 @@ services:
   profi-node:
     build: { context: .., dockerfile: infra/docker/profi-node.Dockerfile }
     restart: unless-stopped
+    # tini as PID 1 passes SIGTERM on; a fixed hostname keeps Chromium's profile lock valid across restarts.
+    init: true
+    hostname: profi-node
     # Long grace period: a clean stop flushes the browser profiles.
     stop_grace_period: 60s
     environment:

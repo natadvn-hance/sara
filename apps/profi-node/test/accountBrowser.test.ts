@@ -1,10 +1,12 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { openAccountBrowser } from '../src/browser/accountBrowser'
 import { checkEgress } from '../src/browser/egress'
+import { acquireAccountLock } from '../src/browser/lock'
+import { nodeTestUrl } from './helpers/db'
 import { startTestSocks } from './helpers/socks'
 
 let site: ProfiSite
@@ -23,6 +25,7 @@ const opts = async () => ({
   profileDir: await mkdtemp(join(tmpdir(), 'profile-')),
   proxy: null as string | null,
   headless: true,
+  databaseUrl: nodeTestUrl(),
 })
 
 describe('account browser', () => {
@@ -36,6 +39,23 @@ describe('account browser', () => {
     const again = await openAccountBrowser(o)
     await again.close()
   }, 60000)
+
+  it('ADR-003: a lock file left by a previous container with a pid that is alive now does not block the start', async () => {
+    const o = await opts()
+    await writeFile(join(o.profileDir, '.sara-lock'), String(process.pid))
+    const a = await openAccountBrowser(o)
+    await a.close()
+  }, 60000)
+
+  it('ADR-003: the account lock lives in the database, so another process or container is refused', async () => {
+    const first = await acquireAccountLock(nodeTestUrl(), 'acc-lock-test')
+    await expect(acquireAccountLock(nodeTestUrl(), 'acc-lock-test')).rejects.toThrow(
+      /SECOND_BROWSER/,
+    )
+    await first()
+    const again = await acquireAccountLock(nodeTestUrl(), 'acc-lock-test')
+    await again()
+  })
 
   it('FR-ACC-1: all tab traffic goes through the account SOCKS proxy', async () => {
     const a = await openAccountBrowser({ ...(await opts()), proxy: socks.url })

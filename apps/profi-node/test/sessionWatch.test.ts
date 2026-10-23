@@ -7,7 +7,7 @@ import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/s
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
 import { outboxNode } from '../src/db/schema'
 import { createSessionWatch, requireAlive } from '../src/watch/sessionWatch'
-import { openNodeTestDb, resetNodeDb } from './helpers/db'
+import { nodeTestUrl, openNodeTestDb, resetNodeDb } from './helpers/db'
 
 const { db, close } = openNodeTestDb()
 let site: ProfiSite
@@ -18,6 +18,7 @@ beforeAll(async () => {
     profileDir: await mkdtemp(join(tmpdir(), 'watch-')),
     proxy: null,
     headless: true,
+    databaseUrl: nodeTestUrl(),
   })
 }, 60000)
 afterAll(async () => {

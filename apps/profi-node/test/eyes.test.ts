@@ -9,7 +9,7 @@ import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { startInsurance } from '../src/eyes/insurance'
 import { standInParsers } from '../src/eyes/parsers'
 import { attachRecorder } from '../src/eyes/recorder'
-import { openNodeTestDb, resetNodeDb } from './helpers/db'
+import { nodeTestUrl, openNodeTestDb, resetNodeDb } from './helpers/db'
 import { loginStandIn } from './helpers/site'
 
 const { db, close } = openNodeTestDb()
@@ -24,6 +24,7 @@ beforeAll(async () => {
     profileDir: await mkdtemp(join(tmpdir(), 'eyes-')),
     proxy: null,
     headless: true,
+    databaseUrl: nodeTestUrl(),
   })
   eyes = createEyes({
     accountId: 'hance-marketing',

@@ -8,6 +8,7 @@ import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountB
 import { serveMcp } from '../src/mcp/http'
 import { createProfiMcpServer } from '../src/mcp/server'
 import { registerScreenRoute } from '../src/screen/screenRoute'
+import { nodeTestUrl } from './helpers/db'
 
 let site: ProfiSite
 let ab: AccountBrowser
@@ -21,6 +22,7 @@ beforeAll(async () => {
     profileDir: await mkdtemp(join(tmpdir(), 'screen-')),
     proxy: null,
     headless: true,
+    databaseUrl: nodeTestUrl(),
   })
   await ab.page.goto(`${site.url}/login`)
   svc = await serveMcp(
