@@ -54,7 +54,8 @@ export function createShipper(o: {
         sent++
         continue
       }
-      if (status === 400 || status === 401) {
+      // 400: the event breaks the contract and never passes. 401 is a wrong token: a setting to fix, so retry.
+      if (status === 400) {
         await o.db
           .update(outboxNode)
           .set({ deadReason: `core answered ${status}`, attempts: row.attempts + 1 })

@@ -106,4 +106,34 @@ describe('session watch', () => {
     const [row] = await db.select().from(outboxNode).where(eq(outboxNode.attempts, 0))
     expect(row).toBeDefined()
   }, 60000)
+
+  it('FR-OPS-2: a tab that cannot be read for 5 minutes counts as gone', async () => {
+    const lone = await openAccountBrowser({
+      accountId: 'stuck-test',
+      profileDir: await mkdtemp(join(tmpdir(), 'stuck-')),
+      proxy: null,
+      headless: true,
+      databaseUrl: nodeTestUrl(),
+    })
+    let stuck = 0
+    const w = createSessionWatch({
+      accountId: 'stuck-test',
+      page: lone.page,
+      db,
+      banMarkers: BAN,
+      onAlive: () => {},
+      onStuck: () => {
+        stuck++
+      },
+    })
+    await lone.page.close()
+    const t0 = Date.now()
+    await w.tick(t0)
+    await w.tick(t0 + 4 * 60_000)
+    expect(stuck).toBe(0)
+    await w.tick(t0 + 5 * 60_000)
+    await w.tick(t0 + 6 * 60_000)
+    expect(stuck).toBe(1)
+    await lone.close()
+  }, 60000)
 })

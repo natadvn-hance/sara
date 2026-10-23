@@ -23,7 +23,7 @@ export async function detectSessionState(page: Page, banMarkers: string[]): Prom
 export type SessionWatch = {
   start(): void
   stop(): void
-  tick(): Promise<void>
+  tick(now?: number): Promise<void>
   state(): SessionState
 }
 
@@ -38,15 +38,31 @@ export function createSessionWatch(o: {
   banMarkers: string[]
   intervalMs?: number
   onAlive(deadSince: string): void
+  /** The tab could not be read at all for stuckAfterMs (crashed or hung browser). */
+  onStuck?: () => void
+  stuckAfterMs?: number
 }): SessionWatch {
+  const stuckAfterMs = o.stuckAfterMs ?? 300000
+  let unknownSince: number | null = null
+  let stuckReported = false
   let current: SessionState = 'unknown'
   let downSince: string | null = null
   let timer: NodeJS.Timeout | null = null
   const entity = { kind: 'account', id: o.accountId }
 
-  async function tick(): Promise<void> {
+  async function tick(now = Date.now()): Promise<void> {
     const next = await detectSessionState(o.page, o.banMarkers)
-    if (next === 'unknown' || next === current) return
+    if (next === 'unknown') {
+      unknownSince ??= now
+      if (!stuckReported && now - unknownSince >= stuckAfterMs) {
+        stuckReported = true
+        o.onStuck?.()
+      }
+      return
+    }
+    unknownSince = null
+    stuckReported = false
+    if (next === current) return
     const prev = current
     current = next
     if (next === 'dead' || next === 'banned') {

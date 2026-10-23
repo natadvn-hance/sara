@@ -17,6 +17,7 @@ export type AccountRuntime = {
   watch: { state(): SessionState }
   eyes: { balance(): number | null; presence(): boolean; lastRecognizedAt(): number }
   egressIp(): string | null
+  egressOk(): boolean
   silenceMs: number
 }
 
@@ -39,14 +40,16 @@ export function createReadTools(o: {
   return {
     async sessionHealth({ account_id }) {
       const r = runtime(account_id)
-      const { queued } = await shipperHealth(o.db)
+      const { queued, dead } = await shipperHealth(o.db)
       return {
         alive: r.watch.state() === 'alive',
         balance_rub: r.eyes.balance(),
         presence: r.eyes.presence(),
         egress_ip: r.egressIp(),
         queued_events: queued,
+        dead_events: dead,
         eyes_seeing: Date.now() - r.eyes.lastRecognizedAt() < r.silenceMs,
+        egress_ok: r.egressOk(),
       }
     },
 

@@ -1,53 +1,50 @@
-import type { AccountBrowser } from '../browser/accountBrowser'
 import type { NodeDb } from '../db/client'
 import { queueEvent } from '../ship/outbox'
 
-/** Can the account's tab reach the site at all? A short-lived tab, same proxy, the live tab undisturbed. */
-export async function probeSite(ab: AccountBrowser, baseUrl: string): Promise<boolean> {
-  const p = await ab.context.newPage()
-  try {
-    const res = await p.goto(baseUrl, { timeout: 15000, waitUntil: 'domcontentloaded' })
-    return (res?.status() ?? 0) < 500
-  } catch {
-    return false
-  } finally {
-    await p.close().catch(() => {})
-  }
+export type ConnectionGuard = {
+  /** The result of a real page load of the site (from the minute check); no extra probes. */
+  report(ok: boolean, now?: number): Promise<void>
+  /** Online: yes. Offline: only once per retry interval, so the site is not hammered (ADR-021). */
+  mayNavigate(now?: number): boolean
+  tick(now?: number): Promise<void>
+  online(): boolean
 }
 
-export type ConnectionGuard = { tick(now?: number): Promise<void>; online(): boolean }
-
 /**
- * Profi.ru unreachable (ADR-021, as v1): ask the site once per 5 minutes, not every chat at once; one 🌐 after
- * 30 minutes and one when it is back; after any outage a reconcile, so nothing written meanwhile is lost.
+ * Profi.ru unreachable (ADR-021, as v1): touch the site once per 5 minutes; one 🌐 after 30 minutes and one when
+ * it is back; after any outage a reconcile, so nothing written meanwhile is lost.
  */
 export function createConnectionGuard(o: {
   db: NodeDb
   accountId: string
-  probe(): Promise<boolean>
   onBack(since: string): Promise<void>
-  onlineCheckMs?: number
   retryMs?: number
   alarmAfterMs?: number
 }): ConnectionGuard {
-  const onlineCheckMs = o.onlineCheckMs ?? 60000
   const retryMs = o.retryMs ?? 300000
   const alarmAfterMs = o.alarmAfterMs ?? 1800000
   let isOnline = true
   let lostSince: number | null = null
   let lostSent = false
-  let lastProbe = Number.NEGATIVE_INFINITY
+  let lastTry = Number.NEGATIVE_INFINITY
   const entity = { kind: 'account', id: o.accountId }
+
+  async function alarmIfLong(now: number) {
+    if (isOnline || lostSent || lostSince === null || now - lostSince < alarmAfterMs) return
+    lostSent = true
+    await queueEvent(o.db, {
+      type: 'profi.connection_lost',
+      accountId: o.accountId,
+      entity,
+      payload: { since: new Date(lostSince).toISOString() },
+    })
+  }
 
   return {
     online: () => isOnline,
-    async tick(now = Date.now()) {
-      if (now - lastProbe < (isOnline ? onlineCheckMs : retryMs)) {
-        await alarmIfLong(now)
-        return
-      }
-      lastProbe = now
-      const ok = await o.probe()
+    mayNavigate: (now = Date.now()) => isOnline || now - lastTry >= retryMs,
+    async report(ok, now = Date.now()) {
+      lastTry = now
       if (!ok) {
         if (isOnline) {
           isOnline = false
@@ -71,16 +68,6 @@ export function createConnectionGuard(o: {
       lostSent = false
       await o.onBack(since)
     },
-  }
-
-  async function alarmIfLong(now: number) {
-    if (isOnline || lostSent || lostSince === null || now - lostSince < alarmAfterMs) return
-    lostSent = true
-    await queueEvent(o.db, {
-      type: 'profi.connection_lost',
-      accountId: o.accountId,
-      entity,
-      payload: { since: new Date(lostSince).toISOString() },
-    })
+    tick: (now = Date.now()) => alarmIfLong(now),
   }
 }

@@ -13,6 +13,8 @@ import { nodeTestUrl } from './helpers/db'
 let site: ProfiSite
 let ab: AccountBrowser
 let svc: Awaited<ReturnType<typeof serveMcp>>
+const viewerCounts: number[] = []
+let inputAllowed = true
 const notUsed = () => Promise.reject(new Error('not used'))
 
 beforeAll(async () => {
@@ -40,6 +42,8 @@ beforeAll(async () => {
   registerScreenRoute(svc.http, {
     nodeToken: 'node-tok',
     browsers: new Map([['hance-marketing', ab]]),
+    onViewers: (_id, n) => viewerCounts.push(n),
+    allowInput: () => inputAllowed,
   })
 }, 60000)
 afterAll(async () => {
@@ -103,4 +107,35 @@ describe('live screen', () => {
   it('T4: the service screen without the node token is refused', async () => {
     await expect(open(null)).rejects.toThrow(/401/)
   })
+
+  it('FR-ACC-6: while someone watches the live screen the service knows it, and stops knowing when they leave', async () => {
+    await expect.poll(() => viewerCounts.at(-1) ?? 0).toBe(0)
+    const ws = await open('node-tok')
+    await nextFrame(ws)
+    expect(viewerCounts.at(-1)).toBe(1)
+    ws.close()
+    await expect.poll(() => viewerCounts.at(-1)).toBe(0)
+  }, 30000)
+
+  it('FR-ACC-1: on a wrong IP the live screen shows the tab but takes no input', async () => {
+    inputAllowed = false
+    await ab.page.fill('#phone', '')
+    const ws = await open('node-tok')
+    await nextFrame(ws)
+    const box = await ab.page.locator('#phone').boundingBox()
+    const vp = ab.page.viewportSize()
+    if (!box || !vp) throw new Error('no layout')
+    ws.send(
+      JSON.stringify({
+        t: 'click',
+        x: (box.x + box.width / 2) / vp.width,
+        y: (box.y + box.height / 2) / vp.height,
+      }),
+    )
+    ws.send(JSON.stringify({ t: 'text', text: '+79000000002' }))
+    await new Promise((r) => setTimeout(r, 1000))
+    expect(await ab.page.locator('#phone').inputValue()).toBe('')
+    ws.close()
+    inputAllowed = true
+  }, 30000)
 })

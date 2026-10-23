@@ -95,4 +95,47 @@ describe('Profi.ru check per account', () => {
       detail: 'Сессия жива, но глаза не видят: 10 минут ничего не узнано на сайте',
     })
   })
+
+  it('FR-ACC-1: a wrong IP is shown even when the session is not alive, and refused events are shown too', async () => {
+    await t.close()
+    const health: { current: TestHealth } = {
+      current: {
+        alive: false,
+        balance_rub: null,
+        presence: false,
+        egress_ip: '10.0.0.5',
+        egress_ok: false,
+      },
+    }
+    t = await buildTestApp(db, {}, health)
+    await t.app.inject({
+      method: 'POST',
+      url: '/api/login',
+      payload: { password: 'длинныйпароль1' },
+    })
+    const read = async () =>
+      (
+        (
+          await t.app.inject({ method: 'GET', url: '/api/health', headers: { cookie: t.cookie() } })
+        ).json() as {
+          checks: { id: string; ok: boolean; detail: string }[]
+        }
+      ).checks.find((c) => c.id === 'profi')
+    expect(await read()).toMatchObject({
+      ok: false,
+      detail: 'Вкладка выходит в сеть с чужого IP 10.0.0.5',
+    })
+    health.current = {
+      alive: true,
+      balance_rub: 1,
+      presence: true,
+      egress_ip: '127.0.0.1',
+      egress_ok: true,
+      dead_events: 2,
+    }
+    expect(await read()).toMatchObject({
+      ok: false,
+      detail: 'Ядро отказалось принять 2 событий Профи-MCP',
+    })
+  })
 })

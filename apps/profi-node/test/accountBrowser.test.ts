@@ -76,4 +76,14 @@ describe('account browser', () => {
     })
     await a.close()
   }, 60000)
+
+  it('FR-ACC-1: the IP check of a browser that closed answers not ok instead of crashing', async () => {
+    const a = await openAccountBrowser(await opts())
+    await a.context.close()
+    expect(await checkEgress(a.page, `${site.url}/ip`, '127.0.0.1')).toEqual({
+      ok: false,
+      seen: null,
+    })
+    await a.close()
+  }, 60000)
 })

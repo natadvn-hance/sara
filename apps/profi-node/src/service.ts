@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import type { SessionHealthOutput } from '@sara/shared'
 import type { Page } from 'playwright'
 import { type AccountBrowser, openAccountBrowser } from './browser/accountBrowser'
 import { checkEgress } from './browser/egress'
@@ -15,7 +16,7 @@ import { registerScreenRoute } from './screen/screenRoute'
 import { createShipper } from './ship/shipper'
 import { purgeOld } from './store/purge'
 import { type AccountRuntime, createReadTools } from './tools/readTools'
-import { createConnectionGuard, probeSite } from './watch/connectionGuard'
+import { createConnectionGuard } from './watch/connectionGuard'
 import { createSessionWatch, type SessionWatch } from './watch/sessionWatch'
 
 export type ServiceTimings = {
@@ -34,27 +35,47 @@ const DEFAULT_TIMINGS: ServiceTimings = {
   egressEveryMs: 600000,
 }
 
-export type ProfiService = { url: string; page(accountId: string): Page; close(): Promise<void> }
+export type ProfiService = {
+  url: string
+  page(accountId: string): Page
+  health(accountId: string): Promise<SessionHealthOutput>
+  close(): Promise<void>
+}
+
+export type ServiceOptions = Partial<ServiceTimings> & {
+  /** The browser of an account died or hangs: by default the process exits so Docker restarts it cleanly. */
+  onBrowserGone?: (accountId: string) => void
+}
 
 type Account = {
   ab: AccountBrowser
   watch: SessionWatch
   insurance: Insurance | null
   egress: { ok: boolean; seen: string | null }
+  viewers: { n: number }
   stop(): Promise<void>
 }
 
 /** The live Profi-MCP: per account a tab with its own IP, eyes, session watch and connection guard. */
 export async function startProfiService(
   c: NodeConfig,
-  t: Partial<ServiceTimings> = {},
+  t: ServiceOptions = {},
 ): Promise<ProfiService> {
   const timing = { ...DEFAULT_TIMINGS, ...t }
+  const o = {
+    onBrowserGone:
+      t.onBrowserGone ??
+      ((id: string) => {
+        console.error(`Браузер аккаунта ${id} перестал отвечать, перезапускаюсь`)
+        process.exit(1)
+      }),
+  }
   await migrateNode(c.databaseUrl)
   const { db, close: closeDb } = createNodeDb(c.databaseUrl)
   const parsers = activeParsers
   const baseHost = new URL(c.profiBaseUrl).host
   const accounts = new Map<string, Account>()
+  let closing = false
   const runtimes = new Map<string, AccountRuntime>()
   const browsers = new Map<string, AccountBrowser>()
 
@@ -67,6 +88,9 @@ export async function startProfiService(
       databaseUrl: c.databaseUrl,
     })
     browsers.set(acc.id, ab)
+    ab.context.on('close', () => {
+      if (!closing) o.onBrowserGone(acc.id)
+    })
     const eyes = createEyes({ accountId: acc.id, db, parsers })
     await attachRecorder(ab, {
       accountId: acc.id,
@@ -74,6 +98,7 @@ export async function startProfiService(
       profiHosts: [baseHost],
       onRaw: (r) => eyes.onRaw(r),
     })
+    const viewers = { n: 0 }
     const a: Account = {
       ab,
       insurance: null,
@@ -84,7 +109,9 @@ export async function startProfiService(
         db,
         banMarkers: parsers.banMarkers,
         onAlive: (since) => void a.insurance?.reconcile(since).catch(() => {}),
+        onStuck: () => o.onBrowserGone(acc.id),
       }),
+      viewers,
       async stop() {},
     }
     accounts.set(acc.id, a)
@@ -92,25 +119,31 @@ export async function startProfiService(
       watch: a.watch,
       eyes,
       egressIp: () => a.egress.seen,
+      egressOk: () => a.egress.ok,
       silenceMs: 600000,
     })
 
     const guard = createConnectionGuard({
       db,
       accountId: acc.id,
-      probe: () => probeSite(ab, c.profiBaseUrl),
       onBack: async (since) => {
         await a.insurance?.reconcile(since)
       },
     })
 
-    // The site is opened only from the account's own IP (FR-ACC-1); until then the tab stays away from it.
+    // One gate for every page load of the account tab: own IP, a session that is not dead (Boris may be logging
+    // in on the live screen), nobody watching the live screen, and a reachable site (FR-ACC-1, FR-ACC-6, ADR-021).
+    const canNavigate = () =>
+      a.egress.ok &&
+      a.watch.state() !== 'dead' &&
+      a.watch.state() !== 'banned' &&
+      viewers.n === 0 &&
+      guard.mayNavigate()
+
+    // The site is opened only from the account's own IP; until then the tab stays away from it.
     const start = async () => {
       a.egress = await checkEgress(ab.page, c.egressEchoUrl, acc.egressIp)
       if (!a.egress.ok || a.insurance) return
-      await ab.page
-        .goto(`${c.profiBaseUrl}${parsers.paths.feed}`, { timeout: 30000 })
-        .catch(() => {})
       a.insurance = startInsurance({
         eyes,
         ab,
@@ -118,22 +151,30 @@ export async function startProfiService(
         parsers,
         feedEveryMs: timing.feedEveryMs,
         chatsEveryMs: timing.chatsEveryMs,
+        canNavigate,
+        onNavigate: (ok) => guard.report(ok),
       })
+      await a.insurance.feedOnce()
+      await a.watch.tick()
     }
     await start()
     const tick = setInterval(() => {
       void (async () => {
         if (!a.insurance) return start()
         await guard.tick()
+        if (a.egress.ok) await eyes.checkSilence(Date.now(), canNavigate())
         if (guard.online()) await a.watch.tick()
       })().catch(() => {})
     }, timing.tickMs)
     const egressTimer = setInterval(() => {
-      void checkEgress(ab.page, c.egressEchoUrl, acc.egressIp).then((e) => {
-        a.egress = e
-      })
+      void checkEgress(ab.page, c.egressEchoUrl, acc.egressIp)
+        .then(async (e) => {
+          a.egress = e
+          // A wrong IP stops the account at once: away from the site until the IP is right again.
+          if (!e.ok) await ab.page.goto('about:blank').catch(() => {})
+        })
+        .catch(() => {})
     }, timing.egressEveryMs)
-    await a.watch.tick()
     a.stop = async () => {
       clearInterval(tick)
       clearInterval(egressTimer)
@@ -154,7 +195,15 @@ export async function startProfiService(
   const readTools = createReadTools({ db, accounts: runtimes })
   const host = c.production ? '0.0.0.0' : '127.0.0.1'
   const svc = await serveMcp(() => createProfiMcpServer(readTools), c.port, undefined, host)
-  registerScreenRoute(svc.http, { nodeToken: c.nodeToken, browsers })
+  registerScreenRoute(svc.http, {
+    nodeToken: c.nodeToken,
+    browsers,
+    onViewers: (id, n) => {
+      const a = accounts.get(id)
+      if (a) a.viewers.n = n
+    },
+    allowInput: (id) => accounts.get(id)?.egress.ok ?? false,
+  })
 
   return {
     url: svc.url,
@@ -163,7 +212,9 @@ export async function startProfiService(
       if (!a) throw new Error(`account ${id} is not served here`)
       return a.ab.page
     },
+    health: (id) => readTools.sessionHealth({ account_id: id }),
     async close() {
+      closing = true
       clearInterval(purge)
       for (const a of accounts.values()) await a.stop()
       await shipper.stop()

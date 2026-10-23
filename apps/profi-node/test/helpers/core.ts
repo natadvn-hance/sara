@@ -4,7 +4,7 @@ import type { EventEnvelope } from '@sara/shared'
 /** A stand-in for the core's C8 endpoint: it can be down, refuse, or accept. */
 export async function startTestCore() {
   const received: EventEnvelope[] = []
-  let mode: 'up' | 'down' | 'refuse' = 'up'
+  let mode: 'up' | 'down' | 'refuse' | 'unauthorized' = 'up'
   const seen = new Set<string>()
   const server = createServer((req, res) => {
     let body = ''
@@ -14,6 +14,7 @@ export async function startTestCore() {
     req.on('end', () => {
       if (mode === 'down') return res.writeHead(503).end()
       if (mode === 'refuse') return res.writeHead(400).end('{"error":"broken"}')
+      if (mode === 'unauthorized') return res.writeHead(401).end('{"error":"unauthorized"}')
       const e = JSON.parse(body) as EventEnvelope
       const duplicate = seen.has(e.id)
       if (!duplicate) {
@@ -38,6 +39,9 @@ export async function startTestCore() {
     },
     refuse: () => {
       mode = 'refuse'
+    },
+    unauthorized: () => {
+      mode = 'unauthorized'
     },
     close: () => new Promise<void>((r) => server.close(() => r())),
   }

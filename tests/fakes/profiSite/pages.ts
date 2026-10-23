@@ -75,7 +75,7 @@ export const chatsPage = () =>
     '<ul id="chats"></ul>',
     `fetch('/api/chats').then((r) => r.json()).then((d) => {
   document.getElementById('chats').innerHTML = d.chats.map((c) =>
-    '<li><a class="chat-link" data-chat-id="' + c.id + '" href="/chats/' + c.id + '">' + c.id + '</a> <b class="unread">' + c.unread + '</b></li>').join('')
+    '<li><a class="chat-link" data-chat-id="' + c.id + '" data-last="' + (c.last || '') + '" href="/chats/' + c.id + '">' + c.id + '</a> <b class="unread">' + c.unread + '</b></li>').join('')
 })`,
   )
 

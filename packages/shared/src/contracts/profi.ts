@@ -21,8 +21,12 @@ export const SessionHealthOutput = z.object({
   egress_ip: z.string().nullable(),
   /** Events waiting in the node's queue for the core (C8). */
   queued_events: z.number().int().nonnegative().optional(),
+  /** Events the core refused as broken; they are never resent and need a look. */
+  dead_events: z.number().int().nonnegative().optional(),
   /** False when nothing on the site was recognized for 10 minutes (layout changed). */
   eyes_seeing: z.boolean().optional(),
+  /** False when the tab does not leave from the account's own IP; the account then stands (FR-ACC-1). */
+  egress_ok: z.boolean().optional(),
 })
 export type SessionHealthInput = z.infer<typeof SessionHealthInput>
 export type SessionHealthOutput = z.infer<typeof SessionHealthOutput>

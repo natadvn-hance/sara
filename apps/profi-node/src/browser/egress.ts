@@ -7,14 +7,15 @@ export async function checkEgress(
   expectedIp: string,
 ): Promise<{ ok: boolean; seen: string | null }> {
   // A separate short-lived tab of the same context: same proxy, the live tab is not disturbed.
-  const probe = await page.context().newPage()
+  let probe: Page | null = null
   try {
+    probe = await page.context().newPage()
     const res = await probe.goto(echoUrl, { timeout: 15000 })
     const seen = ((await res?.text()) ?? '').trim().replace(/^::ffff:/, '') || null
     return { ok: seen === expectedIp, seen }
   } catch {
     return { ok: false, seen: null }
   } finally {
-    await probe.close().catch(() => {})
+    await probe?.close().catch(() => {})
   }
 }

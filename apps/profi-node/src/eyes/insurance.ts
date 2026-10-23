@@ -9,9 +9,13 @@ export type Insurance = {
   reconcile(since: string): Promise<void>
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 /**
  * The minute check (FR-LEAD-1) and the 10-minute chat check (FR-CONV-1): open the feed and unread chats in the
- * same tab, so the site's own answers pass the eyes again. Catches whatever the event stream missed.
+ * same tab, so the site's own answers pass the eyes again. It never touches the tab when canNavigate says no:
+ * a dead session (Boris is logging in on the live screen), no connection, a wrong IP, or someone watching the
+ * live screen.
  */
 export function startInsurance(o: {
   eyes: Eyes
@@ -20,18 +24,37 @@ export function startInsurance(o: {
   parsers: Parsers
   feedEveryMs?: number
   chatsEveryMs?: number
+  chatPauseMs?: number
+  canNavigate?: () => boolean
+  onNavigate?: (ok: boolean) => Promise<void> | void
 }): Insurance {
+  const can = o.canNavigate ?? (() => true)
+  const pause = o.chatPauseMs ?? 2000
   let busy: Promise<void> = Promise.resolve()
   const serial = (f: () => Promise<void>) => {
     busy = busy.then(f, f)
     return busy
   }
-  const go = (path: string) =>
-    o.ab.page.goto(`${o.baseUrl}${path}`, { waitUntil: 'networkidle', timeout: 30000 })
+  async function go(path: string): Promise<boolean> {
+    let ok = false
+    try {
+      const res = await o.ab.page.goto(`${o.baseUrl}${path}`, {
+        waitUntil: 'networkidle',
+        timeout: 30000,
+      })
+      ok = (res?.status() ?? 0) > 0 && (res?.status() ?? 0) < 500
+    } catch {
+      ok = false
+    }
+    // Not awaited: what the guard does next (a reconcile) queues behind this check instead of deadlocking it.
+    void Promise.resolve(o.onNavigate?.(ok)).catch(() => {})
+    return ok
+  }
 
   async function feedOnce() {
     await serial(async () => {
-      await go(o.parsers.paths.feed)
+      if (!can()) return
+      if (!(await go(o.parsers.paths.feed))) return
       await o.eyes.onParsed(
         { recognized: false, signals: await o.parsers.fromHeaderDom(o.ab.page) },
         'dom',
@@ -39,24 +62,24 @@ export function startInsurance(o: {
     })
   }
 
-  async function chatsOnce(onlyUnread = true) {
+  async function chats(pick: (c: { unread: number; lastAt: string | null }) => boolean) {
     await serial(async () => {
-      await go(o.parsers.paths.chats)
-      const chats = await o.parsers.fromChatsDom(o.ab.page)
-      for (const c of chats) {
-        if (onlyUnread && c.unread === 0) continue
-        await go(o.parsers.paths.chat(c.chatId))
+      if (!can() || !(await go(o.parsers.paths.chats))) return
+      const list = await o.parsers.fromChatsDom(o.ab.page)
+      for (const c of list.filter(pick)) {
+        if (!can()) return
+        await sleep(pause)
+        if (!(await go(o.parsers.paths.chat(c.chatId)))) return
         await o.eyes.onParsed(await o.parsers.fromChatDom(o.ab.page, c.chatId), 'dom')
       }
       // Back to the feed, where the event stream lives.
-      await go(o.parsers.paths.feed)
+      if (can()) await go(o.parsers.paths.feed)
     })
   }
 
   const timers = [
     setInterval(() => void feedOnce().catch(() => {}), o.feedEveryMs ?? 60000),
-    setInterval(() => void chatsOnce().catch(() => {}), o.chatsEveryMs ?? 600000),
-    setInterval(() => void o.eyes.checkSilence().catch(() => {}), 60000),
+    setInterval(() => void chats((c) => c.unread > 0).catch(() => {}), o.chatsEveryMs ?? 600000),
   ]
 
   return {
@@ -64,11 +87,12 @@ export function startInsurance(o: {
       for (const t of timers) clearInterval(t)
     },
     feedOnce,
-    chatsOnce,
-    // After a logout or an outage: the whole feed and every chat, not only unread ones (F8).
-    async reconcile() {
+    chatsOnce: (onlyUnread = true) => chats((c) => !onlyUnread || c.unread > 0),
+    // After a logout or an outage: the feed and the chats with messages since then, one by one (F8).
+    async reconcile(since) {
       await feedOnce()
-      await chatsOnce(false)
+      // A chat without a known last time is read too: missing a message is worse than one more page.
+      await chats((c) => c.lastAt === null || c.lastAt >= since)
     },
   }
 }

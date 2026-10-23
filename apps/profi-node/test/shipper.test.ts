@@ -80,6 +80,17 @@ describe('event shipping', () => {
     expect(await shipperHealth(db)).toMatchObject({ queued: 0, dead: 1 })
   })
 
+  it('C8: a wrong node token is a setting to fix, so the event waits and arrives once the token is right', async () => {
+    core.unauthorized()
+    await queueEvent(db, ev(1))
+    const s = shipper()
+    await s.flush()
+    expect(await shipperHealth(db)).toMatchObject({ queued: 1, dead: 0 })
+    core.up()
+    await s.flush()
+    expect(core.received).toHaveLength(1)
+  })
+
   it('ADR-022: an event payload that breaks its contract is refused before it is queued', async () => {
     await expect(
       queueEvent(db, { ...ev(1), type: 'profi.client_message', payload: { text: 'привет' } }),

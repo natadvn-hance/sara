@@ -161,4 +161,30 @@ describe('eyes', () => {
     ins.stop()
     expect(await events('profi.layout_changed')).toHaveLength(1)
   }, 30000)
+
+  it('ADR-002: a broken feed is reported even while chats still parse', async () => {
+    const e = createEyes({
+      accountId: 'hance-marketing',
+      db,
+      parsers: standInParsers,
+      layoutSilenceMs: 300,
+    })
+    await new Promise((r) => setTimeout(r, 400))
+    await e.onParsed({ recognized: true, what: 'chat', signals: [] }, 'dom')
+    await e.checkSilence(Date.now(), true)
+    expect(await events('profi.layout_changed')).toHaveLength(1)
+  })
+
+  it('ADR-002: no layout alarm while the account is not working (logged out, offline, wrong IP)', async () => {
+    const e = createEyes({
+      accountId: 'hance-marketing',
+      db,
+      parsers: standInParsers,
+      layoutSilenceMs: 300,
+    })
+    await new Promise((r) => setTimeout(r, 400))
+    await e.checkSilence(Date.now(), false)
+    await e.checkSilence(Date.now(), true)
+    expect(await events('profi.layout_changed')).toHaveLength(0)
+  })
 })

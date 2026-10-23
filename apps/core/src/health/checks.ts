@@ -91,12 +91,21 @@ async function profiCheck(d: AppDeps): Promise<HealthCheck> {
   try {
     const acc = d.accounts?.[0]
     const h = await d.profi.sessionHealth(acc?.id ?? d.accountId ?? 'hance-marketing')
-    if (h.alive && acc && h.egress_ip !== acc.egressIp) {
+    // A wrong IP matters whatever the session: the account stands until it is fixed (FR-ACC-1).
+    if (h.egress_ok === false || (h.alive && acc && h.egress_ip !== acc.egressIp)) {
       return {
         ...base,
         ok: false,
         detail: `Вкладка выходит в сеть с чужого IP ${h.egress_ip ?? 'неизвестно'}`,
         fix: 'Аккаунт стоит. Напиши разработке: нужно проверить выход через SOCKS аккаунта.',
+      }
+    }
+    if (h.dead_events && h.dead_events > 0) {
+      return {
+        ...base,
+        ok: false,
+        detail: `Ядро отказалось принять ${h.dead_events} событий Профи-MCP`,
+        fix: 'Напиши разработке: события не прошли проверку ядра и не будут отправлены сами.',
       }
     }
     if (h.alive && h.eyes_seeing === false) {

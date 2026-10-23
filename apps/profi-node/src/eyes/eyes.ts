@@ -7,7 +7,8 @@ import type { RawRecord } from './recorder'
 export type Eyes = {
   onRaw(r: RawRecord): Promise<void>
   onParsed(p: ParseResult, source: 'rtp' | 'response' | 'dom', body?: unknown): Promise<void>
-  checkSilence(now?: number): Promise<void>
+  /** active: the account is working (logged in, online, own IP); otherwise the silence clock restarts. */
+  checkSilence(now?: number, active?: boolean): Promise<void>
   lastRecognizedAt(): number
   balance(): number | null
   presence(): boolean
@@ -87,7 +88,8 @@ export function createEyes(o: {
   }
 
   async function onParsed(p: ParseResult, _source: 'rtp' | 'response' | 'dom', body?: unknown) {
-    if (p.recognized) {
+    // The feed is read every minute, so its silence is the sign of a changed site (ADR-002).
+    if (p.recognized && p.what === 'feed') {
       lastRecognized = Date.now()
       layoutReported = false
     }
@@ -112,7 +114,11 @@ export function createEyes(o: {
       await onParsed(p, r.kind, r.body)
     },
     onParsed,
-    async checkSilence(now = Date.now()) {
+    async checkSilence(now = Date.now(), active = true) {
+      if (!active) {
+        lastRecognized = now
+        return
+      }
       if (layoutReported || now - lastRecognized < silenceMs) return
       layoutReported = true
       await queueEvent(o.db, {

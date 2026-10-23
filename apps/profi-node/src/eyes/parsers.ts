@@ -10,7 +10,11 @@ export type Signal =
   | { t: 'presence'; on: boolean }
 
 /** recognized: the source had the shape we know (even if empty). False is how a layout change shows. */
-export type ParseResult = { recognized: boolean; signals: Signal[] }
+export type ParseResult = {
+  recognized: boolean
+  what?: 'feed' | 'chat' | 'order' | 'stream'
+  signals: Signal[]
+}
 
 export type Parsers = {
   paths: { feed: string; chats: string; chat(id: string): string }
@@ -18,7 +22,7 @@ export type Parsers = {
   fromRtp(body: unknown): ParseResult
   fromResponse(url: string, body: unknown): ParseResult
   fromHeaderDom(page: Page): Promise<Signal[]>
-  fromChatsDom(page: Page): Promise<{ chatId: string; unread: number }[]>
+  fromChatsDom(page: Page): Promise<{ chatId: string; unread: number; lastAt: string | null }[]>
   fromChatDom(page: Page, chatId: string): Promise<ParseResult>
 }
 
@@ -86,10 +90,14 @@ export const standInParsers: Parsers = {
   fromRtp(body) {
     if (!isObj(body)) return NONE
     if (body.type === 'order.new' && isObj(body.order)) {
-      return { recognized: true, signals: [order(body.order as StandInOrder)] }
+      return { recognized: true, what: 'stream', signals: [order(body.order as StandInOrder)] }
     }
     if (body.type === 'message.new' && isObj(body.message) && typeof body.chatId === 'string') {
-      return { recognized: true, signals: [message(body.chatId, body.message as StandInMessage)] }
+      return {
+        recognized: true,
+        what: 'stream',
+        signals: [message(body.chatId, body.message as StandInMessage)],
+      }
     }
     return NONE
   },
@@ -97,16 +105,17 @@ export const standInParsers: Parsers = {
     const path = new URL(url).pathname
     if (path === '/api/feed') {
       if (!isObj(body) || !Array.isArray(body.items)) return NONE
-      return { recognized: true, signals: (body.items as StandInOrder[]).map(order) }
+      return { recognized: true, what: 'feed', signals: (body.items as StandInOrder[]).map(order) }
     }
     if (path.startsWith('/api/order/') && isObj(body) && typeof body.id === 'string') {
-      return { recognized: true, signals: [order(body as unknown as StandInOrder)] }
+      return { recognized: true, what: 'order', signals: [order(body as unknown as StandInOrder)] }
     }
     const chat = /^\/api\/chat\/(.+)$/.exec(path)
     if (chat?.[1] && isObj(body) && Array.isArray(body.messages)) {
       const id = decodeURIComponent(chat[1])
       return {
         recognized: true,
+        what: 'chat',
         signals: (body.messages as StandInMessage[]).map((m) => message(id, m)),
       }
     }
@@ -133,6 +142,7 @@ export const standInParsers: Parsers = {
         links.map((a) => ({
           chatId: a.getAttribute('data-chat-id') ?? '',
           unread: Number(a.parentElement?.querySelector('.unread')?.textContent ?? '0'),
+          lastAt: a.getAttribute('data-last') || null,
         })),
       )
       .catch(() => [])
@@ -160,6 +170,7 @@ export const standInParsers: Parsers = {
             : 'x'
     return {
       recognized: raw.length > 0,
+      what: 'chat',
       signals: raw.map((r) =>
         message(chatId, { id: r.id, side: side(r.cls), text: r.text, ts: r.ts, read: true }),
       ),

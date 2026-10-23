@@ -72,3 +72,29 @@ describe('Profi-MCP service end to end', () => {
     expect(types().filter((t) => t === 'profi.session_dead')).toHaveLength(1)
   }, 60000)
 })
+
+describe('account on a wrong IP', () => {
+  it('FR-ACC-1: an account whose tab does not leave from its own IP never opens the site and says so', async () => {
+    const wrong = await startProfiService(
+      {
+        ...loadNodeConfig({}),
+        databaseUrl: nodeTestUrl('sara_node_e2e'),
+        coreEventsUrl: core.url,
+        dataDir: await mkdtemp(join(tmpdir(), 'svc-wrong-')),
+        port: 0,
+        profiBaseUrl: site.url,
+        rtpHost: site.rtpHost,
+        egressEchoUrl: `${site.url}/ip`,
+        accounts: [{ id: 'wrong-ip', proxy: null, egressIp: '203.0.113.9' }],
+      },
+      { tickMs: 200, feedEveryMs: 1000, chatsEveryMs: 1000, shipPollMs: 100 },
+    )
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(wrong.page('wrong-ip').url()).toBe('about:blank')
+    expect(await wrong.health('wrong-ip')).toMatchObject({
+      egress_ok: false,
+      egress_ip: '127.0.0.1',
+    })
+    await wrong.close()
+  }, 60000)
+})

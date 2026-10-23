@@ -12,6 +12,7 @@ const runtime = (state: 'alive' | 'dead' = 'alive'): AccountRuntime => ({
   watch: { state: () => state },
   eyes: { balance: () => 4200, presence: () => true, lastRecognizedAt: () => Date.now() },
   egressIp: () => '203.0.113.9',
+  egressOk: () => true,
   silenceMs: 600000,
 })
 const tools = (state: 'alive' | 'dead' = 'alive') =>
@@ -114,7 +115,9 @@ describe('read tools', () => {
       presence: true,
       egress_ip: '203.0.113.9',
       queued_events: 0,
+      dead_events: 0,
       eyes_seeing: true,
+      egress_ok: true,
     })
   })
 })
