@@ -5,6 +5,7 @@ import type { Db } from '../db/client'
 import { account } from '../db/schema'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
+import { getSetting } from '../settings/store'
 
 export type ProfiEventDeps = { db: Db; notifier: Pick<Notifier, 'sendText'>; publicUrl: string }
 
@@ -67,3 +68,28 @@ export function createProfiEventDispatcher(d: ProfiEventDeps): (e: EventEnvelope
     await DBOS.startWorkflow(handleWorkflow, { workflowID: `profi-event:${e.id}` })(e)
   }
 }
+
+/**
+ * Where a Profi event goes. In shadow (pipeline.leads off, the default) orders are only journaled, so the
+ * new Sara does not double v1's summaries (ST-M1-11).
+ */
+export async function routeProfiEvent(
+  r: {
+    db: Db
+    onOrderSeen(e: EventEnvelope): Promise<void>
+    onAccountEvent(e: EventEnvelope): Promise<void>
+  },
+  e: EventEnvelope,
+): Promise<void> {
+  if (e.type === 'profi.order_seen') {
+    if (await getSetting(r.db, 'pipeline.leads')) await r.onOrderSeen(e)
+    return
+  }
+  if (ACCOUNT_EVENTS.has(e.type)) await r.onAccountEvent(e)
+}
+
+const ACCOUNT_EVENTS = new Set<string>([
+  'profi.session_dead',
+  'profi.profile_banned',
+  'profi.session_alive',
+])

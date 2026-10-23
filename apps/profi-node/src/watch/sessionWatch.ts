@@ -86,7 +86,7 @@ export function createSessionWatch(o: {
 }
 
 /** Every tool of an account checks this first: nothing is done on a dead or banned session. */
-export function requireAlive(w: SessionWatch): void {
+export function requireAlive(w: Pick<SessionWatch, 'state'>): void {
   const s = w.state()
   if (s === 'dead') throw new ProfiToolError('SESSION_DEAD', 'Профи.ру разлогинил аккаунт')
   if (s === 'banned') throw new ProfiToolError('BANNED', 'Профи.ру заблокировал профиль')

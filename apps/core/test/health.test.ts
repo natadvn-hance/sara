@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { buildTestApp, type TestApp } from './helpers/app'
+import { buildTestApp, type TestApp, type TestHealth } from './helpers/app'
 import { openTestDb, resetDb } from './helpers/db'
 
 const { db, close } = openTestDb()
@@ -50,5 +50,49 @@ describe('system status', () => {
       checks: { id: string; ok: boolean }[]
     }
     expect(checks.find((c) => c.id === 'claude')?.ok).toBe(true)
+  })
+})
+
+describe('Profi.ru check per account', () => {
+  it('FR-SET-5: health shows the account IP and how many events wait in the queue', async () => {
+    await t.close()
+    const health: { current: TestHealth } = {
+      current: {
+        alive: true,
+        balance_rub: 5000,
+        presence: true,
+        egress_ip: '127.0.0.1',
+        queued_events: 3,
+        eyes_seeing: true,
+      },
+    }
+    t = await buildTestApp(db, {}, health)
+    await t.app.inject({
+      method: 'POST',
+      url: '/api/login',
+      payload: { password: 'длинныйпароль1' },
+    })
+    const read = async () =>
+      (
+        (
+          await t.app.inject({ method: 'GET', url: '/api/health', headers: { cookie: t.cookie() } })
+        ).json() as {
+          checks: { id: string; ok: boolean; detail: string; fix: string | null }[]
+        }
+      ).checks.find((c) => c.id === 'profi')
+    expect(await read()).toMatchObject({
+      ok: true,
+      detail: 'Сессия жива, IP 127.0.0.1 свой, в очереди к ядру 3',
+    })
+    health.current = { ...health.current, egress_ip: '203.0.113.9' }
+    expect(await read()).toMatchObject({
+      ok: false,
+      detail: 'Вкладка выходит в сеть с чужого IP 203.0.113.9',
+    })
+    health.current = { ...health.current, egress_ip: '127.0.0.1', eyes_seeing: false }
+    expect(await read()).toMatchObject({
+      ok: false,
+      detail: 'Сессия жива, но глаза не видят: 10 минут ничего не узнано на сайте',
+    })
   })
 })

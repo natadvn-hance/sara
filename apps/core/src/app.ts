@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
-import { createProfiEventDispatcher } from './accounts/profiEvents'
+import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
 import { speedReport } from './analytics/speed'
 import type { AppDeps } from './api/deps'
 import { buildServer } from './api/server'
@@ -104,7 +104,11 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   registerProfiEventsRoute(app, {
     db,
     nodeToken: config.nodeToken,
-    onEvent: (e) => (e.type === 'profi.order_seen' ? lp.onOrderSeen(e) : accountEvents(e)),
+    onEvent: (e) =>
+      routeProfiEvent(
+        { db, onOrderSeen: (x) => lp.onOrderSeen(x), onAccountEvent: accountEvents },
+        e,
+      ),
   })
   app.register(async (scoped) => {
     scoped.addHook('preHandler', requireSession)

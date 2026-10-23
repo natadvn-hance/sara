@@ -53,7 +53,11 @@ export function createEyes(o: {
       }
       await o.db.transaction(async (tx) => {
         if (s.t === 'order') {
-          const isNew = await upsertOrder(tx, { accountId: o.accountId, order: s.order, body })
+          const isNew = await upsertOrder(tx, {
+            accountId: o.accountId,
+            order: s.order,
+            body: { ...s.order, published_at: s.published_at },
+          })
           if (!isNew) return
           await queueEvent(tx, {
             type: 'profi.order_seen',

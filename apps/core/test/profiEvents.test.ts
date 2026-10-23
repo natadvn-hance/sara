@@ -74,3 +74,26 @@ describe('Profi events in the core', () => {
     for (const t of sent) expect(t).not.toContain(String.fromCharCode(0x2014))
   })
 })
+
+describe('routing of Profi events', () => {
+  it('ST-M1-11: in shadow an order_seen is journaled but no card is sent', async () => {
+    const { routeProfiEvent } = await import('../src/accounts/profiEvents')
+    const { setSetting } = await import('../src/settings/store')
+    const calls: string[] = []
+    const r = {
+      db,
+      onOrderSeen: async () => {
+        calls.push('pipeline')
+      },
+      onAccountEvent: async () => {
+        calls.push('account')
+      },
+    }
+    await routeProfiEvent(r, ev('profi.order_seen'))
+    expect(calls).toEqual([])
+    await setSetting(db, 'pipeline.leads', true, 'boris')
+    await routeProfiEvent(r, ev('profi.order_seen'))
+    await routeProfiEvent(r, ev('profi.session_dead'))
+    expect(calls).toEqual(['pipeline', 'account'])
+  })
+})

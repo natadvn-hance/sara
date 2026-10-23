@@ -89,8 +89,29 @@ async function claudeCheck(d: AppDeps): Promise<HealthCheck> {
 async function profiCheck(d: AppDeps): Promise<HealthCheck> {
   const base = { id: 'profi' as const, title: 'Профи.ру' }
   try {
-    const h = await d.profi.sessionHealth(d.accountId ?? 'hance-marketing')
-    if (h.alive) return { ...base, ok: true, detail: 'Сессия жива', fix: null }
+    const acc = d.accounts?.[0]
+    const h = await d.profi.sessionHealth(acc?.id ?? d.accountId ?? 'hance-marketing')
+    if (h.alive && acc && h.egress_ip !== acc.egressIp) {
+      return {
+        ...base,
+        ok: false,
+        detail: `Вкладка выходит в сеть с чужого IP ${h.egress_ip ?? 'неизвестно'}`,
+        fix: 'Аккаунт стоит. Напиши разработке: нужно проверить выход через SOCKS аккаунта.',
+      }
+    }
+    if (h.alive && h.eyes_seeing === false) {
+      return {
+        ...base,
+        ok: false,
+        detail: 'Сессия жива, но глаза не видят: 10 минут ничего не узнано на сайте',
+        fix: 'Похоже, Профи.ру поменял страницы. Напиши разработке.',
+      }
+    }
+    if (h.alive) {
+      const ip = acc ? `, IP ${h.egress_ip} свой` : ''
+      const queue = h.queued_events === undefined ? '' : `, в очереди к ядру ${h.queued_events}`
+      return { ...base, ok: true, detail: `Сессия жива${ip}${queue}`, fix: null }
+    }
     return {
       ...base,
       ok: false,

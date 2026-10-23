@@ -17,6 +17,8 @@ export type TestHealth = {
   balance_rub: number | null
   presence: boolean
   egress_ip: string | null
+  queued_events?: number
+  eyes_seeing?: boolean
 }
 
 export type TestApp = {

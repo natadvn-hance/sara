@@ -14,6 +14,11 @@ try {
 console.log('Поднимаю базу данных…')
 execSync('docker compose -f infra/compose.dev.yml up -d --wait', { cwd: root, stdio: 'inherit' })
 execSync('pnpm --filter @sara/core exec tsx src/db/migrate.ts', { cwd: root, stdio: 'inherit' })
+// On the Mac leads come as cards (M0 path); on the server the default is shadow.
+execSync('pnpm --filter @sara/core exec tsx src/settings/cli.ts leads on', {
+  cwd: root,
+  stdio: 'inherit',
+})
 
 const procs: { name: string; cmd: string; args: string[] }[] = [
   {

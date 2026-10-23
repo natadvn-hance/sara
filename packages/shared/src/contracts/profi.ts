@@ -19,6 +19,10 @@ export const SessionHealthOutput = z.object({
   balance_rub: z.number().int().nullable(),
   presence: z.boolean(),
   egress_ip: z.string().nullable(),
+  /** Events waiting in the node's queue for the core (C8). */
+  queued_events: z.number().int().nonnegative().optional(),
+  /** False when nothing on the site was recognized for 10 minutes (layout changed). */
+  eyes_seeing: z.boolean().optional(),
 })
 export type SessionHealthInput = z.infer<typeof SessionHealthInput>
 export type SessionHealthOutput = z.infer<typeof SessionHealthOutput>
