@@ -10,6 +10,10 @@
     "@sara/core": "workspace:*",
     "@sara/profi-node": "workspace:*",
     "@sara/shared": "workspace:*",
-    "drizzle-orm": "0.45.4"
+    "drizzle-orm": "0.45.4",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
   }
 }

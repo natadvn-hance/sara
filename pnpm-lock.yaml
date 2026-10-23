@@ -372,6 +372,13 @@ importers:
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@types/pg@8.23.1)(pg@8.23.1)
+      ws:
+        specifier: 8.18.3
+        version: 8.18.3
+    devDependencies:
+      "@types/ws":
+        specifier: 8.18.1
+        version: 8.18.1
 
 packages:
   "@babel/code-frame@7.29.7":
@@ -1818,6 +1825,12 @@ packages:
     resolution:
       {
         integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==,
+      }
+
+  "@types/ws@8.18.1":
+    resolution:
+      {
+        integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==,
       }
 
   "@typescript/typescript-aix-ppc64@7.0.2":
@@ -4029,6 +4042,21 @@ packages:
         integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==,
       }
 
+  ws@8.18.3:
+    resolution:
+      {
+        integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==,
+      }
+    engines: { node: ">=10.0.0" }
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: ">=5.0.2"
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xtend@4.0.2:
     resolution:
       {
@@ -4733,6 +4761,10 @@ snapshots:
   "@types/react@19.3.0":
     dependencies:
       csstype: 3.2.3
+
+  "@types/ws@8.18.1":
+    dependencies:
+      "@types/node": 26.6.5
 
   "@typescript/typescript-aix-ppc64@7.0.2":
     optional: true
@@ -5902,6 +5934,8 @@ snapshots:
       strip-ansi: 7.2.0
 
   wrappy@1.0.2: {}
+
+  ws@8.18.3: {}
 
   xtend@4.0.2: {}
 
