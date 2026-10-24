@@ -1,4 +1,4 @@
-import { cp, mkdtemp } from 'node:fs/promises'
+import { cp, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
@@ -49,7 +49,11 @@ async function gateway(
     claudeBin: join(ROOT, 'tests/fakes/fake-claude.mjs'),
     rolesDir: join(dir, 'roles'),
     dataDir: join(dir, 'data'),
-    extraEnv: { FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole), ...env },
+    extraEnv: {
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
+      FAKE_CLAUDE_ARGS_LOG: join(dir, 'claude.log'),
+      ...env,
+    },
   })
 }
 const PROPOSAL = {
@@ -78,6 +82,15 @@ async function threeSurprises() {
   }
   await leadWithScore(db, '940004', 70)
   await recordLabel(db, { leadId: '940004', label: 'yes', source: 'card' })
+}
+/** What the proposer got as input in its latest call. */
+async function proposerInput(): Promise<string> {
+  const calls = (await readFile(join(dir, 'claude.log'), 'utf8'))
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+    .filter((c) => c.args.some((a) => a.endsWith('rules-proposer/role.md')))
+  return calls.at(-1)?.stdin ?? ''
 }
 const proposalTask = async () =>
   (await db.select().from(task).where(eq(task.kind, 'rule_proposal')))[0]?.id ?? ''
@@ -182,6 +195,42 @@ describe('rule proposals', () => {
     const gw = await gateway({ 'rules-proposer': PROPOSAL }, { FAKE_CLAUDE_MODE: 'limit' })
     expect(await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)).toBe('not_yet')
     expect(await countEvents(db, 'rules.proposal_invalid')).toBe(0)
+  })
+
+  it('FR-MIND-3: the proposer is told what Boris declined and why', async () => {
+    await threeSurprises()
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    expect(await proposerInput()).not.toContain('Борис уже отказался')
+    await onProposalPress({ db, notifier }, await proposalTask(), 'drop')
+    const [why] = await db.select().from(question).where(eq(question.kind, 'why_decline'))
+    await answerQuestion(db, {
+      text: 'маленький бюджет у нас тоже берут',
+      replyToMessageId: why?.telegramMessageId ?? -1,
+      voice: false,
+      at: new Date(),
+    })
+    expect(
+      await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-26T09:00:00Z')),
+    ).toBe('asked')
+    expect(await proposerInput()).toContain(
+      [
+        'Поправки, от которых Борис уже отказался:',
+        '- Порог выше: 60 вместо 56. Его причина: маленький бюджет у нас тоже берут',
+      ].join('\n'),
+    )
+  })
+
+  it('FR-MIND-3: a proposal that went stale is not a refusal', async () => {
+    await threeSurprises()
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    await rollbackTo(db, ACC, 1)
+    await onProposalPress({ db, notifier }, await proposalTask(), 'apply')
+    expect((await db.select().from(ruleProposal))[0]?.state).toBe('declined')
+    await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-26T09:00:00Z'))
+    expect(await proposerInput()).toContain('Случаи, где решение Бориса')
+    expect(await proposerInput()).not.toContain('Борис уже отказался')
   })
 
   it('FR-MIND-3: a proposal made for v1 is not applied after the rules changed', async () => {

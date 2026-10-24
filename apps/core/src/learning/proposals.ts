@@ -22,6 +22,8 @@ import { askWhy } from './questions'
 /** A proposal needs this many answered surprises since the last one. */
 export const SURPRISES_FOR_PROPOSAL = 3
 const CASES_MAX = 20
+/** The proposer sees this many of Boris's latest refusals, so it does not bring them back. */
+const DECLINED_MAX = 5
 
 const mskDay = (d: Date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(d)
@@ -94,6 +96,29 @@ const caseText = (c: Case, i: number) => {
   return `Случай ${i + 1}\n${sorterInput(order)}\nБалл Сары: ${c.score ?? 'нет'}\nБорис: ${decision}\nЕго причина: ${c.answer}`
 }
 
+type Declined = { summary: string; answer: string | null }
+
+/** Proposals Boris turned down with «Не надо» (a stale «Применить» is not his refusal), newest first. */
+async function declinedProposals(db: Db, accountId: string, limit: number): Promise<Declined[]> {
+  const r = await db.execute<Declined>(sql`
+    select p.summary, q.answer
+    from core.rule_proposal p
+    join core.task t on t.id = p.task_id and t.resolution = 'drop'
+    left join lateral (
+      select q.answer from core.question q
+      where q.kind = 'why_decline' and q.entity_id = p.id::text and q.answered_at is not null
+      order by q.answered_at desc
+      limit 1
+    ) q on true
+    where p.account_id = ${accountId} and p.state = 'declined'
+    order by p.decided_at desc
+    limit ${limit}`)
+  return r.rows
+}
+
+const declinedText = (p: Declined) =>
+  `- ${p.summary.replace(/[.\s]+$/, '')}. Его причина: ${p.answer ?? 'не назвал'}`
+
 /**
  * Proposes one change of the rules when Boris has explained at least 3 surprises since the last proposal, none
  * waits for his answer, and today had no proposal yet (FR-MIND-3). Rules that break the schema are thrown away.
@@ -119,6 +144,7 @@ export async function maybePropose(
   if (taken.length === 0) return 'not_yet'
 
   const active = await activeRules(d.db, accountId)
+  const declined = await declinedProposals(d.db, accountId, DECLINED_MAX)
   const input = [
     `Действующие правила v${active.version}`,
     rulesText(active.rules),
@@ -126,6 +152,9 @@ export async function maybePropose(
     'Те же правила в JSON:',
     JSON.stringify(active.rules),
     '',
+    ...(declined.length > 0
+      ? ['Поправки, от которых Борис уже отказался:', ...declined.map(declinedText), '']
+      : []),
     'Случаи, где решение Бориса разошлось с оценкой Сары:',
     ...cases.map(caseText),
   ].join('\n')
