@@ -1,0 +1,8 @@
+{
+  "name": "scorer",
+  "version": 1,
+  "model": "haiku",
+  "fallbackModel": "sonnet",
+  "priority": "P2",
+  "timeoutMs": 90000
+}

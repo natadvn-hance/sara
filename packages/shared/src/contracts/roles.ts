@@ -21,5 +21,17 @@ export const SorterOutput = z.object({
 })
 export type SorterOutput = z.infer<typeof SorterOutput>
 
+/** The Scorer's answer (FR-LEAD-3): the model scores each axis; the total and the decision are the code's. */
+export const ScorerOutput = z.object({
+  stop_factor: z.string().nullable(),
+  red_flags: z.array(z.string()),
+  axes: z.array(
+    z.object({ id: z.string(), score: z.number().int().min(0).max(100), why: z.string().max(160) }),
+  ),
+  reason: z.string().max(300),
+  confidence: z.number().min(0).max(1),
+})
+export type ScorerOutput = z.infer<typeof ScorerOutput>
+
 export const ProbeOutput = z.object({ ok: z.literal(true) })
 export type ProbeOutput = z.infer<typeof ProbeOutput>

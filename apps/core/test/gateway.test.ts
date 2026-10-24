@@ -1,7 +1,7 @@
 import { cp, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { ProbeOutput } from '@sara/shared'
+import { ProbeOutput, SorterOutput } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { buildClaudeArgs, roleJsonSchema } from '../src/gateway/claudeCli'
@@ -186,5 +186,17 @@ describe('model gateway', () => {
       ...c.map((a) => c.filter((b) => b.start < a.end && a.start < b.end).length),
     )
     expect(maxOverlap).toBeLessThanOrEqual(2)
+  })
+
+  it('FR-LEAD-3: a call can name its model', async () => {
+    // The Sorter has a fallback model: naming the model drops it, the named one is final.
+    const gw = await gateway({
+      FAKE_CLAUDE_OUTPUT: '{"verdict":"fit","reason":"да","tags":[],"confidence":0.9}',
+    })
+    const r = await gw.call('sorter', 'Тема: сайт', SorterOutput, { model: 'opus' })
+    expect(r.ok).toBe(true)
+    const [c] = await calls()
+    expect(c?.args[c.args.indexOf('--model') + 1]).toBe('opus')
+    expect(c?.args).not.toContain('--fallback-model')
   })
 })

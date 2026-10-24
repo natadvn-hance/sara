@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { RoleMeta } from '@sara/shared'
 
-export type RoleName = 'probe' | 'sorter'
+export type RoleName = 'probe' | 'sorter' | 'scorer' | 'rules-proposer'
 
 export async function loadRole(
   rolesDir: string,
