@@ -65,6 +65,9 @@ const PROPOSAL = {
   rules: { ...RULES_V1, threshold: 60 },
 }
 const NOW = new Date('2026-10-25T09:00:00Z')
+// The press asks «почему не надо?» on the day after the surprises: the day allows three questions, and at the real
+// clock (which was this very day once) the three would already be spent.
+const NEXT_DAY = () => new Date(NOW.getTime() + 24 * 3600_000)
 
 /** Three skips Sara did not expect, each with Boris's reason, and one yes. */
 async function threeSurprises() {
@@ -141,9 +144,9 @@ describe('rule proposals', { timeout: 30000 }, () => {
     await threeSurprises()
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
     await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-25T09:30:00Z'))
-    expect(await onProposalPress({ db, notifier }, await proposalTask(), 'drop')).toBe(
-      'Хорошо, оставляю v1',
-    )
+    expect(
+      await onProposalPress({ db, notifier, now: NEXT_DAY }, await proposalTask(), 'drop'),
+    ).toBe('Хорошо, оставляю v1')
     expect((await activeRules(db, ACC)).version).toBe(1)
     expect((await db.select().from(ruleProposal))[0]?.state).toBe('declined')
     expect(sent.at(-1)?.text).toBe('Почему не надо эту поправку? Напиши или скажи голосом.')
@@ -206,13 +209,13 @@ describe('rule proposals', { timeout: 30000 }, () => {
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
     await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
     expect(await proposerInput()).not.toContain('Борис уже отказался')
-    await onProposalPress({ db, notifier }, await proposalTask(), 'drop')
+    await onProposalPress({ db, notifier, now: NEXT_DAY }, await proposalTask(), 'drop')
     const [why] = await db.select().from(question).where(eq(question.kind, 'why_decline'))
     await answerQuestion(db, {
       text: 'маленький бюджет у нас тоже берут',
       replyToMessageId: why?.telegramMessageId ?? -1,
       voice: false,
-      at: new Date(),
+      at: new Date(NEXT_DAY().getTime() + 1000),
     })
     expect(
       await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-26T09:00:00Z')),
