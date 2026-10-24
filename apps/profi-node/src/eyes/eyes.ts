@@ -71,7 +71,8 @@ export function createEyes(o: {
   }
 
   /**
-   * A page reading completes the board one: the board's text and budget, the page's fee. The fee of the page's
+   * A page reading completes the board one: the board's text and budget, the page's fee, and from the page what
+   * the board card did not show. The fee of the page's
    * answer, when it came, wins over the one read from the page text.
    */
   function withBoard(s: OrderSignal): OrderSignal {
@@ -80,9 +81,12 @@ export function createEyes(o: {
     fees.delete(id)
     const b = waiting.get(id)
     waiting.delete(id)
+    // The board's words come first; what a board card lacks (a carousel shows no client name) comes from the page.
     const order = b
       ? {
           ...b.order,
+          client_name: b.order.client_name || s.order.client_name,
+          text: b.order.text || s.order.text,
           budget_text: b.order.budget_text ?? s.order.budget_text,
           bid_price_rub: s.order.bid_price_rub || b.order.bid_price_rub,
         }
