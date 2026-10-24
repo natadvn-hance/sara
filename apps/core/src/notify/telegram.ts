@@ -5,6 +5,7 @@ import { newEventId, parseCallback, type TaskAction } from '@sara/shared'
 import { Bot, type Context, GrammyError } from 'grammy'
 import type { Db } from '../db/client'
 import { appendEvent } from '../journal/journal'
+import { quietNow } from '../leads/cardFlow'
 import type { BorisMessage } from '../learning/inbox'
 import { bindChat, boundChat } from './binding'
 import { leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
@@ -189,6 +190,9 @@ export function createTelegramRuntime(d: {
     }
   }
 
+  /** FR-NOTIF-2: without sound at the quiet hours, unless the message is urgent. */
+  const silentNow = async (loud?: boolean) => !loud && (await quietNow(d.db, new Date()))
+
   let running: Promise<void> | null = null
   let lastError: string | null = null
 
@@ -234,18 +238,24 @@ export function createTelegramRuntime(d: {
     botUsername: () => (bot.isInited() ? bot.botInfo.username : null),
     notifier: {
       async sendLeadCard(c, o) {
+        const silent = o?.silent ?? (await silentNow())
         const m = await sendHtml(leadCardText(c), {
           reply_markup: leadCardKeyboard(c),
-          ...(o?.silent && { disable_notification: true }),
+          ...(silent && { disable_notification: true }),
         })
         return { messageId: m.message_id }
       },
       async sendText(text, o) {
-        const m = o?.html ? await sendHtml(text, {}) : await bot.api.sendMessage(await chat(), text)
+        const silent = await silentNow(o?.loud)
+        const extra: Omit<SendOptions, 'parse_mode'> = silent ? { disable_notification: true } : {}
+        const m = o?.html
+          ? await sendHtml(text, extra)
+          : await bot.api.sendMessage(await chat(), text, extra)
         return { messageId: m.message_id }
       },
-      async sendButtons(text, rows) {
+      async sendButtons(text, rows, o) {
         const m = await bot.api.sendMessage(await chat(), text, {
+          ...((await silentNow(o?.loud)) && { disable_notification: true }),
           reply_markup: {
             inline_keyboard: rows.map((r) =>
               r.map((b) => ({ text: b.text, callback_data: b.callbackData })),

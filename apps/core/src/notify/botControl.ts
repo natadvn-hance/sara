@@ -50,7 +50,7 @@ export function createBotControl(d: {
     notifier: {
       sendLeadCard: (c, o) => current().notifier.sendLeadCard(c, o),
       sendText: (t, o) => current().notifier.sendText(t, o),
-      sendButtons: (t, rows) => current().notifier.sendButtons(t, rows),
+      sendButtons: (t, rows, o) => current().notifier.sendButtons(t, rows, o),
     },
   }
 }
