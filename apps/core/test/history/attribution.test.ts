@@ -34,6 +34,7 @@ const ctx = (over: Partial<AttributionContext> = {}): AttributionContext => ({
 })
 
 const at = '2026-10-01T10:00:00.000Z'
+const LONG_DASH = String.fromCodePoint(0x2014)
 const spec = (
   text: string,
   over: { sentAt?: string; approxTime?: boolean; inBid?: boolean } = {},
@@ -150,7 +151,7 @@ describe('attribution', () => {
   })
 
   it('FR-TRAIN-1: the text Boris dictated to v1 is his', () => {
-    const c = ctx({ lead: lead({ dictatedReply: 'Ещё — пара\nвопросов  по  СРОКАМ' }) })
+    const c = ctx({ lead: lead({ dictatedReply: `Ещё ${LONG_DASH} пара\nвопросов  по  СРОКАМ` }) })
     expect(attribute(spec('еще - пара вопросов по срокам'), c)).toEqual({
       author: 'boris',
       basis: 'v1_dictated',
