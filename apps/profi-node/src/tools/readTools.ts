@@ -142,5 +142,13 @@ export function createReadTools(o: {
     async submitBid() {
       throw new ProfiToolError('INTERNAL', 'Откликов в M1 нет: служба только читает')
     },
+
+    // M4 is shadow: nothing goes to a client until the switch from old Sara (ADR-024).
+    async sendMessage() {
+      throw new ProfiToolError(
+        'INTERNAL',
+        'Служба не пишет в чаты: отправка сообщений ещё не построена',
+      )
+    },
   }
 }

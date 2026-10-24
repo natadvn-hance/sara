@@ -100,7 +100,11 @@ export async function startOutboxDelivery(outboxId: string, leadId: string): Pro
 
 /** On start: delivers bids recorded before a crash that never got their delivery started. */
 export async function resumeQueuedOutbox(db: Db): Promise<number> {
-  const rows = await db.select().from(outbox).where(eq(outbox.state, 'queued'))
+  // Only bids: a message row (M4) has its own delivery and must never go down the bid path.
+  const rows = await db
+    .select()
+    .from(outbox)
+    .where(and(eq(outbox.state, 'queued'), eq(outbox.kind, 'bid')))
   for (const r of rows) await startOutboxDelivery(r.id, (r.payload as BidPayload).leadId)
   return rows.length
 }
@@ -205,12 +209,17 @@ type Attempt =
   | { kind: 'uncertain' }
   | { kind: 'failed'; errorClass: string }
 
+/** Only a queued bid goes down the bid path; a message row (M4) has its own delivery. */
+export function isBidRow(r: { kind: string; state: string }): boolean {
+  return r.kind === 'bid' && r.state === 'queued'
+}
+
 async function deliver(outboxId: string): Promise<void> {
   const [row] = await DBOS.runStep(
     () => d().db.select().from(outbox).where(eq(outbox.id, outboxId)),
     { name: 'load', ...DB_STEP },
   )
-  if (!row || row.state !== 'queued') return
+  if (!row || !isBidRow(row)) return
   const p = row.payload as BidPayload
 
   const allowed = await DBOS.runStep(() => getSetting(d().db, 'outbound.bids'), {

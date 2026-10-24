@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { formatRub, plural } from '../src/index'
+import { formatRub, normalizeText, plural } from '../src/index'
 
 it('NFR-UX-1: formatRub uses a no-break space', () => {
   expect(formatRub(1250)).toBe('1 250 ₽')
@@ -26,4 +26,10 @@ it('NFR-UX-1: plural picks the Russian form by the number', () => {
     [122, 'решения'],
   ]
   for (const [n, want] of cases) expect([n, plural(n, forms)]).toEqual([n, want])
+})
+
+it('FR-TRAIN-1: normalizeText compares messages as people read them', () => {
+  expect(normalizeText('  Ёлка \u2014  Сайт\u2013 под\n\nключ.  ')).toBe('елка - сайт- под ключ')
+  expect(normalizeText('«Добрый день!»')).toBe(normalizeText('добрый день'))
+  expect(normalizeText('Цена 50 000 ₽')).toBe('цена 50 000 ₽')
 })

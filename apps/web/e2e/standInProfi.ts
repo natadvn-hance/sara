@@ -34,6 +34,7 @@ const svc = await serveMcp(
       listChats: no,
       readChat: no,
       submitBid: no,
+      sendMessage: no,
     }),
   7171,
 )

@@ -19,3 +19,19 @@ export function plural(
   if (ten >= 2 && ten <= 4) return forms[1]
   return forms[2]
 }
+
+/**
+ * A message as people read it, for telling the same words apart from different ones (M4 design 5.1): lower case,
+ * ё as е, long and medium dashes as a hyphen, every run of spaces and line breaks as one space, quotes and the
+ * punctuation at the ends dropped.
+ */
+export function normalizeText(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[\u2014\u2013]/g, '-')
+    .replace(/[«»"„“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[\s.,!?;:()]+|[\s.,!?;:()]+$/g, '')
+}

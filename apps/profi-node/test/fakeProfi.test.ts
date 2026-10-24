@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { signPermit } from '@sara/shared/permit'
+import { signMessagePermit, signPermit } from '@sara/shared/permit'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeProfi, type FakeProfi } from '../src/fake/fakeProfi'
 
@@ -61,6 +61,7 @@ describe('fake Profi-MCP', () => {
       'profi.list_chats',
       'profi.list_feed',
       'profi.read_chat',
+      'profi.send_message',
       'profi.session_health',
       'profi.submit_bid',
     ])
@@ -84,6 +85,40 @@ describe('fake Profi-MCP', () => {
     const r = await c.callTool({ name: 'profi.submit_bid', arguments: { ...bid(), permit: 'bad' } })
     expect(r.isError).toBe(true)
     expect(fake.bids).toHaveLength(0)
+    await c.close()
+  })
+
+  it('FR-CONV-9: send_message repeats with one key give one message', async () => {
+    const c = await mcp()
+    const msg = {
+      account_id: 'hance-marketing',
+      chat_id: '95147898',
+      text: 'Добрый день',
+      expect_last_message_id: null,
+      idempotency_key: 'msg:t:1',
+      permit: signMessagePermit(SECRET, {
+        accountId: 'hance-marketing',
+        chatId: '95147898',
+        text: 'Добрый день',
+        key: 'msg:t:1',
+      }),
+    }
+    const a = await c.callTool({ name: 'profi.send_message', arguments: msg })
+    const b = await c.callTool({ name: 'profi.send_message', arguments: msg })
+    expect(a.isError).toBeFalsy()
+    expect(b.structuredContent).toEqual(a.structuredContent)
+    expect(fake.messages).toHaveLength(1)
+    const bad = await c.callTool({
+      name: 'profi.send_message',
+      arguments: { ...msg, permit: 'bad' },
+    })
+    expect(bad.isError).toBe(true)
+    const other = await c.callTool({
+      name: 'profi.send_message',
+      arguments: { ...msg, text: 'Другой текст', idempotency_key: 'msg:t:2' },
+    })
+    expect(other.isError).toBe(true)
+    expect(fake.messages).toHaveLength(1)
     await c.close()
   })
 

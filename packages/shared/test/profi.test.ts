@@ -24,6 +24,7 @@ describe('C2 for M1', () => {
       'profi.list_chats',
       'profi.list_feed',
       'profi.read_chat',
+      'profi.send_message',
       'profi.session_health',
       'profi.submit_bid',
     ])

@@ -51,11 +51,16 @@ export async function buildTestApp(
     dataDir: join(dir, 'data'),
     extraEnv: { FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT: '{"ok":true}', ...claudeEnv },
   })
+  const unused = async (): Promise<never> => {
+    throw new Error('not used here')
+  }
   const profi: ProfiClient = {
     sessionHealth: async () => health.current,
-    submitBid: async () => {
-      throw new Error('not used here')
-    },
+    submitBid: unused,
+    readChat: unused,
+    listChats: unused,
+    getOrder: unused,
+    sendMessage: unused,
   }
   const bot = createBotControl({ db, apiRoot: tg.apiRoot, onPress: async () => 'ok' })
   const app = await buildServer({

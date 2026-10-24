@@ -37,6 +37,7 @@ beforeAll(async () => {
         listChats: notUsed,
         readChat: notUsed,
         submitBid: notUsed,
+        sendMessage: notUsed,
       }),
     0,
   )
