@@ -60,11 +60,16 @@ async function load() {
 load(); window.__RTP.addEventListener('message', load)`,
   )
 
-export type BidLook = { payWay: 'wallet' | 'sbp'; behindContinue: boolean }
+export type BidLook = {
+  payWay: 'wallet' | 'sbp'
+  /** The form is closed until its opener is pressed, as on the live page. */
+  behindOpener: boolean
+}
 
-// The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen, like the October site):
-// one price field, the text, the payment footer, the send button. It opens with «Продолжить», as in September,
-// until the recorded maps say otherwise.
+// The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
+// 24.10.2026: no field and no <button> at first, a tariff block «orderCard/tariffs» with «Отклик • N ₽», and an
+// opener that is no button, with the answer's tariffsBlock.scrollButtonText («Написать клиенту»). It opens the form
+// «Комиссия за заказ»: the price, the text, the payment footer, the send button.
 export const orderPage = (id: string, look: BidLook) =>
   shell(
     'Заказ',
@@ -79,16 +84,18 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
   if (!s) return
   if (s.hasBid) { box.innerHTML = '<p class="bid-done">Вы откликнулись</p>'; return }
   if (s.disabledBidBlock) { box.innerHTML = '<p class="closed">' + s.disabledBidBlock.title + '</p>'; return }
-  const hidden = ${look.behindContinue}
-  box.innerHTML = (hidden ? '<button id="bid-continue" type="button">Продолжить</button>' : '') +
-    '<form id="bid-form" data-testid="bid_form"' + (hidden ? ' hidden' : '') + '>' +
+  const hidden = ${look.behindOpener}
+  const t = s.tariffsBlock
+  box.innerHTML = '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div>' +
+    (hidden ? '<a id="bid-opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>' : '') + '</div>' +
+    '<form id="bid-form" data-testid="bid_form"' + (hidden ? ' hidden' : '') + '><h3>' + t.formTitle + '</h3>' +
     '<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">' +
     '<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>' +
     '<div data-testid="bid_form_footer">К оплате: ' + s.price.value + ' ₽</div>' +
     '<div class="payment-methods"><span class="payment-methods__name">${look.payWay === 'sbp' ? 'СБП' : 'Кошелёк'}</span></div>' +
     '<p class="error"></p><button id="bid-send" type="submit">' + s.form.buttons.submit.text + '</button></form>'
-  const go = document.getElementById('bid-continue')
-  if (go) go.onclick = () => { fetch('/api/bid/continue', { method: 'POST' }); document.getElementById('bid-form').hidden = false }
+  const go = document.getElementById('bid-opener')
+  if (go) go.onclick = (e) => { e.preventDefault(); fetch('/api/bid/open', { method: 'POST' }); document.getElementById('bid-form').hidden = false }
   document.getElementById('bid-form').onsubmit = async (e) => {
     e.preventDefault()
     const r = await fetch('/api/bid', { method: 'POST', body: JSON.stringify({ orderId: '${id}', price: document.getElementById('bid-price').value, text: document.getElementById('bid-text').value }) })

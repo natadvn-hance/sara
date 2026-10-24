@@ -25,6 +25,8 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
       hasBid: false,
       // The recorded sample keeps the length of the words only; the live text is «Откликнуться».
       submitText: 'Текст 2 Текс',
+      // Live: «Написать клиенту» (tariffsBlock.scrollButtonText, 150 answers read 24.10.2026).
+      openerText: 'Текст 18 Текст 1',
       priceRequired: true,
       payment: null,
     })

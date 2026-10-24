@@ -310,11 +310,10 @@ describe('insurance and the account tab', () => {
         r.url?.endsWith(`n.php?o=${id}`),
     )
     expect(maps).toHaveLength(1)
-    const body = maps[0]?.body as { buttons: { text: string }[]; fields: { name: string }[] }
-    expect(body.buttons.map((b) => b.text)).toContain('Продолжить')
+    const body = maps[0]?.body as { fields: { name: string }[] }
     expect(body.fields.map((f) => f.name)).toContain('comments4client')
     expect(JSON.stringify(body)).not.toContain('Клиентский текст')
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(0)
   }, 60000)
 
   it('FR-LEAD-8: work in the tab waits for the minute check, then the tab goes back to the feed', async () => {

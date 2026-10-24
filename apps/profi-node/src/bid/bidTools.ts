@@ -146,7 +146,8 @@ export function createBidTools(o: {
     if (s.payment === 'other')
       throw fail('UNSAFE_PAYMENT', 'Профи.ру просит оплату не с кошелька, отклик не нажат')
 
-    if (!(await openForm(page))) throw fail('LAYOUT_CHANGED', 'Форма отклика не открылась')
+    if (!(await openForm(page, s.openerText)))
+      throw fail('LAYOUT_CHANGED', 'Форма отклика не открылась')
     const pay = await readPayment(page, wallet)
     const due = pay.dueRub ?? s.feeRub
     if (wallet < due) throw fail('NO_MONEY', `В кошельке ${wallet} ₽, а к оплате ${due} ₽`)

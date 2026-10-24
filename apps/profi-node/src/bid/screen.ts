@@ -9,6 +9,8 @@ export type OrderScreen = {
   hasBid: boolean | null
   /** The send button's words, from the answer itself. */
   submitText: string | null
+  /** The words of what opens the bid form on the October page (tariffsBlock.scrollButtonText, «Написать клиенту»). */
+  openerText: string | null
   /** The site will not take a bid without «Стоимость услуги». */
   priceRequired: boolean
   /** A payment way the form asks for: null when it shows none (the wallet pays), 'other' for anything else. */
@@ -22,6 +24,7 @@ type Screen = {
   hasBid?: unknown
   price?: { value?: unknown } | null
   disabledBidBlock?: unknown
+  tariffsBlock?: { scrollButtonText?: unknown } | null
   form?: {
     buttons?: { submit?: Button } | null
     elements?: { paymentMethod?: unknown } | null
@@ -65,6 +68,7 @@ export function orderScreenFromAnswer(
     feeRub: rub(s.price?.value) ?? rub(slide?.paymentInfo?.value),
     hasBid: typeof s.hasBid === 'boolean' ? s.hasBid : null,
     submitText: text(s.form?.buttons?.submit) ?? text(slide?.buttons?.submit),
+    openerText: text({ text: s.tariffsBlock?.scrollButtonText }),
     priceRequired: (slide?.elements ?? []).some((e) => e?.name === 'stavka' && e.required === true),
     payment: way === null || way === undefined ? null : paymentWay(JSON.stringify(way)),
   }

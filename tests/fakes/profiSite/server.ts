@@ -42,6 +42,8 @@ export type BidSettings = BidLook & {
   hasBidField: boolean
   /** The top bar shows the wallet. */
   showWallet: boolean
+  /** The opener's words, in the answer (tariffsBlock.scrollButtonText) and on the page. */
+  openerText: string
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -52,8 +54,8 @@ export type ProfiSite = {
   rtpHost: string
   code: string
   balance: number
-  /** Presses of «Продолжить» on an order page: the eyes never press it. */
-  continueClicks: number
+  /** Presses of what opens the bid form on an order page: the eyes never press it. */
+  openerClicks: number
   /** Bids the form sent and the site took. */
   bids: SiteBid[]
   /** Presses of the send button that reached the site, taken or not. */
@@ -97,6 +99,16 @@ function orderScreen(o: SiteOrder, s: BidSettings) {
     ...(s.hasBidField && { hasBid: o.hasBid }),
     price: { value: fee, baseValue: fee, bidPromoType: null, currencySymbol: '₽' },
     disabledBidBlock: o.open ? null : { title: 'Заказ закрыт' },
+    tariffsBlock: {
+      label: 'Тариф',
+      details: 'Детали',
+      formTitle: 'Комиссия за заказ',
+      scrollButtonText: s.openerText,
+      defaultTariffType: 'LEADGEN',
+      tariffs: [
+        { type: 'LEADGEN', title: 'Отклик', price: { value: `${fee} ₽`, currencySymbol: '₽' } },
+      ],
+    },
     form: o.open
       ? {
           buttons: { refuse: null, submit },
@@ -146,12 +158,13 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
-  const state = { balance: 5000, continueClicks: 0, bidPosts: 0 }
+  const state = { balance: 5000, openerClicks: 0, bidPosts: 0 }
   const bids: SiteBid[] = []
   const freshBidSettings = (): BidSettings => ({
     mode: 'ok',
     payWay: 'wallet',
-    behindContinue: true,
+    behindOpener: true,
+    openerText: 'Написать клиенту',
     answer: true,
     hasBidField: true,
     showWallet: true,
@@ -245,8 +258,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       found.hasBid = true
       return json(res, { ok: true })
     }
-    if (p === '/api/bid/continue') {
-      state.continueClicks++
+    if (p === '/api/bid/open') {
+      state.openerClicks++
       return json(res, { ok: true })
     }
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
@@ -286,8 +299,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     get balance() {
       return state.balance
     },
-    get continueClicks() {
-      return state.continueClicks
+    get openerClicks() {
+      return state.openerClicks
     },
     get bidPosts() {
       return state.bidPosts
@@ -300,7 +313,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     resetBids() {
       bids.length = 0
       state.balance = 5000
-      state.continueClicks = 0
+      state.openerClicks = 0
       state.bidPosts = 0
       Object.assign(bidSettings, freshBidSettings())
     },

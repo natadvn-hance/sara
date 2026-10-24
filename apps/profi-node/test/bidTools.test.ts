@@ -25,7 +25,7 @@ let eyes: Eyes
 let ins: Insurance
 let may = true
 // The tab may stop moving in the middle of a bid: a live screen viewer comes, the IP turns wrong.
-let mayAfterContinue = true
+let mayAfterOpener = true
 let state: SessionState = 'alive'
 let visited: string[] = []
 
@@ -58,7 +58,7 @@ beforeEach(async () => {
   await resetNodeDb(db)
   site.resetBids()
   may = true
-  mayAfterContinue = true
+  mayAfterOpener = true
   state = 'alive'
   eyes = createEyes({ accountId: ACCOUNT, db, parsers })
   ins?.stop()
@@ -69,7 +69,7 @@ beforeEach(async () => {
     parsers,
     feedEveryMs: 3_600_000,
     chatsEveryMs: 3_600_000,
-    canNavigate: () => may && (mayAfterContinue || site.continueClicks === 0),
+    canNavigate: () => may && (mayAfterOpener || site.openerClicks === 0),
   })
   visited = []
 })
@@ -212,7 +212,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     const id = site.addOrder({ price: 71, priceRequired: true })
     expect(await failure(tools().submitBid(bid(id, { price_rub: null })))).toBe('INTERNAL')
     expect(site.bids).toEqual([])
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(0)
   }, 60000)
 
   it('NFR-REL-4: an order already bid on gives found_on_page and 0 ₽, with nothing clicked', async () => {
@@ -223,20 +223,20 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
       balance_after_rub: 5000,
     })
     expect(site.bids).toEqual([])
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(0)
   }, 60000)
 
   it('FR-LEAD-8: a closed order is ORDER_CLOSED', async () => {
     const id = site.addOrder({ open: false })
     expect(await failure(tools().submitBid(bid(id)))).toBe('ORDER_CLOSED')
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(0)
   }, 60000)
 
   it('FR-LEAD-8: a wallet below the amount due is NO_MONEY, with nothing clicked', async () => {
     site.setBalance(50)
     const id = site.addOrder({ price: 71 })
     expect(await failure(tools().submitBid(bid(id)))).toBe('NO_MONEY')
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(0)
     expect(site.bids).toEqual([])
   }, 60000)
 
@@ -270,7 +270,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     site.bidSettings.answer = false
     const id = site.addOrder({ price: 71 })
     expect(await failure(tools().submitBid(bid(id)))).toBe('LAYOUT_CHANGED')
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(0)
   }, 60000)
 
   it('FR-LEAD-8: a wrong permit is refused before the page is opened', async () => {
@@ -375,7 +375,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
   }, 60000)
 
   it('FR-LEAD-8: when the tab may no longer move before the press, nothing is pressed', async () => {
-    mayAfterContinue = false
+    mayAfterOpener = false
     const id = site.addOrder({ price: 71 })
     expect(await failure(tools().submitBid(bid(id)))).toBe('RATE_LIMITED')
     expect(site.bidPosts).toBe(0)
@@ -393,11 +393,18 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     expect(site.bidPosts).toBe(0)
   }, 60000)
 
-  it('FR-LEAD-8: a form open from the start is filled without «Продолжить»', async () => {
-    site.bidSettings.behindContinue = false
+  it('FR-LEAD-8: the form opens by the words the order answer names, whatever they are', async () => {
+    site.bidSettings.openerText = 'Предложить услуги'
     const id = site.addOrder({ price: 71 })
     expect(await tools().submitBid(bid(id))).toMatchObject({ spent_rub: 71 })
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(1)
+  }, 60000)
+
+  it('FR-LEAD-8: a form open from the start is filled without pressing its opener', async () => {
+    site.bidSettings.behindOpener = false
+    const id = site.addOrder({ price: 71 })
+    expect(await tools().submitBid(bid(id))).toMatchObject({ spent_rub: 71 })
+    expect(site.openerClicks).toBe(0)
   }, 60000)
 })
 

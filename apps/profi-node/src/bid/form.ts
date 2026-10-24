@@ -1,4 +1,4 @@
-import type { Page } from 'playwright'
+import type { Locator, Page } from 'playwright'
 import { paymentWay } from './screen'
 
 // The October form as the order answer names it (boOrderScreen.form): «stavka» is «Стоимость услуги», «comments4client»
@@ -6,6 +6,7 @@ import { paymentWay } from './screen'
 const PRICE = '[name="stavka"], input[placeholder="Сумма"]'
 const TEXT = '[name="comments4client"], textarea[placeholder^="Расскажите о своём опыте"]'
 const CONTINUE = 'Продолжить'
+const TARIFFS = '[data-testid*="tariff" i]'
 // September anchors (old Sara, paymentPanel.js, checked live 19.09.2026).
 const FOOTER = '[data-testid="bid_form_footer"]'
 const WAY = '.payment-methods__name'
@@ -16,18 +17,36 @@ const rubIn = (text: string | null) => {
   return m?.[1] ? Number(m[1].replace(/[^\d]/g, '')) : null
 }
 
-/** The text field is on screen, after «Продолжить» when the form is behind it (as in September). */
-export async function openForm(page: Page, ms = 10000): Promise<boolean> {
+/**
+ * The text field is on screen, after pressing what opens the form. On the live page (24.10.2026) that is no button:
+ * its words come from the order answer (tariffsBlock.scrollButtonText, «Написать клиенту»); one in the tariff
+ * block, or the only one on the page, is pressed. «Продолжить» was the September opener.
+ */
+export async function openForm(page: Page, opener: string | null, ms = 10000): Promise<boolean> {
   const text = shown(page, TEXT)
-  const go = page.getByRole('button', { name: CONTINUE, exact: true }).filter({ visible: true })
+  const byWords = (scope: Page | Locator) =>
+    opener ? scope.getByText(opener, { exact: true }).filter({ visible: true }) : null
+  const september = page
+    .getByRole('button', { name: CONTINUE, exact: true })
+    .filter({ visible: true })
+  const anyOpener = byWords(page)?.or(september) ?? september
   await text
-    .or(go)
+    .or(anyOpener)
     .first()
     .waitFor({ timeout: ms })
     .catch(() => {})
   if ((await text.count()) > 0) return true
-  if ((await go.count()) !== 1) return false
-  await go.click({ timeout: 5000 }).catch(() => {})
+  const inTariffs = byWords(page.locator(TARIFFS))
+  const candidates = [inTariffs, byWords(page), september]
+  let press: Locator | null = null
+  for (const c of candidates) {
+    if (c && (await c.count()) === 1) {
+      press = c
+      break
+    }
+  }
+  if (!press) return false
+  await press.click({ timeout: 5000 }).catch(() => {})
   return text
     .first()
     .waitFor({ timeout: ms })
