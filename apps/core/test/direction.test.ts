@@ -1,7 +1,7 @@
 import { DirectionRules, weightedScore } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { applyAmendments } from '../src/direction/amendments'
+import { AMENDMENTS, applyAmendments } from '../src/direction/amendments'
 import { activeRules, addVersion, rollbackTo, seedDirection } from '../src/direction/store'
 import { RULES_V1 } from '../src/direction/v1'
 import { rulesText } from '../src/leads/scorer'
@@ -104,6 +104,38 @@ describe('direction rules', () => {
     expect(await rollbackTo(db, ACC, 1)).toBe(3)
     await applyAmendments(db, ACC)
     expect((await activeRules(db, ACC)).version).toBe(3)
+  })
+
+  it('FR-MIND-3: the flag lands on the active rules, whatever their version, and keeps their threshold', async () => {
+    // Production since 24.10.2026 16:53 MSK: v2 is v1 with threshold 50, on Boris's yes.
+    await seedDirection(db, ACC)
+    await addVersion(db, {
+      accountId: ACC,
+      rules: { ...RULES_V1, threshold: 50 },
+      createdBy: 'boris',
+      reason: 'порог 50: калибровка на 217 заявках старой Сары',
+    })
+    await applyAmendments(db, ACC)
+    await applyAmendments(db, ACC)
+    const a = await activeRules(db, ACC)
+    expect(a.version).toBe(3)
+    expect(a.rules.threshold).toBe(50)
+    expect(a.rules.red_flags.map((f) => f.id)).toContain('symbolic_budget')
+    expect(await versions()).toHaveLength(3)
+  })
+
+  it('FR-MIND-3: rules that already carry the flag get no new version', async () => {
+    await seedDirection(db, ACC)
+    const [amendment] = AMENDMENTS
+    if (!amendment) throw new Error('no amendment')
+    await addVersion(db, {
+      accountId: ACC,
+      rules: amendment.apply(RULES_V1),
+      createdBy: 'boris',
+      reason: 'флаг уже есть',
+    })
+    await applyAmendments(db, ACC)
+    expect((await activeRules(db, ACC)).version).toBe(2)
   })
 
   it('FR-LEAD-3: a symbolic budget like 1 rouble is a soft red flag the Scorer reads', async () => {
