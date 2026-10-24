@@ -8,8 +8,10 @@ import {
   integer,
   jsonb,
   pgSchema,
+  primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 
@@ -148,4 +150,22 @@ export const ownerAuth = core.table(
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
   (t) => [check('owner_auth_single_row', sql`${t.id} = 1`)],
+)
+
+/** Versions of an account's direction rules (FR-ACC-2); exactly one is active per account. */
+export const directionVersion = core.table(
+  'direction_version',
+  {
+    accountId: text('account_id').notNull(),
+    version: integer('version').notNull(),
+    rules: jsonb('rules').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    createdBy: text('created_by').notNull(),
+    reason: text('reason').notNull(),
+    active: boolean('active').notNull().default(false),
+  },
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.version] }),
+    uniqueIndex('direction_version_one_active').on(t.accountId).where(sql`${t.active}`),
+  ],
 )

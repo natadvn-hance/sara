@@ -33,6 +33,7 @@ export const EVENT_TYPES = [
   'model.called',
   'model.failed',
   'notify.failed',
+  'direction.version_created',
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]

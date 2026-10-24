@@ -8,6 +8,7 @@ import { requireSession } from './auth/session'
 import type { Config } from './config'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
+import { seedDirection } from './direction/store'
 import { createGateway } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
@@ -96,6 +97,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     accounts: config.accounts,
   }
   await seedAccounts(db, config.accounts)
+  for (const a of config.accounts) await seedDirection(db, a.id)
   const app = await buildServer(deps)
   await registerScreenProxy(app, {
     profiScreenUrl: config.profiScreenUrl,
