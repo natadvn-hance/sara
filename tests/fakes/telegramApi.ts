@@ -4,6 +4,8 @@ import { createServer } from 'node:http'
 export type SentMessage = {
   chat_id: number
   text: string
+  parse_mode?: string
+  link_preview_options?: { is_disabled?: boolean }
   reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] }
   disable_notification?: boolean
 }
@@ -24,7 +26,63 @@ export type FakeTelegram = {
   setFileBroken(on: boolean): void
   /** Simulates another program polling the same bot: getUpdates answers 409. */
   setConflict(on: boolean): void
+  /** Every HTML message is refused like markup Telegram cannot parse (plain messages go through). */
+  setRejectHtml(on: boolean): void
   close(): Promise<void>
+}
+
+const HTML_TAGS = new Set([
+  'b',
+  'strong',
+  'i',
+  'em',
+  'u',
+  'ins',
+  's',
+  'strike',
+  'del',
+  'a',
+  'code',
+  'pre',
+  'blockquote',
+])
+const HTML_ENTITIES = /^&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);/i
+
+/**
+ * What the real Bot API refuses in parse_mode HTML, as an error text (null: accepted): a tag it does not know or
+ * does not close, a bare < or &, and a message over 4096 characters after the tags and entities are parsed.
+ */
+export function htmlProblem(html: string): string | null {
+  const open: string[] = []
+  let visible = 0
+  for (let i = 0; i < html.length; ) {
+    const ch = html[i]
+    if (ch === '<') {
+      const m = /^<(\/?)([a-z-]+)(?:\s[^<>]*)?>/i.exec(html.slice(i))
+      if (!m || !HTML_TAGS.has((m[2] ?? '').toLowerCase()))
+        return `can't parse entities: unsupported start tag at byte offset ${i}`
+      const name = (m[2] ?? '').toLowerCase()
+      if (m[1]) {
+        if (open.pop() !== name)
+          return `can't parse entities: unmatched end tag at byte offset ${i}`
+      } else open.push(name)
+      i += m[0].length
+    } else if (ch === '&') {
+      const m = HTML_ENTITIES.exec(html.slice(i))
+      if (!m) return `can't parse entities: unsupported entity at byte offset ${i}`
+      visible += 1
+      i += m[0].length
+    } else if (ch === '>') {
+      return `can't parse entities: unescaped > at byte offset ${i}`
+    } else {
+      visible += 1
+      i += 1
+    }
+  }
+  if (open.length > 0) return `can't parse entities: unclosed tag ${open.at(-1)}`
+  if (visible > 4096) return 'message is too long'
+  if (visible === 0) return 'message text is empty'
+  return null
 }
 
 export const FAKE_TOKEN = '123456789:AAFakeTokenForTestsOnly_abcdefghijklmnop'
@@ -38,6 +96,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   let nextCallback = 1
   let conflict = false
   let fileBroken = false
+  let rejectHtml = false
   const now = () => Math.floor(Date.now() / 1000)
 
   const server = createServer((req, res) => {
@@ -88,6 +147,23 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           return reply(updates.filter((u) => (u.update_id as number) >= offset))
         }
         case 'sendMessage': {
+          const problem =
+            params.parse_mode === 'HTML'
+              ? rejectHtml
+                ? "can't parse entities: unsupported start tag at byte offset 0"
+                : htmlProblem(String(params.text))
+              : String(params.text).length > 4096
+                ? 'message is too long'
+                : null
+          if (problem) {
+            return res.writeHead(400, { 'content-type': 'application/json' }).end(
+              JSON.stringify({
+                ok: false,
+                error_code: 400,
+                description: `Bad Request: ${problem}`,
+              }),
+            )
+          }
           sent.push(params)
           return reply({
             message_id: nextMessage++,
@@ -216,6 +292,9 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     },
     setConflict(on) {
       conflict = on
+    },
+    setRejectHtml(on) {
+      rejectHtml = on
     },
     close: () => new Promise((r) => server.close(() => r())),
   }

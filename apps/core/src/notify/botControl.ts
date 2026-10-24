@@ -49,7 +49,7 @@ export function createBotControl(d: {
     lastError: () => runtime?.lastError() ?? null,
     notifier: {
       sendLeadCard: (c, o) => current().notifier.sendLeadCard(c, o),
-      sendText: (t) => current().notifier.sendText(t),
+      sendText: (t, o) => current().notifier.sendText(t, o),
       sendButtons: (t, rows) => current().notifier.sendButtons(t, rows),
     },
   }

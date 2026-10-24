@@ -131,10 +131,10 @@ describe('the draft on the card', () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
-    expect(cards()[0]?.text).toContain(`Черновик отклика:\n${DRAFT}`)
+    expect(cards()[0]?.text).toContain(`<b>Черновик отклика</b>\n<blockquote>${DRAFT}</blockquote>`)
     expect(cards()[0]?.text).toContain(`Стоимость услуги: 90${NBSP}000${NBSP}₽`)
     expect(cards()[0]?.text).toContain(
-      'Разбор: Боится долгого запуска\nРиск: Объём больше, чем звучит. Условие: Брать, если сроки понятны',
+      '<b>Разбор:</b> Боится долгого запуска\n<b>Риск:</b> Объём больше, чем звучит. <b>Условие:</b> Брать, если сроки понятны',
     )
     expect(await leadOf(id)).toMatchObject({
       draftText: DRAFT,
@@ -164,7 +164,7 @@ describe('the draft on the card', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Черновика нет: Аналитик не ответил.')
-    expect(cards()[0]?.text).not.toContain('Разбор:')
+    expect(cards()[0]?.text).not.toContain('<b>Разбор:</b>')
     expect(await leadOf(id)).toMatchObject({
       draftText: null,
       draftPriceRub: null,
@@ -199,7 +199,7 @@ describe('the draft on the card', () => {
     const [t] = await db.select().from(task).where(eq(task.entityId, id))
     await app.pipeline.resendCard(t?.id ?? '')
     await until(() => cards().length === 2)
-    expect(cards()[1]?.text).toContain(`Черновик отклика:\n${DRAFT}`)
+    expect(cards()[1]?.text).toContain(`<b>Черновик отклика</b>\n<blockquote>${DRAFT}</blockquote>`)
   })
 
   it('FR-LEAD-7: «Взял бы» brings a card with a draft', async () => {
@@ -214,7 +214,7 @@ describe('the draft on the card', () => {
     await until(() => tg.answers.some((a) => a.text === 'Пишу черновик, пришлю карточку'))
     await until(() => cards().some((m) => button(m, 'bid') !== ''))
     expect(cards().find((m) => button(m, 'bid') !== '')?.text).toContain(
-      `Черновик отклика:\n${DRAFT}`,
+      `<b>Черновик отклика</b>\n<blockquote>${DRAFT}</blockquote>`,
     )
     expect(await leadOf(id)).toMatchObject({ draftText: DRAFT, draftPriceRub: 90000 })
   })
@@ -260,7 +260,9 @@ describe('«Изменить»', () => {
     tg.pushText(111, NEW, ask)
     await until(() => said('Записала новый текст отклика'))
     expect(cards()).toHaveLength(2)
-    expect(cards()[1]?.text).toContain(`Черновик отклика:\nИрина, добрый день!\n\n${NEW}`)
+    expect(cards()[1]?.text).toContain(
+      `<b>Черновик отклика</b>\n<blockquote>Ирина, добрый день!\n\n${NEW}</blockquote>`,
+    )
     expect(cards()[1]?.text).toContain(`Стоимость услуги: 90${NBSP}000${NBSP}₽`)
     expect(await leadOf(id)).toMatchObject({
       draftText: `Ирина, добрый день!\n\n${NEW}`,
@@ -356,5 +358,97 @@ describe('«Изменить»', () => {
     tg.pushPress(111, button(cards()[0], 'edit'))
     await until(() => tg.answers.some((a) => a.text === 'Уже сделано'))
     expect(await editRequests()).toHaveLength(0)
+  })
+})
+
+describe('the laid-out card', () => {
+  const razbor = () => tg.sent.filter((m) => m.text.startsWith('<b>Разбор:'))
+
+  it('FR-LEAD-7: an order comes as an HTML card with the whole order text, the client and the link', async () => {
+    const id = orderId()
+    await fake.emitOrder({
+      order_id: id,
+      title: 'Сайт <для> клиники',
+      text: 'Нужен сайт & запись <b>онлайн</b>.\nСрок: месяц.',
+    })
+    await until(() => cards().length === 1)
+    const card = cards()[0]
+    expect(card).toMatchObject({ parse_mode: 'HTML', link_preview_options: { is_disabled: true } })
+    expect(card?.text.split('\n').slice(0, 2)).toEqual([
+      '<b>🔔 Сайт &lt;для&gt; клиники</b>',
+      `Краснодар · бюджет до 150 000 ₽ · отклик 210${NBSP}₽`,
+    ])
+    expect(card?.text).toContain('<b>Клиент:</b> Ирина')
+    expect(card?.text).toContain(
+      '<blockquote expandable>Нужен сайт &amp; запись &lt;b&gt;онлайн&lt;/b&gt;.\nСрок: месяц.</blockquote>',
+    )
+    expect(
+      card?.text.endsWith(
+        `<a href="https://profi.ru/backoffice/n.php?o=${id}">Открыть заявку на Профи.ру</a>`,
+      ),
+    ).toBe(true)
+    expect(
+      card?.reply_markup?.inline_keyboard.flat().map((b) => b.callback_data.split(':')[2]),
+    ).toEqual(['bid', 'razbor', 'edit', 'skip'])
+  })
+
+  it('FR-LEAD-7: «Разбор» sends the Analyst reading as its own message, again from the old card after the bid', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    tg.pushPress(111, button(cards()[0], 'razbor'))
+    await until(() => razbor().length === 1)
+    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+    expect(razbor()[0]).toMatchObject({ parse_mode: 'HTML' })
+    for (const part of Object.values(ANALYST.reading)) expect(razbor()[0]?.text).toContain(part)
+    expect(razbor()[0]?.text).toContain(ANALYST.condition)
+    expect(razbor()[0]?.reply_markup).toBeUndefined()
+    expect((await db.select().from(task).where(eq(task.entityId, id)))[0]?.state).toBe('open')
+
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    tg.pushPress(111, button(cards()[0], 'razbor'))
+    await until(() => razbor().length === 2)
+    expect(razbor()[1]?.text).toBe(razbor()[0]?.text)
+    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+  })
+
+  it('FR-LEAD-7: a long order text is cut on the card and comes whole with «Разбор»', async () => {
+    const id = orderId()
+    const text = `Начало заявки. ${'Нужно сделать много разных вещей. '.repeat(250)}Конец заявки.`
+    await fake.emitOrder({ order_id: id, text })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.text).toContain('…</blockquote>')
+    expect(cards()[0]?.text).not.toContain('Конец заявки.')
+    expect(cards()[0]?.text).toContain('<b>Черновик отклика</b>')
+    tg.pushPress(111, button(cards()[0], 'razbor'))
+    await until(() => razbor().length === 1)
+    const all = tg.sent.filter((m) => !m.reply_markup && m.text.includes('<blockquote expandable>'))
+    expect(all.map((m) => m.text).join('\n')).toContain('Конец заявки.')
+  })
+
+  it('FR-LEAD-7: an order the Analyst did not answer on still has «Разбор»: it says there is none', async () => {
+    byRole = { ...byRole, analyst: { nothing: true } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    tg.pushPress(111, button(cards()[0], 'razbor'))
+    await until(() => razbor().length === 1)
+    expect(razbor()[0]?.text).toContain('Разбора для этой заявки нет')
+    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+  })
+
+  it('FR-LEAD-7: the reminder card has the same layout and its «Разбор» works', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const [t] = await db.select().from(task).where(eq(task.entityId, id))
+    await app.pipeline.onReminder(t?.id ?? '')
+    await until(() => cards().length === 2)
+    expect(cards()[1]?.text.startsWith('<b>⏰ ')).toBe(true)
+    expect(cards()[1]?.text).toContain('<i>Заявка ждёт решения</i>')
+    expect(cards()[1]?.parse_mode).toBe('HTML')
+    tg.pushPress(111, button(cards()[1], 'razbor'))
+    await until(() => razbor().length === 1)
   })
 })

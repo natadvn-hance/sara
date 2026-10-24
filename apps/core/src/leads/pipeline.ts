@@ -1,6 +1,7 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import {
   AnalystOutput,
+  ClientInfo,
   type EventEnvelope,
   newEventId,
   ProfiOrder,
@@ -21,8 +22,7 @@ import {
   type DraftAnswer,
   markAnswered,
 } from '../learning/questions'
-import type { LeadCard } from '../notify/cards'
-import { TEXTS } from '../notify/cards'
+import { analysisMessages, type LeadCard, TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
@@ -176,12 +176,26 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
 
 const CardAnalysis = AnalystOutput.pick({ hidden_need: true, risk: true, condition: true })
 
-/** The card's two lines of the разбор, from the draft or the lead's stored reading (null: none, or unreadable). */
+/**
+ * The card's two lines of the разбор and the full reading for «Разбор», from the draft or the lead's stored
+ * analysis (null: none, or unreadable; a reading that is unreadable on its own leaves the two lines).
+ */
 function cardAnalysis(a: unknown): LeadCard['analysis'] {
   const r = CardAnalysis.safeParse(a)
-  return r.success
-    ? { hiddenNeed: r.data.hidden_need, risk: r.data.risk, condition: r.data.condition }
-    : null
+  if (!r.success) return null
+  const reading = AnalystOutput.shape.reading.safeParse((a as { reading?: unknown }).reading)
+  return {
+    hiddenNeed: r.data.hidden_need,
+    risk: r.data.risk,
+    condition: r.data.condition,
+    reading: reading.success ? reading.data : null,
+  }
+}
+
+/** What the order page said about the client, as stored on the lead; null: nothing, or not readable. */
+function clientInfoOf(stored: unknown): ClientInfo | null {
+  const r = ClientInfo.safeParse(stored)
+  return r.success ? r.data : null
 }
 
 /** One order, one durable run (workflow id lead:<order>): record, sort, card, wait for Boris. */
@@ -377,8 +391,12 @@ async function processOrder(e: EventEnvelope): Promise<void> {
 
   const card: LeadCard = {
     taskId,
+    orderId: order.order_id,
     title: order.title,
     city: order.city,
+    budgetText: order.budget_text,
+    clientName: order.client_name,
+    text: order.text,
     verdict: sorted.verdict,
     reason: sorted.reason,
     bidPriceRub: order.bid_price_rub,
@@ -392,7 +410,16 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     await DBOS.runStep(
       async () => {
         const silent = await quietNow(d().db, new Date())
-        const m = await d().notifier.sendLeadCard(card, { silent })
+        // What the order page said about the client is read here, inside the step, so a run recorded before this
+        // card kept its steps; an order whose page was not opened has none.
+        const [stored] = await d()
+          .db.select({ clientInfo: lead.clientInfo })
+          .from(lead)
+          .where(eq(lead.id, order.order_id))
+        const m = await d().notifier.sendLeadCard(
+          { ...card, clientInfo: clientInfoOf(stored?.clientInfo) },
+          { silent },
+        )
         await cardSent(taskId, correlationId, m.messageId, 'order')
       },
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
@@ -422,14 +449,16 @@ async function leadOfTask(taskId: string) {
   return l ? { task: t, lead: l } : null
 }
 
-/** The lead card for an open task, rebuilt from the lead and its last sorter verdict. */
-async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard | null> {
-  const found = await leadOfTask(taskId)
-  if (!found || found.task.state !== 'open') return null
+/** The lead card of a task in any state, rebuilt from the lead and its last sorter verdict and score. */
+async function cardOfFound(
+  found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>,
+  reminder: boolean,
+): Promise<LeadCard> {
+  const { lead: l, task: t } = found
   const [sorted] = await d()
     .db.select({ payload: event.payload })
     .from(event)
-    .where(and(eq(event.correlationId, found.lead.correlationId), eq(event.type, 'lead.sorted')))
+    .where(and(eq(event.correlationId, l.correlationId), eq(event.type, 'lead.sorted')))
     .orderBy(desc(event.id))
     .limit(1)
   const s = (sorted?.payload ?? {}) as {
@@ -439,23 +468,33 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
   const [sc] = await d()
     .db.select()
     .from(leadScore)
-    .where(and(eq(leadScore.leadId, found.lead.id), eq(leadScore.backtest, false)))
+    .where(and(eq(leadScore.leadId, l.id), eq(leadScore.backtest, false)))
     .orderBy(desc(leadScore.createdAt))
     .limit(1)
   return {
-    taskId,
-    title: found.lead.title,
-    city: found.lead.city,
+    taskId: t.id,
+    orderId: l.id,
+    title: l.title,
+    city: l.city,
+    budgetText: l.budgetText,
+    clientName: l.clientName,
+    text: l.text,
+    clientInfo: clientInfoOf(l.clientInfo),
     verdict: s.verdict === 'fit' || s.verdict === 'maybe' ? s.verdict : null,
     reason: s.reason ?? null,
-    bidPriceRub: found.lead.bidPriceRub,
+    bidPriceRub: l.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
     reminder,
-    draft: found.lead.draftText
-      ? { text: found.lead.draftText, priceRub: found.lead.draftPriceRub }
-      : null,
-    analysis: cardAnalysis(found.lead.draftAnalysis),
+    draft: l.draftText ? { text: l.draftText, priceRub: l.draftPriceRub } : null,
+    analysis: cardAnalysis(l.draftAnalysis),
   }
+}
+
+/** The lead card for an open task. */
+async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard | null> {
+  const found = await leadOfTask(taskId)
+  if (!found || found.task.state !== 'open') return null
+  return cardOfFound(found, reminder)
 }
 
 /**
@@ -492,6 +531,27 @@ async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
   if (!l.draftText)
     await storeDraft(l, await draftFor(sourceOf(l), { correlationId: l.correlationId }))
   await sendCard(taskId, 'summary')
+}
+
+/**
+ * «Разбор»: the Analyst's full reading as its own message(s). It reads only, in any state of the task, so an old
+ * card works as well as the new one, and it can be pressed again.
+ */
+async function onAnalysis(taskId: string): Promise<string> {
+  const found = await leadOfTask(taskId)
+  if (!found) return TEXTS.noTask
+  // The reminder layout of an unscored card is the longest: if any version cut the order text, this one does.
+  const card = await cardOfFound(found, true)
+  try {
+    for (const message of analysisMessages({ ...card, unscored: !card.score })) {
+      await d().notifier.sendText(message, { html: true })
+    }
+  } catch (err) {
+    // Reading is harmless to repeat: Boris presses again.
+    console.error('analysis not sent', err instanceof Error ? err.message.slice(0, 200) : err)
+    return TEXTS.analysisFailed
+  }
+  return TEXTS.analysisSent
 }
 
 /** «Изменить»: Sara asks for the new text; the card stays as it is until the text comes. */
@@ -650,6 +710,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (action === 'want') return onWant(taskId)
       if (action === 'open') return onOpen(taskId)
       if (action === 'edit') return onEdit(taskId)
+      if (action === 'razbor') return onAnalysis(taskId)
       if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)

@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { createFakeTelegram, type FakeTelegram } from '../../../tests/fakes/telegramApi'
 import { boundChat } from '../src/notify/binding'
 import { createBotControl } from '../src/notify/botControl'
+import type { LeadCard } from '../src/notify/cards'
 import { createTelegramRuntime, type TelegramRuntime } from '../src/notify/telegram'
 import { getMe } from '../src/notify/telegramApi'
 import { openTestDb, resetDb } from './helpers/db'
@@ -24,6 +25,20 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 3000) {
 }
 const settle = () => new Promise((r) => setTimeout(r, 500))
 const taskId = '0192f3c4-5b6a-7c8d-9e0f-112233445566'
+const CARD: LeadCard = {
+  taskId,
+  orderId: '90001',
+  title: 'Сайт',
+  city: 'Краснодар',
+  budgetText: null,
+  clientName: 'Ирина',
+  text: 'Нужен сайт',
+  verdict: 'fit',
+  reason: 'Сайт',
+  bidPriceRub: 210,
+}
+const DASH = String.fromCharCode(0x2014)
+const EN_DASH = String.fromCharCode(0x2013)
 
 beforeEach(async () => {
   await resetDb(db)
@@ -77,38 +92,88 @@ describe('telegram bot', () => {
   it('FR-NOTIF-1: lead card goes to the bound chat with buttons', async () => {
     tg.pushStart(111)
     await until(() => tg.sent.length === 1)
-    await bot.notifier.sendLeadCard({
-      taskId,
-      title: 'Сайт',
-      city: 'Краснодар',
-      verdict: 'fit',
-      reason: 'Сайт',
-      bidPriceRub: 210,
-    })
+    await bot.notifier.sendLeadCard(CARD)
     expect(tg.sent[1]?.chat_id).toBe(111)
     expect(tg.sent[1]?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toBe(`t:${taskId}:bid`)
+    expect(tg.sent[1]?.reply_markup?.inline_keyboard[1]?.map((b) => b.callback_data)).toEqual([
+      `t:${taskId}:razbor`,
+      `t:${taskId}:edit`,
+      `t:${taskId}:skip`,
+    ])
+  })
+
+  it('FR-LEAD-7: the lead card goes as Telegram HTML with link previews off', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    await bot.notifier.sendLeadCard(CARD)
+    expect(tg.sent[1]).toMatchObject({
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    })
+    expect(tg.sent[1]?.text).toContain('<b>🔔 Сайт</b>')
+    expect(tg.sent[1]?.text).toContain('<a href="https://profi.ru/backoffice/n.php?o=90001">')
+  })
+
+  it('FR-LEAD-7: a client text with tags and an ampersand reaches Telegram escaped, and Telegram takes it', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    await bot.notifier.sendLeadCard({
+      ...CARD,
+      title: 'Сайт <b>&</b>',
+      text: 'Нужно <script>alert(1)</script> & "всё" > 5',
+      clientName: 'Ира <i>',
+    })
+    expect(tg.sent[1]?.text).toContain('<b>🔔 Сайт &lt;b&gt;&amp;&lt;/b&gt;</b>')
+    expect(tg.sent[1]?.text).toContain(
+      '<blockquote expandable>Нужно &lt;script&gt;alert(1)&lt;/script&gt; &amp; "всё" &gt; 5</blockquote>',
+    )
+    expect(tg.sent[1]?.text).toContain('<b>Клиент:</b> Ира &lt;i&gt;')
+  })
+
+  it('FR-LEAD-7: a very long order text still goes in one message of at most 4096 characters', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    await bot.notifier.sendLeadCard({ ...CARD, text: 'Очень длинная заявка. '.repeat(1000) })
+    expect(tg.sent).toHaveLength(2)
+    expect(tg.sent[1]?.text).toContain('…</blockquote>')
+  })
+
+  it('FR-LEAD-7: should Telegram refuse the markup, the card still comes as plain text', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    tg.setRejectHtml(true)
+    await bot.notifier.sendLeadCard({ ...CARD, text: 'Нужен <сайт> & всё' })
+    const m = tg.sent[1]
+    expect(m?.parse_mode).toBeUndefined()
+    expect(m?.text).not.toMatch(/<\/?(b|i|a|blockquote)\b/)
+    expect(m?.text).toContain('Нужен <сайт> & всё')
+    expect(m?.text).toContain('https://profi.ru/backoffice/n.php?o=90001')
+    expect(m?.reply_markup?.inline_keyboard.flat().length).toBe(4)
+    expect(m?.link_preview_options).toEqual({ is_disabled: true })
+  })
+
+  it('FR-LEAD-7: should Telegram refuse the markup of a card at the limit, the plain text still fits 4096', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    tg.setRejectHtml(true)
+    await bot.notifier.sendLeadCard({ ...CARD, text: 'a '.repeat(9000) })
+    const m = tg.sent[1]
+    expect(m?.parse_mode).toBeUndefined()
+    expect(m?.text.length).toBeLessThanOrEqual(4096)
+    expect(m?.text.endsWith('https://profi.ru/backoffice/n.php?o=90001')).toBe(true)
+    expect(m?.link_preview_options).toEqual({ is_disabled: true })
   })
 
   it('FR-NOTIF-2: a silent lead card goes with disable_notification, a usual one without', async () => {
     tg.pushStart(111)
     await until(() => tg.sent.length === 1)
-    const card = {
-      taskId,
-      title: 'Сайт',
-      city: 'Краснодар',
-      verdict: 'fit' as const,
-      reason: 'Сайт',
-      bidPriceRub: 210,
-    }
-    await bot.notifier.sendLeadCard(card, { silent: true })
-    await bot.notifier.sendLeadCard(card)
+    await bot.notifier.sendLeadCard(CARD, { silent: true })
+    await bot.notifier.sendLeadCard(CARD)
     expect(tg.sent[1]?.disable_notification).toBe(true)
     expect(tg.sent[2]?.disable_notification).toBeUndefined()
   })
 
   it('NFR-UX-1: no long dash reaches Boris, whatever text the model or the order brought', async () => {
-    const DASH = String.fromCharCode(0x2014)
-    const EN_DASH = String.fromCharCode(0x2013)
     tg.pushStart(111)
     await until(() => tg.sent.length === 1)
     await bot.notifier.sendText(`Почему: клиент ${DASH} сеть клиник`)
@@ -116,35 +181,77 @@ describe('telegram bot', () => {
       [{ text: 'Применить', callbackData: `t:${taskId}:apply` }],
     ])
     await bot.notifier.sendLeadCard({
-      taskId,
+      ...CARD,
       title: `Сайт${DASH}лендинг`,
-      city: 'Краснодар',
       verdict: null,
       reason: null,
-      bidPriceRub: 210,
       score: { value: 70, version: 2, reason: `Зрелый бизнес ${DASH} понятная задача` },
       draft: { text: `Добрый день!\n\nСайт ${DASH} это просто`, priceRub: null },
     })
     onPress.mockResolvedValueOnce(`Готово ${DASH} отклик ушёл`)
     tg.pushPress(111, `t:${taskId}:bid`)
     await until(() => tg.answers.length === 1)
-    expect(tg.sent.slice(1).map((m) => m.text)).toEqual([
-      'Почему: клиент - сеть клиник',
-      'Бюджет 10-20 тысяч, а не - 5',
-      [
-        '🔔 Заявка · Сайт-лендинг, Краснодар',
-        'Балл 70 (правила v2). Зрелый бизнес - понятная задача',
-        'Отклик 210\u00a0₽',
-        '',
-        'Черновик отклика:',
-        'Добрый день!',
-        '',
-        'Сайт - это просто',
-        '',
-        'Стоимость услуги: не указана',
-      ].join('\n'),
+    expect(tg.sent[1]?.text).toBe('Почему: клиент - сеть клиник')
+    expect(tg.sent[2]?.text).toBe('Бюджет 10-20 тысяч, а не - 5')
+    expect(tg.sent[3]?.text.split('\n')).toEqual([
+      '<b>🔔 Сайт-лендинг</b>',
+      'Краснодар · бюджет не указан · отклик 210\u00a0₽',
+      '',
+      '<b>Клиент:</b> Ирина',
+      '',
+      '<b>Заявка</b>',
+      '<blockquote expandable>Нужен сайт</blockquote>',
+      '',
+      '<b>Балл 70</b> (правила v2). Зрелый бизнес - понятная задача',
+      '',
+      '<b>Черновик отклика</b>',
+      '<blockquote>Добрый день!',
+      '',
+      'Сайт - это просто</blockquote>',
+      'Стоимость услуги: не указана',
+      '',
+      '<a href="https://profi.ru/backoffice/n.php?o=90001">Открыть заявку на Профи.ру</a>',
     ])
     expect(tg.answers[0]?.text).toBe('Готово - отклик ушёл')
+  })
+
+  it('NFR-UX-1: the dash replacement leaves HTML tags and entities whole', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    const html = [
+      `<b>Сайт ${DASH} лендинг</b> &amp; &lt;i&gt; ${EN_DASH} &quot;q&quot;`,
+      `<a href="https://example.ru/a${DASH}b?x=1&amp;y=2">ссылка ${DASH} тут</a>`,
+      `<blockquote expandable>строка ${DASH} раз\nстрока ${EN_DASH} два</blockquote>`,
+    ].join('\n')
+    await bot.notifier.sendText(html, { html: true })
+    expect(tg.sent[1]?.parse_mode).toBe('HTML')
+    expect(tg.sent[1]?.text).toBe(
+      [
+        '<b>Сайт - лендинг</b> &amp; &lt;i&gt; - &quot;q&quot;',
+        `<a href="https://example.ru/a${DASH}b?x=1&amp;y=2">ссылка - тут</a>`,
+        '<blockquote expandable>строка - раз\nстрока - два</blockquote>',
+      ].join('\n'),
+    )
+  })
+
+  it('NFR-UX-1: a dash written as a numeric entity in HTML becomes a hyphen too', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    await bot.notifier.sendText(
+      '<b>раз &#8212; два &#x2014; три &#X2013; четыре &#8211; пять</b> &#169;',
+      {
+        html: true,
+      },
+    )
+    expect(tg.sent[1]?.text).toBe('<b>раз - два - три - четыре - пять</b> &#169;')
+  })
+
+  it('NFR-UX-1: text without a parse mode is not read as HTML: angle brackets stay, dashes go', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    await bot.notifier.sendText(`a <b> ${DASH} &#8212; c`)
+    expect(tg.sent[1]?.parse_mode).toBeUndefined()
+    expect(tg.sent[1]?.text).toBe('a <b> - &#8212; c')
   })
 
   it('FR-OPS-2: another program polling the same bot does not crash the core and is reported', async () => {

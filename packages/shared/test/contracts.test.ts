@@ -65,6 +65,14 @@ describe('contracts', () => {
     expect(parseCallback('t:x:fly')).toBeNull()
   })
 
+  it('FR-LEAD-7: the «Разбор» action of a lead card is a task action and fits a callback', () => {
+    const id = '0192f3c4-5b6a-7c8d-9e0f-112233445566'
+    const data = formatCallback(id, 'razbor')
+    expect(data).toBe(`t:${id}:razbor`)
+    expect(Buffer.byteLength(data)).toBeLessThanOrEqual(64)
+    expect(parseCallback(data)).toEqual({ taskId: id, action: 'razbor' })
+  })
+
   it('C5: callback longer than 64 bytes is refused', () => {
     expect(() => formatCallback('x'.repeat(70), 'bid')).toThrow()
   })
