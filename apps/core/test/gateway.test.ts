@@ -74,7 +74,9 @@ async function until(check: () => Promise<boolean> | boolean, ms = 5000): Promis
   }
 }
 
-async function calls(): Promise<{ args: string[]; start: number; end: number; token: string }[]> {
+async function calls(): Promise<
+  { args: string[]; stdin: string; start: number; end: number; token: string }[]
+> {
   try {
     return (await readFile(log, 'utf8'))
       .trim()
@@ -294,6 +296,42 @@ describe('model gateway', () => {
     const [c] = await calls()
     expect(c?.args[c.args.indexOf('--model') + 1]).toBe('opus')
     expect(c?.args).not.toContain('--fallback-model')
+  })
+})
+
+describe('client data and the model', () => {
+  it('NFR-PRIV-2: the CLI never sees a phone, an e-mail, a link or a given name, and the answer gets them back', async () => {
+    const answer = {
+      verdict: 'fit',
+      reason: 'Позвонить [имя 1] на [телефон 1], [ссылка 7] не трогать',
+      tags: ['[почта 1]'],
+      confidence: 0.9,
+    }
+    const gw = await gateway({ FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({ sorter: answer }) })
+    const r = await gw.call(
+      'sorter',
+      'Олег просит сайт, тел. +7 916 123-45-67, почта oleg@mail.ru, пример vk.com/hance',
+      SorterOutput,
+      { redact: { names: ['Олег'] } },
+    )
+    expect((await calls())[0]?.stdin).toBe(
+      '[имя 1] просит сайт, тел. [телефон 1], почта [почта 1], пример [ссылка 1]',
+    )
+    expect(r).toMatchObject({
+      ok: true,
+      output: {
+        reason: 'Позвонить Олег на +7 916 123-45-67, [ссылка 7] не трогать',
+        tags: ['oleg@mail.ru'],
+      },
+    })
+    const rows = await db.execute<{ pseudonymized: boolean }>(
+      sql`select pseudonymized from core.model_call`,
+    )
+    expect(rows.rows).toEqual([{ pseudonymized: true }])
+    const events = await db.execute<{ payload: { redacted?: unknown } }>(
+      sql`select payload from core.event where type = 'model.called'`,
+    )
+    expect(events.rows[0]?.payload.redacted).toEqual({ phone: 1, email: 1, link: 1, name: 1 })
   })
 })
 

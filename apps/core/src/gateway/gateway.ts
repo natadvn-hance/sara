@@ -11,6 +11,7 @@ import type { SecretStore } from '../secrets/store'
 import { buildClaudeArgs, type CliRun, roleJsonSchema, runClaude } from './claudeCli'
 import { createLimitGuard, parseResetAt } from './limit'
 import { createSlots } from './queue'
+import { type Redacted, redact, restore } from './redact'
 import { loadRole, type RoleName } from './roles'
 
 export type GatewayErrorClass =
@@ -37,6 +38,8 @@ export type CallOptions = {
   model?: RoleMeta['model']
   /** How long a P1-P3 call may wait out the Claude limit (default 6 hours); 0 meets it with limit_reached at once. */
   limitWaitMs?: number
+  /** Client names to hide from the model, besides the phones, e-mails and links it never sees (ADR-016). */
+  redact?: { names?: (string | null | undefined)[] }
 }
 
 export type Gateway = {
@@ -60,6 +63,7 @@ const AUTH_TEXT = /failed to authenticate|invalid api key|oauth|not logged in|pl
 function classify<T>(
   run: CliRun,
   schema: ZodType<T>,
+  tags: Map<string, string>,
 ): { ok: true; output: T } | { ok: false; errorClass: GatewayErrorClass; message: string } {
   if (run.timedOut)
     return { ok: false, errorClass: 'timeout', message: 'Claude did not answer in time' }
@@ -80,7 +84,8 @@ function classify<T>(
   if (parsed.structured_output === undefined) {
     return { ok: false, errorClass: 'bad_output', message: 'no structured_output' }
   }
-  const checked = schema.safeParse(parsed.structured_output)
+  // The answer is checked with the real values back in it: that is the answer the caller gets.
+  const checked = schema.safeParse(restore(parsed.structured_output, tags))
   if (!checked.success)
     return { ok: false, errorClass: 'bad_output', message: checked.error.message.slice(0, 300) }
   return { ok: true, output: checked.data }
@@ -134,7 +139,7 @@ export function createGateway(d: {
   async function runOnce(
     meta: RoleMeta,
     promptPath: string,
-    input: string,
+    hidden: Redacted,
     schema: ZodType,
     waits: boolean,
   ): Promise<{ result: Outcome; durationMs: number } | 'limit_began'> {
@@ -154,13 +159,13 @@ export function createGateway(d: {
       const run = await runClaude({
         bin: d.claudeBin,
         args: buildClaudeArgs(meta, promptPath, roleJsonSchema(schema)),
-        input,
+        input: hidden.text,
         token,
         cwd,
         timeoutMs: meta.timeoutMs,
         extraEnv: typeof d.extraEnv === 'function' ? d.extraEnv() : d.extraEnv,
       })
-      const result = classify(run, schema)
+      const result = classify(run, schema, hidden.tags)
       if (!result.ok && result.errorClass === 'limit_reached')
         guard.hit(parseResetAt(`${run.stdout}\n${run.stderr}`, new Date()))
       else if (result.ok || result.errorClass === 'bad_output') guard.answered()
@@ -170,10 +175,10 @@ export function createGateway(d: {
     }
   }
 
+  type Call = { role: RoleName; meta: RoleMeta; opts?: CallOptions; hidden: Redacted }
+
   async function record(
-    role: RoleName,
-    meta: RoleMeta,
-    opts: CallOptions | undefined,
+    { role, meta, opts, hidden }: Call,
     startedAt: string,
     result: Outcome,
     durationMs: number,
@@ -189,7 +194,11 @@ export function createGateway(d: {
       durationMs,
       ok: result.ok,
       errorClass: result.ok ? null : result.errorClass,
+      pseudonymized: true,
     })
+    const redacted = Object.values(hidden.counts).some((n) => n > 0)
+      ? { redacted: hidden.counts }
+      : {}
     await appendEvent(d.db, {
       type: result.ok ? 'model.called' : 'model.failed',
       v: 1,
@@ -200,7 +209,12 @@ export function createGateway(d: {
       causation_id: opts?.causationId ?? null,
       correlation_id: opts?.correlationId ?? newEventId(),
       reason: result.ok ? null : result.errorClass,
-      payload: { role, durationMs, ...(result.ok ? {} : { errorClass: result.errorClass }) },
+      payload: {
+        role,
+        durationMs,
+        ...(result.ok ? {} : { errorClass: result.errorClass }),
+        ...redacted,
+      },
     })
     return result.ok
       ? { ok: true, output: result.output, durationMs, modelCallId: id }
@@ -219,6 +233,8 @@ export function createGateway(d: {
       ? { ...loaded.meta, model: opts.model, fallbackModel: undefined }
       : loaded.meta
     await readLimit()
+    // Always on: what the model sees has no phone, e-mail, link or given name of a client (ADR-016).
+    const c: Call = { role, meta, opts, hidden: redact(input, opts?.redact?.names) }
     const waits = meta.priority !== 'P0'
     const deadline = Date.now() + (opts?.limitWaitMs ?? maxWaitMs)
     let last: RoleCallResult<unknown> | null = null
@@ -227,9 +243,7 @@ export function createGateway(d: {
       if (waits && (await guard.wait(deadline)) === 'expired') {
         // The limit outlived the wait: the last run's answer stands, or one without a run is recorded.
         last ??= await record(
-          role,
-          meta,
-          opts,
+          c,
           startedAt,
           {
             ok: false,
@@ -240,9 +254,9 @@ export function createGateway(d: {
         )
         return last as RoleCallResult<T>
       }
-      const run = await runOnce(meta, promptPath, input, schema, waits)
+      const run = await runOnce(meta, promptPath, c.hidden, schema, waits)
       if (run === 'limit_began') continue
-      last = await record(role, meta, opts, startedAt, run.result, run.durationMs)
+      last = await record(c, startedAt, run.result, run.durationMs)
       if (!waits || run.result.ok || run.result.errorClass !== 'limit_reached')
         return last as RoleCallResult<T>
     }
