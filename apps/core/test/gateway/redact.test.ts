@@ -14,7 +14,7 @@ describe('redaction before the model', () => {
 
   it('NFR-PRIV-2: prices, dates, ranges and tech names stay as they are', () => {
     const text =
-      'Бюджет 50 000 ₽, срок 24.10.2026 или 2026-10-24, от 30000 до 50000, 1500-2000 руб., 2 000 000 руб, 8 часов, заказ 123456789, сайт на ASP.NET и Vue.js'
+      'Бюджет 50 000 ₽, срок 24.10.2026 или 2026-10-24, от 30000 до 50000, 1500-2000 руб., 2 000 000 руб, 1 500 000 000 руб, +1 500 000 руб, 8 часов, заказ 123456789, сайт на ASP.NET и Vue.js, стек Node.js/React'
     expect(redact(text).text).toBe(text)
   })
 
@@ -28,6 +28,37 @@ describe('redaction before the model', () => {
     expect(r.counts).toEqual({ phone: 0, email: 2, link: 7, name: 0 })
   })
 
+  it('NFR-PRIV-2: phones without the country code, with long area codes or with dots are hidden', () => {
+    const r = redact(
+      'Тел 495 1234567, 4951234567, (812)1234567, (495) 123-45-67, 8 (8452) 12-34-56, 8 (34342) 2-12-34, 12-34-56, 916.123.45.67',
+    )
+    expect(r.text).toBe(
+      'Тел [телефон 1], [телефон 2], [телефон 3], [телефон 4], [телефон 5], [телефон 6], [телефон 7], [телефон 8]',
+    )
+  })
+
+  it('NFR-PRIV-2: a phone takes neither the number after it nor the next line', () => {
+    expect(redact('+7 916 123 45 67 10 дней\n8 916 123 45 67\n5 штук').text).toBe(
+      '[телефон 1] 10 дней\n[телефон 2]\n5 штук',
+    )
+  })
+
+  it('NFR-PRIV-2: profile links on short hosts and in capitals are hidden', () => {
+    expect(
+      redact(
+        'taplink.cc/ivan, linktr.ee/ivan, youtu.be/x1, vk.cc/abc, wa.me/79161234567, VK.COM/ivan',
+      ).text,
+    ).toBe('[ссылка 1], [ссылка 2], [ссылка 3], [ссылка 4], [ссылка 5], [ссылка 6]')
+  })
+
+  it('NFR-PRIV-2: inside JSON a link stops before an escape, so the JSON stays whole and comes back the same', () => {
+    const rules = { about: 'Наш сайт https://hance.ru\nПишите', note: 'см. "vk.com/hance"' }
+    const r = redact(JSON.stringify(rules))
+    const seen = JSON.parse(r.text)
+    expect(seen).toEqual({ about: 'Наш сайт [ссылка 1]\nПишите', note: 'см. "[ссылка 2]"' })
+    expect(restore(seen, r.tags)).toEqual(rules)
+  })
+
   it('NFR-PRIV-2: given names become tags, with case endings for names of 4 letters and more', () => {
     const r = redact(
       'Иван Петров просит. Ивану удобно вечером. Ян тоже. Янтарь и январь не имена.',
@@ -35,6 +66,16 @@ describe('redaction before the model', () => {
     )
     expect(r.text).toBe(
       '[имя 1] просит. [имя 2] удобно вечером. [имя 3] тоже. Янтарь и январь не имена.',
+    )
+  })
+
+  it('NFR-PRIV-2: only real case endings and both е and ё count, so common words stay', () => {
+    const r = redact(
+      'Ника никак не ответит. Виктор любит викторины. Марк зашёл в маркет. Дина болеет за Динамо. Пётр и Петра ждут, Марии нет, Ольге пишем.',
+      ['Ника', 'Виктор', 'Марк', 'Дина', 'Петр', 'Мария', 'Ольга'],
+    )
+    expect(r.text).toBe(
+      '[имя 1] никак не ответит. [имя 2] любит викторины. [имя 3] зашёл в маркет. [имя 4] болеет за Динамо. [имя 5] и [имя 6] ждут, [имя 7] нет, [имя 8] пишем.',
     )
   })
 

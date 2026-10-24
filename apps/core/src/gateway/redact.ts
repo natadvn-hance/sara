@@ -10,19 +10,33 @@ export type Redacted = {
   counts: Record<Kind, number>
 }
 
-const URL_CHARS = `[^\\s<>"'«»]`
-const TLDS = 'ru|рф|su|com|net|org|info|biz|pro|io|me|online|site|shop|store|app|dev|by|kz|ua'
+// No backslash: inside a JSON string it starts an escape ("\n", "\""), not a part of the link.
+const URL_CHARS = `[^\\s<>"'«»\\\\]`
+const TLDS =
+  'ru|рф|su|com|net|org|info|biz|pro|io|me|online|site|shop|store|app|dev|by|kz|ua|cc|ee|be|ly|co|gl|to|tv|ws|link|page'
+/** One optional separator between digit groups; never a line break. */
+const S = '[ \\u00a0.-]?'
+const AREA_AND_NUMBER = [
+  `\\(?\\d{3}\\)?${S}\\d{3}${S}(?:\\d{2}${S}\\d{2}|\\d{4})`,
+  `\\(?\\d{4}\\)?${S}(?:\\d{2}${S}\\d{2}${S}\\d{2}|\\d{3}${S}\\d{3})`,
+  `\\(?\\d{5}\\)?${S}(?:\\d${S}\\d{2}${S}\\d{2}|\\d{3}${S}\\d{2})`,
+].join('|')
 
 /** In this order: a link may hold an e-mail or a handle, an e-mail holds a domain. */
 const PATTERNS: [Kind, RegExp][] = [
   ['link', new RegExp(`\\b(?:https?://|www\\.)${URL_CHARS}+`, 'giu')],
   // Every pattern starts at a word's start only: tried inside a long word, it would make the pass quadratic.
   ['email', /(?<![\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/giu],
+  // A domain with a path, in any case: VK.COM/ivan, taplink.cc/ivan.
+  [
+    'link',
+    new RegExp(`(?<![\\p{L}\\p{N}@._/-])(?:[a-z0-9-]+\\.)+(?:${TLDS})/${URL_CHARS}*`, 'giu'),
+  ],
+  // A bare domain only in lower case: "site.ru" is a link, "ASP.NET" is a technology.
   [
     'link',
     new RegExp(
-      `(?<![\\p{L}\\p{N}@._/-])(?:[\\p{L}\\p{N}-]+\\.)+(?:${TLDS})(?![\\p{L}\\p{N}-])(?:/${URL_CHARS}*)?`,
-      // Case matters: a domain is written in lower case, "ASP.NET" is a technology.
+      `(?<![\\p{L}\\p{N}@._/-])(?:[\\p{L}\\p{N}-]+\\.)+(?:${TLDS})(?![\\p{L}\\p{N}-])`,
       'gu',
     ),
   ],
@@ -31,14 +45,16 @@ const PATTERNS: [Kind, RegExp][] = [
     'phone',
     new RegExp(
       [
-        // Any number written with its country code: +375 29 123-45-67.
-        String.raw`\+\d[\d\s()-]{7,}\d`,
-        // A Russian number: 8 916 123 45 67, 89161234567, 7 (916) 123-45-67.
-        String.raw`(?<![\d+])[78][\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}(?!\d)`,
-        // A mobile number without the code: 916-123-45-67.
-        String.raw`(?<![\d+])\(?9\d{2}\)?[\s-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}(?!\d)`,
-        // A city number: 123-45-67.
-        String.raw`(?<![\d-])\d{3}-\d{2}-\d{2}(?![\d-])`,
+        // A Russian number with its code: +7 (916) 123-45-67, 89161234567, 8 (8452) 12-34-56.
+        `(?<![\\d+])(?:\\+7|8|7)${S}(?:${AREA_AND_NUMBER})(?!\\d)`,
+        // Without the code, the area in brackets: (812)1234567, (34342) 2-12-34.
+        `(?<![\\d+(])\\((?:\\d{3}\\)${S}\\d{3}${S}(?:\\d{2}${S}\\d{2}|\\d{4})|\\d{4}\\)${S}(?:\\d{2}${S}\\d{2}${S}\\d{2}|\\d{3}${S}\\d{3})|\\d{5}\\)${S}(?:\\d${S}\\d{2}${S}\\d{2}|\\d{3}${S}\\d{2}))(?!\\d)`,
+        // Another country: +375 29 123-45-67, +1 (555) 123-4567.
+        `\\+(?!7)\\d{1,3}${S}\\(?\\d{2,4}\\)?${S}\\d{2,4}${S}\\d{2,4}(?:${S}\\d{2,4})?(?!\\d)`,
+        // Ten digits without the code: 916-123-45-67, 495 1234567, 916.123.45.67.
+        `(?<![\\d+])\\d{3}${S}\\d{3}${S}(?:\\d{2}${S}\\d{2}|\\d{4})(?!\\d)`,
+        // A city number: 123-45-67, 12-34-56.
+        `(?<![\\d-])\\d{2,3}-\\d{2}-\\d{2}(?![\\d-])`,
       ].join('|'),
       'gu',
     ),
@@ -54,27 +70,36 @@ function splitTail(value: string): [string, string] {
   return cut > 0 ? [value.slice(0, -cut), value.slice(-cut)] : [value, '']
 }
 
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** Russian case endings of a name: Ивану, Марии, Ольгой, Петровым. */
+const ENDINGS = 'ой|ей|ом|ем|ём|ою|ею|ью|ым|им|а|я|у|ю|е|ё|ы|и|й|ь'
 
-/** A given name as a whole word; names of 4 letters and more also with a Russian case ending (Ивану, Марии). */
-function namePatterns(names: (string | null | undefined)[]): RegExp[] {
-  const words = new Set<string>()
+/** One name word as a pattern: е and ё alike; a stem with its case endings for names of 4 letters and more. */
+function nameWord(w: string): string {
+  const chars = (s: string) =>
+    [...s]
+      .map((c) => (/[её]/i.test(c) ? '[её]' : c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      .join('')
+  if ([...w].length < 4) return chars(w)
+  // Мария → Мари + я|и|ю|ей; without its last vowel the stem alone is another word (Ника, Ник).
+  if (/[аяйьеоё]$/i.test(w)) return `${chars(w.slice(0, -1))}(?:${ENDINGS})`
+  return `${chars(w)}(?:${ENDINGS})?`
+}
+
+/** All given names in one pattern, so tags go by their place in the text; a full name before its parts. */
+function namePattern(names: (string | null | undefined)[]): RegExp | null {
+  const variants = new Set<string>()
   for (const n of names) {
     const full = n?.trim().replace(/\s+/g, ' ')
     if (!full) continue
-    words.add(full)
-    for (const w of full.split(' ')) words.add(w)
+    variants.add(full)
+    for (const w of full.split(' ')) variants.add(w)
   }
-  return [...words]
-    .filter((w) => [...w].filter((c) => /\p{L}/u.test(c)).length >= 2)
+  const kept = [...variants]
+    .filter((v) => [...v].filter((c) => /\p{L}/u.test(c)).length >= 2)
     .sort((a, b) => b.length - a.length)
-    .map(
-      (w) =>
-        new RegExp(
-          `(?<![\\p{L}\\p{N}])${escapeRe(w)}${w.length >= 4 ? '[а-яё]{0,3}' : ''}(?![\\p{L}\\p{N}])`,
-          'giu',
-        ),
-    )
+  if (kept.length === 0) return null
+  const alts = kept.map((v) => v.split(' ').map(nameWord).join(' '))
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${alts.join('|')})(?![\\p{L}\\p{N}])`, 'giu')
 }
 
 const TAG = /\[\s*(телефон|почта|ссылка|имя)\s*(\d+)\s*\]/giu
@@ -108,7 +133,8 @@ export function redact(text: string, names: (string | null | undefined)[] = []):
       return `${tagFor(kind, value)}${tail}`
     })
   }
-  for (const re of namePatterns(names)) out = out.replace(re, (m) => tagFor('name', m))
+  const nameRe = namePattern(names)
+  if (nameRe) out = out.replace(nameRe, (m) => tagFor('name', m))
   return { text: out, tags, counts }
 }
 
