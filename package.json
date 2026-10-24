@@ -32,7 +32,8 @@
     "profi:samples": "tsx scripts/profi-samples.ts",
     "report:shadow": "pnpm --filter @sara/core report:shadow",
     "direction:show": "pnpm --filter @sara/core direction show",
-    "direction:rollback": "pnpm --filter @sara/core direction rollback"
+    "direction:rollback": "pnpm --filter @sara/core direction rollback",
+    "history:export": "pnpm --filter @sara/core history:export"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",

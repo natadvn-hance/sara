@@ -3,7 +3,7 @@ import { asc, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { migrateNode } from '../../../profi-node/src/db/migrate'
 import { chatMessage, conversation, outbox } from '../../src/db/schema'
-import { exportHistory } from '../../src/history/exportHistory'
+import { exportHistory, formatExportReport } from '../../src/history/exportHistory'
 import type { V1Lead } from '../../src/history/v1Snapshot'
 import { listEvents } from '../../src/journal/journal'
 import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
@@ -354,5 +354,24 @@ describe('history export', () => {
     await run(null, { v1Writes: false })
     const [row] = await db.select().from(chatMessage).where(eq(chatMessage.chatId, 'c1'))
     expect(row).toMatchObject({ author: 'boris', authorBasis: 'after_cutover' })
+  })
+
+  it('FR-TRAIN-1: the report reads in plain words', () => {
+    const text = formatExportReport({
+      chats: 2,
+      messages: { client: 5, boris: 3, sara: 0, sara_v1: 2, system: 1, unknown: 4 },
+      unknownSpecialist: 3,
+      v1Only: 2,
+      borisMessages: 3,
+      line: 'Нашла 2 диалога, 3 твоих сообщения',
+    })
+    expect(text).toBe(
+      [
+        'Нашла 2 диалога, 3 твоих сообщения',
+        'По авторам: клиенты 5, ты 3, новая Сара 0, старая Сара 2, Профи.ру 1, не понять 4.',
+        'Без доказательства, чьи они: 3 сообщения со стороны Hance. Пока v1 пишет с того же аккаунта, такие сообщения не считаются твоими.',
+        'Только из базы v1, время примерное: 2.',
+      ].join('\n'),
+    )
   })
 })

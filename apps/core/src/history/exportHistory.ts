@@ -302,3 +302,23 @@ export async function exportHistory(
   const line = `Нашла ${r.chats} ${plural(r.chats, ['диалог', 'диалога', 'диалогов'])}, ${r.borisMessages} ${plural(r.borisMessages, ['твоё сообщение', 'твоих сообщения', 'твоих сообщений'])}`
   return { ...r, line }
 }
+
+const AUTHOR_WORDS: Record<ChatAuthor, string> = {
+  client: 'клиенты',
+  boris: 'ты',
+  sara: 'новая Сара',
+  sara_v1: 'старая Сара',
+  system: 'Профи.ру',
+  unknown: 'не понять',
+}
+
+/** The whole report in plain words, for the command line. */
+export function formatExportReport(r: ExportReport): string {
+  const byAuthor = CHAT_AUTHORS.map((a) => `${AUTHOR_WORDS[a]} ${r.messages[a]}`).join(', ')
+  return [
+    r.line,
+    `По авторам: ${byAuthor}.`,
+    `Без доказательства, чьи они: ${r.unknownSpecialist} ${plural(r.unknownSpecialist, ['сообщение', 'сообщения', 'сообщений'])} со стороны Hance. Пока v1 пишет с того же аккаунта, такие сообщения не считаются твоими.`,
+    `Только из базы v1, время примерное: ${r.v1Only}.`,
+  ].join('\n')
+}

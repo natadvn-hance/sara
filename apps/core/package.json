@@ -12,7 +12,8 @@
     "report:shadow": "tsx src/analytics/shadowCli.ts",
     "direction": "tsx src/direction/cli.ts",
     "score:eval": "tsx src/leads/scoreEvalCli.ts",
-    "mind": "tsx src/mind/cli.ts"
+    "mind": "tsx src/mind/cli.ts",
+    "history:export": "tsx src/history/exportCli.ts"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "5.3.0",
