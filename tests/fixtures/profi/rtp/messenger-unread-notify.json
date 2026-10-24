@@ -1,0 +1,6 @@
+{
+  "kind": "rtp",
+  "url": "wss://online.profi.ru/socket.io/202/cw4mr2gg/websocket?props=%7B%22accountId%22%3A%22%22%2C%22clientOptions%22%3A%7B%22uiType%22%3A%22WEB%22%2C%22uiApp%22%3A%22WEBBO%22%2C%22uiVer%22%3A%22100%22%7D%7D&new_auth=1&appId=BO",
+  "body": "a[\"{\\\"type\\\":\\\"MSG_MESSENGER_UNREAD_NOTIFY\\\",\\\"containerId\\\":100000001,\\\"userId\\\":100000002,\\\"userType\\\":\\\"PROFILE\\\",\\\"notShownCount\\\":0,\\\"containersMessages\\\":[{\\\"containerId\\\":100000001,\\\"messageId\\\":1000000003}],\\\"messengerId\\\":100000004,\\\"messengerType\\\":\\\"ORDER\\\",\\\"messengerExtId\\\":10000005,\\\"messageId\\\":1000000003,\\\"firstMessageId\\\":1000000003}\"]",
+  "receivedAt": "2026-10-24T09:11:35.788Z"
+}

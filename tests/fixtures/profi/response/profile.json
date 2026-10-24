@@ -1,0 +1,92 @@
+{
+  "kind": "response",
+  "url": "https://profi.ru/backoffice/api/",
+  "body": {
+    "data": {
+      "id": "anon1",
+      "ads": {
+        "gaMobSdk": {
+          "show": false,
+          "oldBanner": false
+        }
+      },
+      "geo": {
+        "coords": {
+          "prcn": -1,
+          "latitude": 45,
+          "longitude": 39
+        }
+      },
+      "pid": 1000001,
+      "debt": 0,
+      "g_id": "ksdr",
+      "name": "Клиент 1",
+      "u_id": "ru",
+      "z_id": "itfl",
+      "zubs": {
+        "title": "Текст 1 Те",
+        "subtitle": "Текст 2 Те",
+        "buttonText": "Текст 3 Текст 3 Т",
+        "description": "Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст",
+        "hasPurchased": false
+      },
+      "bonus": {
+        "color": "#00C75C",
+        "value": 0,
+        "caption": "бонусов",
+        "details": [],
+        "description": "Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Те"
+      },
+      "oform": -1,
+      "phone": "[скрыто]",
+      "avatar": "https://cdn.profi.ru/xfiles/pfiles/00000000000000000000000000000000.jpg-a11-180.jpg",
+      "gender": "m",
+      "is_new": false,
+      "status": {
+        "n": 0,
+        "viz": 0,
+        "activ": 1,
+        "wants": 1
+      },
+      "balance": 23,
+      "contacts": {
+        "phones": "[скрыто]",
+        "address": "",
+        "project": "Профи.ру",
+        "feedback": true,
+        "intercom": true,
+        "specialty": "специалистами"
+      },
+      "currency": "₽",
+      "regState": {
+        "isRegProcess": false
+      },
+      "yurlo_id": "PROFI",
+      "first_name": "Клиент 2",
+      "isVerified": true,
+      "refundLink": "https://profi.ru/backoffice/bill.php?boFormType=MONEY_REFUND&bo_tkn=xxxxxxxxxxxxxxxxxxxxxx",
+      "billingEmail": "",
+      "squareAvatar": "https://cdn.profi.ru/xfiles/pfiles/00000000000000000000000000000000.jpg-a11-180.jpg",
+      "isNewHeadInfo": true,
+      "canUploadFiles": true,
+      "hasLgPservices": true,
+      "minBalanceUnit": 1,
+      "canChangeProfile": false,
+      "is_map_available": true,
+      "needToHideResponses": true,
+      "can_see_white_orders": false,
+      "showOptionalRboBanner": true,
+      "showRequiredRboBanner": false,
+      "isPortfolioAlbumsDisabled": false,
+      "editProfileLoginToAccountLink": null,
+      "isTransactionsListRboAvailable": true
+    },
+    "meta": {
+      "method": "getProfile",
+      "prepId": "anon1"
+    },
+    "errors": [],
+    "errors_type": null
+  },
+  "receivedAt": "2026-10-24T14:04:55.672Z"
+}

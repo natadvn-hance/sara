@@ -7,6 +7,8 @@ export type OrderSignal = {
   published_at: string | null
   /** Seen on the board without the fee: held until its own page is read (or cannot be). */
   needsPage?: boolean
+  /** This account already bid on the order (the order page answer says so; null when it was not read). */
+  hasBid?: boolean | null
 }
 export type MessageSignal = { t: 'message'; message: ChatMessage & { order_id: string | null } }
 export type Signal =
@@ -16,6 +18,8 @@ export type Signal =
   | { t: 'presence'; on: boolean }
   /** The event stream says a chat has news: its page is read on the next minute check. */
   | { t: 'chat_touched'; chatId: string; messageId: string | null }
+  /** The order page's own answer: the fee for a bid now. It completes an order, never makes one. */
+  | { t: 'order_fee'; orderId: string; rub: number; hasBid: boolean | null }
 
 /** recognized: the source had the shape we know (even if empty). False is how a layout change shows. */
 export type ParseResult = {

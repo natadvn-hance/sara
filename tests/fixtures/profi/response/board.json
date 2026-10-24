@@ -1,0 +1,1474 @@
+{
+  "kind": "response",
+  "url": "https://profi.ru/graphql",
+  "body": {
+    "data": {
+      "boSearchBoardItems": {
+        "items": [
+          {
+            "id": "10000001",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "",
+              "prefix": "",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 89.25712,
+            "title": "Текст 1 Текст 1 Текст 1 Текс",
+            "badges": [],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": true,
+            "isViewed": false,
+            "schedule": "",
+            "clientInfo": {
+              "name": "Клиент 1"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст 2 Текст",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 89.25712,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792838061,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000002",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "14 700 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 89.16134,
+            "title": "Текст 3 Те",
+            "badges": [],
+            "images": [
+              {
+                "host": "cdn.profi.ru",
+                "width": 1206,
+                "height": 1059,
+                "original": "/xfiles/ofiles/10000002/00000000000000000000000000000000.jpg"
+              }
+            ],
+            "notice": null,
+            "status": null,
+            "isFresh": true,
+            "isViewed": false,
+            "schedule": "24 окт. (Сб), 31 окт. (Сб)",
+            "clientInfo": {
+              "name": "Клиент 2"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Текст 4 Тек",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 89.16134,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792837787,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "STORIES",
+            "type": "STORIES"
+          },
+          {
+            "id": "DIVIDER",
+            "type": "DIVIDER",
+            "title": "Текст 5 Текст 5 Текст 5 Текст ",
+            "button": null
+          },
+          {
+            "id": "10000003",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "",
+              "prefix": "",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.52264,
+            "title": "Текст 6 Текст 6 Текс",
+            "badges": [],
+            "images": [
+              {
+                "host": "cdn.profi.ru",
+                "width": 1206,
+                "height": 1962,
+                "original": "/xfiles/ofiles/10000003/00000000000000000000000000000000.jpg"
+              }
+            ],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "",
+            "clientInfo": {
+              "name": "Клиент 3"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Текст 7 Те",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.52264,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792833321,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "CAROUSEL",
+            "type": "CAROUSEL",
+            "snippets": [
+              {
+                "id": "10000004",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Москва",
+                    "suffix": "",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "",
+                  "prefix": "",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.19022,
+                "title": "Текст 8 Текст",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": true,
+                "description": "Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 Текст 9 ",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.19022,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792590392,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000005",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Москва",
+                    "suffix": "",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "1 ₽",
+                  "prefix": "до",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 10 Текст 10 Текс",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": true,
+                "description": "Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Текст",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792766619,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000006",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Самара",
+                    "suffix": "+1 час",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "",
+                  "prefix": "",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 12 Текст 12 Те",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": false,
+                "description": "Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 13 Текст 1",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792694601,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000007",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Самара",
+                    "suffix": "+1 час",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "",
+                  "prefix": "",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 14 Текст 14 Текс",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": false,
+                "description": "Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Текст 15 Тек",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792694540,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000008",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Самара",
+                    "suffix": "+1 час",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "",
+                  "prefix": "",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 16 Текст 16 Текс",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": false,
+                "description": "Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792694389,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000009",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Самара",
+                    "suffix": "+1 час",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "20 000 ₽",
+                  "prefix": "до",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 18 Текст 18 Текс",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": false,
+                "description": "Текст 19 Текст 19 Текст 19 Текст 19 Текст 19 Текст 19 Текст 19 Текст 19 Текст 19 Текст 19 Текст 19 Текст",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792694310,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000010",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Самара",
+                    "suffix": "+1 час",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "15 000 ₽",
+                  "prefix": "до",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 20 Текст 20 Текс",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": false,
+                "description": "Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст 21 Текст",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792694217,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000011",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Москва",
+                    "suffix": "",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "80 000 ₽",
+                  "prefix": "до",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 22 Текст 22 Текс",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": true,
+                "description": "Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23 Текст 23",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792671640,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000012",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Псков",
+                    "suffix": "",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "",
+                  "prefix": "",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 24 Текст 24 Текст 24 Т",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": true,
+                "description": "Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25 Текст 25",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792662261,
+                "shouldRequestRefuseReasons": false
+              },
+              {
+                "id": "10000013",
+                "geo": {
+                  "remote": {
+                    "prefix": "Дистанционно · Москва",
+                    "suffix": "",
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "clientMayCome": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  },
+                  "orderLocation": {
+                    "prefix": null,
+                    "suffix": null,
+                    "address": null,
+                    "geoplaces": null
+                  }
+                },
+                "price": {
+                  "value": "",
+                  "prefix": "",
+                  "suffix": "",
+                  "bonusLabel": null
+                },
+                "score": 85.189224,
+                "title": "Текст 26 Текст 26 Текс",
+                "notice": null,
+                "isFresh": true,
+                "isViewed": false,
+                "headerIcon": null,
+                "isReposted": false,
+                "description": "Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 Текст 27 ",
+                "secondPrice": {
+                  "value": null,
+                  "prefix": null,
+                  "suffix": null
+                },
+                "analyticsData": {
+                  "score": 85.189224,
+                  "caseId": null
+                },
+                "lastUpdateDate": 1792586688,
+                "shouldRequestRefuseReasons": false
+              }
+            ]
+          },
+          {
+            "id": "10000014",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Приморский край",
+                "suffix": "+7 часов",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "30 000 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.38907,
+            "title": "Текст 28 Текст",
+            "badges": [
+              {
+                "id": "highChances",
+                "label": "Высокие шансы",
+                "imageKey": "BOLT"
+              }
+            ],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "",
+            "clientInfo": {
+              "name": "Клиент 4"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст 29 Текст ",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.38907,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792835873,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000015",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "",
+              "prefix": "",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.38636,
+            "title": "Текст 30 Текст 30 Текст 30 Т",
+            "badges": [
+              {
+                "id": "highChances",
+                "label": "Высокие шансы",
+                "imageKey": "BOLT"
+              }
+            ],
+            "images": [
+              {
+                "host": "cdn.profi.ru",
+                "width": 512,
+                "height": 279,
+                "original": "/xfiles/ofiles/10000015/00000000000000000000000000000000.jpg"
+              }
+            ],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "24 окт. (Сб)",
+            "clientInfo": {
+              "name": "Клиент 5"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 Текст 31 ",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.38636,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792824677,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000016",
+            "geo": {
+              "remote": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": "",
+                "address": null,
+                "geoplaces": [
+                  {
+                    "code": "[скрыто]",
+                    "name": "Клиент 6",
+                    "color": ["#F58231"],
+                    "distance": 1185158.2233405157
+                  }
+                ]
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": "300 м",
+                "address": null,
+                "geoplaces": [
+                  {
+                    "code": "[скрыто]",
+                    "name": "Клиент 7",
+                    "color": [],
+                    "distance": null,
+                    "prepDistance": null
+                  }
+                ]
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "12 000 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.376495,
+            "title": "Текст 3",
+            "badges": [],
+            "images": [],
+            "notice": {
+              "type": "BOOSTED",
+              "color": "WARNING",
+              "label": "Клиент запросил ещё отклики 4 дня назад"
+            },
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "25 окт. (Вс) - 30 июн. 2028 (Пт)",
+            "clientInfo": {
+              "name": "Клиент 8"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": true,
+            "isStandard": false,
+            "coordinates": {
+              "lat": 56,
+              "lon": 38
+            },
+            "description": "Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33 Текст 33",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.376495,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792477577,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000017",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Нижний Новгород",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "",
+              "prefix": "",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.36052,
+            "title": "Текст 34 Текст ",
+            "badges": [
+              {
+                "id": "highChances",
+                "label": "Высокие шансы",
+                "imageKey": "BOLT"
+              }
+            ],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "",
+            "clientInfo": {
+              "name": "Клиент 9"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Текст 35 Т",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.36052,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792833787,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000018",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Нижний Новгород",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "10000 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.33997,
+            "title": "Текст 3",
+            "badges": [],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "24 окт. (Сб)",
+            "clientInfo": {
+              "name": "Клиент 10"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст 37 Текст ",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.33997,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792820831,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000019",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Приморский край",
+                "suffix": "+7 часов",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "",
+              "prefix": "",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.33272,
+            "title": "Текст 38 Текс",
+            "badges": [
+              {
+                "id": "askPrice",
+                "label": "Клиент изучает цены",
+                "imageKey": "INFO"
+              }
+            ],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "",
+            "clientInfo": {
+              "name": "Клиент 11"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст 39 Текст ",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.33272,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792829880,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000020",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "1000 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.32884,
+            "title": "Текст 40 Текст 40 Т",
+            "badges": [],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "22 окт. (Чт), 31 окт. (Сб)",
+            "clientInfo": {
+              "name": "Клиент 12"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст 41 Текст ",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.32884,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792669648,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000021",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "150 000 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.31095,
+            "title": "Текст 42 Текст 42",
+            "badges": [
+              {
+                "id": "highChances",
+                "label": "Высокие шансы",
+                "imageKey": "BOLT"
+              }
+            ],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "Начать 26 октября (пн)",
+            "clientInfo": {
+              "name": "Клиент 13"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": false,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текст 43 Текс",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.31095,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792758904,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000022",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "30 000 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.31095,
+            "title": "Текст 44 Т",
+            "badges": [],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "Начать 12 октября (пн)",
+            "clientInfo": {
+              "name": "Клиент 14"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": true,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст 45 Текст ",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.31095,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792716822,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000023",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "",
+              "prefix": "",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.31095,
+            "title": "Текст 46 ",
+            "badges": [],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "",
+            "clientInfo": {
+              "name": "Клиент 15"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": true,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст 47 Текст ",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.31095,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792700934,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000024",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Волгоград",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "1 ₽",
+              "prefix": "до",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.31095,
+            "title": "Текст 48 ",
+            "badges": [],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "18 сен. (Пт) - 31 окт. (Сб)",
+            "clientInfo": {
+              "name": "Клиент 16"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": true,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 49 Текст 4",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.31095,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792672676,
+            "shouldRequestRefuseReasons": false
+          },
+          {
+            "id": "10000025",
+            "geo": {
+              "remote": {
+                "prefix": "Дистанционно · Москва",
+                "suffix": "",
+                "address": null,
+                "geoplaces": null
+              },
+              "clientMayCome": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              },
+              "orderLocation": {
+                "prefix": null,
+                "suffix": null,
+                "address": null,
+                "geoplaces": null
+              }
+            },
+            "type": "SNIPPET",
+            "price": {
+              "value": "",
+              "prefix": "",
+              "suffix": "",
+              "bonusLabel": null
+            },
+            "score": 80.31095,
+            "title": "Текст 50 ",
+            "badges": [],
+            "images": [],
+            "notice": null,
+            "status": null,
+            "isFresh": false,
+            "isViewed": false,
+            "schedule": "",
+            "clientInfo": {
+              "name": "Клиент 17"
+            },
+            "clientTags": [],
+            "headerIcon": null,
+            "isReposted": true,
+            "isStandard": false,
+            "coordinates": null,
+            "description": "Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текст 51 Текс",
+            "secondPrice": {
+              "value": null,
+              "prefix": null,
+              "suffix": null
+            },
+            "analyticsData": {
+              "score": 80.31095,
+              "caseId": null
+            },
+            "lastUpdateDate": 1792658206,
+            "shouldRequestRefuseReasons": false
+          }
+        ],
+        "serverTs": 1792838124,
+        "analytics": {
+          "boardSearchUsed": false,
+          "boardSearchQuery": ""
+        },
+        "nextCursor": "WzgwLjMxMDk1LDE3OTI2NTc5NzMsOTUyOTYxNzQsMl0=",
+        "totalCount": 346
+      }
+    }
+  },
+  "receivedAt": "2026-10-24T10:35:24.659Z"
+}

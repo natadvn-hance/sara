@@ -1,0 +1,6 @@
+{
+  "kind": "rtp",
+  "url": "wss://online.profi.ru/socket.io/869/qmd3dr1x/websocket?props=%7B%22accountId%22%3A%22%22%2C%22clientOptions%22%3A%7B%22uiType%22%3A%22WEB%22%2C%22uiApp%22%3A%22WEBBO%22%2C%22uiVer%22%3A%22100%22%7D%7D&new_auth=1&appId=BO",
+  "body": "o",
+  "receivedAt": "2026-10-24T14:04:55.427Z"
+}

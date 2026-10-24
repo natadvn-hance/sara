@@ -1,0 +1,6 @@
+{
+  "kind": "rtp",
+  "url": "wss://online.profi.ru/socket.io/869/qmd3dr1x/websocket?props=%7B%22accountId%22%3A%22%22%2C%22clientOptions%22%3A%7B%22uiType%22%3A%22WEB%22%2C%22uiApp%22%3A%22WEBBO%22%2C%22uiVer%22%3A%22100%22%7D%7D&new_auth=1&appId=BO",
+  "body": "a[\"{\\\"userId\\\":\\\"anon1\\\",\\\"streamId\\\":\\\"158e98a9-ea1f-4b71-aa08-c0f9c51f037f\\\",\\\"info\\\":\\\"[01b331c5c8d6:3003]_1\\\",\\\"type\\\":\\\"SERVER_READY\\\"}\"]",
+  "receivedAt": "2026-10-24T14:04:55.444Z"
+}
