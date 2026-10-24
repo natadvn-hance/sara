@@ -12,6 +12,9 @@ export type RoleName =
   | 'checker'
   | 'reminder'
   | 'examiner'
+  | 'onboarding-about'
+  | 'onboarding-stops'
+  | 'onboarding-ideal'
 
 export async function loadRole(
   rolesDir: string,
