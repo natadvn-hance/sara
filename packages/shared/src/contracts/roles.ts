@@ -34,6 +34,17 @@ export const ScorerOutput = z.object({
 })
 export type ScorerOutput = z.infer<typeof ScorerOutput>
 
+/**
+ * The Analyst's draft of a bid (FR-LEAD-6): the body without the greeting (the code adds it), the client's
+ * hidden need first so the text answers it, and the «Стоимость услуги» in rubles or null.
+ */
+export const AnalystOutput = z.object({
+  hidden_need: z.string().max(300),
+  text: z.string().min(1).max(2000),
+  price_rub: z.number().int().nonnegative().nullable(),
+})
+export type AnalystOutput = z.infer<typeof AnalystOutput>
+
 /** The rules proposer's answer (FR-MIND-3): one change in plain words and the whole new rules. */
 export const RulesProposalOutput = z.object({
   summary: z.string().max(300),
