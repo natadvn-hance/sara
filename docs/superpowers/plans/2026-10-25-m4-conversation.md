@@ -252,7 +252,8 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 **Files:** Create `history/attribution.ts`; Test `history/attribution.test.ts`
 
 **Interfaces:**
-- Produces: `normalizeText(s: string): string`; `type AttributionContext = { v1StartedAt: string | null; lead: V1Lead | null; v1Texts: Set<string>; ourOutbox: { text: string; at: string }[]; v1Writes: boolean }`; `attribute(m: { side: MessageSide; text: string; sentAt: string }, c: AttributionContext): { author: ChatAuthor; basis: AuthorBasis }`; `V1_TEMPLATES: string[]` (готовые тексты v1: «Да, давайте созвонимся. Во сколько вам удобно?», оба шаблона `followUpTemplates.js` без имени, начало подтверждения встречи «Отлично, договорились! Встреча:»).
+- Consumes: `normalizeText` из `@sara/shared` (часть 0, `packages/shared/src/format.ts`).
+- Produces: `type AttributionContext = { v1StartedAt: string | null; lead: V1Lead | null; v1Texts: Set<string>; ourOutbox: { text: string; at: string }[]; v1Writes: boolean }`; `attribute(m: { side: MessageSide; text: string; sentAt: string }, c: AttributionContext): { author: ChatAuthor; basis: AuthorBasis }`; `V1_TEMPLATES: string[]` (готовые тексты v1: «Да, давайте созвонимся. Во сколько вам удобно?», оба шаблона `followUpTemplates.js` без имени, начало подтверждения встречи «Отлично, договорились! Встреча:»).
 
 - [ ] **Step 1: Write the failing tests**, по строке таблицы дизайна 5.1 на каждую ветку, плюс:
   - `FR-TRAIN-1: a specialist message with no proof is unknown, never boris`;
@@ -448,7 +449,7 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 **Files:** Create `conversation/store.ts`, `conversation/sync.ts`, `conversation/events.ts`, `conversation/reconcile.ts`; Modify `apps/core/src/accounts/profiEvents.ts` (`routeProfiEvent`: `profi.client_message`, `profi.specialist_message`, `profi.author_unclear`, `profi.client_typing`, `profi.client_read` → `onConversationEvent`); Test `conversation/sync.test.ts`, `conversation/reconcile.test.ts`
 
 **Interfaces:**
-- Consumes: `ProfiClient.readChat`, `listChats`, `attribute` и `normalizeText` из части A (если A ещё не слита: `attribution.ts` берётся в эту ветку как есть из ветки A, файл тот же).
+- Consumes: `ProfiClient.readChat`, `listChats`, `normalizeText` из `@sara/shared`. Живое авторство здесь своё и короткое (`liveAuthor`: совпадение с исходящей очередью новой Сары → `sara`/`outbox`; `conv.v1_writes` выключено → `boris`/`after_cutover`; иначе `unknown`/`v1_or_boris`); доказательства из снимка v1 есть только у выгрузки (часть A).
 - Produces: `ensureConversation(db: Db, i: { accountId: string; chatId: string; orderId: string | null }): Promise<ConversationRow>` (ссылка на `deal` по `lead_id = orderId`, `origin: sara`, если сделка есть, иначе `v1`); `syncChat(d: { db: Db; profi: ProfiClient }, conv: ConversationRow, heardAt: Date): Promise<SyncResult>`; `type SyncResult = { added: StoredMessage[]; specialistAfter: StoredMessage[]; unclear: boolean; messages: StoredMessage[] }`; `applyOwnerRule(db: Db, conv: ConversationRow, added: StoredMessage[], v1Writes: boolean): Promise<ConversationRow>`; `onConversationEvent(e: EventEnvelope): Promise<void>` (регистрируется в `app.ts`); `startReconcile(d, everyMs = 600000): { stop(): void }`.
 
 - [ ] **Step 1: Write the failing tests**:
