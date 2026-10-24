@@ -66,7 +66,7 @@ Code, и единственное, что их связывает, это кон
 | Система | `system.started`, `setup.step_completed`, `setting.changed`, `security.foreign_chat`, `health.check_failed` |
 | Аккаунт | `account.session_alive`, `account.session_dead`, `account.banned`, `account.balance_changed`, `account.paused` |
 | Заявка | `lead.found`, `lead.changed`, `lead.sorted`, `lead.scored`, `lead.routed`, `lead.checked`, `lead.skipped`, `lead.expired` |
-| Отклик | `bid.drafted`, `bid.requested`, `bid.sent`, `bid.failed`, `spend.recorded` |
+| Отклик | `bid.drafted`, `bid.requested`, `bid.sent`, `bid.failed`, `spend.recorded`, `draft.priced` |
 | Клиент | `deal.stage_changed`, `deal.owner_changed`, `deal.turn_changed` |
 | Сообщения | `message.received`, `message.typing`, `message.read`, `reply.drafted`, `reply.checked`, `reply.sent`, `reply.cancelled` |
 | Задачи | `task.created`, `task.resolved`, `task.expired` |

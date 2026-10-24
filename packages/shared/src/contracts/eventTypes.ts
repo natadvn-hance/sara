@@ -25,6 +25,8 @@ export const EVENT_TYPES = [
   'lead.held',
   'lead.drafted',
   'draft.edited',
+  /** Boris set the «Стоимость услуги» after «Изменить» or the price question (before, after). */
+  'draft.priced',
   'bid.requested',
   'bid.sent',
   'bid.failed',

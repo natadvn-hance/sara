@@ -96,6 +96,42 @@ export function priceWithin(price: number | null, budgetText: string | null): nu
   return sums && sums.length > 0 && price > Math.max(...sums) ? null : price
 }
 
+const PRICE_MAX = 10_000_000
+const SUM = String.raw`(\d[\d  ]*)`
+const RUB = String.raw`(?:₽|р\.?|руб\.?|рубл(?:ей|я|ь))`
+/** «цена 5000», «Стоимость: 7 500 руб.», «Стоимость услуги 5000 ₽», on a line of its own. */
+const PRICE_LINE = new RegExp(
+  String.raw`^\s*(?:цена|стоимость(?:\s+услуги)?)\s*[:\-]?\s*${SUM}\s*${RUB}?\s*\.?\s*$`,
+  'iu',
+)
+/** «5000 ₽» on a line of its own. */
+const SUM_LINE = new RegExp(String.raw`^\s*${SUM}\s*${RUB}\s*\.?\s*$`, 'iu')
+/** A bare «5000», only where the price was asked for. */
+const BARE_LINE = new RegExp(String.raw`^\s*${SUM}\s*\.?\s*$`, 'u')
+
+/**
+ * Boris's price in his answer after «Изменить» (K2): the last line that is only a price, «цена 5000» or «5000 ₽» (a
+ * bare number too when `bare`, the answer to the price question). It leaves the text; a sum inside a sentence stays
+ * text. `text` is null when nothing but the price came.
+ */
+export function priceOf(
+  answer: string,
+  o: { bare?: boolean } = {},
+): { text: string | null; priceRub: number | null } {
+  const lines = answer.split('\n')
+  const shapes = o.bare ? [PRICE_LINE, SUM_LINE, BARE_LINE] : [PRICE_LINE, SUM_LINE]
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const sum = shapes.map((re) => re.exec(lines[i] ?? '')?.[1]).find((m) => m !== undefined)
+    if (sum === undefined) continue
+    const rub = Number(sum.replace(/\D/g, ''))
+    // The price column is an int: a price past ten million is a slip, not a price.
+    if (!Number.isSafeInteger(rub) || rub <= 0 || rub > PRICE_MAX) break
+    const rest = [...lines.slice(0, i), ...lines.slice(i + 1)].join('\n').trim()
+    return { text: rest === '' ? null : rest, priceRub: rub }
+  }
+  return { text: answer.trim(), priceRub: null }
+}
+
 /** The client as the order page shows them, in one line without the name (ADR-016); null when it shows nothing. */
 function clientLine(info: DraftSource['client_info']): string | null {
   if (!info) return null

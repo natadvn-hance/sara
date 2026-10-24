@@ -41,6 +41,10 @@ export type RunningApp = {
 export type StartOptions = {
   claudeEnv?: () => Record<string, string>
   retryDelaysMs?: number[]
+  /** A busy account tab is waited for (default every 2 minutes, 10 times). */
+  busyRetry?: { delayMs: number; tries: number }
+  /** When an unsure bid is looked for on its order (default after 5 minutes, 30 minutes and 2 hours). */
+  reconcileDelaysMs?: number[]
   remindAfterMs?: () => Promise<number>
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** How often the learning jobs run (default a minute); tests call them directly instead. */
@@ -102,6 +106,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     notifier: bot.notifier,
     retryDelaysMs: o.retryDelaysMs ?? [1000, 2000, 4000, 8000, 16000],
+    busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
+    reconcileDelaysMs: o.reconcileDelaysMs ?? [5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
@@ -111,8 +117,6 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     publicUrl: config.publicUrl,
   })
   await launchDbos(config.databaseUrl)
-  // Bids whose delivery never started (a crash right after Boris's press) are picked up now.
-  await resumeQueuedOutbox(db)
 
   const deps: AppDeps = {
     db,
@@ -156,6 +160,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
 
   const token = await secrets.get('telegram_bot_token')
   if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))
+  // Bids whose delivery never started (a crash right after Boris's press) are picked up now, once the bot can
+  // tell Boris about one given back.
+  await resumeQueuedOutbox(db)
   const learning = startLearningJobs({
     db,
     notifier: bot.notifier,

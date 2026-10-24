@@ -165,7 +165,7 @@ describe('the lead card layout', () => {
       '',
       'Подходит: Нужен сайт',
       '',
-      'Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст.',
+      'Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст, а цену услуги отдельной строкой, например «цена 5000».',
       '',
       LINK,
     ])
@@ -179,15 +179,17 @@ describe('the lead card layout', () => {
     expect(none).toContain('Без оценки: Оценщик не ответил')
   })
 
-  it('FR-LEAD-6: a draft without a price says the field stays empty', () => {
+  it('FR-LEAD-6: a draft without a price says the bid needs one and how to give it', () => {
     const text = leadCardText({ ...card, draft: { ...DRAFT, priceRub: null } })
-    expect(text).toContain('</blockquote>\nСтоимость услуги: не указана\n')
+    expect(text).toContain(
+      '</blockquote>\nСтоимость услуги: не указана. Без неё Профи.ру отклик не примет: пришли её через «Изменить» отдельной строкой, например «цена 5000».\n',
+    )
   })
 
-  it('FR-LEAD-6: a card without a draft says how to add one', () => {
+  it('FR-LEAD-6: a card without a draft says how to add one, and the price', () => {
     for (const draft of [null, undefined])
       expect(leadCardText({ ...card, draft })).toContain(
-        'Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст.',
+        'Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст, а цену услуги отдельной строкой, например «цена 5000».',
       )
   })
 
@@ -518,7 +520,7 @@ describe('the texts', () => {
 
   it('NFR-UX-1: the edit texts are exact and count characters in the right form', () => {
     expect(TEXTS.askDraft('Сайт')).toBe(
-      'Пришли новый текст отклика на «Сайт» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама.',
+      'Пришли новый текст отклика на «Сайт» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама. Цену услуги можно прислать отдельной строкой, например «цена 5000».',
     )
     expect(TEXTS.noDraft).toBe('Сначала нажми «Изменить» и пришли текст отклика')
     expect(TEXTS.draftTooLong(621)).toBe(
@@ -564,5 +566,44 @@ describe('the texts', () => {
     for (const t of texts) expect(t).not.toContain(DASH)
     // The minus of the reviews is the mathematical one, not a dash.
     expect(leadCardText(full)).toContain('−1')
+  })
+})
+
+describe('what Sara says when a bid does not go (B1)', () => {
+  const CLASSES = [
+    'SESSION_DEAD',
+    'BANNED',
+    'LAYOUT_CHANGED',
+    'NOT_FOUND',
+    'ORDER_CLOSED',
+    'NO_MONEY',
+    'UNSAFE_PAYMENT',
+    'RATE_LIMITED',
+    'INTERNAL',
+  ] as const
+
+  it('FR-LEAD-8: every refusal of the node has its own plain words, with the order and what to do', () => {
+    const said = CLASSES.map((c) => TEXTS.bidRefused('Сайт для клиники', c))
+    expect(new Set(said).size).toBe(CLASSES.length)
+    for (const t of said) {
+      expect(t).toMatch(/^Отклик на «Сайт для клиники» не ушёл: /)
+      expect(t).not.toContain(DASH)
+    }
+    expect(TEXTS.bidRefused('Сайт', 'NO_MONEY')).toContain('Пополни кошелёк')
+    expect(TEXTS.bidRefused('Сайт', 'SESSION_DEAD')).toContain('Войди')
+  })
+
+  it('FR-LEAD-9: a dearer bid says the new fee when it is known', () => {
+    expect(TEXTS.bidDearer('Сайт', 210, 250)).toContain(`теперь стоит 250${NBSP}₽`)
+    expect(TEXTS.bidDearer('Сайт', 210, null)).toContain('посмотри заявку на Профи.ру')
+    for (const t of [
+      TEXTS.bidDearer('Сайт', 210, 250),
+      TEXTS.bidDearer('Сайт', 210, null),
+      TEXTS.bidAlreadyThere('Сайт'),
+      TEXTS.bidFoundLater('Сайт', 210),
+      TEXTS.bidStale('Сайт'),
+      TEXTS.askPrice('Сайт'),
+    ])
+      expect(t).not.toContain(DASH)
   })
 })

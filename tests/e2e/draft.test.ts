@@ -55,7 +55,7 @@ const eventsOf = (type: string, id: string) =>
     .from(event)
     .where(and(eq(event.type, type), eq(event.entityId, id)))
 const ASK =
-  'Пришли новый текст отклика на «Сайт для стоматологической клиники» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама.'
+  'Пришли новый текст отклика на «Сайт для стоматологической клиники» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама. Цену услуги можно прислать отдельной строкой, например «цена 5000».'
 const said = (t: string) => tg.sent.some((m) => m.text === t)
 const editRequests = () =>
   db.select().from(question).where(eq(question.kind, 'edit_draft')).orderBy(question.askedAt)
@@ -389,17 +389,29 @@ describe('«Изменить»', () => {
     const ask = await pressEdit(cards()[0])
     tg.pushText(111, 'Сделаем сайт. Когда старт?', ask)
     await until(() => said(SAVED))
-    expect(cards()[1]?.text).toContain('Стоимость услуги: не указана')
+    expect(cards()[1]?.text).toContain(
+      'Стоимость услуги: не указана. Без неё Профи.ру отклик не примет',
+    )
     expect((await eventsOf('draft.edited', id)).map((e) => e.payload)).toEqual([
       { before: null, after: 'Сделаем сайт. Когда старт?', voice: false },
     ])
+    // Without the «Стоимость услуги» the press asks for it (K2); the answer is the price.
     tg.pushPress(111, button(cards()[1], 'bid'))
+    await until(() => tg.answers.some((a) => a.text === 'Жду цену услуги'))
+    const asked = async () =>
+      (await db.select().from(question).where(eq(question.kind, 'edit_price'))).find(
+        (q) => q.telegramMessageId,
+      )
+    await until(async () => !!(await asked()))
+    tg.pushText(111, '20000', (await asked())?.telegramMessageId ?? undefined)
+    await until(() => said('Записала цену услуги для «Сайт для стоматологической клиники»'))
+    tg.pushPress(111, button(cards()[2], 'bid'))
     await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
     expect(fake.bids[0]).toMatchObject({
       text: 'Ирина, добрый день!\n\nСделаем сайт. Когда старт?',
-      price_rub: null,
+      price_rub: 20000,
     })
-  })
+  }, 15000)
 
   it('FR-LEAD-7: a reply to the first of two edit requests is taken', async () => {
     const id = orderId()

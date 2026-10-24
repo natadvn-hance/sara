@@ -45,6 +45,27 @@ export type LeadCard = {
 
 const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
 
+/** Why the node pressed nothing, by its error class, and what Boris can do (after «Отклик на «…» не ушёл: »). */
+const REFUSED: Record<string, string> = {
+  SESSION_DEAD:
+    'Профи.ру разлогинил аккаунт. Ничего не нажала. Войди и нажми «Откликнуться» снова, карточка у тебя.',
+  BANNED: 'Профи.ру заблокировал профиль. Ничего не нажала.',
+  LAYOUT_CHANGED:
+    'страница заказа на Профи.ру выглядит не так, как я умею читать. Ничего не нажала. Откликнись вручную на Профи.ру или подожди исправления, карточка у тебя.',
+  NOT_FOUND:
+    'служба Профи.ру не знает этот аккаунт или заказ. Ничего не нажала. Посмотри «Состояние системы».',
+  ORDER_CLOSED: 'заявка больше не принимает отклики. Ничего не нажала, деньги не списаны.',
+  NO_MONEY:
+    'на кошельке Профи.ру не хватает денег. Ничего не нажала. Пополни кошелёк и нажми «Откликнуться» снова, карточка у тебя.',
+  UNSAFE_PAYMENT:
+    'Профи.ру просит оплату не с кошелька, а я плачу только с кошелька. Ничего не оплатила. Откликнись вручную, если заявка нужна.',
+  PRICE_CHANGED: 'на Профи.ру он стоит дороже, чем на карточке. Ничего не нажала.',
+  RATE_LIMITED:
+    'вкладка аккаунта долго была занята: открыт живой экран, нет связи с Профи.ру или чужой IP. Ничего не нажала. Нажми «Откликнуться» снова, когда она освободится, карточка у тебя.',
+  INTERNAL:
+    'сбой у меня до нажатия, ничего не отправлено. Посмотри «Состояние системы» и нажми «Откликнуться» снова, карточка у тебя.',
+}
+
 /** Every text Sara sends Boris in Telegram (Russian, plain, no long dash). */
 export const TEXTS = {
   bound: 'Сара на связи',
@@ -56,8 +77,20 @@ export const TEXTS = {
   bidUncertain:
     'Не знаю, ушёл ли отклик: площадка не ответила. Проверь заявку на Профи.ру, прежде чем откликаться вручную.',
   bidsPausedPress: 'Отправка откликов на паузе. Включи её и нажми снова.',
-  bidSent: (title: string, priceRub: number) =>
-    `✅ Отклик отправлен: ${title}, ${formatRub(priceRub)}`,
+  bidSent: (title: string, spentRub: number) =>
+    `✅ Отклик отправлен: ${title}, ${formatRub(spentRub)}`,
+  bidRefused: (title: string, errorClass: string) =>
+    `Отклик на «${title}» не ушёл: ${REFUSED[errorClass] ?? REFUSED.INTERNAL}`,
+  bidDearer: (title: string, wasRub: number, nowRub: number | null) =>
+    nowRub !== null
+      ? `Отклик на «${title}» не ушёл: на Профи.ру он теперь стоит ${formatRub(nowRub)}, а на карточке было ${formatRub(wasRub)}. Ничего не нажала. Карточка снова у тебя с новой ценой, нажми ещё раз, если она подходит.`
+      : `Отклик на «${title}» не ушёл: на Профи.ру он стоит дороже, чем ${formatRub(wasRub)} на карточке. Ничего не нажала. Новую цену узнать не смогла, посмотри заявку на Профи.ру.`,
+  bidAlreadyThere: (title: string) =>
+    `Отклик на «${title}» уже есть на Профи.ру, второй не отправляла. Деньги не списаны.`,
+  bidFoundLater: (title: string, rub: number) =>
+    `✅ Проверила: отклик на «${title}» есть на Профи.ру, ${formatRub(rub)}`,
+  bidStale: (title: string) =>
+    `Отклик на «${title}» не ушёл: я перезапускалась, а с нажатия прошло больше часа. Ничего не нажала, карточка снова у тебя.`,
   sessionDead: (title: string, loginUrl: string) =>
     `🔴 Профи.ру разлогинил аккаунт ${title}. Пока ты не войдёшь, я ничего не вижу на этом аккаунте.\nВойти: ${loginUrl}`,
   banned: (title: string) =>
@@ -78,6 +111,7 @@ export const TEXTS = {
   waitingFor: {
     edit_draft: (title: string | null) =>
       title ? `новый текст отклика на «${title}»` : 'новый текст отклика',
+    edit_price: (title: string | null) => (title ? `цену услуги для «${title}»` : 'цену услуги'),
     why_skip: (title: string | null) =>
       title ? `почему пропустил «${title}»` : 'почему пропустил',
     why_want: (title: string | null) => (title ? `почему взял бы «${title}»` : 'почему взял бы'),
@@ -114,8 +148,15 @@ export const TEXTS = {
   proposalStale: 'Правила уже поменялись, предложение устарело',
   editButton: 'Изменить',
   askDraft: (title: string) =>
-    `Пришли новый текст отклика на «${title}» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама.`,
+    `Пришли новый текст отклика на «${title}» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама. Цену услуги можно прислать отдельной строкой, например «цена 5000».`,
   waitingDraft: 'Жду новый текст отклика',
+  askPrice: (title: string) =>
+    `Профи.ру не примет отклик на «${title}» без стоимости услуги. Пришли цену ответом на это сообщение, например «5000» или «цена 5000».`,
+  waitingPrice: 'Жду цену услуги',
+  priceSaved: (title: string) => `Записала цену услуги для «${title}»`,
+  draftAndPriceSaved: (title: string) => `Записала новый текст и цену услуги для «${title}»`,
+  priceNotFound: 'Не нашла цену в ответе. Пришли её числом, например «5000» или «цена 5000».',
+  noPrice: 'Без стоимости услуги Профи.ру отклик не примет. Пришли цену ответом на мой вопрос.',
   noDraft: 'Сначала нажми «Изменить» и пришли текст отклика',
   draftTooLong: (n: number) =>
     `С приветствием выходит ${n} ${plural(n, ['знак', 'знака', 'знаков'])}, а Профи.ру принимает до 500. Пришли текст короче.`,
@@ -147,7 +188,11 @@ const CAP = {
 } as const
 
 const NO_TEXT = 'Текста заявки нет.'
-const NO_DRAFT = 'Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст.'
+const NO_DRAFT =
+  'Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст, а цену услуги отдельной строкой, например «цена 5000».'
+// Calibration (#79): the field is required on every live answer, so a bid without it never goes (K2).
+const NO_PRICE =
+  'не указана. Без неё Профи.ру отклик не примет: пришли её через «Изменить» отдельной строкой, например «цена 5000».'
 const NO_READING = 'Разбора для этой заявки нет: Аналитик не ответил или заявка пришла раньше.'
 const TEXT_HEADING = '<b>Полный текст заявки</b>'
 const ENTITY = /&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);/gi
@@ -278,7 +323,7 @@ function whyLines(c: LeadCard): string[] {
 
 function draftLines(c: LeadCard): string[] {
   if (!c.draft) return [NO_DRAFT]
-  const price = c.draft.priceRub ? formatRub(c.draft.priceRub) : 'не указана'
+  const price = c.draft.priceRub ? formatRub(c.draft.priceRub) : NO_PRICE
   return [
     '<b>Черновик отклика</b>',
     `<blockquote>${clean(c.draft.text, CAP.draft)}</blockquote>`,

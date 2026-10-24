@@ -26,7 +26,7 @@ import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = { verdict: 'fit', reason: 'Нужен сайт', tags: ['сайт'], confidence: 0.9 }
-const ANALYST = analystAnswer('Понимаю задачу.\n\nКогда запуск?', null)
+const ANALYST = analystAnswer('Понимаю задачу.\n\nКогда запуск?', 30000)
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram
