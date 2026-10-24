@@ -126,6 +126,18 @@ describe('rule proposals', { timeout: 30000 }, () => {
     expect(await countEvents(db, 'rules.proposed')).toBe(1)
   })
 
+  it("NFR-PRIV-2: a client's name inside an order text never reaches the proposer", async () => {
+    await threeSurprises()
+    await db.execute(
+      sql`update core.lead set text = 'Меня зовут Андрей, нужны федеральные каналы' where id = '940001'`,
+    )
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    const input = await proposerInput()
+    expect(input).toContain('Меня зовут [имя 1], нужны федеральные каналы')
+    expect(input).not.toContain('Андрей')
+  })
+
   it('FR-MIND-3: nothing changes until «Применить»', async () => {
     await threeSurprises()
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })

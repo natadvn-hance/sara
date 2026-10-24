@@ -12,6 +12,7 @@ import { rulesDiff } from '../direction/diff'
 import { activeRules, insertVersion } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
+import { namesToHide } from '../leads/clientName'
 import { rulesText } from '../leads/scorer'
 import { sorterInput } from '../leads/sorter'
 import { TEXTS } from '../notify/cards'
@@ -53,6 +54,7 @@ type Case = {
   category: string
   city: string
   text: string
+  client_name: string
   budget_text: string | null
   bid_price_rub: number
   seen_at: string
@@ -64,7 +66,7 @@ type Case = {
 /** Surprises Boris explained since the last proposal (or ever), newest first. */
 async function explainedSurprises(db: Db, accountId: string, limit: number): Promise<Case[]> {
   const r = await db.execute<Case>(sql`
-    select l.title, l.category, l.city, l.text, l.budget_text, l.bid_price_rub,
+    select l.title, l.category, l.city, l.text, l.client_name, l.budget_text, l.bid_price_rub,
       to_char(l.seen_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as seen_at,
       b.score, b.label, q.answer
     from core.question q
@@ -86,7 +88,7 @@ const caseText = (c: Case, i: number) => {
     category: c.category,
     city: c.city,
     text: c.text,
-    // The client's name never goes to the model (ADR-016).
+    // The client's name is not put in the case; one inside its text is hidden by the gateway (ADR-016).
     client_name: '',
     budget_text: c.budget_text,
     bid_price_rub: c.bid_price_rub,
@@ -158,7 +160,9 @@ export async function maybePropose(
     'Случаи, где решение Бориса разошлось с оценкой Сары:',
     ...cases.map(caseText),
   ].join('\n')
-  const r = await d.gateway.call('rules-proposer', input, RulesProposalOutput)
+  const r = await d.gateway.call('rules-proposer', input, RulesProposalOutput, {
+    redact: { names: namesToHide(...cases.map((c) => c.client_name)) },
+  })
   const id = newEventId()
   if (!r.ok) {
     // An answer off the schema is a broken proposal like any other; a model that did not answer is not.

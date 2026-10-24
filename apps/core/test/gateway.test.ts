@@ -335,6 +335,26 @@ describe('client data and the model', () => {
   })
 })
 
+describe('what pseudonymized says', () => {
+  it('NFR-PRIV-2: a call that carries a client but names no one is not marked as pseudonymized', async () => {
+    const gw = await gateway({
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({
+        sorter: { verdict: 'fit', reason: 'да', tags: [], confidence: 0.9 },
+        probe: { ok: true },
+      }),
+    })
+    const text = 'Меня зовут Ирина, нужен сайт'
+    await gw.call('sorter', text, SorterOutput, { redact: { names: [] } })
+    await gw.call('sorter', text, SorterOutput, { redact: { names: [null, ' '] } })
+    await gw.call('sorter', text, SorterOutput, { redact: { names: ['Ирина'] } })
+    await gw.call('probe', 'Проверка связи.', ProbeOutput)
+    const rows = await db.execute<{ pseudonymized: boolean }>(
+      sql`select pseudonymized from core.model_call order by started_at, id`,
+    )
+    expect(rows.rows.map((r) => r.pseudonymized)).toEqual([false, false, true, true])
+  })
+})
+
 describe('Claude limit in the gateway', () => {
   const SORTED = { verdict: 'fit', reason: 'да', tags: [], confidence: 0.9 }
   const BY_ROLE = JSON.stringify({ sorter: SORTED, probe: { ok: true } })

@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
@@ -29,6 +29,7 @@ let tg: FakeTelegram
 let fake: FakeProfi
 let app: RunningApp
 let n = 0
+const claudeLog = join(tmpdir(), `e2e-draft-claude-${process.pid}.log`)
 const orderId = () => `${Date.now()}${n++}`
 /** What each role answers in the next calls (fake Claude reads it per call). */
 let byRole: Record<string, unknown> = {}
@@ -94,7 +95,10 @@ beforeAll(async () => {
       telegramApiRoot: tg.apiRoot,
     },
     {
-      claudeEnv: () => ({ FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole) }),
+      claudeEnv: () => ({
+        FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
+        FAKE_CLAUDE_ARGS_LOG: claudeLog,
+      }),
       retryDelaysMs: [50, 50, 50, 50, 50],
       learningTickMs: 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
@@ -114,6 +118,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
+  await rm(claudeLog, { force: true })
   byRole = { sorter: FIT, scorer: scorerAnswer(70), analyst: ANALYST }
   await resetDb(db)
   await seedDirection(db, 'hance-marketing')
@@ -156,6 +161,29 @@ describe('the draft on the card', () => {
         reason: null,
       },
     ])
+  })
+
+  it('NFR-PRIV-2: a name inside the order text reaches no model, the card shows it back', async () => {
+    byRole = {
+      ...byRole,
+      analyst: analystAnswer('Понимаю, [имя 1], вам важно быстро начать.\n\nКогда запуск?'),
+    }
+    await fake.emitOrder({
+      order_id: orderId(),
+      client_name: 'Ирина',
+      text: 'Меня зовут Ирина, нужен сайт для клиники.',
+    })
+    await until(() => cards().length === 1)
+    const stdins = (await readFile(claudeLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l).stdin as string)
+    // The Sorter, the Scorer and the Analyst each had the text.
+    expect(stdins.length).toBeGreaterThanOrEqual(3)
+    for (const stdin of stdins) expect(stdin).not.toContain('Ирина')
+    expect(cards()[0]?.text).toContain(
+      'Ирина, добрый день!\n\nПонимаю, Ирина, вам важно быстро начать.\n\nКогда запуск?',
+    )
   })
 
   it('FR-LEAD-7: without an Analyst answer the card comes without a draft', async () => {

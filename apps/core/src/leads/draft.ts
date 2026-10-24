@@ -1,15 +1,20 @@
 import { AnalystOutput, type ProfiOrder, plural } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
+import { hasTag } from '../gateway/redact'
+import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
 /** Profi.ru's bid form takes at most this many characters, the greeting included. */
 export const BID_TEXT_MAX = 500
 
-/** What a draft is written from; the client's name only ever reaches the greeting, never the model. */
+/**
+ * What a draft is written from; the client's name only ever reaches the greeting, never the model: the gateway
+ * hides it, the board's and the order page's, wherever the text says it.
+ */
 export type DraftSource = Pick<
   ProfiOrder,
   'title' | 'category' | 'city' | 'budget_text' | 'text' | 'client_name'
->
+> & { client_info_name?: string | null }
 
 /** The Analyst's reading of the order and its short разбор, kept beside the draft. */
 export type Analysis = Pick<AnalystOutput, 'reading' | 'hidden_need' | 'risk' | 'condition'>
@@ -34,8 +39,6 @@ const analysisOf = (o: AnalystOutput): Analysis => ({
   condition: o.condition,
 })
 
-/** What Profi.ru shows instead of a name while it hides one. */
-const PLACEHOLDER = /^(клиент|заказчик|пользовател|имя|аноним|скрыт)/iu
 /**
  * A greeting counts only in the first sentence: «Добрый день!», «Анна, добрый день!», «Здравствуйте, Анна.»
  * Whole words only: «Приветливый персонал» is no greeting.
@@ -46,12 +49,6 @@ const FIRST_SENTENCE = /^[^.!?\n]*[.!?]*\s*/u
 const DASHES = /[\u2013\u2014]/g
 /** The model's own framing or JSON around the text (old Sara, 17.09 and 30.09): never typed into the form. */
 const NOT_PLAIN = /^\s*[{[]|<\/?parameter\b/i
-
-/** The leading letters of the name («Анна(Юля)» gives «Анна»), so only letters and hyphens ever reach a pattern. */
-function firstName(clientName: string): string | null {
-  const word = /^\p{L}[\p{L}-]*/u.exec(clientName.trim())?.[0] ?? ''
-  return word && !PLACEHOLDER.test(word) ? word : null
-}
 
 /** «Ирина, добрый день!» when the client's name is known, else «Добрый день!» (Boris, 20.10: a missing hello is rude). */
 export function greetingOf(clientName: string): string {
@@ -114,8 +111,9 @@ export async function writeDraft(
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
   let analysis: Analysis | null = null
+  const redact = { names: namesToHide(o.client_name, o.client_info_name) }
   for (let attempts = 1; attempts <= 2; attempts++) {
-    const r = await gw.call('analyst', input, AnalystOutput, opts)
+    const r = await gw.call('analyst', input, AnalystOutput, { ...opts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
@@ -123,6 +121,10 @@ export async function writeDraft(
     if (!body || NOT_PLAIN.test(body)) {
       reason = 'not_plain'
       input = `${base}\n\nПрошлый вариант был не простой текст. Напиши только сам текст отклика, без JSON и разметки.`
+    } else if (hasTag(body)) {
+      // A tag the gateway could not put back (the model made it up): the client would read it.
+      reason = 'not_plain'
+      input = `${base}\n\nВ прошлом варианте остались метки в квадратных скобках. Напиши текст без них, словами.`
     } else if (text.length > BID_TEXT_MAX) {
       reason = 'too_long'
       input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${BID_TEXT_MAX}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`

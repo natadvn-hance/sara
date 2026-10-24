@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import { AnalystOutput, ProfiOrder } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
 import { roleJsonSchema } from '../src/gateway/claudeCli'
-import type { Gateway, RoleCallResult } from '../src/gateway/gateway'
+import type { CallOptions, Gateway, RoleCallResult } from '../src/gateway/gateway'
 import { draftOf, editOf, greetingOf, priceWithin, writeDraft } from '../src/leads/draft'
 
 const ROOT = resolve(import.meta.dirname, '../../..')
@@ -16,16 +16,23 @@ const order = async () =>
 /** A gateway that answers the given results in turn and keeps every input it was sent. */
 function stubGateway(results: (AnalystOutput | null)[]) {
   const inputs: string[] = []
+  const options: (CallOptions | undefined)[] = []
   const gw: Gateway = {
-    async call<T>(_role: string, input: string): Promise<RoleCallResult<T>> {
+    async call<T>(
+      _role: string,
+      input: string,
+      _schema: unknown,
+      opts?: CallOptions,
+    ): Promise<RoleCallResult<T>> {
       inputs.push(input)
+      options.push(opts)
       const out = results[inputs.length - 1] ?? null
       return out
         ? { ok: true, output: out as T, durationMs: 1, modelCallId: 'm' }
         : { ok: false, errorClass: 'timeout', message: 'no', durationMs: 1, modelCallId: 'm' }
     },
   }
-  return { gw, inputs }
+  return { gw, inputs, options }
 }
 const READING = {
   said: 'Сайт клиники: услуги, врачи, онлайн-запись, логотип есть',
@@ -183,6 +190,39 @@ describe('the Analyst', () => {
       attempts: 2,
     })
     expect(inputs[1]).toContain('не простой текст')
+  })
+
+  it('NFR-PRIV-2: the Analyst call hides the client name the board and the order page gave', async () => {
+    const { gw, options } = stubGateway([answer(BODY)])
+    await writeDraft(gw, { ...(await order()), client_info_name: 'Ирина Петрова' })
+    expect(options[0]?.redact?.names).toEqual(['Ирина', 'Ирина Петрова'])
+  })
+
+  it('NFR-PRIV-2: a name the site hides is not given to the redaction as a name', async () => {
+    const { gw, options } = stubGateway([answer(BODY)])
+    await writeDraft(gw, { ...(await order()), client_name: 'Клиент 7' })
+    expect(options[0]?.redact?.names).toEqual([])
+  })
+
+  it('NFR-PRIV-2: a tag the model made up never stays in the draft: it is asked again, then no draft', async () => {
+    const { gw, inputs } = stubGateway([
+      answer('Понимаю, [имя 4]. Когда запуск?'),
+      answer('Смотрите [ссылка 2]. Когда запуск?'),
+    ])
+    expect(await writeDraft(gw, await order())).toMatchObject({
+      text: null,
+      reason: 'not_plain',
+      attempts: 2,
+    })
+    expect(inputs[1]).toContain('квадратных скобках')
+  })
+
+  it('NFR-PRIV-2: a second answer without tags is the draft', async () => {
+    const { gw } = stubGateway([answer('Понимаю, [имя 4]. Когда запуск?'), answer(BODY)])
+    expect(await writeDraft(gw, await order())).toMatchObject({
+      text: `Ирина, добрый день!\n\n${BODY}`,
+      attempts: 2,
+    })
   })
 
   it('FR-LEAD-6: a failed Analyst call gives no draft', async () => {

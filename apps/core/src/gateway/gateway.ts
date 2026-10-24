@@ -38,7 +38,11 @@ export type CallOptions = {
   model?: RoleMeta['model']
   /** How long a P1-P3 call may wait out the Claude limit (default 6 hours); 0 meets it with limit_reached at once. */
   limitWaitMs?: number
-  /** Client names to hide from the model, besides the phones, e-mails and links it never sees (ADR-016). */
+  /**
+   * Client names to hide from the model, besides the phones, e-mails and links it never sees (ADR-016). A call whose
+   * input carries a client's words passes it, with the names it knows (an empty list when it knows none): without a
+   * name in it the call is not recorded as pseudonymized, because a name inside the text went through.
+   */
   redact?: { names?: (string | null | undefined)[] }
 }
 
@@ -208,7 +212,8 @@ export function createGateway(d: {
       durationMs,
       ok: result.ok,
       errorClass: result.ok ? null : result.errorClass,
-      pseudonymized: true,
+      // A call without the option carries no client's words (the probe); one with it is pseudonymized only if a name was hidden.
+      pseudonymized: opts?.redact === undefined || hidden.named,
     })
     const redacted = Object.values(hidden.counts).some((n) => n > 0)
       ? { redacted: hidden.counts }
