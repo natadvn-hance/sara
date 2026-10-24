@@ -250,7 +250,7 @@ export function createBidTools(o: {
     async getOrder({ account_id, order_id }): Promise<GetOrderOutput> {
       const r = runtime(account_id)
       requireAlive(r.watch)
-      const read = await r.inTab(async ({ go, can }) => {
+      const read = await r.inTab(async ({ go, can, later }) => {
         if (!can()) return null
         const page = r.page()
         const opened = await openOrder(page, go, order_id, true)
@@ -259,32 +259,43 @@ export function createBidTools(o: {
           (x) => x,
           () => null,
         )
-        // The page is read for what the board did not show (a card without the client name or the text), and for an
-        // order the eyes never stored.
+        // Closed only on the site's own word: a disabled bid block in the order answer, or, when the page gave no
+        // answer, a notice on the page. A missing form can be a changed layout or a bid already made.
+        const closed = opened.screen ? opened.screen.disabled : await closedNotice(page)
+        const read = opened.screen !== null || closed
+        // The page text is read for what the board did not show (a card without the text, or without any client
+        // name), and for an order the eyes never stored; the client answer already carries a name.
         let fromPage: ProfiOrder | null = null
-        if ((!known || !known.client_name || !known.text) && o.parsers.fromOrderDom) {
+        if (
+          o.parsers.fromOrderDom &&
+          (!known || !known.text || (!known.client_name && !opened.client?.name))
+        ) {
           const parsed = await o.parsers.fromOrderDom(page, order_id)
           if (!known) await r.eyes.onParsed(parsed, 'dom')
           const sig = parsed.signals.find((x) => x.t === 'order')
           fromPage = sig?.t === 'order' ? sig.order : null
         }
         if (opened.screen?.hasBid) await markOrderBid(o.db, account_id, order_id)
-        await keepFormMap(r, page)
-        if (r.afterOrderPage && can()) await r.afterOrderPage(order_id, can).catch(() => {})
-        return { screen: opened.screen, client: opened.client, fromPage }
+        // The form map and the calibration need this page, but not the caller's wait.
+        later(async () => {
+          await keepFormMap(r, page)
+          if (r.afterOrderPage && can()) await r.afterOrderPage(order_id, can)
+        })
+        return { screen: opened.screen, closed, read, client: opened.client, fromPage }
       })
       const stored = await storedOrder(o.db, account_id, order_id)
       if (!read) return stored
-      const { screen, client, fromPage } = read
+      const { screen, closed, client, fromPage } = read
       return {
         ...stored,
         // What the board showed comes first; the page and the client answer fill what it lacked.
         client_name: stored.client_name || fromPage?.client_name || client?.name || '',
         text: stored.text || fromPage?.text || '',
-        open: screen?.open ?? stored.open,
+        open: read.read ? !closed : stored.open,
         bid_price_rub: screen?.feeRub ?? (stored.bid_price_rub || fromPage?.bid_price_rub || 0),
         has_bid: screen?.hasBid ?? stored.has_bid,
         client_info: client,
+        from_page: read.read,
       }
     },
 

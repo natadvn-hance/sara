@@ -61,6 +61,11 @@ beforeEach(async () => {
   mayAfterOpener = true
   state = 'alive'
   eyes = createEyes({ accountId: ACCOUNT, db, parsers })
+  // The answer of work in the tab comes before the tab is back on the feed: let the last test's tail finish. A tail
+  // that waited for may/mayAfterOpener to be reset runs only now, after the first job's answer, so the second job
+  // waits for it.
+  await ins?.inTab(async () => null)
+  await ins?.inTab(async () => null)
   ins?.stop()
   ins = startInsurance({
     eyes,
@@ -178,6 +183,43 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     expect((await tools().getOrder({ account_id: ACCOUNT, order_id: id })).open).toBe(false)
   }, 60000)
 
+  it('FR-LEAD-5: get_order says its numbers come from the page when it read the page', async () => {
+    const id = site.addOrder({ price: 71 })
+    await seen(id)
+    expect(await tools().getOrder({ account_id: ACCOUNT, order_id: id })).toMatchObject({
+      from_page: true,
+      open: true,
+      bid_price_rub: 71,
+    })
+  }, 60000)
+
+  it('FR-LEAD-5: an order whose form is gone, but which the page does not mark closed, is not called closed', async () => {
+    const id = site.addOrder({ price: 71 })
+    await seen(id)
+    // A changed layout: no form and no disabled block. Only the site saying «closed» closes an order.
+    site.bidSettings.formShown = false
+    expect(await tools().getOrder({ account_id: ACCOUNT, order_id: id })).toMatchObject({
+      from_page: true,
+      open: true,
+    })
+  }, 60000)
+
+  it('FR-LEAD-5: a page that gave no answer is not a read page, unless the page itself says the order is closed', async () => {
+    site.bidSettings.answer = false
+    const live = site.addOrder({ price: 71 })
+    const closed = site.addOrder({ open: false })
+    await seen(live)
+    await seen(closed)
+    const t = tools({ clientMs: 300 })
+    expect(await t.getOrder({ account_id: ACCOUNT, order_id: live })).toMatchObject({
+      from_page: false,
+    })
+    expect(await t.getOrder({ account_id: ACCOUNT, order_id: closed })).toMatchObject({
+      from_page: true,
+      open: false,
+    })
+  }, 60000)
+
   const KLIENT = {
     name: 'Ирина',
     title: 'На Профи.ру с 7 сентября 2020',
@@ -214,7 +256,7 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     expect((await t.getOrder({ account_id: ACCOUNT, order_id: a })).client_info?.name).toBe('Анна')
   }, 60000)
 
-  it('FR-LEAD-5: a client answer that comes a little after the page opened is still taken, and not kept for the next order', async () => {
+  it('FR-LEAD-5: a client answer that comes a little after the page opened is still taken; the next order without one gets none', async () => {
     const slow = site.addOrder({ klient: { ...KLIENT, name: 'Опоздавшая' } })
     const next = site.addOrder({ klient: null })
     await seen(slow)
@@ -314,9 +356,12 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     const visits: string[] = []
     const t = tools({ afterOrderPage: async (orderId) => void visits.push(orderId) })
     await t.getOrder({ account_id: ACCOUNT, order_id: id })
+    // The calibration runs after the answer, before the tab leaves the page.
+    await ins.inTab(async () => null)
     expect(visits).toEqual([id])
     may = false
     await t.getOrder({ account_id: ACCOUNT, order_id: id })
+    await ins.inTab(async () => null)
     expect(visits).toEqual([id])
   }, 60000)
 
@@ -324,6 +369,8 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     const id = site.addOrder({ price: 71 })
     await seen(id)
     await tools().getOrder({ account_id: ACCOUNT, order_id: id })
+    // The map is written after the answer, before the tab leaves the page.
+    await ins.inTab(async () => null)
     const maps = (await db.select().from(rawEvent)).filter(
       (r) => (r.body as { what?: string } | null)?.what === 'bid_form',
     )
@@ -336,7 +383,7 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     await seen(id, { bid_price_rub: 64 })
     may = false
     const o = await tools().getOrder({ account_id: ACCOUNT, order_id: id })
-    expect(o).toMatchObject({ bid_price_rub: 64, has_bid: null })
+    expect(o).toMatchObject({ bid_price_rub: 64, has_bid: null, from_page: false })
     expect(orderVisits(id)).toBe(0)
   }, 60000)
 })
@@ -353,6 +400,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     )
     expect(maps.length).toBeGreaterThan(0)
     // The tab goes back to the feed, where the event stream lives.
+    await ins.inTab(async () => null)
     expect(ab.page.url()).toContain('/backoffice/a.php')
   }, 60000)
 

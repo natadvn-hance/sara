@@ -358,6 +358,8 @@ describe('insurance and the account tab', () => {
     })
     expect(await work).toBe(42)
     await feed
+    // The work's answer does not wait for the tab to go back to the feed; the next job in turn does.
+    await ins.inTab(async () => null)
     // The feed page, then the work and its page, then back to the feed.
     expect(order).toEqual(['nav', 'work', 'nav', 'nav'])
     expect(new URL(ab.page.url()).pathname).toBe('/backoffice/a.php')
@@ -377,6 +379,42 @@ describe('insurance and the account tab', () => {
       }),
     ).rejects.toThrow('boom')
     ins.stop()
+  }, 60000)
+
+  it('FR-LEAD-5: the answer of work in the tab comes before the tab goes back to the feed, and late work still runs on the page', async () => {
+    await loginStandIn(ab.page, site)
+    const log: string[] = []
+    ab.page.on('framenavigated', (f) => {
+      if (f === ab.page.mainFrame()) log.push(new URL(f.url()).pathname)
+    })
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+    })
+    const answer = await ins.inTab(async ({ go, later }) => {
+      await go('/chats')
+      later(async () => {
+        await new Promise((r) => setTimeout(r, 100))
+        log.push(`later on ${new URL(ab.page.url()).pathname}`)
+      })
+      return 'answer'
+    })
+    log.push('answered')
+    // Late work runs before the tab leaves; the answer does not wait for either.
+    await ins.inTab(async () => null)
+    ins.stop()
+    expect(answer).toBe('answer')
+    expect(log.slice(log.indexOf('/chats'))).toEqual([
+      '/chats',
+      'answered',
+      'later on /chats',
+      '/backoffice/a.php',
+    ])
   }, 60000)
 
   it('ST-M1-04: the chats list page leaves the links it showed in node.raw_event, for calibration', async () => {

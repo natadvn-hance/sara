@@ -249,6 +249,61 @@ describe('an order the page shows as not to offer', () => {
   })
 })
 
+describe('what counts as a page that was read', () => {
+  it("FR-LEAD-5: an answer from the node's store, not from the page, is a page not read, and the card still comes", async () => {
+    const id = orderId()
+    // The tab may not move: the node answers with what it stored (open: true, nothing checked).
+    fake.setOrderPage(id, { from_page: false })
+    await fake.emitOrder({ order_id: id, ...BOARD })
+    await until(() => cards().length === 1)
+    expect((await journal(id)).find((e) => e.type === 'lead.page_read')?.payload).toEqual({
+      ok: false,
+      open: null,
+      has_bid: null,
+      fee_rub: null,
+      client_info: false,
+      error: 'NOT_READ',
+    })
+    expect(await leadOf(id)).toMatchObject({ bidPriceRub: 0, clientInfo: null, status: 'queued' })
+  })
+
+  it('FR-LEAD-5: an old node that does not say where its numbers come from is not trusted as a read page', async () => {
+    const id = orderId()
+    fake.setOrderPage(id, { from_page: undefined })
+    await fake.emitOrder({ order_id: id, ...BOARD })
+    await until(() => cards().length === 1)
+    expect((await journal(id)).find((e) => e.type === 'lead.page_read')?.payload).toMatchObject({
+      ok: false,
+      error: 'NOT_READ',
+    })
+  })
+
+  it('FR-LEAD-5: an order we already bid on is bid_already even when its page shows no form', async () => {
+    const id = orderId()
+    fake.setOrderPage(id, { open: false, has_bid: true })
+    await fake.emitOrder({ order_id: id, ...BOARD })
+    await until(async () => (await leadOf(id))?.status === 'bid_already')
+  })
+
+  it('FR-LEAD-5: a closed order keeps its Sorter verdict in the journal', async () => {
+    const id = orderId()
+    fake.setOrderPage(id, { open: false })
+    await fake.emitOrder({ order_id: id, ...BOARD })
+    await until(async () => (await leadOf(id))?.status === 'closed')
+    const sorted = (await journal(id)).filter((e) => e.type === 'lead.sorted')
+    expect(sorted.map((e) => e.payload)).toEqual([{ verdict: 'fit', reason: 'Нужен сайт' }])
+  })
+
+  it('FR-LEAD-5: a fee the board knew is kept when the page gives none', async () => {
+    const id = orderId()
+    fake.setOrderPage(id, { bid_price_rub: 0 })
+    await fake.emitOrder({ order_id: id, ...BOARD, bid_price_rub: 99 })
+    await until(() => cards().length === 1)
+    expect(await leadOf(id)).toMatchObject({ bidPriceRub: 99 })
+    expect(cards()[0]?.text).toContain(`Отклик 99${NBSP}₽`)
+  })
+})
+
 describe('a page that could not be read', () => {
   it('FR-LEAD-5: the card still comes with the board data, the fee shown as unknown', async () => {
     const id = orderId()
@@ -256,7 +311,9 @@ describe('a page that could not be read', () => {
     await fake.emitOrder({ order_id: id, ...BOARD })
     await until(() => cards().length === 1)
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 0, clientInfo: null, status: 'queued' })
-    expect(cards()[0]?.text).toContain('Отклик: цена неизвестна')
+    // Whatever the card's words, it says the fee is unknown and names no sum.
+    expect(cards()[0]?.text).toMatch(/цена.*неизвестна/)
+    expect(cards()[0]?.text).not.toMatch(/Отклик 0/)
     expect(
       cards()[0]
         ?.reply_markup?.inline_keyboard.flat()
@@ -303,6 +360,16 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 145, clientInfo: CLIENT })
     expect(cards().at(-1)?.text).toContain(`Отклик 145${NBSP}₽`)
     expect(inputsOf('analyst')[0]).toContain('На Профи.ру с 7 сентября 2020')
+  })
+
+  it('FR-LEAD-5: a wanted order whose page could not be read still comes as a card, the fee unknown', async () => {
+    const id = orderId()
+    fake.setOrderPage(id, { fail: 'LAYOUT_CHANGED' })
+    await wantDropped(id)
+    await until(() => leadCards().length === 1)
+    expect(fake.orderReads).toEqual([id])
+    expect(leadCards()[0]?.text).toMatch(/цена.*неизвестна/)
+    expect(await leadOf(id)).toMatchObject({ bidPriceRub: 0 })
   })
 
   it('FR-LEAD-5: a wanted order that is closed by now is not sent as a card, Boris is told', async () => {

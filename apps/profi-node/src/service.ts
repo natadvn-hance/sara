@@ -172,7 +172,9 @@ export async function startProfiService(
       afterOrderPage: (id, may) => calibration.afterOrderPage(id, may),
       // Until the tab is on the site from its own IP there is no tab to work in: can() is false.
       inTab: (f) =>
-        a.insurance ? a.insurance.inTab(f) : f({ go: async () => false, can: () => false }),
+        a.insurance
+          ? a.insurance.inTab(f)
+          : f({ go: async () => false, can: () => false, later: () => {} }),
     })
 
     // The site is opened only from the account's own IP; until then the tab stays away from it.

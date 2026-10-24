@@ -23,7 +23,7 @@ import { sampleOrders } from './sampleOrders'
 export type FakeOrderPage = Partial<
   Pick<
     GetOrderOutput,
-    'open' | 'has_bid' | 'bid_price_rub' | 'client_name' | 'text' | 'client_info'
+    'open' | 'has_bid' | 'bid_price_rub' | 'client_name' | 'text' | 'client_info' | 'from_page'
   >
 > & { fail?: ProfiErrorClass; delayMs?: number }
 
@@ -92,6 +92,7 @@ export async function createFakeProfi(o: {
         published_at: order.published_at ?? null,
         open: true,
         has_bid: false,
+        from_page: true,
         ...page,
       }
     },

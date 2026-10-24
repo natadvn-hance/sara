@@ -92,7 +92,7 @@ export const orderPage = (id: string, look: BidLook) =>
     'Заказ',
     `<article id="order" data-order-id="${id}"></article><section id="bid"></section>${look.klientDecoy ? '<iframe src="/backoffice/widget.html"></iframe>' : ''}`,
     `fetch('/api/order/${id}').then((r) => r.json()).then((o) => {
-  document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>'
+  document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>' + (o.open === false ? '<p class="closed-notice">Заказ закрыт</p>' : '')
 })
 // The client card of the order page: the live page asks the backoffice API for it (getKlientInfo).
 fetch('/backoffice/api/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method: 'getKlientInfo', orderId: '${id}' }) })

@@ -58,6 +58,8 @@ export type BidSettings = BidLook & {
   openerText: string
   /** The client answer (getKlientInfo) comes this late, in ms. */
   klientDelayMs: number
+  /** An open order shows its bid form; false is a changed layout: no form, and no «closed» mark either. */
+  formShown: boolean
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -132,42 +134,44 @@ function orderScreen(o: SiteOrder, s: BidSettings) {
         { type: 'LEADGEN', title: 'Отклик', price: { value: `${fee} ₽`, currencySymbol: '₽' } },
       ],
     },
-    form: o.open
-      ? {
-          buttons: { refuse: null, submit },
-          elements: {
-            amount: {
-              name: 'stavka',
-              type: 'INPUT',
-              label: 'Стоимость услуги',
-              placeholder: 'Сумма',
+    form:
+      o.open && s.formShown
+        ? {
+            buttons: { refuse: null, submit },
+            elements: {
+              amount: {
+                name: 'stavka',
+                type: 'INPUT',
+                label: 'Стоимость услуги',
+                placeholder: 'Сумма',
+              },
+              commentsForClient: {
+                name: 'comments4client',
+                type: 'TEXTAREA',
+                label: 'Предложение или вопрос клиенту',
+                placeholder: COMMENT_PLACEHOLDER,
+              },
+              paymentMethod: null,
             },
-            commentsForClient: {
-              name: 'comments4client',
-              type: 'TEXTAREA',
-              label: 'Предложение или вопрос клиенту',
-              placeholder: COMMENT_PLACEHOLDER,
+          }
+        : null,
+    bidForms:
+      o.open && s.formShown
+        ? [
+            {
+              type: 'LEADGEN',
+              bidSlideData: {
+                buttons: { submit },
+                elements: [
+                  { name: 'stavka', type: 'INPUT', required: o.priceRequired },
+                  { name: 'comments4client', type: 'TEXTAREA', required: false },
+                ],
+                paymentInfo: { value: fee, currencySymbol: '₽' },
+                paymentInfoLabel: 'К оплате:',
+              },
             },
-            paymentMethod: null,
-          },
-        }
-      : null,
-    bidForms: o.open
-      ? [
-          {
-            type: 'LEADGEN',
-            bidSlideData: {
-              buttons: { submit },
-              elements: [
-                { name: 'stavka', type: 'INPUT', required: o.priceRequired },
-                { name: 'comments4client', type: 'TEXTAREA', required: false },
-              ],
-              paymentInfo: { value: fee, currencySymbol: '₽' },
-              paymentInfoLabel: 'К оплате:',
-            },
-          },
-        ]
-      : [],
+          ]
+        : [],
   }
 }
 
@@ -199,6 +203,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     hasBidField: true,
     showWallet: true,
     klientDelayMs: 0,
+    formShown: true,
   })
   const bidSettings = freshBidSettings()
 

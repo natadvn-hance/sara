@@ -121,10 +121,15 @@ const sourceOf = (l: LeadRow): DraftSource => ({
 /** What the order page said (the plain data of a durable step), or why it could not be read. */
 type PageRead = { ok: true; page: GetOrderOutput } | { ok: false; error: string }
 
-/** The order page through the node; any failure is «not read»: the card goes on with what the board showed. */
+/**
+ * The order page through the node; any failure is «not read»: the card goes on with what the board showed. An answer
+ * the node gives from its store (the tab may not move, the page gave no order answer), or an older node's answer that
+ * does not say, is no read either: it would pass a closed order and an order already bid on.
+ */
 async function readPage(accountId: string, orderId: string): Promise<PageRead> {
   try {
-    return { ok: true, page: await d().profi.getOrder(accountId, orderId) }
+    const page = await d().profi.getOrder(accountId, orderId)
+    return page.from_page === true ? { ok: true, page } : { ok: false, error: 'NOT_READ' }
   } catch (err) {
     const error = err instanceof ProfiError ? err.errorClass : 'INTERNAL'
     console.error('order page not read', orderId, error)
@@ -148,9 +153,12 @@ function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'te
   }
 }
 
-/** What the page says about offering the order: closed, already bid on, or fine (also when it was not read). */
+/**
+ * What the page says about offering the order: already bid on (checked first: such an order may show no form),
+ * closed, or fine (also when it was not read).
+ */
 const pageVerdict = (r: PageRead): 'go' | 'closed' | 'bid_already' =>
-  !r.ok ? 'go' : !r.page.open ? 'closed' : r.page.has_bid === true ? 'bid_already' : 'go'
+  !r.ok ? 'go' : r.page.has_bid === true ? 'bid_already' : !r.page.open ? 'closed' : 'go'
 
 /**
  * The page's findings go on the lead, and into the journal as numbers and flags, never as the client's words
@@ -440,16 +448,16 @@ async function processOrder(e: EventEnvelope): Promise<void> {
 
   // Only an order that passed the Sorter and the Scorer on what the board showed costs a visit of the one tab. A run
   // recorded before this step existed resumes along its old steps and keeps the board's data.
-  let full: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
+  let withPage: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
     client_info: ClientInfo | null
   } = { ...order, client_info: null }
   if (await DBOS.patch('order-page')) {
     const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
       name: 'orderPage',
     })
-    full = fuller(order, read)
+    withPage = fuller(order, read)
     const verdict = await DBOS.runStep(
-      () => storePage({ id: order.order_id, correlationId }, full, read, sorted),
+      () => storePage({ id: order.order_id, correlationId }, withPage, read, sorted),
       { name: 'orderPageStored', ...DB_STEP },
     )
     // Closed, or already bid on: nothing to offer, no card and no model call.
@@ -463,7 +471,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         async () =>
           (await capSpent().catch(() => false))
             ? null
-            : draftFor({ ...order, ...full }, { correlationId, causationId: e.id }),
+            : draftFor({ ...order, ...withPage }, { correlationId, causationId: e.id }),
         { name: 'draft' },
       )
     : null
@@ -527,7 +535,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     text: order.text,
     verdict: sorted.verdict,
     reason: sorted.reason,
-    bidPriceRub: full.bid_price_rub,
+    bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
     draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
@@ -667,11 +675,14 @@ async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
   )
   const verdict = await storePage(l, full, read, { verdict: null, reason: null })
   if (verdict !== 'go') {
-    await d().db.transaction(async (tx) => {
-      await tx
+    const ended = await d().db.transaction(async (tx) => {
+      const rows = await tx
         .update(task)
         .set({ state: 'resolved', resolution: 'skip', resolvedAt: new Date().toISOString() })
         .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+        .returning({ id: task.id })
+      // Decided meanwhile (Boris pressed something): nothing to end, nothing to say.
+      if (rows.length === 0) return false
       await appendEvent(
         tx,
         ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'sara', {
@@ -679,11 +690,14 @@ async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
           reason: verdict,
         }),
       )
+      return true
     })
-    await deliverDecision(taskId, 'skip')
-    await d().notifier.sendText(
-      verdict === 'closed' ? CARD_FLOW_TEXTS.pageClosed : CARD_FLOW_TEXTS.pageBidAlready,
-    )
+    if (ended) {
+      await deliverDecision(taskId, 'skip')
+      await d().notifier.sendText(
+        verdict === 'closed' ? CARD_FLOW_TEXTS.pageClosed : CARD_FLOW_TEXTS.pageBidAlready,
+      )
+    }
     return
   }
   if (!l.draftText)
