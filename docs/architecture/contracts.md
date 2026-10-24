@@ -150,10 +150,12 @@ Code, и единственное, что их связывает, это кон
 
 `/accounts`, `/directions/{accountId}`, `/leads`, `/clients` (Клиент:
 разговор M4 и его сделка; заменяет `/deals`), `/clients/{id}` с перепиской,
-`/conversations/{id}/take|return|say|close` (команды M4), `/meetings`,
+`/conversations/{id}/take|return|say|close` (команды M4), `/meetings`
+(M6: список, отметка, `/meetings/{id}/outcome`, `/meetings/availability`),
 `/tasks/{id}/{action}`, `/questions/{id}/answer`, `/inbox` (сборка задач
 и вопросов, ничего не хранит), `/today` (сборка для экрана «Сегодня»),
-`/mind`, `/lessons`, `/trainings`, `/exams`, `/analytics`, `/settings`,
+`/mind`, `/lessons`, `/trainings`, `/exams`, `/analytics/funnel|speed|load`
+(M6), `/settings`,
 `/cutover`, `/search`, `/health`, `/journal` (события C1; заменяет
 `/events`), `/journal/trace/{correlationId}`, `/setup`, `/screen/ticket`.
 
