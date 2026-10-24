@@ -14,6 +14,18 @@ describe('settings', () => {
     await expect(setSetting(db, 'reminder.decision_after_min', -1, 'boris')).rejects.toThrow()
   })
 
+  it("C7: money and card limits default to old Sara's values", async () => {
+    expect(await getSetting(db, 'money.daily_bids')).toBe(10)
+    expect(await getSetting(db, 'money.daily_budget_rub')).toBeNull()
+    expect(await getSetting(db, 'money.max_fee_rub')).toBeNull()
+    expect(await getSetting(db, 'cards.max_per_day')).toBe(10)
+    expect(await getSetting(db, 'cards.quiet_hours')).toEqual({ from: 23, to: 9 })
+    await expect(setSetting(db, 'money.daily_bids', 0, 'boris')).rejects.toThrow()
+    await expect(setSetting(db, 'cards.quiet_hours', { from: 24, to: 9 }, 'boris')).rejects.toThrow()
+    await setSetting(db, 'money.max_fee_rub', 300, 'boris')
+    expect(await getSetting(db, 'money.max_fee_rub')).toBe(300)
+  })
+
   it('C7: setting change is stored with history and an event', async () => {
     await setSetting(db, 'outbound.bids', true, 'boris')
     expect(await getSetting(db, 'outbound.bids')).toBe(true)
