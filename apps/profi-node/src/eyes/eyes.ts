@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, gte, max } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
 import { rawMessage, rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
@@ -19,6 +19,8 @@ export type Eyes = {
   ordersWantingPage(): string[]
   /** Chats the event stream named since their page was last read. */
   chatsTouched(): string[]
+  /** Chats with news seen in the last 3 days, newest first, 3 at most: what the 10-minute check rereads. */
+  knownChats(now?: number): Promise<string[]>
   /**
    * A chat page was read. On the first reading of a chat only the client's messages after our last one are news;
    * what came before is history from before Sara watched, kept without events.
@@ -31,6 +33,9 @@ export type Eyes = {
   presence(): boolean
   reset(): void
 }
+
+// Old Sara's line between a live chat and an old one (v1, OLD_ESCALATION_AFTER_MS).
+const KNOWN_CHAT_MS = 3 * 24 * 3600 * 1000
 
 /**
  * Turns raw platform data into Profi events: each order and message once, by its platform number, whichever
@@ -51,7 +56,7 @@ export function createEyes(o: {
   const waiting = new Map<string, OrderSignal>()
   const WAITING_MAX = 100
   // The fee from the order page's own answer: truer than the page text, which misses a discount.
-  const fees = new Map<string, { rub: number; hasBid: boolean | null }>()
+  const fees = new Map<string, { rub: number; baseRub: number | null; hasBid: boolean | null }>()
   let boardAt = 0
   // chat → when the stream named it and which message, for the time the message really came.
   const touched = new Map<string, { at: string; messageId: string | null }>()
@@ -86,7 +91,7 @@ export function createEyes(o: {
       t: 'order',
       order: fee ? { ...order, bid_price_rub: fee.rub } : order,
       published_at: b?.published_at ?? s.published_at,
-      hasBid: fee?.hasBid ?? s.hasBid ?? null,
+      answer: fee ? { baseRub: fee.baseRub, hasBid: fee.hasBid } : s.answer,
     }
   }
 
@@ -106,7 +111,7 @@ export function createEyes(o: {
         // Kept until its order is completed; the oldest goes first, so a stuck tab cannot grow it.
         fees.delete(s.orderId)
         if (fees.size >= WAITING_MAX) fees.delete(fees.keys().next().value ?? '')
-        fees.set(s.orderId, { rub: s.rub, hasBid: s.hasBid })
+        fees.set(s.orderId, { rub: s.rub, baseRub: s.baseRub, hasBid: s.hasBid })
         continue
       }
       if (s.t === 'order' && s.needsPage) {
@@ -145,7 +150,10 @@ export function createEyes(o: {
               body: {
                 ...s.order,
                 published_at: s.published_at,
-                ...(typeof s.hasBid === 'boolean' && { has_bid: s.hasBid }),
+                ...(s.answer && {
+                  bid_base_price_rub: s.answer.baseRub,
+                  has_bid: s.answer.hasBid,
+                }),
               },
             })
             if (!isNew) return
@@ -230,6 +238,22 @@ export function createEyes(o: {
     knowsOrder,
     ordersWantingPage: () => [...waiting.keys()],
     chatsTouched: () => [...touched.keys()],
+    async knownChats(now = Date.now()) {
+      const last = max(rawMessage.sentAt)
+      const rows = await o.db
+        .select({ chatId: rawMessage.chatId })
+        .from(rawMessage)
+        .where(
+          and(
+            eq(rawMessage.accountId, o.accountId),
+            gte(rawMessage.sentAt, new Date(now - KNOWN_CHAT_MS).toISOString()),
+          ),
+        )
+        .groupBy(rawMessage.chatId)
+        .orderBy(desc(last))
+        .limit(3)
+      return rows.map((r) => r.chatId)
+    },
     async onChatRead(chatId, p) {
       const touch = touched.get(chatId)
       touched.delete(chatId)

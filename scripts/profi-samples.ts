@@ -23,6 +23,8 @@ const isIdKey = (k: string) => ID_KEY.test(k) || CAMEL_ID_KEY.test(k)
 // A Profi.ru profile id, like «PetrovaIA» or «IvanovPP7»: a surname and initials.
 const PROFILE_ID = /^[A-Z][a-z]+[A-Z]{1,3}\d*$/
 const PROFILE_PARAM = /[?&][\w-]+=([A-Z][a-z]+[A-Z]{1,3}\d*)(?=[&#\s"']|$)/g
+// An order or chat number in a link of the site: «r.php?id=95147898», «n.php?o=95147898».
+const LINK_ID = /[?&](?:id|o|order_?id|chat_?id)=(\d{5,})(?=[&#\s"']|$)/gi
 // A link parameter that opens something without a login, like «bo_tkn» in the refund link of the profile.
 const TOKEN_PARAM =
   /([?&][\w-]*(?:tkn|token|key|secret|sig|hash|auth|session)[\w-]*=)([^&#\s"']{8,})/gi
@@ -90,6 +92,10 @@ function addProfile(id: string, ctx: Ctx): void {
   if (id.length >= 4 && !ctx.profiles.has(id)) ctx.profiles.set(id, `anon${ctx.profiles.size + 1}`)
 }
 
+function addId(id: string, ctx: Ctx): void {
+  if (!ctx.ids.has(id)) ctx.ids.set(id, String(10 ** (id.length - 1) + ctx.ids.size + 1))
+}
+
 function collect(v: unknown, key: string, ctx: Ctx): void {
   if (Array.isArray(v)) {
     for (const x of v) collect(x, key, ctx)
@@ -106,9 +112,8 @@ function collect(v: unknown, key: string, ctx: Ctx): void {
     collect(inner.value, key, ctx)
     return
   }
-  if (isIdKey(key) && /^\d{5,}$/.test(s) && !ctx.ids.has(s)) {
-    ctx.ids.set(s, String(10 ** (s.length - 1) + ctx.ids.size + 1))
-  }
+  if (isIdKey(key) && /^\d{5,}$/.test(s)) addId(s, ctx)
+  for (const m of s.matchAll(LINK_ID)) addId(m[1] ?? '', ctx)
   if (isIdKey(key) && PROFILE_ID.test(s)) addProfile(s, ctx)
   for (const m of s.matchAll(PROFILE)) addProfile(m[2] ?? '', ctx)
   for (const m of s.matchAll(PROFILE_PARAM)) addProfile(m[1] ?? '', ctx)
