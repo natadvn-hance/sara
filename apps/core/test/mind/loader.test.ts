@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadMind } from '../../src/mind/loader'
-import { gitCommitAll, putFile, putRecord, tempMind } from '../helpers/mind'
+import { git, gitCommitAll, putFile, putRecord, tempMind } from '../helpers/mind'
 
 const PRICE = 'mind/shared/knowledge/k-price.md'
 
@@ -45,6 +45,16 @@ describe('mind loader', () => {
     const root = await tempMind()
     await putRecord(root, PRICE, { id: 'k-price', type: 'knowledge' }, '## Факт\nЦена по запросу.')
     const head = await gitCommitAll(root)
+    expect((await loadMind(root)).mindVersion).toBe(head)
+  })
+
+  it('FR-MIND-1: the commit is found in packed refs and on a detached head', async () => {
+    const root = await tempMind()
+    await putRecord(root, PRICE, { id: 'k-price', type: 'knowledge' }, '## Факт\nЦена по запросу.')
+    const head = await gitCommitAll(root)
+    await git(root, 'pack-refs', '--all')
+    expect((await loadMind(root)).mindVersion).toBe(head)
+    await git(root, 'checkout', '-q', '--detach')
     expect((await loadMind(root)).mindVersion).toBe(head)
   })
 
