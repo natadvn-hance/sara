@@ -51,6 +51,7 @@ export function createBotControl(d: {
       sendLeadCard: (c, o) => current().notifier.sendLeadCard(c, o),
       sendText: (t, o) => current().notifier.sendText(t, o),
       sendButtons: (t, rows, o) => current().notifier.sendButtons(t, rows, o),
+      editText: async (id, t, rows) => current().notifier.editText?.(id, t, rows),
     },
   }
 }

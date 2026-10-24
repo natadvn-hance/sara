@@ -42,6 +42,9 @@ function chatOf(ctx: Context): number | undefined {
 }
 
 /** The bot obeys only the chat bound by the first /start (threat model T9). */
+const keyboard = (rows: { text: string; callbackData: string }[][]) =>
+  rows.map((r) => r.map((b) => ({ text: b.text, callback_data: b.callbackData })))
+
 export function createTelegramRuntime(d: {
   token: string
   apiRoot?: string
@@ -263,6 +266,16 @@ export function createTelegramRuntime(d: {
           },
         })
         return { messageId: m.message_id }
+      },
+      async editText(messageId, text, rows) {
+        await bot.api
+          .editMessageText(await chat(), messageId, text, {
+            ...(rows && { reply_markup: { inline_keyboard: keyboard(rows) } }),
+          })
+          .catch((e: unknown) => {
+            // The same text again is not an error worth a retry.
+            if (!String((e as Error).message).includes('message is not modified')) throw e
+          })
       },
     },
   }

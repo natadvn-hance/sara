@@ -1,0 +1,188 @@
+import { newEventId } from '@sara/shared'
+import { eq } from 'drizzle-orm'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { sendTurnCard } from '../../src/conversation/cards'
+import { compareTurn, similarity } from '../../src/conversation/compare'
+import { ensureConversation } from '../../src/conversation/store'
+import { syncChat } from '../../src/conversation/sync'
+import { chatMessage, convTurn, lead, task } from '../../src/db/schema'
+import type { Notifier } from '../../src/notify/notifier'
+import { setSetting } from '../../src/settings/store'
+import { chatMsg, stubProfi } from '../helpers/conversation'
+import { openTestDb, resetDb } from '../helpers/db'
+import { countEvents } from '../helpers/events'
+
+const { db, close } = openTestDb()
+afterAll(close)
+
+type Sent = {
+  text: string
+  rows: { text: string; callbackData: string }[][]
+  loud: boolean
+  id: number
+}
+let sent: Sent[]
+let edits: { id: number; text: string; rows?: { text: string; callbackData: string }[][] }[]
+const notifier: Pick<Notifier, 'sendButtons' | 'editText'> = {
+  sendButtons: async (text, rows, o) => {
+    sent.push({ text, rows, loud: o?.loud ?? false, id: 100 + sent.length })
+    return { messageId: 100 + sent.length - 1 }
+  },
+  editText: async (id, text, rows) => {
+    edits.push({ id, text, rows })
+  },
+}
+
+const CHAT = '95147898'
+let convId: string
+
+beforeEach(async () => {
+  await resetDb(db)
+  sent = []
+  edits = []
+  await setSetting(db, 'cards.quiet_hours', null, 'system')
+  await db.insert(lead).values({
+    id: CHAT,
+    accountId: 'hance-marketing',
+    title: 'Сайт для клиники',
+    category: 'Сайты',
+    city: 'Краснодар',
+    text: 'Нужен сайт',
+    clientName: 'Анна',
+    bidPriceRub: 100,
+    seenAt: new Date().toISOString(),
+    correlationId: newEventId(),
+  })
+  const conv = await ensureConversation(db, {
+    accountId: 'hance-marketing',
+    chatId: CHAT,
+    orderId: CHAT,
+  })
+  convId = conv.id
+  await syncChat(
+    {
+      db,
+      profi: stubProfi([
+        chatMsg('m-2', 'client', 'Сколько стоит и когда начнём?', new Date().toISOString()),
+      ]),
+    },
+    conv,
+    new Date(),
+    { v1Writes: true },
+  )
+})
+
+async function turn(id: string, o: Partial<typeof convTurn.$inferInsert> = {}) {
+  await db.insert(convTurn).values({
+    id,
+    conversationId: convId,
+    anchorMessageId: 'm-2',
+    messageIds: ['m-2'],
+    state: 'decided',
+    move: 'reply',
+    text: 'Анна, здравствуйте. Начнём с короткого созвона, чтобы понять задачу.',
+    factIds: ['k-process-start'],
+    exampleIds: ['e-1'],
+    understanding: { topic: 'process', tone: 'doubt' },
+    decision: 'draft',
+    decisionReason: 'режим тени; сама бы: отправила бы',
+    ...o,
+  })
+}
+
+describe('the draft card', () => {
+  it('FR-CONV-3: the draft card shows the draft, what Sara would do and the mind ids', async () => {
+    await turn('t-1')
+    const r = await sendTurnCard({ db, notifier }, 't-1')
+    expect(r).not.toBeNull()
+    const card = sent[0]
+    expect(card?.text).toContain('Анна')
+    expect(card?.text).toContain('Сайт для клиники')
+    expect(card?.text).toContain('Сколько стоит и когда начнём?')
+    expect(card?.text).toContain('Начнём с короткого созвона')
+    expect(card?.text).toContain('k-process-start')
+    expect(card?.text).toContain('сомнение')
+    expect(card?.text).toMatch(/Режим тени: клиенту ничего не ушло/)
+    const actions = card?.rows.flat().map((b) => b.callbackData.split(':')[2])
+    expect(actions).toEqual(['good', 'edit', 'take', 'close'])
+    const [t] = await db.select().from(task)
+    expect(t).toMatchObject({
+      kind: 'conv_draft',
+      entityKind: 'conv_turn',
+      entityId: 't-1',
+      state: 'open',
+    })
+    const [row] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+    expect(row?.cardMessageId).toBe(r?.messageId)
+    expect(row?.taskId).toBe(t?.id)
+  })
+
+  it('FR-NOTIF-3: the 11th card of the day is not sent, a call for Boris still is', async () => {
+    for (let i = 0; i < 11; i++) {
+      await turn(`t-${i}`)
+      await sendTurnCard({ db, notifier }, `t-${i}`)
+    }
+    expect(sent).toHaveLength(10)
+    await turn('t-call', {
+      decision: 'call_boris',
+      move: 'call_boris',
+      text: null,
+      decisionReason: 'клиент просит созвон',
+    })
+    expect(await sendTurnCard({ db, notifier }, 't-call')).not.toBeNull()
+    expect(sent).toHaveLength(11)
+    expect(sent[10]?.text).toMatch(/просит созвон/)
+  })
+
+  it('NFR-UX-1: conversation texts have no long dash', async () => {
+    await turn('t-1', { text: 'Да \u2014 начнём' })
+    await sendTurnCard({ db, notifier }, 't-1')
+    expect(sent[0]?.text).not.toMatch(/[\u2014\u2013]/)
+  })
+})
+
+describe('comparison in shadow', () => {
+  it('FR-CONV-10: the real reply edits the card silently with its author and similarity', async () => {
+    await turn('t-1', {
+      state: 'finished',
+      outcome: 'drafted',
+      finishedAt: new Date().toISOString(),
+    })
+    await sendTurnCard({ db, notifier }, 't-1')
+    const [actual] = await db
+      .insert(chatMessage)
+      .values({
+        id: newEventId(),
+        accountId: 'hance-marketing',
+        chatId: CHAT,
+        orderId: CHAT,
+        platformMessageId: 'm-3',
+        side: 'specialist',
+        author: 'unknown',
+        authorBasis: 'v1_or_boris',
+        text: 'Анна, здравствуйте. Давайте начнём с созвона.',
+        sentAt: new Date().toISOString(),
+        source: 'node',
+        conversationId: convId,
+      })
+      .returning()
+    await compareTurn({ db, notifier }, convId, [actual as never])
+    const [row] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+    expect(row?.actualMessageId).toBe('m-3')
+    expect(row?.actualAuthor).toBe('unknown')
+    expect(row?.similarity).toBeGreaterThan(20)
+    expect(edits).toHaveLength(1)
+    expect(edits[0]?.text).toMatch(/Ушло клиенту в \d\d:\d\d \(Сара v1 или ты\)/)
+    expect(edits[0]?.text).toMatch(/Сходство с моим: \d+%/)
+    expect(edits[0]?.rows?.flat().length).toBe(4)
+    expect(await countEvents(db, 'conv.compared')).toBe(1)
+    // A second message of our side does not compare the same turn again.
+    await compareTurn({ db, notifier }, convId, [actual as never])
+    expect(edits).toHaveLength(1)
+  })
+
+  it('FR-CONV-10: similarity of the same text is 100 and of unrelated texts near 0', () => {
+    expect(similarity('Давайте созвонимся завтра', 'давайте  созвонимся завтра!')).toBe(100)
+    expect(similarity('абв', 'где')).toBe(0)
+  })
+})

@@ -1,0 +1,147 @@
+import { formatCallback, newEventId, type TaskAction, type Tone } from '@sara/shared'
+import { and, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
+import type { Db } from '../db/client'
+import { chatMessage, convTurn, lead, task } from '../db/schema'
+import { appendEvent } from '../journal/journal'
+import type { Notifier } from '../notify/notifier'
+import { getSetting } from '../settings/store'
+import { getConversation } from './store'
+import { type CardView, CONV_TEXTS } from './texts'
+import { inMoscowHours } from './time'
+
+export type CardDeps = { db: Db; notifier: Pick<Notifier, 'sendButtons' | 'editText'> }
+
+/** The start of the Moscow day `now` is in, as an ISO string (UTC+3 all year). */
+export function moscowDayStart(now: Date): string {
+  const shifted = new Date(now.getTime() + 3 * 3600_000)
+  return new Date(
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - 3 * 3600_000,
+  ).toISOString()
+}
+
+type Row = typeof convTurn.$inferSelect
+
+/** Everything a card shows about a turn, from the trace row, its conversation and its client messages. */
+export async function cardView(db: Db, t: Row): Promise<CardView> {
+  const conv = await getConversation(db, t.conversationId)
+  const [l] = conv?.orderId ? await db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
+  const ids = (t.messageIds as string[]) ?? []
+  const words = ids.length
+    ? await db
+        .select({ text: chatMessage.text, id: chatMessage.platformMessageId })
+        .from(chatMessage)
+        .where(
+          and(
+            eq(chatMessage.conversationId, t.conversationId),
+            inArray(chatMessage.platformMessageId, ids),
+          ),
+        )
+    : []
+  const byId = new Map(words.map((w) => [w.id, w.text]))
+  const understanding = (t.understanding as { tone?: Tone } | null) ?? null
+  return {
+    name: l?.clientName || null,
+    orderTitle: l?.title ?? null,
+    clientWords: ids
+      .map((id) => byId.get(id) ?? '')
+      .filter(Boolean)
+      .join('\n'),
+    text: t.text,
+    decision: t.decision,
+    reason: t.decisionReason,
+    shadow: await getSetting(db, 'conv.v1_writes'),
+    tone: understanding?.tone ?? null,
+    factIds: (t.factIds as string[]) ?? [],
+    examples: ((t.exampleIds as string[]) ?? []).length,
+  }
+}
+
+function rowsFor(
+  taskId: string,
+  t: Row,
+  shadow: boolean,
+): { text: string; callbackData: string }[][] {
+  const b = CONV_TEXTS.buttons
+  const btn = (text: string, action: TaskAction) => ({
+    text,
+    callbackData: formatCallback(taskId, action),
+  })
+  const first =
+    t.decision === 'call_boris'
+      ? [btn(b.edit, 'edit')]
+      : shadow
+        ? [btn(b.good, 'good'), btn(b.edit, 'edit')]
+        : [btn(b.send, 'send'), btn(b.edit, 'edit')]
+  return [first, [btn(b.take, 'take'), btn(b.close, 'close')]]
+}
+
+/**
+ * The card of a decided turn (M4 design 5.12): the shadow draft, a draft for Boris's «да», or a call for him. At most
+ * conv.cards_per_day draft cards a Moscow day; a call for Boris always goes; at quiet hours without a sound. Null
+ * when the day's cards are used up (the turn stays in the trace and in the evening summary).
+ */
+export async function sendTurnCard(
+  d: CardDeps,
+  turnId: string,
+): Promise<{ taskId: string; messageId: number } | null> {
+  const [t] = await d.db.select().from(convTurn).where(eq(convTurn.id, turnId))
+  if (!t) return null
+  if (t.cardMessageId !== null && t.taskId) return { taskId: t.taskId, messageId: t.cardMessageId }
+  const now = new Date()
+  const urgent = t.decision === 'call_boris'
+  if (!urgent) {
+    const [c] = await d.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(convTurn)
+      .where(
+        and(
+          isNotNull(convTurn.cardMessageId),
+          ne(convTurn.decision, 'call_boris'),
+          gte(convTurn.createdAt, moscowDayStart(now)),
+        ),
+      )
+    if ((c?.n ?? 0) >= (await getSetting(d.db, 'conv.cards_per_day'))) return null
+  }
+  const view = await cardView(d.db, t)
+  const taskId = newEventId()
+  // At quiet hours the Telegram layer sends it without sound (FR-NOTIF-2, cards.quiet_hours).
+  const m = await d.notifier.sendButtons(CONV_TEXTS.card(view), rowsFor(taskId, t, view.shadow))
+  await d.db.transaction(async (tx) => {
+    await tx.insert(task).values({
+      id: taskId,
+      kind: 'conv_draft',
+      entityKind: 'conv_turn',
+      entityId: turnId,
+      priority: urgent ? 'P0' : 'P1',
+      telegramMessageId: m.messageId,
+    })
+    await tx
+      .update(convTurn)
+      .set({ taskId, cardMessageId: m.messageId })
+      .where(eq(convTurn.id, turnId))
+    await appendEvent(tx, {
+      type: 'task.created',
+      v: 1,
+      entity: { kind: 'task', id: taskId },
+      account_id: null,
+      actor: 'sara',
+      occurred_at: now.toISOString(),
+      causation_id: null,
+      correlation_id: t.conversationId,
+      reason: null,
+      payload: { kind: 'conv_draft', turn_id: turnId },
+    })
+  })
+  return { taskId, messageId: m.messageId }
+}
+
+/** The card again with the rows it had: used when the card's text grows (the comparison). */
+export async function redrawCard(d: CardDeps, t: Row, tail: string): Promise<void> {
+  if (t.cardMessageId === null || !t.taskId) return
+  const view = await cardView(d.db, t)
+  await d.notifier.editText?.(
+    t.cardMessageId,
+    `${CONV_TEXTS.card(view)}\n\n${tail}`,
+    rowsFor(t.taskId, t, view.shadow),
+  )
+}
