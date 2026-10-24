@@ -78,6 +78,15 @@ async function claudeCheck(d: AppDeps): Promise<HealthCheck> {
     .limit(1)
   if (last?.ok)
     return { ...base, ok: true, detail: `Пробный вызов прошёл за ${last.durationMs} мс`, fix: null }
+  // The subscription limit is no broken token: the gateway waits for it and tells Boris when it is back.
+  if (last?.errorClass === 'limit_reached') {
+    return {
+      ...base,
+      ok: false,
+      detail: 'Кончился лимит подписки Claude, разбор заявок ждёт его возврата',
+      fix: 'Ничего делать не нужно: Сара продолжит сама и напишет «▶️ Лимит Claude вернулся».',
+    }
+  }
   return {
     ...base,
     ok: false,
