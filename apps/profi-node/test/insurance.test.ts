@@ -293,7 +293,9 @@ describe('insurance and the account tab', () => {
     })
     await ins.chatsOnce(false)
     ins.stop()
-    const dom = (await db.select().from(rawEvent)).filter((r) => r.kind === 'dom')
+    const dom = (await db.select().from(rawEvent)).filter(
+      (r) => r.kind === 'dom' && r.url?.endsWith('/chats'),
+    )
     expect(dom).toHaveLength(1)
     const body = dom[0]?.body as { links: string[]; messages: number }
     expect(body.links).toContain('/chats/c-links')
@@ -361,5 +363,118 @@ describe('insurance and the account tab', () => {
       .map((r) => r.payload as { type: string; entity: { id: string } })
       .filter((t) => t.type === 'profi.client_message')
     expect(seen.map((t) => t.entity.id)).toEqual(['c-touched'])
+  }, 60000)
+
+  it('FR-CONV-1: when the chats list shows no chats, the 10-minute check rereads the chats Sara knows', async () => {
+    await loginStandIn(ab.page, site)
+    site.addMessage('c-known', 'client', 'Здравствуйте')
+    // The real list page of 24.10.2026: no chat links at all.
+    const parsers: Parsers = { ...standInParsers, fromChatsDom: async () => [] }
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    await eyes.onParsed(
+      {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: 'c-known', messageId: null }],
+      },
+      'rtp',
+    )
+    await ins.feedOnce()
+    // The stream misses the next message: only the 10-minute check can see it.
+    site.addMessage('c-known', 'client', 'Ещё вопрос')
+    await ins.chatsOnce()
+    ins.stop()
+    const seen = (await db.select().from(outboxNode))
+      .map((r) => r.payload as { type: string; entity: { id: string } })
+      .filter((t) => t.type === 'profi.client_message')
+    expect(seen.map((t) => t.entity.id)).toEqual(['c-known', 'c-known'])
+  }, 60000)
+
+  it('ST-M1-04: a chat page leaves its bubbles in node.raw_event: numbers, classes and times, never the text', async () => {
+    await loginStandIn(ab.page, site)
+    site.addMessage('c-shape', 'client', 'Здравствуйте, сколько стоит?')
+    site.addMessage('c-shape', 'strange', 'Непонятно чьё')
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    await eyes.onParsed(
+      {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: 'c-shape', messageId: null }],
+      },
+      'rtp',
+    )
+    await ins.feedOnce()
+    ins.stop()
+    const kept = (await db.select().from(rawEvent)).filter(
+      (r) => r.kind === 'dom' && r.url?.endsWith('/chats/c-shape'),
+    )
+    expect(kept).toHaveLength(1)
+    const body = kept[0]?.body as {
+      chatId: string
+      messages: { id: string; classes: string[]; parts: string[] }[]
+    }
+    expect(body.chatId).toBe('c-shape')
+    expect(body.messages.map((m) => m.classes)).toEqual([
+      ['cw_msg', 'cw_cO7-r-'],
+      ['cw_msg', 'cw_ZZZ999'],
+    ])
+    expect(body.messages[0]?.parts).toEqual(['div.cw_xeDn2R', 'div.cw_BFgZYK'])
+    expect(JSON.stringify(body)).not.toMatch(/Здравствуйте|Непонятно/)
+  }, 60000)
+
+  it('ST-M1-04: the chats list page leaves the outline of its elements, without text, for calibration', async () => {
+    await loginStandIn(ab.page, site)
+    site.addMessage('c-outline', 'client', 'Здравствуйте')
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: { ...standInParsers, fromChatsDom: async () => [] },
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    await ins.chatsOnce(false)
+    ins.stop()
+    const list = (await db.select().from(rawEvent)).find(
+      (r) => r.kind === 'dom' && r.url?.endsWith('/chats'),
+    )
+    const body = list?.body as {
+      shape: {
+        tag: string
+        classes: string[]
+        data: { attr: string; value?: string }[]
+        badge?: string
+      }[]
+    }
+    expect(body.shape).toContainEqual(
+      expect.objectContaining({
+        tag: 'a',
+        classes: ['chat-link'],
+        data: expect.arrayContaining([{ attr: 'data-chat-id', value: 'c-outline' }]),
+      }),
+    )
+    // A short number, like an unread count, is kept: it is how the list marks news.
+    expect(body.shape).toContainEqual(expect.objectContaining({ tag: 'b', badge: '1' }))
+    expect(JSON.stringify(body)).not.toContain('Здравствуйте')
   }, 60000)
 })

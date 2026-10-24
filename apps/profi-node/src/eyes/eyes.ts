@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, gte, max } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
 import { rawMessage, rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
@@ -19,6 +19,8 @@ export type Eyes = {
   ordersWantingPage(): string[]
   /** Chats the event stream named since their page was last read. */
   chatsTouched(): string[]
+  /** Chats with news seen in the last 3 days, newest first, 3 at most: what the 10-minute check rereads. */
+  knownChats(now?: number): Promise<string[]>
   /**
    * A chat page was read. On the first reading of a chat only the client's messages after our last one are news;
    * what came before is history from before Sara watched, kept without events.
@@ -31,6 +33,9 @@ export type Eyes = {
   presence(): boolean
   reset(): void
 }
+
+// Old Sara's line between a live chat and an old one (v1, OLD_ESCALATION_AFTER_MS).
+const KNOWN_CHAT_MS = 3 * 24 * 3600 * 1000
 
 /**
  * Turns raw platform data into Profi events: each order and message once, by its platform number, whichever
@@ -233,6 +238,22 @@ export function createEyes(o: {
     knowsOrder,
     ordersWantingPage: () => [...waiting.keys()],
     chatsTouched: () => [...touched.keys()],
+    async knownChats(now = Date.now()) {
+      const last = max(rawMessage.sentAt)
+      const rows = await o.db
+        .select({ chatId: rawMessage.chatId })
+        .from(rawMessage)
+        .where(
+          and(
+            eq(rawMessage.accountId, o.accountId),
+            gte(rawMessage.sentAt, new Date(now - KNOWN_CHAT_MS).toISOString()),
+          ),
+        )
+        .groupBy(rawMessage.chatId)
+        .orderBy(desc(last))
+        .limit(3)
+      return rows.map((r) => r.chatId)
+    },
     async onChatRead(chatId, p) {
       const touch = touched.get(chatId)
       touched.delete(chatId)
