@@ -85,6 +85,13 @@
       "when": 1792874927906,
       "tag": "0010_trial_score",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792875032868,
+      "tag": "0011_direction_run",
+      "breakpoints": true
     }
   ]
 }
