@@ -22,6 +22,13 @@
       "when": 1792856516731,
       "tag": "0002_bid_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792861239776,
+      "tag": "0003_node_flag",
+      "breakpoints": true
     }
   ]
 }
