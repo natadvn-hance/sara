@@ -70,7 +70,16 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     db,
     apiRoot: config.telegramApiRoot,
     onPress: (p) => (pipeline ? pipeline.onPress(p) : Promise.resolve('Сара ещё запускается')),
-    onMessage: (m) => handleBorisMessage({ db, transcriber }, m),
+    onMessage: (m) =>
+      handleBorisMessage(
+        {
+          db,
+          transcriber,
+          onDraftText: (a) =>
+            pipeline ? pipeline.onDraftText(a) : Promise.resolve('Сара ещё запускается'),
+        },
+        m,
+      ),
     voiceDir: join(config.dataDir, 'voice'),
   })
   pipeline = createLeadPipeline({

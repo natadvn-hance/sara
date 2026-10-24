@@ -8,13 +8,21 @@ import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import { recordLabel } from '../learning/labels'
 import { onProposalPress } from '../learning/proposals'
-import { askWhy } from '../learning/questions'
+import { askForDraft, askWhy, type DraftAnswer, markAnswered } from '../learning/questions'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
-import { type Draft, type DraftMiss, type DraftSource, writeDraft } from './draft'
+import {
+  BID_TEXT_MAX,
+  bodyOf,
+  type Draft,
+  type DraftMiss,
+  type DraftSource,
+  editOf,
+  writeDraft,
+} from './draft'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
 import { sortOrder } from './sorter'
@@ -33,6 +41,8 @@ export type LeadPipeline = {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onReminder(taskId: string): Promise<void>
   resendCard(taskId: string): Promise<void>
+  /** Boris's answer to the request after «Изменить»: the new bid text; the reply goes back to him. */
+  onDraftText(a: DraftAnswer): Promise<string>
 }
 
 /** Database steps may hit a passing database error; they are safe to repeat. */
@@ -392,6 +402,52 @@ async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
   }
 }
 
+/** «Изменить»: Sara asks for the new text; the card stays as it is until the text comes. */
+async function onEdit(taskId: string): Promise<string> {
+  const found = await leadOfTask(taskId)
+  if (!found || found.task.kind !== 'lead_decision' || found.task.state !== 'open')
+    return TEXTS.alreadyDone
+  await askForDraft(d(), { taskId, title: found.lead.title }, new Date())
+  return TEXTS.waitingDraft
+}
+
+/**
+ * The new bid text: the same greeting and length rules as the Analyst's, then an updated card. The edit is
+ * journaled (draft.edited, before and after) without the greeting, so no client name reaches the journal.
+ */
+async function onDraftText(a: DraftAnswer): Promise<string> {
+  const found = await leadOfTask(a.question.entityId)
+  if (!found || found.task.state !== 'open') {
+    // Decided meanwhile: the request is closed so a later message does not land on it.
+    await d().db.transaction((tx) => markAnswered(tx, a.question, a))
+    return TEXTS.draftLate
+  }
+  const { lead: l, task: t } = found
+  const next = editOf(a.text, l.clientName)
+  // Too long: the request stays open, the next text answers it.
+  if (next.length > BID_TEXT_MAX) return TEXTS.draftTooLong(next.length)
+  const saved = await d().db.transaction(async (tx) => {
+    if (!(await markAnswered(tx, a.question, a))) return false
+    await tx.update(lead).set({ draftText: next }).where(eq(lead.id, l.id))
+    await appendEvent(
+      tx,
+      ev('draft.edited', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
+        before: l.draftText === null ? null : bodyOf(l.draftText),
+        after: bodyOf(next),
+        voice: a.voice,
+      }),
+    )
+    return true
+  })
+  if (!saved) return TEXTS.alreadyDone
+  const card = await cardOfTask(t.id, false)
+  if (card) {
+    const m = await d().notifier.sendLeadCard(card)
+    await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, t.id))
+  }
+  return TEXTS.draftSaved
+}
+
 /**
  * «Взял бы» from the daily summary: Boris's yes on an order Sara dropped. It is a label and a surprise («почему?»),
  * and the order comes back as a normal card so he can bid on it.
@@ -467,6 +523,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
 
     async onPress({ taskId, action }) {
       if (action === 'want') return onWant(taskId)
+      if (action === 'edit') return onEdit(taskId)
       if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)
@@ -548,5 +605,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       const card = await cardOfTask(taskId, false)
       if (card) await d().notifier.sendLeadCard(card)
     },
+
+    onDraftText,
   }
 }

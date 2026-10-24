@@ -6,7 +6,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { event, lead, outbox, task } from '../../apps/core/src/db/schema'
+import { event, lead, outbox, question, task } from '../../apps/core/src/db/schema'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
@@ -49,6 +49,18 @@ const eventsOf = (type: string, id: string) =>
     .select({ payload: event.payload })
     .from(event)
     .where(and(eq(event.type, type), eq(event.entityId, id)))
+const ASK =
+  'Пришли новый текст отклика на «Сайт для стоматологической клиники» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама.'
+const said = (t: string) => tg.sent.some((m) => m.text === t)
+const editRequests = () =>
+  db.select().from(question).where(eq(question.kind, 'edit_draft')).orderBy(question.askedAt)
+/** Presses «Изменить» on the card and waits for Sara's request; returns the request's message id. */
+async function pressEdit(card: (typeof tg.sent)[number] | undefined): Promise<number> {
+  const before = (await editRequests()).length
+  tg.pushPress(111, button(card, 'edit'))
+  await until(async () => (await editRequests()).filter((q) => q.telegramMessageId).length > before)
+  return (await editRequests()).at(-1)?.telegramMessageId ?? -1
+}
 const analystCalls = async () =>
   (
     await db
@@ -200,5 +212,111 @@ describe('the bid', () => {
     expect(fake.bids).toHaveLength(0)
     const [t] = await db.select().from(task).where(eq(task.entityId, id))
     expect(t?.state).toBe('open')
+  })
+})
+
+describe('«Изменить»', () => {
+  const NEW = 'Понимаю вашу задачу. Когда нужен запуск?'
+
+  it('FR-LEAD-7: «Изменить» takes a new text by reply and brings an updated card', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const ask = await pressEdit(cards()[0])
+    expect(tg.answers.at(-1)?.text).toBe('Жду новый текст отклика')
+    expect(said(ASK)).toBe(true)
+    tg.pushText(111, NEW, ask)
+    await until(() => said('Записала новый текст отклика'))
+    expect(cards()).toHaveLength(2)
+    expect(cards()[1]?.text).toContain(`Черновик отклика:\nИрина, добрый день!\n\n${NEW}`)
+    expect(cards()[1]?.text).toContain(`Стоимость услуги: 90${NBSP}000${NBSP}₽`)
+    expect(await leadOf(id)).toMatchObject({
+      draftText: `Ирина, добрый день!\n\n${NEW}`,
+      draftPriceRub: 90000,
+    })
+    expect((await eventsOf('draft.edited', id)).map((e) => e.payload)).toEqual([
+      { before: BODY, after: NEW, voice: false },
+    ])
+    const journal = await db.select({ p: event.payload }).from(event)
+    expect(JSON.stringify(journal)).not.toContain('Ирина')
+    tg.pushPress(111, button(cards()[1], 'bid'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    expect(fake.bids[0]).toMatchObject({
+      text: `Ирина, добрый день!\n\n${NEW}`,
+      price_rub: 90000,
+    })
+  })
+
+  it('FR-LEAD-6: an edit longer than 500 with the greeting is refused and the next one is taken', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const ask = await pressEdit(cards()[0])
+    tg.pushText(111, `Понимаю. ${'а'.repeat(590)}`, ask)
+    await until(() =>
+      said('С приветствием выходит 620 знаков, а Профи.ру принимает до 500. Пришли текст короче.'),
+    )
+    expect((await leadOf(id))?.draftText).toBe(DRAFT)
+    expect(cards()).toHaveLength(1)
+    tg.pushText(111, NEW)
+    await until(() => said('Записала новый текст отклика'))
+    expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
+  })
+
+  it('FR-LEAD-7: after «Пропустить» a late edit changes nothing', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const ask = await pressEdit(cards()[0])
+    tg.pushPress(111, button(cards()[0], 'skip'))
+    await until(() => tg.answers.some((a) => a.text === 'Пропущено'))
+    tg.pushText(111, NEW, ask)
+    await until(() => said('Заявка уже решена, текст не поменяла'))
+    expect(cards()).toHaveLength(1)
+    expect((await leadOf(id))?.draftText).toBe(DRAFT)
+    expect((await editRequests())[0]?.answeredAt).not.toBeNull()
+    expect(await eventsOf('draft.edited', id)).toHaveLength(0)
+  })
+
+  it('FR-LEAD-7: a card without a draft gets one through «Изменить»', async () => {
+    byRole = { ...byRole, analyst: { nothing: true } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const ask = await pressEdit(cards()[0])
+    tg.pushText(111, 'Сделаем сайт. Когда старт?', ask)
+    await until(() => said('Записала новый текст отклика'))
+    expect(cards()[1]?.text).toContain('Стоимость услуги: не указана')
+    expect((await eventsOf('draft.edited', id)).map((e) => e.payload)).toEqual([
+      { before: null, after: 'Сделаем сайт. Когда старт?', voice: false },
+    ])
+    tg.pushPress(111, button(cards()[1], 'bid'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    expect(fake.bids[0]).toMatchObject({
+      text: 'Ирина, добрый день!\n\nСделаем сайт. Когда старт?',
+      price_rub: null,
+    })
+  })
+
+  it('FR-LEAD-7: a reply to the first of two edit requests is taken', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const first = await pressEdit(cards()[0])
+    await pressEdit(cards()[0])
+    tg.pushText(111, NEW, first)
+    await until(() => said('Записала новый текст отклика'))
+    expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
+  })
+
+  it('FR-LEAD-7: «Изменить» on a decided card does nothing', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    tg.pushPress(111, button(cards()[0], 'skip'))
+    await until(() => tg.answers.some((a) => a.text === 'Пропущено'))
+    tg.pushPress(111, button(cards()[0], 'edit'))
+    await until(() => tg.answers.some((a) => a.text === 'Уже сделано'))
+    expect(await editRequests()).toHaveLength(0)
   })
 })

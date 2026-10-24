@@ -5,7 +5,7 @@ import { leadLabel, question } from '../src/db/schema'
 import { seedDirection } from '../src/direction/store'
 import { handleBorisMessage } from '../src/learning/inbox'
 import { recordLabel } from '../src/learning/labels'
-import { askWhy } from '../src/learning/questions'
+import { askForDraft, askWhy, type DraftAnswer } from '../src/learning/questions'
 import { createTelegramRuntime, type TelegramRuntime } from '../src/notify/telegram'
 import { openTestDb, resetDb } from './helpers/db'
 import { countEvents } from './helpers/events'
@@ -18,8 +18,9 @@ let tg: FakeTelegram
 let bot: TelegramRuntime
 let heard: string | null = 'бюджет копейки'
 const transcribe = vi.fn(async () => heard)
+const onDraftText = vi.fn(async (_a: DraftAnswer) => 'Записала новый текст отклика')
 const onMessage = vi.fn((m: Parameters<typeof handleBorisMessage>[1]) =>
-  handleBorisMessage({ db, transcriber: { transcribe } }, m),
+  handleBorisMessage({ db, transcriber: { transcribe }, onDraftText }, m),
 )
 
 async function until(cond: () => boolean | Promise<boolean>, ms = 3000) {
@@ -55,6 +56,7 @@ beforeEach(async () => {
   heard = 'бюджет копейки'
   transcribe.mockClear()
   onMessage.mockClear()
+  onDraftText.mockClear()
   tg = await createFakeTelegram()
   bot = createTelegramRuntime({
     token: tg.token,
@@ -84,6 +86,29 @@ describe("Boris's words in the bot", () => {
     await until(() => said('Записала: «бюджет копейки»'))
     expect(transcribe).toHaveBeenCalledOnce()
     expect(await label()).toMatchObject({ reason: 'бюджет копейки', voice: true })
+  })
+
+  it('FR-LEAD-7: a voice reply to the edit request goes to the draft, not to a reason', async () => {
+    const q = await asked()
+    const taskId = '0192f3c4-5b6a-7c8d-9e0f-aabbccdd0001'
+    await askForDraft(
+      { db, notifier: bot.notifier },
+      { taskId, title: 'Реклама на ТВ' },
+      new Date(),
+    )
+    const [edit] = await db.select().from(question).where(eq(question.kind, 'edit_draft'))
+    tg.pushVoice(111, edit?.telegramMessageId ?? -1)
+    await until(() => said('Записала новый текст отклика'))
+    expect(onDraftText).toHaveBeenCalledOnce()
+    expect(onDraftText.mock.calls[0]?.[0]).toMatchObject({
+      question: { kind: 'edit_draft', entityId: taskId },
+      text: 'бюджет копейки',
+      voice: true,
+    })
+    expect((await label())?.reason).toBeNull()
+    // The «почему?» asked before is still open for its own answer.
+    tg.pushText(111, 'не наш профиль', q)
+    await until(() => said('Записала: «не наш профиль»'))
   })
 
   it('NFR-UX-1: a long dash in the recognized voice comes back to Boris as a hyphen', async () => {
