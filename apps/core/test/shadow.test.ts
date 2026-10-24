@@ -47,9 +47,9 @@ async function journal(
   await db.execute(sql`alter table core.event enable trigger event_append_only`)
 }
 
-async function rawOrder(id: string, publishedAt: string) {
+async function rawOrder(id: string, publishedAt: string, seenAt = publishedAt) {
   await db.execute(
-    sql`insert into node.raw_order (order_id, account_id, seen_at, body) values (${id}, 'hance-marketing', ${publishedAt}, ${JSON.stringify({ published_at: publishedAt })}::jsonb)`,
+    sql`insert into node.raw_order (order_id, account_id, seen_at, body) values (${id}, 'hance-marketing', ${seenAt}, ${JSON.stringify({ published_at: publishedAt })}::jsonb)`,
   )
 }
 async function rawMessage(id: string, sentAt: string) {
@@ -87,5 +87,17 @@ describe('shadow report', () => {
     const text = formatShadowReport(await shadowReport(db, from, to), from, to)
     expect(text).toContain('Тень')
     expect(text).not.toContain(String.fromCharCode(0x2014))
+  })
+
+  it('ST-M1-11: an old or reposted order is not a new one, it is counted apart from the speed', async () => {
+    await rawOrder('1', at(0))
+    await journal('profi.order_seen', '1', at(0, 20), {})
+    // Published long before Sara first saw it: an order that came back up the board, not a new order.
+    await rawOrder('2', '2026-10-20T08:00:00.000Z', at(3))
+    await journal('profi.order_seen', '2', at(3, 10), {})
+    const r = await shadowReport(db, from, to)
+    expect(r.orders).toMatchObject({ count: 1, under60sShare: 1 })
+    expect(r.oldOrders).toBe(1)
+    expect(formatShadowReport(r, from, to)).toContain('Старые и поднятые заказы: 1')
   })
 })
