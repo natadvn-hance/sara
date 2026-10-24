@@ -122,7 +122,8 @@ export async function syncChat(
         text: m.text,
         sentAt: m.sent_at,
         approxTime: approx,
-        read: m.read,
+        // The page's mark on our side's messages is not the client's reading yet (design 5.11): only the read event.
+        read: m.author === 'specialist' ? false : m.read,
         source: 'node',
         conversationId: conv.id,
         heardAt: heardAt.toISOString(),

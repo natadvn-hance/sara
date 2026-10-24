@@ -49,6 +49,16 @@ describe('chat sync', () => {
     expect(payloads).not.toContain('Сколько стоит')
   })
 
+  it('FR-CONV-12: the page’s read mark of our message is not trusted, only the read event', async () => {
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    await syncChat({ db, profi: stubProfi([bid, ask]) }, conv, new Date(), shadow)
+    const rows = await db.select().from(chatMessage).orderBy(chatMessage.platformMessageId)
+    expect(rows.map((m) => [m.side, m.read])).toEqual([
+      ['specialist', false],
+      ['client', true],
+    ])
+  })
+
   it('FR-CONV-2: an unclear author is reported by the sync', async () => {
     const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
     const odd = chatMsg('m-3', 'unknown', 'что-то', '2026-10-20T10:01:00.000Z')
