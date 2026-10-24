@@ -32,6 +32,7 @@ export const EVENT_TYPES = [
   'task.created',
   'task.resolved',
   'task.reminded',
+  'card.sent',
   'question.asked',
   'question.answered',
   'outbox.queued',

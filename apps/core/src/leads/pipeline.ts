@@ -77,7 +77,8 @@ const ev = (
     | 'draft.edited'
     | 'task.created'
     | 'task.resolved'
-    | 'task.reminded',
+    | 'task.reminded'
+    | 'card.sent',
   entity: { kind: string; id: string },
   correlationId: string,
   actor: 'sara' | 'boris',
@@ -360,7 +361,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       async () => {
         const silent = await quietNow(d().db, new Date())
         const m = await d().notifier.sendLeadCard(card, { silent })
-        await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
+        await cardSent(taskId, correlationId, m.messageId, 'order')
       },
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
     )
@@ -424,12 +425,32 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
   }
 }
 
-/** The card of an open task, sent now; the task keeps the new message (the one Boris sees last). */
-async function sendCard(taskId: string): Promise<void> {
+/**
+ * A card went out: the task keeps the new message (the one Boris sees last) and the journal the moment, which
+ * the speed report reads for the order's own card (via 'order').
+ */
+function cardSent(
+  taskId: string,
+  correlationId: string,
+  messageId: number,
+  via: 'order' | 'summary' | 'edit',
+): Promise<void> {
+  return d().db.transaction(async (tx) => {
+    await tx.update(task).set({ telegramMessageId: messageId }).where(eq(task.id, taskId))
+    await appendEvent(
+      tx,
+      ev('card.sent', { kind: 'task', id: taskId }, correlationId, 'sara', { via }),
+    )
+  })
+}
+
+/** The card of an open task, sent now. */
+async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> {
   const card = await cardOfTask(taskId, false)
-  if (card) {
+  const found = card ? await leadOfTask(taskId) : null
+  if (card && found) {
     const m = await d().notifier.sendLeadCard(card)
-    await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
+    await cardSent(taskId, found.lead.correlationId, m.messageId, via)
   }
 }
 
@@ -437,7 +458,7 @@ async function sendCard(taskId: string): Promise<void> {
 async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
   if (!l.draftText)
     await storeDraft(l, await draftFor(sourceOf(l), { correlationId: l.correlationId }))
-  await sendCard(taskId)
+  await sendCard(taskId, 'summary')
 }
 
 /** «Изменить»: Sara asks for the new text; the card stays as it is until the text comes. */
@@ -481,7 +502,7 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
     return true
   })
   if (!saved) return TEXTS.alreadyDone
-  await sendCard(t.id)
+  await sendCard(t.id, 'edit')
   return TEXTS.draftSaved
 }
 
@@ -528,7 +549,7 @@ async function bringCard(
   await startDecisionWait(decisionId, await d().remindAfterMs())
   if (action === 'open') {
     // A held order got its draft before its task: the card goes at once.
-    await sendCard(decisionId)
+    await sendCard(decisionId, 'summary')
   } else {
     // A dropped order has no draft yet: the press is answered now, the card follows its draft (a reminder brings
     // it back if this fails).

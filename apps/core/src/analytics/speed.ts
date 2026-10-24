@@ -31,9 +31,10 @@ async function ms(db: DbOrTx, q: ReturnType<typeof sql>): Promise<number[]> {
 }
 
 /**
- * G1 and G2 measured from the journal (FR-ANL-3). Lead to card: from lead.found to the order's first decision
- * task, leaving out a card Boris brought from the summary hours later. Yes to bid: from the last press of
- * «Откликнуться» before bid.sent, so a press given back by a pause does not count twice.
+ * G1 and G2 measured from the journal (FR-ANL-3). Lead to card: from lead.found to the order's own card really
+ * sent (card.sent via 'order'), so the Analyst and Telegram count; a card Boris brought from the summary hours
+ * later or an edited one does not. Yes to bid: from the last press of «Откликнуться» before bid.sent, so a press
+ * given back by a pause does not count twice.
  */
 export async function speedReport(db: DbOrTx): Promise<SpeedReport> {
   const leadToCard = await ms(
@@ -42,12 +43,12 @@ export async function speedReport(db: DbOrTx): Promise<SpeedReport> {
     select extract(epoch from (b.occurred_at - a.occurred_at)) * 1000 as ms
     from core.event a
     join lateral (
-      select b.occurred_at, b.payload from core.event b
-      where b.correlation_id = a.correlation_id and b.type = 'task.created'
-        and b.occurred_at >= a.occurred_at
+      select b.occurred_at from core.event b
+      where b.correlation_id = a.correlation_id and b.type = 'card.sent'
+        and b.payload->>'via' = 'order' and b.occurred_at >= a.occurred_at
       order by b.occurred_at, b.id limit 1
     ) b on true
-    where a.type = 'lead.found' and coalesce(b.payload->>'via', '') <> 'summary'`,
+    where a.type = 'lead.found'`,
   )
   const yesToBid = await ms(
     db,

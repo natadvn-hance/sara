@@ -128,6 +128,7 @@ describe('walking skeleton', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Подходит: Нужен сайт')
+    await until(async () => (await eventTypesOf(id)).includes('card.sent'))
     expect(await eventTypesOf(id)).toEqual([
       'profi.order_seen',
       'lead.found',
@@ -136,6 +137,7 @@ describe('walking skeleton', () => {
       'lead.drafted',
       'lead.sorted',
       'task.created',
+      'card.sent',
     ])
   })
 
