@@ -12,18 +12,37 @@ export async function startLiveScreen(
   onFrame: (jpegBase64: string, w: number, h: number) => void,
 ): Promise<() => Promise<void>> {
   const cdp = await page.context().newCDPSession(page)
+  // Chromium sends up to ~25 frames a second (about 1 MB/s): far too much for Boris's connection from
+  // Russia, where the picture then froze. Only the newest frame is kept and sent at most every 350 ms.
+  let latest: { data: string; w: number; h: number } | null = null
+  let sent: string | null = null
+  let sentAt = Date.now()
   cdp.on('Page.screencastFrame', (f) => {
-    onFrame(f.data, f.metadata.deviceWidth, f.metadata.deviceHeight)
+    latest = { data: f.data, w: f.metadata.deviceWidth, h: f.metadata.deviceHeight }
     void cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {})
   })
-  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, everyNthFrame: 2 })
+  const timer = setInterval(() => {
+    // Unchanged pictures are resent every 2 s, so a picture skipped on a slow link is replaced soon.
+    if (latest && (latest.data !== sent || Date.now() - sentAt >= 2000)) {
+      sent = latest.data
+      sentAt = Date.now()
+      onFrame(latest.data, latest.w, latest.h)
+    }
+  }, 350)
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 55, everyNthFrame: 3 })
   // Screencast frames come only on repaints; a still page gets one picture right away.
   const vp = page.viewportSize() ?? { width: 1280, height: 800 }
   const shot = await cdp
     .send('Page.captureScreenshot', { format: 'jpeg', quality: 60 })
     .catch(() => null)
-  if (shot) onFrame(shot.data, vp.width, vp.height)
+  if (shot) {
+    latest ??= { data: shot.data, w: vp.width, h: vp.height }
+    sent = shot.data
+    sentAt = Date.now()
+    onFrame(shot.data, vp.width, vp.height)
+  }
   return async () => {
+    clearInterval(timer)
     await cdp.send('Page.stopScreencast').catch(() => {})
     await cdp.detach().catch(() => {})
   }

@@ -30,7 +30,11 @@ export async function registerScreenProxy(
         upstream.on('open', () => {
           for (const m of pending.splice(0)) upstream.send(m)
         })
-        upstream.on('message', (m) => panel.readyState === panel.OPEN && panel.send(String(m)))
+        // A slow phone or laptop skips pictures instead of piling them up (the picture froze before).
+        upstream.on('message', (m) => {
+          if (panel.readyState === panel.OPEN && panel.bufferedAmount < 512_000)
+            panel.send(String(m))
+        })
         upstream.on('close', () => panel.close())
         upstream.on('error', () => panel.close(1011, 'Служба Профи-MCP не отвечает'))
         panel.on('message', (m: WebSocket.RawData) => {

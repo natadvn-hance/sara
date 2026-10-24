@@ -7,6 +7,7 @@ import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/s
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
 import { serveMcp } from '../src/mcp/http'
 import { createProfiMcpServer } from '../src/mcp/server'
+import { startLiveScreen } from '../src/screen/liveScreen'
 import { registerScreenRoute } from '../src/screen/screenRoute'
 import { nodeTestUrl } from './helpers/db'
 
@@ -137,5 +138,44 @@ describe('live screen', () => {
     expect(await ab.page.locator('#phone').inputValue()).toBe('')
     ws.close()
     inputAllowed = true
+  }, 30000)
+
+  it('FR-ACC-6: the live screen keeps sending pictures of a still page, so a stuck picture never happens', async () => {
+    // A page with nothing blinking: Chromium has no reason to send screencast frames.
+    const still = await ab.context.newPage()
+    await still.setContent('<p style="font: 20px sans-serif">Тихая страница</p>')
+    const got: string[] = []
+    const stop = await startLiveScreen(still, (frame) => got.push(frame))
+    await new Promise((r) => setTimeout(r, 4500))
+    await still.close()
+    await stop()
+    expect(got.length).toBeGreaterThanOrEqual(2)
+  }, 30000)
+
+  it('FR-ACC-6: text typed into the tab shows on the live screen within 2 seconds', async () => {
+    const got: string[] = []
+    const stop = await startLiveScreen(ab.page, (frame) => got.push(frame))
+    await new Promise((r) => setTimeout(r, 600))
+    const before = got.length
+    await ab.page.fill('#phone', '+79000000777')
+    await new Promise((r) => setTimeout(r, 2000))
+    await stop()
+    expect(got.length).toBeGreaterThan(before)
+    expect(got.at(-1)).not.toBe(got[0])
+  }, 30000)
+
+  it('FR-ACC-6: the live screen sends at most 3 pictures a second, so a slow connection keeps up', async () => {
+    const busy = await ab.context.newPage()
+    // A blinking caret and an animation: Chromium repaints all the time.
+    await busy.setContent(
+      '<input autofocus><div style="width:50px;height:50px;background:red;animation:s 0.2s infinite alternate"></div><style>@keyframes s{to{transform:translateX(200px)}}</style>',
+    )
+    const got: string[] = []
+    const stop = await startLiveScreen(busy, (frame) => got.push(frame))
+    await new Promise((r) => setTimeout(r, 4000))
+    await stop()
+    await busy.close()
+    expect(got.length).toBeLessThanOrEqual(13)
+    expect(got.length).toBeGreaterThanOrEqual(4)
   }, 30000)
 })
