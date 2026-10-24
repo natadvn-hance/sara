@@ -44,6 +44,6 @@ describe('learning tick', () => {
     })
     await jobs.tick()
     jobs.stop()
-    expect(sent[0]).toMatch(/^Сегодня отсеяла 1\. На грани:/)
+    expect(sent[0]).toMatch(/^Сегодня отсеяла 1 заявку\. На грани:/)
   })
 })

@@ -164,7 +164,7 @@ describe('scoring in the lead pipeline', () => {
     expect(
       await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`)),
     ).toBe('sent')
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1. На грани:')))
+    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1 заявку. На грани:')))
     const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
       ?.inline_keyboard[0]?.[0]
     expect(want?.text).toBe('Взял бы №1')
