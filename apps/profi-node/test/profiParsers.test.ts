@@ -178,4 +178,25 @@ describe('Profi.ru page readers', () => {
   it('FR-CONV-1: chats are listed at r.php, the menu link «Чаты»', () => {
     expect(profiParsers.paths.chats).toBe('/backoffice/r.php')
   })
+
+  it('FR-CONV-1: a chat notice of the event stream names the order chat to read', () => {
+    // SockJS frames as recorded live 24.10.2026 (numbers here are made up).
+    const order = String.raw`a["{\"type\":\"MSG_CHAT_ORDER_NOTIFY\",\"containerId\":1,\"orderId\":95300001,\"messengerType\":\"ORDER\",\"messengerExtId\":95300001}"]`
+    const unread = String.raw`a["{\"type\":\"MSG_MESSENGER_UNREAD_NOTIFY\",\"containerId\":1,\"messengerType\":\"ORDER\",\"messengerExtId\":95300001,\"messageId\":1900000001}"]`
+    expect(profiParsers.fromRtp(order)).toEqual({
+      recognized: true,
+      what: 'stream',
+      signals: [{ t: 'chat_touched', chatId: '95300001', messageId: null }],
+    })
+    expect(profiParsers.fromRtp(unread).signals).toEqual([
+      { t: 'chat_touched', chatId: '95300001', messageId: '1900000001' },
+    ])
+  })
+
+  it('ADR-002: the stream greeting and its open frame are known, an odd frame is not', () => {
+    expect(profiParsers.fromRtp('o')).toEqual({ recognized: true, what: 'stream', signals: [] })
+    const ready = String.raw`a["{\"userId\":\"x\",\"streamId\":\"s\",\"type\":\"SERVER_READY\"}"]`
+    expect(profiParsers.fromRtp(ready)).toEqual({ recognized: true, what: 'stream', signals: [] })
+    expect(profiParsers.fromRtp({ some: 'thing' }).recognized).toBe(false)
+  })
 })

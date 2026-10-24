@@ -86,6 +86,19 @@ export function startInsurance(o: {
     }
   }
 
+  // Chats the event stream named: read within the minute, at most 3 a pass, the rest on the next one.
+  async function readTouchedChats() {
+    let opened = 0
+    for (const id of o.eyes.chatsTouched()) {
+      if (opened >= 3 || !can()) return
+      await sleep(pause)
+      if (!(await go(o.parsers.paths.chat(id)))) return
+      onFeed = false
+      opened++
+      await o.eyes.onChatRead(id, await o.parsers.fromChatDom(o.ab.page, id))
+    }
+  }
+
   async function maybeBackToFeed() {
     if (onFeed) return
     await go(o.parsers.paths.feed)
@@ -97,6 +110,7 @@ export function startInsurance(o: {
       if (!can()) return
       if (!(await go(o.parsers.paths.feed))) return
       await readNewOrders()
+      await readTouchedChats()
       if (o.parsers.paths.feed && can()) await maybeBackToFeed()
       await o.eyes.onParsed(
         { recognized: false, signals: await o.parsers.fromHeaderDom(o.ab.page) },
@@ -137,7 +151,7 @@ export function startInsurance(o: {
         if (!can()) return
         await sleep(pause)
         if (!(await go(o.parsers.paths.chat(c.chatId)))) return
-        await o.eyes.onParsed(await o.parsers.fromChatDom(o.ab.page, c.chatId), 'dom')
+        await o.eyes.onChatRead(c.chatId, await o.parsers.fromChatDom(o.ab.page, c.chatId))
       }
       // Back to the feed, where the event stream lives.
       if (can()) await go(o.parsers.paths.feed)

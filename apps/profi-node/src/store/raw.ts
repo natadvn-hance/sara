@@ -51,7 +51,7 @@ export type StoredMessage = {
 /** True when this platform message was not stored before. */
 export async function upsertMessage(
   db: NodeDbOrTx,
-  m: { accountId: string; message: StoredMessage },
+  m: { accountId: string; message: StoredMessage; history?: boolean },
 ): Promise<boolean> {
   const rows = await db
     .insert(rawMessage)
@@ -64,6 +64,7 @@ export async function upsertMessage(
       sentAt: m.message.sent_at,
       text: m.message.text,
       read: m.message.read,
+      history: m.history ?? false,
     })
     .onConflictDoNothing()
     .returning({ id: rawMessage.platformMessageId })

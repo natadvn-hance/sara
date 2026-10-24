@@ -270,4 +270,41 @@ describe('eyes', () => {
     expect(seen[0]?.payload.budget_text).toBe('до 50 000 ₽')
     expect(e.ordersWantingPage()).toEqual([])
   })
+
+  it('FR-CONV-1: a chat named by the stream is read; on its first reading only the unanswered tail is news', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: '95300009', messageId: '13' }],
+      },
+      'rtp',
+    )
+    expect(e.chatsTouched()).toEqual(['95300009'])
+    const m = (id: string, author: 'client' | 'specialist') => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300009',
+        order_id: '95300009',
+        author,
+        sent_at: new Date().toISOString(),
+        text: 'x',
+        read: true,
+      },
+    })
+    const first = [m('10', 'client'), m('11', 'specialist'), m('12', 'client'), m('13', 'client')]
+    await e.onChatRead('95300009', { recognized: true, what: 'chat', signals: first })
+    expect(e.chatsTouched()).toEqual([])
+    await e.onChatRead('95300009', {
+      recognized: true,
+      what: 'chat',
+      signals: [...first, m('14', 'specialist'), m('15', 'client')],
+    })
+    expect(
+      (await events('profi.client_message')).map((x) => x.payload.platform_message_id),
+    ).toEqual(['12', '13', '15'])
+    expect((await db.select().from(rawMessage)).length).toBe(6)
+  })
 })

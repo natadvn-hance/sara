@@ -1,9 +1,9 @@
 import { and, eq } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
-import { rawOrder } from '../db/schema'
+import { rawMessage, rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
 import { saveRaw, upsertMessage, upsertOrder } from '../store/raw'
-import type { OrderSignal, ParseResult, Parsers, Signal } from './parsers'
+import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 import type { RawRecord } from './recorder'
 
 export type Eyes = {
@@ -17,6 +17,13 @@ export type Eyes = {
   knowsOrder(orderId: string): Promise<boolean>
   /** Orders seen on the board whose page has not been read yet, oldest first. */
   ordersWantingPage(): string[]
+  /** Chats the event stream named since their page was last read. */
+  chatsTouched(): string[]
+  /**
+   * A chat page was read. On the first reading of a chat only the client's messages after our last one are news;
+   * what came before is history from before Sara watched, kept without events.
+   */
+  onChatRead(chatId: string, p: ParseResult): Promise<void>
   /** The site's board answer was read in the last 10 minutes. */
   boardWorks(now?: number): boolean
   /** The order's page could not be read: the order goes out with what the board showed. */
@@ -44,6 +51,8 @@ export function createEyes(o: {
   const waiting = new Map<string, OrderSignal>()
   const WAITING_MAX = 100
   let boardAt = 0
+  // chat → when the stream named it and which message, for the time the message really came.
+  const touched = new Map<string, { at: string; messageId: string | null }>()
 
   async function knowsOrder(orderId: string): Promise<boolean> {
     const rows = await o.db
@@ -70,9 +79,18 @@ export function createEyes(o: {
     }
   }
 
-  async function onSignals(signals: Signal[], body: unknown): Promise<void> {
+  async function onSignals(
+    signals: Signal[],
+    body: unknown,
+    quiet: Set<string> = new Set(),
+  ): Promise<void> {
     for (const raw of signals) {
       let s = raw
+      if (s.t === 'chat_touched') {
+        if (touched.size < WAITING_MAX || touched.has(s.chatId))
+          touched.set(s.chatId, { at: new Date().toISOString(), messageId: s.messageId })
+        continue
+      }
       if (s.t === 'order' && s.needsPage) {
         const id = s.order.order_id
         if (!waiting.has(id) && waiting.size < WAITING_MAX && !(await knowsOrder(id)))
@@ -118,8 +136,9 @@ export function createEyes(o: {
             return
           }
           const m = s.message
-          const isNew = await upsertMessage(tx, { accountId: o.accountId, message: m })
-          if (!isNew || m.author === 'specialist' || m.author === 'system') return
+          const history = quiet.has(m.platform_message_id)
+          const isNew = await upsertMessage(tx, { accountId: o.accountId, message: m, history })
+          if (!isNew || history || m.author === 'specialist' || m.author === 'system') return
           await queueEvent(tx, {
             type: m.author === 'client' ? 'profi.client_message' : 'profi.author_unclear',
             accountId: o.accountId,
@@ -188,6 +207,29 @@ export function createEyes(o: {
     lastRecognizedAt: () => lastRecognized,
     knowsOrder,
     ordersWantingPage: () => [...waiting.keys()],
+    chatsTouched: () => [...touched.keys()],
+    async onChatRead(chatId, p) {
+      const touch = touched.get(chatId)
+      touched.delete(chatId)
+      const msgs = p.signals.filter((x): x is MessageSignal => x.t === 'message')
+      const known = await o.db
+        .select({ id: rawMessage.platformMessageId })
+        .from(rawMessage)
+        .where(and(eq(rawMessage.chatId, chatId), eq(rawMessage.accountId, o.accountId)))
+        .limit(1)
+      const quiet = new Set<string>()
+      if (known.length === 0) {
+        const lastOurs = msgs.findLastIndex((x) => x.message.author === 'specialist')
+        for (const x of msgs.slice(0, lastOurs + 1)) quiet.add(x.message.platform_message_id)
+      }
+      // The page shows only HH:MM; the stream's moment is the truer time of the message it named.
+      const signals = p.signals.map((x) =>
+        x.t === 'message' && touch && x.message.platform_message_id === touch.messageId
+          ? { ...x, message: { ...x.message, sent_at: touch.at } }
+          : x,
+      )
+      await onSignals(signals, undefined, quiet)
+    },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,
     async settleOrder(orderId) {
       const b = waiting.get(orderId)
