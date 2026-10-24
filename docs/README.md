@@ -11,6 +11,7 @@ IT-компаниях: продукт, интерфейс, требования,
 | Начало | Аудит старой Сары (41 находка) | `audit/2026-10-21-audit-sara-v1.md` |
 | | Дизайн v3 (подробности по каждой части) | `superpowers/specs/2026-10-21-sara-hance-design.md` |
 | | Документы передачи дел между сессиями | `handoff/` |
+| | Дизайн M4 «Разум и разговор» | `superpowers/specs/2026-10-25-m4-conversation-design.md` |
 | Продукт | Видение и границы, пресс-релиз из будущего, экономика | `product/vision-and-scope.md` |
 | | Дорожная карта | `product/roadmap.md` |
 | | Карта пользовательских историй | `product/story-map.md` |
@@ -25,7 +26,7 @@ IT-компаниях: продукт, интерфейс, требования,
 | | Технологический радар | `architecture/tech-radar.md` |
 | | Модель угроз | `architecture/threat-model.md` |
 | | Развёртывание | `architecture/deployment.md` |
-| | Записи архитектурных решений ADR-000..022 | `adr/` |
+| | Записи архитектурных решений ADR-000..024 | `adr/` |
 | Качество | Стратегия тестирования и план оценки Сары | `quality/test-strategy.md` |
 | | Готово к работе и Готово (DoR, DoD) | `quality/definition-of-ready-and-done.md` |
 | | Трассируемость требований | `quality/traceability.md` |

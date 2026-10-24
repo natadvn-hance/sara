@@ -75,19 +75,21 @@
 | | `lead_id`, `account_id`, `direction_id` | | Н | связи |
 | | `chat_id` | text | Н | номер чата на площадке |
 | | `stage` | enum (спецификация 7.2) | Н | этап |
-| | `owner` | enum `sara`, `boris`, `paused` | Н | кто ведёт |
-| | `turn` | enum `client`, `sara`, `boris`, `nobody` | Н | чей ход |
-| | `boris_note` | text | Н | указание Бориса при возврате Саре |
+| | `owner`, `turn` | | Н | не используются с M4: дом владельца и чьего хода `conversation` (ADR-024); колонки остаются до сужения |
 | | `amount_rub`, `outcome`, `outcome_reason` | | Н | итог |
-| `message` | `id` | uuid | Н | |
-| | `deal_id` | uuid | Н | |
-| | `platform_message_id` | text | Н | номер на площадке (уникален) |
-| | `author` | enum `client`, `boris`, `sara`, `sara_v1`, `unknown` | Н | автор |
+| `conversation` (M4) | `id` | uuid | Н | один чат аккаунта, уникально `account_id` и `chat_id` (ADR-024) |
+| | `account_id`, `chat_id`, `order_id`, `deal_id` | | Н | связи; `deal_id` пусто у чатов, начатых откликом v1 |
+| | `origin` | enum `sara`, `v1` | Н | кто сделал отклик |
+| | `owner`, `owner_reason` | enum `sara`, `boris`, `paused`; `take`, `wrote`, `topic` | Н | кто ведёт и почему |
+| | `boris_note` | text | П | указание Бориса при возврате Саре |
+| | `closed_at`, `handled_through`, `last_client_heard_at`, `typing_at`, `unclear_count` | | Н | закрыт ли, до какого сообщения клиента отвечено, когда ядро слышало клиента и «печатает», сколько неясных авторов подряд |
+| `chat_message` (M4) | `id` | uuid | Н | вся переписка, живая и выгруженная, уникально `account_id` и `platform_message_id` |
+| | `side` | enum `client`, `specialist`, `system`, `unknown` | Н | сторона на площадке |
+| | `author`, `author_basis` | enum `client`, `boris`, `sara`, `sara_v1`, `system`, `unknown`; почему так | Н | чей голос (дизайн M4, 5.1) |
 | | `text` | text | П | текст |
-| | `sent_at`, `read_at` | timestamptz | Н | время, прочитано |
-| | `delivery` | enum `received`, `queued`, `sent`, `confirmed`, `failed` | Н | доставка |
-| | `mind_version` | text | Н | версия разума, на которой написан ответ Сары |
-| | `fact_ids` | text[] | Н | номера записей разума, на которые опирается |
+| | `sent_at`, `approx_time`, `heard_at`, `read` | | Н | время со страницы, приблизительное ли, когда услышало ядро, прочитано |
+| | `source` | enum `node`, `v1`, `telegram_export` | Н | откуда |
+| `conv_turn` (M4) | `id` (номер процесса), `conversation_id`, `kind`, `anchor_message_id`, `message_ids`, `mind_version`, `recalled`, `understanding`, `move`, `text`, `fact_ids`, `example_ids`, `checks`, `decision`, `outcome`, `model_call_ids`, `task_id`, `card_message_id`, `boris_text`, `actual_message_id`, `actual_author`, `similarity`, `timings` | | П (`text`, `boris_text`) | трасса хода из 8 шагов (FR-OPS-4) |
 | `client_contact` | `deal_id`, `kind` (`phone`, `email`, `messenger`), `value`, `delete_after` | | К | контакт для встречи |
 
 ### 3.3 Работа и надёжность
@@ -109,12 +111,14 @@
 
 | Таблица | Поля | Класс | Смысл |
 |---|---|---|---|
-| `mind_index` | `record_id`, `path`, `type`, `scope`, `status`, `version`, `tsv` (полнотекстовый по-русски), `embedding` (vector 384) | Н (обезличено) | индекс файлов разума |
+| `mind_index` | `record_id`, `path`, `type`, `scope`, `topic`, `tones`, `stages`, `title`, `body`, `example_client`, `example_boris`, `version`, `mind_version`, `tsv` (полнотекстовый по-русски), `embedding` (vector 384) | Н (обезличено) | индекс подтверждённых записей разума |
+| `mind_gap` (M4) | `id`, `turn_id`, `text`, `topic`, `question_id` | Н | чего не хватило ходу (FR-MIND-4) |
+| `mind_proposal` (M4) | `id`, `path` (уникален), `content`, `kind`, `source`, `state` (`new`, `exported`, `accepted`, `declined`), `exported_at` | Н (обезличено) | предложения в разум до «да» Бориса (FR-MIND-3) |
 | `lesson` | `id`, `source` (`edit`, `training`, `interview`), `source_ref`, `before`, `after`, `insight`, `decision` (`yes`, `no`, `skip`), `decided_at`, `mind_commit` | Н (обезличено) | уроки |
 | `persona`, `scenario` | `id`, `archetype`, `description`, `source_refs` | Н (обезличено) | материалы тренажёра |
 | `training_session` | `id`, `mode`, `scenario_id`, `started_at`, `finished_at`, `similarity`, `lessons_count` | Н | тренировки |
 | `autonomy` | `topic`, `direction_id`, `level` (`self`, `draft`, `call`), `approvals_in_row`, `last_change_at` | Н | самостоятельность |
-| `exam_run`, `exam_result` | `id`, `mind_version`, `roles_version`, `started_at`, `score`; по сценарию: оценка, класс ошибки, тяжесть | Н | экзамены |
+| `exam_run`, `exam_result` | `id`, `mind_version`, `roles_version`, `scenario_set`, `started_at`, `finished_at`, `score`, `s1`, `s2`, `s3`, `passed`, `compared_to`; по сценарию: ход, текст, проверки, оценка судьи, тяжесть, итог | Н | экзамены |
 | `sim_dialog` | `id`, `persona_id`, `created_at`, `found_gap` | Н | сгенерированные диалоги, никогда не знание |
 
 ## 4. Сроки хранения и удаление
