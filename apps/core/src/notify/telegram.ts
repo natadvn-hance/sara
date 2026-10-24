@@ -2,13 +2,15 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { newEventId, parseCallback, type TaskAction } from '@sara/shared'
-import { Bot, type Context } from 'grammy'
+import { Bot, type Context, GrammyError } from 'grammy'
 import type { Db } from '../db/client'
 import { appendEvent } from '../journal/journal'
 import type { BorisMessage } from '../learning/inbox'
 import { bindChat, boundChat } from './binding'
-import { leadCardKeyboard, leadCardText, TEXTS } from './cards'
+import { htmlToPlain, leadCardKeyboard, leadCardText, TEXTS } from './cards'
 import type { Notifier } from './notifier'
+
+type SendOptions = NonNullable<Parameters<Bot['api']['sendMessage']>[2]>
 
 export type TelegramRuntime = {
   start(): Promise<void>
@@ -21,6 +23,18 @@ export type TelegramRuntime = {
 
 /** A long or en dash, which the model, a voice or an order text can bring; Boris never gets one. */
 const DASHES = /[\u2013\u2014]/g
+/** The same dashes written as numeric entities, which Telegram's HTML would turn back into dashes. */
+const DASH_ENTITIES = /&#(?:x0*(?:2013|2014)|0*(?:8211|8212));/gi
+
+/** Dashes become hyphens in the text of an HTML message only, never inside a tag (a link keeps its address). */
+function hyphenateHtml(html: string): string {
+  return html
+    .split(/(<[^>]*>)/)
+    .map((part) =>
+      part.startsWith('<') ? part : part.replace(DASHES, '-').replace(DASH_ENTITIES, '-'),
+    )
+    .join('')
+}
 
 function chatOf(ctx: Context): number | undefined {
   return ctx.chat?.id ?? ctx.callbackQuery?.message?.chat.id ?? ctx.from?.id
@@ -40,9 +54,10 @@ export function createTelegramRuntime(d: {
   const bot = new Bot(d.token, d.apiRoot ? { client: { apiRoot: d.apiRoot } } : undefined)
   // Every text leaves through here (messages, replies, button answers), so a dash in it becomes a short hyphen once.
   bot.api.config.use((prev, method, payload, signal) => {
-    const text = (payload as { text?: unknown }).text
+    const { text, parse_mode: mode } = payload as { text?: unknown; parse_mode?: unknown }
     if (typeof text !== 'string') return prev(method, payload, signal)
-    return prev(method, { ...payload, text: text.replace(DASHES, '-') }, signal)
+    const hyphenated = mode === 'HTML' ? hyphenateHtml(text) : text.replace(DASHES, '-')
+    return prev(method, { ...payload, text: hyphenated }, signal)
   })
 
   async function logForeign(chatId: number | undefined): Promise<void> {
@@ -152,6 +167,25 @@ export function createTelegramRuntime(d: {
     return id
   }
 
+  /**
+   * A message of Telegram HTML without link previews (the order page needs a login, so a preview is empty). Should
+   * Telegram refuse the markup, the same message goes as plain text: a card is never lost to a formatting error.
+   */
+  async function sendHtml(html: string, extra: Omit<SendOptions, 'parse_mode'>) {
+    const to = await chat()
+    try {
+      return await bot.api.sendMessage(to, html, {
+        ...extra,
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+      })
+    } catch (err) {
+      if (!(err instanceof GrammyError) || !/can't parse entities/i.test(err.description)) throw err
+      console.error('telegram refused the markup, sending plain text:', err.description)
+      return bot.api.sendMessage(to, htmlToPlain(html), extra)
+    }
+  }
+
   let running: Promise<void> | null = null
   let lastError: string | null = null
 
@@ -197,14 +231,14 @@ export function createTelegramRuntime(d: {
     botUsername: () => (bot.isInited() ? bot.botInfo.username : null),
     notifier: {
       async sendLeadCard(c, o) {
-        const m = await bot.api.sendMessage(await chat(), leadCardText(c), {
+        const m = await sendHtml(leadCardText(c), {
           reply_markup: leadCardKeyboard(c),
           ...(o?.silent && { disable_notification: true }),
         })
         return { messageId: m.message_id }
       },
-      async sendText(text) {
-        const m = await bot.api.sendMessage(await chat(), text)
+      async sendText(text, o) {
+        const m = o?.html ? await sendHtml(text, {}) : await bot.api.sendMessage(await chat(), text)
         return { messageId: m.message_id }
       },
       async sendButtons(text, rows) {

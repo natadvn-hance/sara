@@ -273,8 +273,8 @@ describe('walking skeleton', () => {
   it('FR-NOTIF-1: a reminder carries the buttons again', async () => {
     remindMs = 500
     await fake.emitOrder({ order_id: orderId() })
-    await until(() => tg.sent.some((m) => m.text.startsWith('⏰') && m.reply_markup))
-    const reminder = tg.sent.find((m) => m.text.startsWith('⏰'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('<b>⏰') && m.reply_markup))
+    const reminder = tg.sent.find((m) => m.text.startsWith('<b>⏰'))
     expect(reminder?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
   })
 
