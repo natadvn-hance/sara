@@ -1,5 +1,6 @@
 import type { AccountBrowser } from '../browser/accountBrowser'
 import type { Eyes } from './eyes'
+import { readFormMap } from './formMap'
 import type { Parsers } from './parsers'
 
 export type Insurance = {
@@ -80,9 +81,20 @@ export function startInsurance(o: {
       onFeed = false
       opened++
       const page = await fromOrderDom(o.ab.page, id)
+      await keepFormMap()
       await o.eyes.onParsed(page, 'dom')
       // An expired or changed page still lets a board order through, without its fee.
       if (!page.signals.some((s) => s.t === 'order')) await o.eyes.settleOrder(id)
+    }
+  }
+
+  // The bid form changed since September: a map of it on every order page (never a click) calibrates the bid.
+  async function keepFormMap() {
+    const body = await readFormMap(o.ab.page)
+    if (body) {
+      await o.eyes
+        .onRaw({ kind: 'dom', url: o.ab.page.url(), body, receivedAt: new Date().toISOString() })
+        .catch(() => {})
     }
   }
 

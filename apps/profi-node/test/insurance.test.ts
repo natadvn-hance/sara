@@ -278,6 +278,45 @@ describe('insurance and the account tab', () => {
     ])
   }, 60000)
 
+  it('FR-LEAD-8: each order page visit leaves a map of the bid form in node.raw_event, nothing clicked', async () => {
+    await loginStandIn(ab.page, site)
+    site.muteRtp(true)
+    const parsers: Parsers = {
+      ...standInParsers,
+      paths: { ...standInParsers.paths, order: (id) => `/backoffice/n.php?o=${id}` },
+      fromResponse: () => ({ recognized: false, signals: [] }),
+      fromFeedDom: profiParsers.fromFeedDom,
+      fromOrderDom: async () => ({ recognized: false, what: 'order', signals: [] }),
+    }
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    const id = site.addOrder({ description: 'Клиентский текст про оплату' })
+    await ins.feedOnce()
+    ins.stop()
+    site.muteRtp(false)
+    // Orders of the earlier tests are still on the stand-in feed: only this one is looked at.
+    const maps = (await db.select().from(rawEvent)).filter(
+      (r) =>
+        r.kind === 'dom' &&
+        (r.body as { what?: string }).what === 'bid_form' &&
+        r.url?.endsWith(`n.php?o=${id}`),
+    )
+    expect(maps).toHaveLength(1)
+    const body = maps[0]?.body as { buttons: { text: string }[]; fields: { name: string }[] }
+    expect(body.buttons.map((b) => b.text)).toContain('Продолжить')
+    expect(body.fields.map((f) => f.name)).toContain('comments4client')
+    expect(JSON.stringify(body)).not.toContain('Клиентский текст')
+    expect(site.continueClicks).toBe(0)
+  }, 60000)
+
   it('ST-M1-04: the chats list page leaves the links it showed in node.raw_event, for calibration', async () => {
     await loginStandIn(ab.page, site)
     site.addMessage('c-links', 'client', 'Здравствуйте')

@@ -60,12 +60,22 @@ async function load() {
 load(); window.__RTP.addEventListener('message', load)`,
   )
 
+// The bid form as the October site describes it in its order answer (boOrderScreen.form): one price field, the
+// text, the send button. Until the recorded maps say otherwise it opens with «Продолжить», as in September.
+const bidForm = `<button id="bid-continue" type="button" onclick="fetch('/api/bid/continue', { method: 'POST' }); document.getElementById('bid-form').hidden = false">Продолжить</button>
+<form id="bid-form" data-testid="bid_form" hidden onsubmit="return false">
+<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">
+<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>
+<div data-testid="bid_form_footer">К оплате: <span class="due"></span> ₽</div>
+<button type="submit">Откликнуться</button></form>`
+
 export const orderPage = (id: string) =>
   shell(
     'Заказ',
-    `<article id="order" data-order-id="${id}"></article>`,
+    `<article id="order" data-order-id="${id}"></article>${bidForm}`,
     `fetch('/api/order/${id}').then((r) => r.json()).then((o) => {
   document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>'
+  document.querySelector('#bid-form .due').textContent = o.price
 })`,
   )
 
