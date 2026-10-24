@@ -34,7 +34,15 @@ export type SiteOrder = {
 }
 export type SiteBid = { orderId: string; price: string; text: string }
 /** How the bid form behaves: ok, silent (refused, the form stays), lost (the form closes, no bid on the order). */
-export type BidSettings = BidLook & { mode: 'ok' | 'silent' | 'lost'; answer: boolean }
+export type BidSettings = BidLook & {
+  mode: 'ok' | 'silent' | 'lost'
+  /** The order page gets its answer at all. */
+  answer: boolean
+  /** The answer says hasBid (a renamed field would not). */
+  hasBidField: boolean
+  /** The top bar shows the wallet. */
+  showWallet: boolean
+}
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
 
@@ -48,6 +56,8 @@ export type ProfiSite = {
   continueClicks: number
   /** Bids the form sent and the site took. */
   bids: SiteBid[]
+  /** Presses of the send button that reached the site, taken or not. */
+  bidPosts: number
   bidSettings: BidSettings
   setBalance(rub: number): void
   /** Back to a fresh form: no bids, 5000 ₽, the wallet pays, the answer comes. */
@@ -79,12 +89,12 @@ const COMMENT_PLACEHOLDER =
   'Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену.'
 
 /** The order page answer in the shape of the live one (tests/fixtures/profi/response/order-page.json). */
-function orderScreen(o: SiteOrder) {
+function orderScreen(o: SiteOrder, s: BidSettings) {
   const fee = String(o.price)
   const submit = { text: 'Откликнуться', style: 'PRIMARY' }
   return {
     id: o.id,
-    hasBid: o.hasBid,
+    ...(s.hasBidField && { hasBid: o.hasBid }),
     price: { value: fee, baseValue: fee, bidPromoType: null, currencySymbol: '₽' },
     disabledBidBlock: o.open ? null : { title: 'Заказ закрыт' },
     form: o.open
@@ -136,13 +146,15 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
-  const state = { balance: 5000, continueClicks: 0 }
+  const state = { balance: 5000, continueClicks: 0, bidPosts: 0 }
   const bids: SiteBid[] = []
   const freshBidSettings = (): BidSettings => ({
     mode: 'ok',
     payWay: 'wallet',
     behindContinue: true,
     answer: true,
+    hasBidField: true,
+    showWallet: true,
   })
   const bidSettings = freshBidSettings()
 
@@ -150,7 +162,11 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   const html = (res: ServerResponse, body: string) =>
     res
       .writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      .end(body.replaceAll('__BALANCE__', String(state.balance)).replaceAll('__PRESENCE__', 'on'))
+      .end(
+        (bidSettings.showWallet ? body : body.replace(/<span class="balance"[\s\S]*?<\/span>/, ''))
+          .replaceAll('__BALANCE__', String(state.balance))
+          .replaceAll('__PRESENCE__', 'on'),
+      )
   const json = (res: ServerResponse, body: unknown, status = 200) =>
     res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
 
@@ -209,13 +225,16 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       const body = JSON.parse((await readBody(req)) || '{}') as { variables?: { id?: string } }
       const found = orders.find((x) => x.id === body.variables?.id)
       if (!bidSettings.answer || !found) return json(res, { data: { orders: [] } })
-      return json(res, { data: { orders: [{ _id: found.id, boOrderScreen: orderScreen(found) }] } })
+      return json(res, {
+        data: { orders: [{ _id: found.id, boOrderScreen: orderScreen(found, bidSettings) }] },
+      })
     }
     if (p === '/api/bid' && req.method === 'POST') {
       const b = JSON.parse((await readBody(req)) || '{}') as Partial<SiteBid>
       const found = orders.find((x) => x.id === b.orderId)
       const price = String(b.price ?? '')
       const text = String(b.text ?? '')
+      state.bidPosts++
       if (!found?.open || found.hasBid || bidSettings.mode === 'silent')
         return json(res, { ok: false })
       if (found.priceRequired && !price) return json(res, { ok: false, error: 'Укажите стоимость' })
@@ -270,6 +289,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     get continueClicks() {
       return state.continueClicks
     },
+    get bidPosts() {
+      return state.bidPosts
+    },
     bids,
     bidSettings,
     setBalance(rub) {
@@ -279,6 +301,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       bids.length = 0
       state.balance = 5000
       state.continueClicks = 0
+      state.bidPosts = 0
       Object.assign(bidSettings, freshBidSettings())
     },
     orders,

@@ -12,5 +12,7 @@ export function openNodeTestDb() {
 }
 
 export async function resetNodeDb(db: NodeDb): Promise<void> {
-  await db.execute(sql`truncate node.raw_event, node.raw_order, node.raw_message, node.outbox_node`)
+  await db.execute(
+    sql`truncate node.raw_event, node.raw_order, node.raw_message, node.outbox_node, node.bid_attempt`,
+  )
 }

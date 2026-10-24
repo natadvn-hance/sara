@@ -347,7 +347,15 @@ describe('insurance and the account tab', () => {
     // The feed page, then the work and its page, then back to the feed.
     expect(order).toEqual(['nav', 'work', 'nav', 'nav'])
     expect(new URL(ab.page.url()).pathname).toBe('/backoffice/a.php')
-    may = false
+    // The tab stops moving in the middle of the work: its next page is not opened.
+    const url = ab.page.url()
+    expect(
+      await ins.inTab(async ({ go }) => {
+        may = false
+        return go('/chats')
+      }),
+    ).toBe(false)
+    expect(ab.page.url()).toBe(url)
     expect(await ins.inTab(async ({ can }) => can())).toBe(false)
     await expect(
       ins.inTab(async () => {

@@ -1,14 +1,16 @@
 import type { GetOrderOutput, SubmitBidInput, SubmitBidOutput } from '@sara/shared'
 import { verifyPermit } from '@sara/shared/permit'
+import { eq } from 'drizzle-orm'
 import type { Page } from 'playwright'
 import type { NodeDb } from '../db/client'
+import { bidAttempt } from '../db/schema'
 import type { Eyes } from '../eyes/eyes'
 import { readFormMap } from '../eyes/formMap'
 import type { Insurance } from '../eyes/insurance'
 import type { Parsers } from '../eyes/parsers'
 import { profiParsers } from '../eyes/profiParsers'
 import { ProfiToolError, type ProfiToolsImpl } from '../mcp/server'
-import { markOrderBid } from '../store/raw'
+import { findBidAttempt, markOrderBid, saveBidResult, savePress } from '../store/raw'
 import { storedOrder } from '../tools/readTools'
 import { requireAlive, type SessionState } from '../watch/sessionWatch'
 import { clickSubmit, closedNotice, fillForm, openForm, readPayment, waitFormClosed } from './form'
@@ -30,7 +32,7 @@ const fail = (c: ConstructorParameters<typeof ProfiToolError>[0], m: string) =>
  * profi.get_order and profi.submit_bid on the site itself (FR-LEAD-5, FR-LEAD-8, NFR-REL-4, M2 design 5.B). The order
  * page is opened in the account tab only when it may move; its own answer says whether the order is open, what a bid
  * costs and whether this account already bid. A bid counts only when the form closed and a fresh read of that
- * answer shows it.
+ * answer shows it. A press is written down before it happens: after it, a call with the same key only looks.
  */
 export function createBidTools(o: {
   db: NodeDb
@@ -40,17 +42,11 @@ export function createBidTools(o: {
   answerMs?: number
   closeMs?: number
 }): Pick<ProfiToolsImpl, 'getOrder' | 'submitBid'> {
-  const answerMs = o.answerMs ?? 20000
+  // As long as a page load may take (30 s to load, 10 s to settle): a slow page is not a changed site.
+  const answerMs = o.answerMs ?? 45000
   const closeMs = o.closeMs ?? 15000
   const orderPath = o.parsers.paths.order ?? profiParsers.paths.order ?? ((id) => id)
-  // Answers by idempotency key: a call repeated after a lost answer clicks nothing. Bounded, oldest out first.
-  const done = new Map<string, SubmitBidOutput>()
-  // Clicked but not confirmed: if the retry finds the bid on the page, it was this click and its money.
-  const pressed = new Map<string, number>()
-  const remember = <T>(m: Map<string, T>, key: string, v: T) => {
-    if (m.size >= 500) m.delete(m.keys().next().value ?? '')
-    m.set(key, v)
-  }
+  const uncertain = () => fail('UNCERTAIN', 'Отклик нажат, но страница его не показала')
 
   const runtime = (id: string) => {
     const r = o.accounts.get(id)
@@ -74,12 +70,12 @@ export function createBidTools(o: {
     return { ok: true, screen: await answer }
   }
 
-  /** The wallet in the top bar of the page now, told to the eyes too; what they knew when the bar is unreadable. */
-  async function walletNow(r: BidRuntime, page: Page): Promise<number | null> {
+  /** The wallet in the top bar of this page, told to the eyes too; null when the bar shows none. */
+  async function walletOnPage(r: BidRuntime, page: Page): Promise<number | null> {
     const signals = await o.parsers.fromHeaderDom(page).catch(() => [])
     await r.eyes.onParsed({ recognized: false, signals }, 'dom')
     const rub = signals.find((s) => s.t === 'balance')
-    return rub && rub.t === 'balance' ? rub.rub : r.eyes.balance()
+    return rub && rub.t === 'balance' ? rub.rub : null
   }
 
   async function keepFormMap(r: BidRuntime, page: Page) {
@@ -90,10 +86,40 @@ export function createBidTools(o: {
         .catch(() => {})
   }
 
-  async function bid(r: BidRuntime, i: SubmitBidInput, go: Go): Promise<SubmitBidOutput> {
+  /** After a press only a look: the bid on the page is that press and its money; anything else is UNCERTAIN. */
+  async function confirm(
+    r: BidRuntime,
+    i: SubmitBidInput,
+    dueRub: number,
+    t: { go: Go; can(): boolean },
+  ): Promise<SubmitBidOutput> {
+    try {
+      const s = r.watch.state()
+      if (s === 'dead' || s === 'banned' || !t.can()) throw uncertain()
+      const page = r.page()
+      const again = await openOrder(page, t.go, i.order_id)
+      if (again.screen?.hasBid !== true) throw uncertain()
+      await markOrderBid(o.db, i.account_id, i.order_id)
+      const out = {
+        found_on_page: true,
+        spent_rub: dueRub,
+        balance_after_rub: (await walletOnPage(r, page)) ?? r.eyes.balance(),
+      }
+      await saveBidResult(o.db, i.idempotency_key, out)
+      return out
+    } catch {
+      throw uncertain()
+    }
+  }
+
+  async function bid(
+    r: BidRuntime,
+    i: SubmitBidInput,
+    t: { go: Go; can(): boolean },
+  ): Promise<SubmitBidOutput> {
     const page = r.page()
     const id = i.order_id
-    const opened = await openOrder(page, go, id)
+    const opened = await openOrder(page, t.go, id)
     if (!opened.ok) throw fail('RATE_LIMITED', 'Страница заказа не открылась, отклик не нажат')
     await keepFormMap(r, page)
     const s: OrderScreen | null = opened.screen
@@ -101,12 +127,14 @@ export function createBidTools(o: {
       if (await closedNotice(page)) throw fail('ORDER_CLOSED', 'Заказ больше не принимает отклики')
       throw fail('LAYOUT_CHANGED', 'Страница заказа не дала свой ответ, отклик не нажат')
     }
-    const wallet = await walletNow(r, page)
-    if (s.hasBid) {
+    // Before any money only the wallet the page itself shows counts, never one remembered.
+    const wallet = await walletOnPage(r, page)
+    if (s.hasBid === true) {
       await markOrderBid(o.db, i.account_id, id)
-      const spent = pressed.get(i.idempotency_key) ?? 0
-      return { found_on_page: true, spent_rub: spent, balance_after_rub: wallet }
+      return { found_on_page: true, spent_rub: 0, balance_after_rub: wallet ?? r.eyes.balance() }
     }
+    if (s.hasBid === null)
+      throw fail('LAYOUT_CHANGED', 'Ответ страницы не говорит, был ли отклик, отклик не нажат')
     if (!s.open) throw fail('ORDER_CLOSED', 'Заказ больше не принимает отклики')
     const price = i.price_rub ?? null
     if (s.priceRequired && price === null)
@@ -128,17 +156,32 @@ export function createBidTools(o: {
     if (filled === 'no_field') throw fail('LAYOUT_CHANGED', 'Поля формы отклика не нашлись')
     if (filled === 'not_taken')
       throw fail('INTERNAL', 'Форма не приняла цену или текст целиком, отклик не нажат')
-    const clicked = await clickSubmit(page, s.submitText)
-    if (clicked === 'no_button') throw fail('LAYOUT_CHANGED', 'Кнопки отправки отклика нет')
+    if (!t.can())
+      throw fail('RATE_LIMITED', 'Вкладка аккаунта перестала ходить на сайт, отклик не нажат')
+    if (
+      !(await savePress(o.db, {
+        key: i.idempotency_key,
+        accountId: i.account_id,
+        orderId: id,
+        dueRub: due,
+      }))
+    )
+      return confirm(r, i, due, t)
 
     // From here the bid may be on the site: anything not confirmed is UNCERTAIN, never a failure.
-    remember(pressed, i.idempotency_key, due)
-    const uncertain = fail('UNCERTAIN', 'Отклик нажат, но страница его не показала')
-    if (clicked === 'unsure' || !(await waitFormClosed(page, closeMs))) throw uncertain
-    const again = await openOrder(page, go, id)
-    if (again.screen?.hasBid !== true) throw uncertain
-    await markOrderBid(o.db, i.account_id, id)
-    return { found_on_page: true, spent_rub: due, balance_after_rub: await walletNow(r, page) }
+    try {
+      const clicked = await clickSubmit(page, s.submitText)
+      if (clicked === 'no_button') {
+        // Nothing was pressed after all: the written press goes, so a retry may try again.
+        await o.db.delete(bidAttempt).where(eq(bidAttempt.idempotencyKey, i.idempotency_key))
+        throw fail('LAYOUT_CHANGED', 'Кнопки отправки отклика нет')
+      }
+      if (clicked === 'unsure' || !(await waitFormClosed(page, closeMs))) throw uncertain()
+    } catch (e) {
+      if (e instanceof ProfiToolError) throw e
+      throw uncertain()
+    }
+    return confirm(r, i, due, t)
   }
 
   return {
@@ -174,22 +217,32 @@ export function createBidTools(o: {
       if (!verifyPermit(o.permitSecret, i.idempotency_key, i.permit))
         throw fail('INTERNAL', 'Разрешение ядра не подходит к ключу отклика')
       const r = runtime(i.account_id)
+      const known = await findBidAttempt(o.db, i.idempotency_key)
+      if (known?.result) return known.result as SubmitBidOutput
+      if (known) {
+        const due = known.dueRub
+        return r.inTab((t) => confirm(r, i, due, t)).catch(() => Promise.reject(uncertain()))
+      }
       requireAlive(r.watch)
-      const before = done.get(i.idempotency_key)
-      if (before) return before
-      return r.inTab(async ({ go, can }) => {
-        // A twin of this call may have finished while this one waited for the tab.
-        const twin = done.get(i.idempotency_key)
-        if (twin) return twin
+      return r.inTab(async (t) => {
+        // A twin of this call may have pressed while this one waited for the tab.
+        const twin = await findBidAttempt(o.db, i.idempotency_key)
+        if (twin?.result) return twin.result as SubmitBidOutput
+        if (twin) return confirm(r, i, twin.dueRub, t)
         requireAlive(r.watch)
-        if (!can())
+        if (!t.can())
           throw fail(
             'RATE_LIMITED',
             'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
           )
-        const out = await bid(r, i, go)
-        remember(done, i.idempotency_key, out)
-        return out
+        try {
+          return await bid(r, i, t)
+        } catch (e) {
+          if (e instanceof ProfiToolError) throw e
+          // A failure of our own before the press (the database, the browser): nothing was pressed.
+          const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
+          throw fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`)
+        }
       })
     },
   }

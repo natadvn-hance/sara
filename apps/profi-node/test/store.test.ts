@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { outboxNode, rawEvent } from '../src/db/schema'
+import { bidAttempt, outboxNode, rawEvent } from '../src/db/schema'
 import { purgeOld } from '../src/store/purge'
 import { upsertOrder } from '../src/store/raw'
 import { openNodeTestDb, resetNodeDb } from './helpers/db'
@@ -71,5 +71,18 @@ describe('node store', () => {
       },
     ])
     expect(await purgeOld(db, now)).toEqual({ raw: 1, outbox: 1 })
+  })
+
+  it('data-dictionary: presses of the send button are kept 30 days', async () => {
+    const press = (key: string, days: number) => ({
+      idempotencyKey: key,
+      accountId: 'a',
+      orderId: '95147898',
+      dueRub: 71,
+      pressedAt: ago(days),
+    })
+    await db.insert(bidAttempt).values([press('old', 31), press('fresh', 29)])
+    await purgeOld(db, now)
+    expect((await db.select().from(bidAttempt)).map((r) => r.idempotencyKey)).toEqual(['fresh'])
   })
 })

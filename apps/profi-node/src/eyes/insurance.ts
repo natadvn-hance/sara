@@ -210,7 +210,9 @@ export function startInsurance(o: {
       serial(async () => {
         try {
           return await f({
+            // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
             go: async (path) => {
+              if (!can()) return false
               onFeed = false
               return go(path)
             },

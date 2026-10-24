@@ -105,6 +105,14 @@ describe('Profi.ru page readers', () => {
     expect(await profiParsers.fromHeaderDom(ab.page)).toContainEqual({ t: 'balance', rub: 23 })
   })
 
+  it('FR-SET-4: the wallet is read by its «Баланс» label wherever the top bar draws it', async () => {
+    // Old Sara, paymentPanel.js (25.09.2026): two elements carry the label, with the same amount.
+    await ab.page.setContent(
+      '<div class="top"><a aria-label="Баланс">1\u00a0254 ₽</a><span aria-label="Баланс">1 254 ₽</span></div>',
+    )
+    expect(await profiParsers.fromHeaderDom(ab.page)).toContainEqual({ t: 'balance', rub: 1254 })
+  })
+
   it('ST-M1-07: the chats page address is found in the site menu', async () => {
     await ab.page.setContent(FEED)
     expect(await profiParsers.chatsUrl?.(ab.page)).toBe('/backoffice/chats.php')

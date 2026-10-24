@@ -5,7 +5,7 @@ import type { ProfiOrder, SubmitBidInput } from '@sara/shared'
 import { signPermit } from '@sara/shared/permit'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
-import { createBidTools } from '../src/bid/bidTools'
+import { type BidRuntime, createBidTools } from '../src/bid/bidTools'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
 import { rawEvent, rawOrder } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
@@ -24,6 +24,8 @@ let ab: AccountBrowser
 let eyes: Eyes
 let ins: Insurance
 let may = true
+// The tab may stop moving in the middle of a bid: a live screen viewer comes, the IP turns wrong.
+let mayAfterContinue = true
 let state: SessionState = 'alive'
 let visited: string[] = []
 
@@ -56,6 +58,7 @@ beforeEach(async () => {
   await resetNodeDb(db)
   site.resetBids()
   may = true
+  mayAfterContinue = true
   state = 'alive'
   eyes = createEyes({ accountId: ACCOUNT, db, parsers })
   ins?.stop()
@@ -66,20 +69,28 @@ beforeEach(async () => {
     parsers,
     feedEveryMs: 3_600_000,
     chatsEveryMs: 3_600_000,
-    canNavigate: () => may,
+    canNavigate: () => may && (mayAfterContinue || site.continueClicks === 0),
   })
   visited = []
 })
 
-const tools = () =>
+const tools = (o: { eyes?: BidRuntime['eyes']; parsers?: Parsers } = {}) =>
   createBidTools({
     db,
     permitSecret: SECRET,
-    parsers,
+    parsers: o.parsers ?? parsers,
     answerMs: 5000,
     closeMs: 3000,
     accounts: new Map([
-      [ACCOUNT, { watch: { state: () => state }, eyes, inTab: ins.inTab, page: () => ab.page }],
+      [
+        ACCOUNT,
+        {
+          watch: { state: () => state },
+          eyes: o.eyes ?? eyes,
+          inTab: ins.inTab,
+          page: () => ab.page,
+        },
+      ],
     ]),
   })
 
@@ -299,4 +310,129 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     expect(site.bids).toHaveLength(1)
     expect(outs.map((o) => o.spent_rub).sort((a, b) => a - b)).toEqual([0, 71])
   }, 90000)
+
+  it('NFR-REL-4: after an unconfirmed press the same key only looks, it never presses again', async () => {
+    site.bidSettings.mode = 'lost'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    expect(site.bidPosts).toBe(1)
+    // The bid shows up on the page later: the earlier press and its money are reported.
+    const order = site.orders.find((x) => x.id === id)
+    if (order) order.hasBid = true
+    expect(await tools().submitBid(input)).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(site.bidPosts).toBe(1)
+  }, 90000)
+
+  it('NFR-REL-4: after a press a retry that cannot look is UNCERTAIN, never a failure', async () => {
+    site.bidSettings.mode = 'lost'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    may = false
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    may = true
+    state = 'dead'
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    site.setBalance(10)
+    state = 'alive'
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    expect(site.bidPosts).toBe(1)
+  }, 90000)
+
+  it('NFR-REL-4: a confirmed bid is answered again after the session died', async () => {
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    const first = await tools().submitBid(input)
+    state = 'dead'
+    expect(await tools().submitBid(input)).toEqual(first)
+  }, 60000)
+
+  it('NFR-REL-4: two calls with one key at once press once and answer alike', async () => {
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    const t = tools()
+    const [a, b] = await Promise.all([t.submitBid(input), t.submitBid(input)])
+    expect(b).toEqual(a)
+    expect(site.bidPosts).toBe(1)
+  }, 90000)
+
+  it('FR-LEAD-8: an answer that does not say has_bid presses nothing', async () => {
+    site.bidSettings.hasBidField = false
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id)))).toBe('LAYOUT_CHANGED')
+    expect(site.bidPosts).toBe(0)
+  }, 60000)
+
+  it('FR-LEAD-8: a wallet not read from the page itself presses nothing', async () => {
+    await eyes.onParsed({ recognized: false, signals: [{ t: 'balance', rub: 5000 }] }, 'dom')
+    site.setBalance(50)
+    site.bidSettings.showWallet = false
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id)))).toBe('LAYOUT_CHANGED')
+    expect(site.bidPosts).toBe(0)
+  }, 60000)
+
+  it('FR-LEAD-8: when the tab may no longer move before the press, nothing is pressed', async () => {
+    mayAfterContinue = false
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id)))).toBe('RATE_LIMITED')
+    expect(site.bidPosts).toBe(0)
+  }, 60000)
+
+  it('FR-LEAD-8: a broken step before the press is INTERNAL, not UNCERTAIN', async () => {
+    const id = site.addOrder({ price: 71 })
+    const broken: BidRuntime['eyes'] = {
+      ...eyes,
+      onParsed: async () => {
+        throw new Error('database is down')
+      },
+    }
+    expect(await failure(tools({ eyes: broken }).submitBid(bid(id)))).toBe('INTERNAL')
+    expect(site.bidPosts).toBe(0)
+  }, 60000)
+
+  it('FR-LEAD-8: a form open from the start is filled without «Продолжить»', async () => {
+    site.bidSettings.behindContinue = false
+    const id = site.addOrder({ price: 71 })
+    expect(await tools().submitBid(bid(id))).toMatchObject({ spent_rub: 71 })
+    expect(site.continueClicks).toBe(0)
+  }, 60000)
+})
+
+describe('get_order of an order the eyes never stored (FR-LEAD-5)', () => {
+  it('FR-LEAD-5: the order is read from its page and stored', async () => {
+    const id = site.addOrder({ price: 71, subject: 'Лендинг для школы' })
+    const withPage: Parsers = {
+      ...parsers,
+      async fromOrderDom(page, orderId) {
+        await page.waitForSelector('#order h1', { timeout: 5000 })
+        return {
+          recognized: true,
+          what: 'order',
+          signals: [
+            {
+              t: 'order',
+              order: {
+                order_id: orderId,
+                title: await page.locator('#order h1').innerText(),
+                category: '',
+                city: '',
+                text: '',
+                client_name: '',
+                budget_text: null,
+                bid_price_rub: 0,
+                seen_at: new Date().toISOString(),
+              },
+              published_at: null,
+            },
+          ],
+        }
+      },
+    }
+    expect(await failure(tools().getOrder({ account_id: ACCOUNT, order_id: id }))).toBe('NOT_FOUND')
+    const o = await tools({ parsers: withPage }).getOrder({ account_id: ACCOUNT, order_id: id })
+    expect(o).toMatchObject({ title: 'Лендинг для школы', open: true, bid_price_rub: 71 })
+  }, 60000)
 })
