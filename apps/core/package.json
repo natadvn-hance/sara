@@ -10,7 +10,8 @@
     "report:speed": "tsx src/analytics/speedCli.ts",
     "bids": "tsx src/settings/cli.ts",
     "report:shadow": "tsx src/analytics/shadowCli.ts",
-    "direction": "tsx src/direction/cli.ts"
+    "direction": "tsx src/direction/cli.ts",
+    "score:eval": "tsx src/leads/scoreEvalCli.ts"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "5.3.0",
