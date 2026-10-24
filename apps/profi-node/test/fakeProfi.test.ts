@@ -61,6 +61,7 @@ describe('fake Profi-MCP', () => {
       'profi.list_chats',
       'profi.list_feed',
       'profi.read_chat',
+      'profi.send_message',
       'profi.session_health',
       'profi.submit_bid',
     ])
@@ -84,6 +85,29 @@ describe('fake Profi-MCP', () => {
     const r = await c.callTool({ name: 'profi.submit_bid', arguments: { ...bid(), permit: 'bad' } })
     expect(r.isError).toBe(true)
     expect(fake.bids).toHaveLength(0)
+    await c.close()
+  })
+
+  it('FR-CONV-9: send_message repeats with one key give one message', async () => {
+    const c = await mcp()
+    const msg = {
+      account_id: 'hance-marketing',
+      chat_id: '95147898',
+      text: 'Добрый день',
+      expect_last_message_id: null,
+      idempotency_key: 'msg:t:1',
+      permit: signPermit(SECRET, 'msg:t:1'),
+    }
+    const a = await c.callTool({ name: 'profi.send_message', arguments: msg })
+    const b = await c.callTool({ name: 'profi.send_message', arguments: msg })
+    expect(a.isError).toBeFalsy()
+    expect(b.structuredContent).toEqual(a.structuredContent)
+    expect(fake.messages).toHaveLength(1)
+    const bad = await c.callTool({
+      name: 'profi.send_message',
+      arguments: { ...msg, permit: 'bad' },
+    })
+    expect(bad.isError).toBe(true)
     await c.close()
   })
 

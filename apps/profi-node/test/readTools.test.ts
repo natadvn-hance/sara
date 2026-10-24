@@ -122,6 +122,21 @@ describe('read tools', () => {
     expect(await db.select().from(rawMessage)).toHaveLength(0)
   })
 
+  it('FR-CONV-5: the live node refuses to write into a chat and touches nothing', async () => {
+    await expect(
+      tools().sendMessage({
+        account_id: 'hance-marketing',
+        chat_id: '1',
+        text: 'x',
+        expect_last_message_id: null,
+        idempotency_key: 'msg:1',
+        permit: 'p',
+      }),
+    ).rejects.toMatchObject({ errorClass: 'INTERNAL' })
+    expect(await db.select().from(outboxNode)).toHaveLength(0)
+    expect(await db.select().from(rawMessage)).toHaveLength(0)
+  })
+
   it('FR-OPS-2: on a dead session the read tools answer SESSION_DEAD', async () => {
     await expect(
       tools('dead').readChat({ account_id: 'hance-marketing', chat_id: 'c-1' }),

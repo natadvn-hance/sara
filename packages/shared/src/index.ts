@@ -1,3 +1,4 @@
+export * from './contracts/conversation'
 export * from './contracts/direction'
 export * from './contracts/event'
 export * from './contracts/eventTypes'

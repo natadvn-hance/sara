@@ -1,4 +1,16 @@
 import { z } from 'zod'
+import { LOCKED_TOPICS, TOPICS, type Topic } from './conversation'
+
+const hours = z.object({
+  from: z.number().int().min(0).max(23),
+  to: z.number().int().min(0).max(23),
+})
+const LEVEL = z.enum(['self', 'draft', 'call'])
+type Level = z.infer<typeof LEVEL>
+const locked = new Set<string>(LOCKED_TOPICS)
+const AUTONOMY_DEFAULT = Object.fromEntries(
+  TOPICS.map((t) => [t, locked.has(t) ? 'call' : 'draft']),
+) as Record<Topic, Level>
 
 export const SETUP_STEPS = ['password', 'telegram', 'claude', 'profi'] as const
 export type SetupStep = (typeof SETUP_STEPS)[number]
@@ -41,6 +53,36 @@ export const SETTINGS = {
       .nullable(),
     default: { from: 23, to: 9 } as { from: number; to: number } | null,
   },
+  /**
+   * Shadow (ADR-024): old Sara still writes to clients from this account. While on, the new Sara sends nothing,
+   * not even Boris's own text, and a specialist message is not taken for Boris's.
+   */
+  'conv.v1_writes': { schema: z.boolean(), default: true },
+  /** FR-CONV-7: the turn waits this long after the last client message the core heard... */
+  'conv.quiet_after_message_s': { schema: z.number().int().positive(), default: 45 },
+  /** ...and this long after the last «печатает». */
+  'conv.quiet_after_typing_s': { schema: z.number().int().positive(), default: 20 },
+  /** FR-CONV-7: never longer than this from the first message of the turn. */
+  'conv.max_wait_s': { schema: z.number().int().positive(), default: 600 },
+  /** FR-CONV-8: Moscow hours when only urgent replies go to a client. */
+  'conv.night': { schema: hours, default: { from: 23, to: 8 } },
+  /** FR-CONV-12: Moscow hours without reminders to clients. */
+  'conv.reminder_quiet': { schema: hours, default: { from: 23, to: 9 } },
+  /** FR-NOTIF-3: draft cards of conversations a Moscow day. */
+  'conv.cards_per_day': { schema: z.number().int().positive(), default: 10 },
+  /** FR-AUTO-1, FR-AUTO-2: the level of each topic; the locked topics can only call Boris. */
+  'conv.autonomy': {
+    schema: z
+      .record(z.enum(TOPICS), LEVEL)
+      .refine((m) => LOCKED_TOPICS.every((t) => m[t] === 'call'), {
+        message: 'цена, договор, скидки и NDA всегда у Бориса',
+      }),
+    default: AUTONOMY_DEFAULT,
+  },
+  /** FR-CONV-12: reminders to clients who went quiet. */
+  'conv.reminders': { schema: z.boolean(), default: true },
+  /** FR-MIND-2: local vectors beside the full-text search, when they proved cheap. */
+  'mind.vectors': { schema: z.boolean(), default: false },
 } as const
 
 export type SettingKey = keyof typeof SETTINGS
