@@ -69,6 +69,7 @@ export async function buildTestApp(
     gateway,
     profi,
     bot,
+    rolesDir: join(dir, 'roles'),
     production: false,
     telegramApiRoot: tg.apiRoot,
     accounts: [{ id: 'hance-marketing', title: 'Hance маркетинг', egressIp: '127.0.0.1' }],

@@ -10,6 +10,8 @@ export type AppDeps = {
   gateway: Gateway
   profi: ProfiClient
   bot: BotControl
+  /** Where the roles' prompts are, for jobs that score on their own (the runs of the direction pages). */
+  rolesDir: string
   production: boolean
   telegramApiRoot?: string
   accountId?: string
