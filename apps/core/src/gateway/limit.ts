@@ -64,3 +64,117 @@ export function parseResetAt(text: string, now: Date): Date | null {
     return null
   }
 }
+
+export const LIMIT_TEXTS = {
+  started: '⏸️ Лимит Claude кончился, разбор заявок ждёт',
+  ended: '▶️ Лимит Claude вернулся',
+} as const
+
+/** The CLI shows the reset to the minute: the probe waits out the rest of that minute. */
+const AFTER_RESET_MS = 60_000
+
+export type LimitGuard = {
+  active(): boolean
+  /** A limit answer from the CLI: turns the limit on with one message to Boris, or updates its reset time. */
+  hit(resetAt: Date | null): void
+  /** The model answered: the limit, if any, is over (one message), and the waiting calls go. */
+  answered(): void
+  /** A limit that held before a restart: on again without a second message, and probed at once. */
+  adopt(): void
+  /** Resolves 'go' when there is no limit or it ends, 'expired' at `deadline` (epoch ms) or when it cannot end in time. */
+  wait(deadline: number): Promise<'go' | 'expired'>
+  stop(): void
+}
+
+/** The Claude limit (FR-OPS-3): who waits, when to probe the subscription again, what Boris hears. */
+export function createLimitGuard(o: {
+  notify(text: string): Promise<unknown>
+  /** One cheap model call; its outcome comes back through hit() or answered(). */
+  probe(): Promise<unknown>
+  probeEveryMs: number
+}): LimitGuard {
+  let state: { resetAt: Date | null } | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let stopped = false
+  const waiters = new Set<(r: 'go' | 'expired') => void>()
+
+  const tell = (text: string) =>
+    Promise.resolve()
+      .then(() => o.notify(text))
+      .catch((e) => console.error('limit message not sent', e instanceof Error ? e.message : e))
+  const release = (r: 'go' | 'expired') => {
+    for (const done of [...waiters]) done(r)
+  }
+  function schedule(ms: number) {
+    if (timer) clearTimeout(timer)
+    timer = null
+    if (stopped) return
+    timer = setTimeout(() => void check(), Math.max(0, ms))
+    timer.unref?.()
+  }
+  const nextCheckMs = () => {
+    const left = state?.resetAt ? state.resetAt.getTime() + AFTER_RESET_MS - Date.now() : 0
+    return left > 0 ? left : o.probeEveryMs
+  }
+  async function check() {
+    timer = null
+    try {
+      await o.probe()
+    } catch (e) {
+      console.error('limit probe failed', e instanceof Error ? e.message : e)
+    }
+    if (state && !timer) schedule(o.probeEveryMs)
+  }
+
+  return {
+    active: () => state !== null,
+    hit(resetAt) {
+      if (!state) {
+        state = { resetAt }
+        void tell(LIMIT_TEXTS.started)
+        schedule(nextCheckMs())
+      } else if (resetAt && resetAt.getTime() !== state.resetAt?.getTime()) {
+        state.resetAt = resetAt
+        schedule(nextCheckMs())
+      } else if (!timer) {
+        schedule(nextCheckMs())
+      }
+    },
+    answered() {
+      if (!state) return
+      state = null
+      if (timer) clearTimeout(timer)
+      timer = null
+      void tell(LIMIT_TEXTS.ended)
+      release('go')
+    },
+    adopt() {
+      if (state) return
+      state = { resetAt: null }
+      schedule(0)
+    },
+    wait(deadline) {
+      if (!state) return Promise.resolve('go')
+      const left = deadline - Date.now()
+      const resetAt = state.resetAt?.getTime()
+      if (stopped || left <= 0 || (resetAt && resetAt + AFTER_RESET_MS > deadline))
+        return Promise.resolve('expired')
+      return new Promise((resolve) => {
+        const done = (r: 'go' | 'expired') => {
+          clearTimeout(t)
+          waiters.delete(done)
+          resolve(r)
+        }
+        const t = setTimeout(() => done('expired'), left)
+        t.unref?.()
+        waiters.add(done)
+      })
+    },
+    stop() {
+      stopped = true
+      if (timer) clearTimeout(timer)
+      timer = null
+      release('expired')
+    },
+  }
+}
