@@ -89,6 +89,23 @@ describe('telegram bot', () => {
     expect(tg.sent[1]?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toBe(`t:${taskId}:bid`)
   })
 
+  it('FR-NOTIF-2: a silent lead card goes with disable_notification, a usual one without', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    const card = {
+      taskId,
+      title: 'Сайт',
+      city: 'Краснодар',
+      verdict: 'fit' as const,
+      reason: 'Сайт',
+      bidPriceRub: 210,
+    }
+    await bot.notifier.sendLeadCard(card, { silent: true })
+    await bot.notifier.sendLeadCard(card)
+    expect(tg.sent[1]?.disable_notification).toBe(true)
+    expect(tg.sent[2]?.disable_notification).toBeUndefined()
+  })
+
   it('NFR-UX-1: no long dash reaches Boris, whatever text the model or the order brought', async () => {
     const DASH = String.fromCharCode(0x2014)
     const EN_DASH = String.fromCharCode(0x2013)

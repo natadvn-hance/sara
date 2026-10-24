@@ -316,6 +316,8 @@ describe('eyes', () => {
     )
     const seen = await events('profi.order_seen')
     expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['911', 1]])
+    // The board's publication time travels with the order, so the core can drop a stale one (FR-LEAD-10).
+    expect(seen[0]?.payload.published_at).toBe('2026-10-24T08:00:00.000Z')
     const [stored] = await db.select().from(rawOrder).where(eq(rawOrder.orderId, '911'))
     expect(stored?.body).toMatchObject({ bid_price_rub: 1, bid_base_price_rub: 67, has_bid: false })
   })
@@ -423,5 +425,54 @@ describe('eyes', () => {
       ],
     })
     expect(await e.knownChats()).toEqual(['c-b', 'c-a', 'c-c'])
+  })
+
+  it('ST-M1-06: a board order without the client name or text takes them from its page', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const order = (over: Record<string, unknown>) => ({
+      order_id: '95300777',
+      title: 'Реклама ВКонтакте',
+      category: 'Реклама ВКонтакте',
+      city: 'Дистанционно · Москва',
+      text: '',
+      client_name: '',
+      budget_text: null,
+      bid_price_rub: 0,
+      seen_at: new Date().toISOString(),
+      ...over,
+    })
+    // A carousel card: no client name and no description on the board.
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'feed',
+        signals: [{ t: 'order', needsPage: true, order: order({}), published_at: null }],
+      },
+      'response',
+    )
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'order',
+        signals: [
+          {
+            t: 'order',
+            order: order({
+              client_name: 'Ирина',
+              text: 'Нужна реклама для кофейни',
+              bid_price_rub: 140,
+            }),
+            published_at: null,
+          },
+        ],
+      },
+      'dom',
+    )
+    const [seen] = await events('profi.order_seen')
+    expect(seen?.payload).toMatchObject({
+      client_name: 'Ирина',
+      text: 'Нужна реклама для кофейни',
+      bid_price_rub: 140,
+    })
   })
 })

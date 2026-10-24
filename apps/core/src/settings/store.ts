@@ -1,10 +1,13 @@
 import { type Actor, newEventId, SETTINGS, type SettingKey, type SettingValue } from '@sara/shared'
-import { eq } from 'drizzle-orm'
-import type { Db } from '../db/client'
+import { eq, sql } from 'drizzle-orm'
+import type { Db, DbOrTx } from '../db/client'
 import { setting, settingHistory } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 
-export async function getSetting<K extends SettingKey>(db: Db, key: K): Promise<SettingValue<K>> {
+export async function getSetting<K extends SettingKey>(
+  db: DbOrTx,
+  key: K,
+): Promise<SettingValue<K>> {
   const [row] = await db.select().from(setting).where(eq(setting.key, key))
   if (!row) return SETTINGS[key].default as SettingValue<K>
   return SETTINGS[key].schema.parse(row.value) as SettingValue<K>
@@ -17,7 +20,9 @@ export async function setSetting<K extends SettingKey>(
   value: SettingValue<K>,
   changedBy: Actor,
 ): Promise<void> {
-  const parsed = SETTINGS[key].schema.parse(value)
+  const checked = SETTINGS[key].schema.parse(value)
+  // A JavaScript null would be SQL NULL; «no limit» is kept as the JSON null.
+  const parsed = checked === null ? sql`'null'::jsonb` : checked
   const now = new Date().toISOString()
   await db.transaction(async (tx) => {
     await tx
