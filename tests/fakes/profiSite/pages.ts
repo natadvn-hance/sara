@@ -72,12 +72,19 @@ export type BidLook = {
   openerLeaves: boolean
   /** How many openers the tariff block draws. */
   openers: number
+  /**
+   * What opens the form: «Продолжить» with the fee beside it, a div as on the live page (maps of 24.10.2026), or the
+   * answer's own opener words (tariffsBlock.scrollButtonText).
+   */
+  opener: 'continue' | 'words'
+  /** The amount the «Продолжить» opener shows; null shows the fee. */
+  openerAmount: number | null
 }
 
 // The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
-// 24.10.2026: no field and no <button> at first, a tariff block «orderCard/tariffs» with «Отклик • N ₽», and an
-// opener that is no button, with the answer's tariffsBlock.scrollButtonText («Написать клиенту»). It opens the form
-// «Комиссия за заказ»: the price, the text, the payment footer, the send button.
+// 24.10.2026: no field and no <button> at first, a tariff block «orderCard/tariffs» with the tariff card «Отклик • N ₽»,
+// «Детали» and the opener «Продолжить» with the fee beside it, all of them divs or links. It opens the form «Комиссия за
+// заказ»: the price, the text, the payment footer, the send button.
 export const orderPage = (id: string, look: BidLook) =>
   shell(
     'Заказ',
@@ -94,8 +101,14 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
   if (s.disabledBidBlock) { box.innerHTML = '<p class="closed">' + s.disabledBidBlock.title + '</p>'; return }
   const hidden = ${look.behindOpener}
   const t = s.tariffsBlock
-  box.innerHTML = '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div>' +
-    (hidden ? Array.from({ length: ${look.openers} }, (_, i) => '<a id="bid-opener' + (i ? i : '') + '" class="opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>').join('') : '') + '</div>' +
+  const amount = ${look.openerAmount === null ? 's.price.value' : `'${look.openerAmount}'`}
+  const opener = (i) => ${look.opener === 'continue'}
+    ? '<div id="bid-opener' + (i ? i : '') + '" class="opener" style="cursor: pointer"><div>Продолжить</div><div>' + amount + ' ₽</div></div>'
+    : '<a id="bid-opener' + (i ? i : '') + '" class="opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>'
+  box.innerHTML = '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div>' +
+    '<div class="tariff" style="cursor: pointer"><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div><div>Вы платите сразу за предложение услуг, но не каждый отклик приводит к заказу</div></div>' +
+    '<a href="#details">' + t.details + '</a>' +
+    (hidden ? Array.from({ length: ${look.openers} }, (_, i) => opener(i)).join('') : '') + '</div>' +
     '<form id="bid-form" data-testid="bid_form"' + (hidden ? ' hidden' : '') + '><h3>' + t.formTitle + '</h3>' +
     '<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">' +
     '<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>' +

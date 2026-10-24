@@ -17,30 +17,40 @@ const rubIn = (text: string | null) => {
   return m?.[1] ? Number(m[1].replace(/[^\d]/g, '')) : null
 }
 
+/** What may open the form: the answer's opener words and the fee the opener shows beside «Продолжить». */
+export type Opener = { words: string | null; feeRub: number | null }
+
+// «Продолжить» with the fee beside it (the live opener: a div of two divs, so no space in its text).
+const CONTINUE_PRICED = /^\s*Продолжить\s*\d[\d\s]*₽\s*$/
+
 /**
- * The text field is on screen, after pressing what opens the form. On the live page (24.10.2026) that is no button:
- * its words come from the order answer (tariffsBlock.scrollButtonText, «Написать клиенту»); one in the tariff
- * block, or the only one on the page, is pressed. «Продолжить» was the September opener.
+ * The text field is on screen, after pressing what opens the form. On the live page (maps of 24.10.2026) that is no
+ * button but a div in the tariff block: «Продолжить» with the fee beside it, pressed only when the fee is the order's
+ * own. Then the answer's opener words (tariffsBlock.scrollButtonText), one in the tariff block or the only one on the
+ * page, and the September button «Продолжить». Two of a kind, or another fee, presses nothing.
  */
 export async function openForm(
   page: Page,
-  opener: string | null,
+  opener: Opener,
   ms = 10000,
   o: {
     /** Asked right before the press: the tab may have stopped being ours meanwhile. */
     may?: () => boolean
-    /** «Продолжить» as the September fallback; the node's own calibration never uses it. */
+    /** «Продолжить» as the September button; the node's own calibration never uses it. */
     september?: boolean
   } = {},
-): Promise<{ open: boolean; pressed: boolean }> {
+): Promise<{ open: boolean; pressed: boolean; by: string | null }> {
+  const none = { open: false, pressed: false, by: null }
   const text = shown(page, TEXT)
+  const tariffs = page.locator(TARIFFS)
+  const priced = tariffs.locator('*').filter({ hasText: CONTINUE_PRICED }).filter({ visible: true })
   const byWords = (scope: Page | Locator) =>
-    opener ? scope.getByText(opener, { exact: true }).filter({ visible: true }) : null
+    opener.words ? scope.getByText(opener.words, { exact: true }).filter({ visible: true }) : null
   const september =
     o.september === false
       ? null
       : page.getByRole('button', { name: CONTINUE, exact: true }).filter({ visible: true })
-  const anyOpener = [byWords(page), september].reduce<Locator | null>(
+  const anyOpener = [priced, byWords(page), september].reduce<Locator | null>(
     (a, b) => (a && b ? a.or(b) : (a ?? b)),
     null,
   )
@@ -48,27 +58,52 @@ export async function openForm(
     .first()
     .waitFor({ timeout: ms })
     .catch(() => {})
-  if ((await text.count()) > 0) return { open: true, pressed: false }
+  if ((await text.count()) > 0) return { open: true, pressed: false, by: null }
+
   let press: Locator | null = null
-  for (const c of [byWords(page.locator(TARIFFS)), byWords(page), september]) {
-    if (c && (await c.count()) === 1) {
-      press = c
-      break
+  let by: string | null = null
+  // A wrapper holding only the opener matches too: one chain of nested matches is one opener.
+  const seen = await priced
+    .evaluateAll((els) => {
+      const last = els[els.length - 1]
+      return {
+        n: els.length,
+        one: !!last && els.every((e) => e.contains(last)),
+        text: last?.textContent ?? '',
+      }
+    })
+    .catch(() => ({ n: 0, one: false, text: '' }))
+  if (seen.n > 0) {
+    const fee = Number(seen.text.replace(/[^\d]/g, ''))
+    if (!seen.one || opener.feeRub === null || fee !== opener.feeRub) return none
+    press = priced.last()
+    by = `${CONTINUE} ${fee} ₽`
+  } else {
+    for (const [c, words] of [
+      [byWords(tariffs), opener.words],
+      [byWords(page), opener.words],
+      [september, CONTINUE],
+    ] as const) {
+      if (c && (await c.count()) === 1) {
+        press = c
+        by = words
+        break
+      }
     }
   }
-  if (!press) return { open: false, pressed: false }
+  if (!press) return none
   // Never what sends a form: an opener is no submit and lives outside the form.
   const sends = await press
     .evaluate((el) => !!el.closest('form, button[type="submit"], input[type="submit"]'))
     .catch(() => true)
-  if (sends || (o.may && !o.may())) return { open: false, pressed: false }
+  if (sends || (o.may && !o.may())) return none
   await press.click({ timeout: 5000 }).catch(() => {})
   const open = await text
     .first()
     .waitFor({ timeout: ms })
     .then(() => true)
     .catch(() => false)
-  return { open, pressed: true }
+  return { open, pressed: true, by }
 }
 
 /**
