@@ -20,18 +20,21 @@ const sample = (kind: Sample['kind'], name: string): Sample =>
 const parse = (s: Sample): ParseResult =>
   s.kind === 'rtp' ? profiParsers.fromRtp(s.body) : profiParsers.fromResponse(s.url ?? '', s.body)
 
-type BoardItem = { id: string; type: string }
+type BoardItem = { id: string; type: string; snippets?: BoardItem[] }
 
 describe('Profi.ru samples', () => {
-  it('ST-M1-10: the board sample gives each order card as an order that waits for its page', () => {
+  it('ST-M1-10: the board sample gives each order card, the carousel ones too, as an order that waits for its page', () => {
     const s = sample('response', 'board')
     const r = parse(s)
     expect(r.recognized).toBe(true)
     expect(r.what).toBe('feed')
+    // The carousel of older orders sits among the cards; Boris: score them like the others (24.10.2026).
     const cards = (
       s.body as { data: { boSearchBoardItems: { items: BoardItem[] } } }
-    ).data.boSearchBoardItems.items.filter((it) => it.type === 'SNIPPET')
-    expect(cards.length).toBeGreaterThan(10)
+    ).data.boSearchBoardItems.items.flatMap((it) =>
+      it.type === 'SNIPPET' ? [it] : it.type === 'CAROUSEL' ? (it.snippets ?? []) : [],
+    )
+    expect(cards.length).toBeGreaterThan(20)
     expect(r.signals.map((x) => (x.t === 'order' ? x.order.order_id : x.t))).toEqual(
       cards.map((c) => c.id),
     )
@@ -80,14 +83,15 @@ describe('Profi.ru samples', () => {
     expect(parse(sample('response', 'order-page'))).toEqual({
       recognized: true,
       what: 'order',
-      signals: [{ t: 'order_fee', orderId: '10000001', rub: 71, hasBid: false }],
+      signals: [{ t: 'order_fee', orderId: '10000001', rub: 71, baseRub: 71, hasBid: false }],
     })
   })
 
-  it('ST-M1-06: with a discount the fee is what the bid costs now, not the usual price', () => {
+  it('ST-M1-06: with a discount the fee is what the bid costs now, the usual price kept beside it', () => {
     // «Для вас отклик на этот заказ стоит 1 ₽»: the page text has no «Отклик • N ₽» line then.
+    // Boris, 24.10.2026: Sara counts what is really paid.
     expect(parse(sample('response', 'order-page-discount')).signals).toEqual([
-      { t: 'order_fee', orderId: '10000001', rub: 1, hasBid: false },
+      { t: 'order_fee', orderId: '10000001', rub: 1, baseRub: 67, hasBid: false },
     ])
   })
 

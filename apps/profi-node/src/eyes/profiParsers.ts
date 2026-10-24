@@ -73,6 +73,8 @@ type BoardItem = {
   price?: { value?: string | null; prefix?: string | null; suffix?: string | null } | null
   clientInfo?: { name?: string | null } | null
   lastUpdateDate?: number | null
+  /** A CAROUSEL item: older orders among the cards, without their own type or client name. */
+  snippets?: BoardItem[] | null
 }
 
 /** One order card of the GraphQL board; other item kinds (banners and the like) are skipped. */
@@ -115,7 +117,11 @@ function fromProfileAnswer(body: unknown): ParseResult {
 
 type OrderScreen = {
   _id?: unknown
-  boOrderScreen?: { id?: unknown; price?: { value?: unknown } | null; hasBid?: unknown } | null
+  boOrderScreen?: {
+    id?: unknown
+    price?: { value?: unknown; baseValue?: unknown } | null
+    hasBid?: unknown
+  } | null
 }
 
 /**
@@ -129,10 +135,12 @@ function fromOrderAnswer(orders: unknown[]): ParseResult {
     const orderId = String(o?._id ?? screen?.id ?? '')
     const digits = String(screen?.price?.value ?? '').replace(/[^\d]/g, '')
     if (!/^\d+$/.test(orderId) || digits === '') continue
+    const base = String(screen?.price?.baseValue ?? '').replace(/[^\d]/g, '')
     signals.push({
       t: 'order_fee',
       orderId,
       rub: Number(digits),
+      baseRub: base === '' ? null : Number(base),
       hasBid: typeof screen?.hasBid === 'boolean' ? screen.hasBid : null,
     })
   }
@@ -149,8 +157,14 @@ export function fromSiteAnswer(url: string, body: unknown): ParseResult {
   if (!/\/graphql/.test(url) || !board || !Array.isArray(board.items))
     return { recognized: false, signals: [] }
   const now = new Date().toISOString()
-  const signals = (board.items as BoardItem[])
-    .map((it) => boardOrder(it ?? {}, now))
+  // The carousel's orders are read like the other cards (Boris, 24.10.2026).
+  const signals = (board.items as (BoardItem | null)[])
+    .flatMap((it) =>
+      it?.type === 'CAROUSEL' && Array.isArray(it.snippets)
+        ? it.snippets.map((x) => ({ ...x, type: 'SNIPPET' }))
+        : [it ?? {}],
+    )
+    .map((it) => boardOrder(it, now))
     .filter((x): x is OrderSignal => x !== null)
   return { recognized: true, what: 'feed', signals }
 }
