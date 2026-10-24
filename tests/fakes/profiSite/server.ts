@@ -168,6 +168,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     openerChargeShown: true,
     openerLeaves: false,
     openers: 1,
+    opener: 'continue',
+    openerAmount: null,
     openerText: 'Написать клиенту',
     answer: true,
     hasBidField: true,
