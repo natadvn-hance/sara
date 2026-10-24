@@ -130,8 +130,16 @@ export async function maybePropose(
     ...cases.map(caseText),
   ].join('\n')
   const r = await d.gateway.call('rules-proposer', input, RulesProposalOutput)
-  if (!r.ok) return 'not_yet'
   const id = newEventId()
+  if (!r.ok) {
+    // An answer off the schema is a broken proposal like any other; a model that did not answer is not.
+    if (r.errorClass !== 'bad_output') return 'not_yet'
+    await appendEvent(
+      d.db,
+      journal('rules.proposal_invalid', accountId, id, 'sara', {}, r.message.slice(0, 300)),
+    )
+    return 'invalid'
+  }
   const rules = DirectionRules.safeParse(r.output.rules)
   if (!rules.success) {
     await appendEvent(

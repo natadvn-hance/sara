@@ -37,7 +37,10 @@ const notifier: Notifier = {
   },
 }
 let dir: string
-async function gateway(byRole: Record<string, unknown>): Promise<Gateway> {
+async function gateway(
+  byRole: Record<string, unknown>,
+  env: Record<string, string> = {},
+): Promise<Gateway> {
   const secrets = createSecretStore(join(dir, 'data'))
   await secrets.set('claude_oauth_token', 'tok')
   return createGateway({
@@ -46,7 +49,7 @@ async function gateway(byRole: Record<string, unknown>): Promise<Gateway> {
     claudeBin: join(ROOT, 'tests/fakes/fake-claude.mjs'),
     rolesDir: join(dir, 'roles'),
     dataDir: join(dir, 'data'),
-    extraEnv: { FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole) },
+    extraEnv: { FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole), ...env },
   })
 }
 const PROPOSAL = {
@@ -159,6 +162,26 @@ describe('rule proposals', () => {
     expect(sent.length).toBe(before)
     expect(await countEvents(db, 'rules.proposal_invalid')).toBe(1)
     expect(await db.select().from(ruleProposal)).toHaveLength(0)
+  })
+
+  it('FR-MIND-3: an answer that breaks the answer schema is journaled as an invalid proposal', async () => {
+    await threeSurprises()
+    const gw = await gateway({
+      'rules-proposer': { summary: 'Порог выше', why: 'так' },
+      scorer: scorerAnswer(58),
+    })
+    const before = sent.length
+    expect(await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)).toBe('invalid')
+    expect(sent.length).toBe(before)
+    expect(await countEvents(db, 'rules.proposal_invalid')).toBe(1)
+    expect(await db.select().from(ruleProposal)).toHaveLength(0)
+  })
+
+  it('FR-MIND-3: a proposer that did not answer at all is not an invalid proposal', async () => {
+    await threeSurprises()
+    const gw = await gateway({ 'rules-proposer': PROPOSAL }, { FAKE_CLAUDE_MODE: 'limit' })
+    expect(await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)).toBe('not_yet')
+    expect(await countEvents(db, 'rules.proposal_invalid')).toBe(0)
   })
 
   it('FR-MIND-3: a proposal made for v1 is not applied after the rules changed', async () => {
