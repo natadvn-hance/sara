@@ -18,4 +18,17 @@ describe('the names a model must not see', () => {
       'Анна Петрова',
     ])
   })
+
+  it('NFR-PRIV-2: a hyphenated name is hidden whole and by its parts', () => {
+    expect(namesToHide('Анна-Мария')).toEqual(['Анна-Мария', 'Анна', 'Мария'])
+  })
+
+  it('NFR-PRIV-2: a company form written in capitals is not a name', () => {
+    expect(namesToHide('Ольга ИП Иванова')).toEqual(['Ольга Иванова'])
+    expect(namesToHide('ООО Ромашка')).toEqual(['Ромашка'])
+  })
+
+  it('NFR-PRIV-2: «скрыт», «скрыл», «скрыто» all say the name is hidden', () => {
+    expect(namesToHide('Пользователь скрыл имя', 'Имя скрыто', 'Скрытый клиент')).toEqual([])
+  })
 })

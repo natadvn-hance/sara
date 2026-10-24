@@ -11,6 +11,7 @@ import { jobRun, ruleProposal, task } from '../db/schema'
 import { rulesDiff } from '../direction/diff'
 import { activeRules, insertVersion } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
+import { hasTag } from '../gateway/redact'
 import { appendEvent } from '../journal/journal'
 import { namesToHide } from '../leads/clientName'
 import { rulesText } from '../leads/scorer'
@@ -160,8 +161,9 @@ export async function maybePropose(
     'Случаи, где решение Бориса разошлось с оценкой Сары:',
     ...cases.map(caseText),
   ].join('\n')
+  // The proposal is kept and read by the Scorer for every later order: nothing of a client may come back into it.
   const r = await d.gateway.call('rules-proposer', input, RulesProposalOutput, {
-    redact: { names: namesToHide(...cases.map((c) => c.client_name)) },
+    redact: { names: namesToHide(...cases.map((c) => c.client_name)), restore: false },
   })
   const id = newEventId()
   if (!r.ok) {
@@ -170,6 +172,20 @@ export async function maybePropose(
     await appendEvent(
       d.db,
       journal('rules.proposal_invalid', accountId, id, 'sara', {}, r.message.slice(0, 300)),
+    )
+    return 'invalid'
+  }
+  if (hasTag(JSON.stringify(r.output))) {
+    await appendEvent(
+      d.db,
+      journal(
+        'rules.proposal_invalid',
+        accountId,
+        id,
+        'sara',
+        {},
+        'the proposal holds a client tag',
+      ),
     )
     return 'invalid'
   }

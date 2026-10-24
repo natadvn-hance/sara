@@ -248,6 +248,45 @@ describe('the draft on the card', () => {
   })
 })
 
+describe('the order page name', () => {
+  it('NFR-PRIV-2: the name the order page gave is hidden from the Analyst of a «Взял бы» draft', async () => {
+    byRole = { ...byRole, scorer: scorerAnswer(50) }
+    const id = orderId()
+    // The board gave no name; the text says it, and so will the order page.
+    await fake.emitOrder({
+      order_id: id,
+      client_name: '',
+      text: 'Меня зовут Ольга Петрова, нужен сайт для клиники.',
+    })
+    await until(async () => (await leadOf(id))?.status === 'scored_out')
+    await db
+      .update(lead)
+      .set({
+        clientInfo: {
+          name: 'Ольга Петрова',
+          on_profi_since: null,
+          phone_verified: null,
+          reviews: null,
+          review_tags: [],
+        },
+      })
+      .where(eq(lead.id, id))
+    await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
+    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
+    const summary = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))
+    tg.pushPress(111, summary?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data ?? '')
+    await until(() => cards().some((m) => button(m, 'bid') !== ''))
+    const analyst = (await readFile(claudeLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l).stdin as string)
+      .filter((stdin) => stdin.includes('Длина текста'))
+    expect(analyst).toHaveLength(1)
+    expect(analyst[0]).not.toContain('Ольга')
+    expect(analyst[0]).not.toContain('Петрова')
+  })
+})
+
 describe('the bid', () => {
   it('FR-LEAD-8: «Откликнуться» sends the draft and its price', async () => {
     const id = orderId()

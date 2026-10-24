@@ -194,7 +194,10 @@ describe('the Analyst', () => {
 
   it('NFR-PRIV-2: the Analyst call hides the client name the board and the order page gave', async () => {
     const { gw, options } = stubGateway([answer(BODY)])
-    await writeDraft(gw, { ...(await order()), client_info_name: 'Ирина Петрова' })
+    await writeDraft(gw, {
+      ...(await order()),
+      client_info: { name: 'Ирина Петрова' },
+    })
     expect(options[0]?.redact?.names).toEqual(['Ирина', 'Ирина Петрова'])
   })
 
@@ -211,10 +214,25 @@ describe('the Analyst', () => {
     ])
     expect(await writeDraft(gw, await order())).toMatchObject({
       text: null,
-      reason: 'not_plain',
+      reason: 'has_tag',
       attempts: 2,
     })
     expect(inputs[1]).toContain('квадратных скобках')
+  })
+
+  it('NFR-PRIV-2: any square-bracketed word in a draft is refused, the tag forms the model invents included', async () => {
+    for (const text of [
+      'Понимаю, [Имя]. Когда запуск?',
+      'Смотрите [ссылка на сайт]. Когда запуск?',
+    ]) {
+      const { gw, inputs } = stubGateway([answer(text), answer(text)])
+      expect(await writeDraft(gw, await order())).toMatchObject({
+        text: null,
+        reason: 'has_tag',
+        attempts: 2,
+      })
+      expect(inputs[1]).toContain('квадратных скобках')
+    }
   })
 
   it('NFR-PRIV-2: a second answer without tags is the draft', async () => {

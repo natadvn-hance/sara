@@ -113,7 +113,7 @@ const sourceOf = (l: LeadRow): DraftSource => ({
   budget_text: l.budgetText,
   text: l.text,
   client_name: l.clientName,
-  client_info_name: ClientInfo.safeParse(l.clientInfo).data?.name ?? null,
+  client_info: ClientInfo.safeParse(l.clientInfo).data ?? null,
 })
 
 /** The Analyst's draft, or why there is none; any failure is «no answer», the card comes anyway. */

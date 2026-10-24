@@ -1,6 +1,5 @@
 import { AnalystOutput, type ProfiOrder, plural } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
-import { hasTag } from '../gateway/redact'
 import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
@@ -14,7 +13,10 @@ export const BID_TEXT_MAX = 500
 export type DraftSource = Pick<
   ProfiOrder,
   'title' | 'category' | 'city' | 'budget_text' | 'text' | 'client_name'
-> & { client_info_name?: string | null }
+> & {
+  /** What the order page says about the client; only the name is read, to hide it from the model. */
+  client_info?: { name: string | null } | null
+}
 
 /** The Analyst's reading of the order and its short разбор, kept beside the draft. */
 export type Analysis = Pick<AnalystOutput, 'reading' | 'hidden_need' | 'risk' | 'condition'>
@@ -27,7 +29,7 @@ export type Draft = {
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
   text: null
-  reason: 'no_answer' | 'too_long' | 'not_plain'
+  reason: 'no_answer' | 'too_long' | 'not_plain' | 'has_tag'
   attempts: number
   analysis: Analysis | null
 }
@@ -49,6 +51,11 @@ const FIRST_SENTENCE = /^[^.!?\n]*[.!?]*\s*/u
 const DASHES = /[\u2013\u2014]/g
 /** The model's own framing or JSON around the text (old Sara, 17.09 and 30.09): never typed into the form. */
 const NOT_PLAIN = /^\s*[{[]|<\/?parameter\b/i
+/**
+ * A word in square brackets: a tag of ADR-016 the model made up and the gateway could not put back («[имя 4]»,
+ * «[Имя]», «[ссылка на сайт]»). A bid has no use for brackets, and the client would read them.
+ */
+const BRACKETED = /\[[^\]\n]{1,40}\]/u
 
 /** «Ирина, добрый день!» when the client's name is known, else «Добрый день!» (Boris, 20.10: a missing hello is rude). */
 export function greetingOf(clientName: string): string {
@@ -111,7 +118,7 @@ export async function writeDraft(
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
   let analysis: Analysis | null = null
-  const redact = { names: namesToHide(o.client_name, o.client_info_name) }
+  const redact = { names: namesToHide(o.client_name, o.client_info?.name) }
   for (let attempts = 1; attempts <= 2; attempts++) {
     const r = await gw.call('analyst', input, AnalystOutput, { ...opts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
@@ -121,9 +128,8 @@ export async function writeDraft(
     if (!body || NOT_PLAIN.test(body)) {
       reason = 'not_plain'
       input = `${base}\n\nПрошлый вариант был не простой текст. Напиши только сам текст отклика, без JSON и разметки.`
-    } else if (hasTag(body)) {
-      // A tag the gateway could not put back (the model made it up): the client would read it.
-      reason = 'not_plain'
+    } else if (BRACKETED.test(body)) {
+      reason = 'has_tag'
       input = `${base}\n\nВ прошлом варианте остались метки в квадратных скобках. Напиши текст без них, словами.`
     } else if (text.length > BID_TEXT_MAX) {
       reason = 'too_long'

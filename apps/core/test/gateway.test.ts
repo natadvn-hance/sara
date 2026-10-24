@@ -335,6 +335,25 @@ describe('client data and the model', () => {
   })
 })
 
+describe('an answer that must stay hidden', () => {
+  it('NFR-PRIV-2: with restore off the tags of the answer stay as the model wrote them', async () => {
+    const gw = await gateway({
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({
+        sorter: {
+          verdict: 'fit',
+          reason: 'Это [имя 1], тел. [телефон 1]',
+          tags: [],
+          confidence: 0.9,
+        },
+      }),
+    })
+    const r = await gw.call('sorter', 'Олег, тел. +7 916 123-45-67', SorterOutput, {
+      redact: { names: ['Олег'], restore: false },
+    })
+    expect(r).toMatchObject({ ok: true, output: { reason: 'Это [имя 1], тел. [телефон 1]' } })
+  })
+})
+
 describe('what pseudonymized says', () => {
   it('NFR-PRIV-2: a call that carries a client but names no one is not marked as pseudonymized', async () => {
     const gw = await gateway({
