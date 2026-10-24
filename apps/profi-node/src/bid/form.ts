@@ -17,6 +17,18 @@ const rubIn = (text: string | null) => {
   return m?.[1] ? Number(m[1].replace(/[^\d]/g, '')) : null
 }
 
+/**
+ * The amount due in the form footer: the sum after «К оплате», or the only sum there. «Баланс 2 500 ₽ К оплате 300 ₽»
+ * is 300, never the wallet; several sums without that label are not read (null).
+ */
+export function dueIn(text: string | null): number | null {
+  const t = (text ?? '').replace(/\u00a0/g, ' ')
+  const labelled = /К оплате\D*?(\d[\d ]*)\s*₽/.exec(t)
+  if (labelled?.[1]) return Number(labelled[1].replace(/\D/g, ''))
+  const sums = t.match(/\d[\d ]*\s*₽/g) ?? []
+  return sums.length === 1 ? rubIn(sums[0] ?? null) : null
+}
+
 /** What may open the form: the answer's opener words and the fee the opener shows beside «Продолжить». */
 export type Opener = { words: string | null; feeRub: number | null }
 
@@ -128,9 +140,9 @@ export async function readPayment(
       .innerText({ timeout: 1000 })
       .catch(() => null))
   const wayText = (await read(WAY))?.trim() ?? null
-  if (!wayText) return { dueRub: rubIn(footer), way: null }
+  if (!wayText) return { dueRub: dueIn(footer), way: null }
   const byAmount = /^\d[\d\s ]*₽$/.test(wayText) && rubIn(wayText) === walletRub
-  return { dueRub: rubIn(footer), way: byAmount ? 'wallet' : paymentWay(wayText) }
+  return { dueRub: dueIn(footer), way: byAmount ? 'wallet' : paymentWay(wayText) }
 }
 
 /** Fills the price (empty for null) and the text, then reads them back: what the form did not take whole stops. */

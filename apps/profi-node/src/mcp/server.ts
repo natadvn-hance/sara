@@ -27,7 +27,8 @@ export type ProfiToolsImpl = {
   getOrder(i: GetOrderInput): Promise<GetOrderOutput>
   listChats(i: ListChatsInput): Promise<ListChatsOutput>
   readChat(i: ReadChatInput): Promise<ReadChatOutput>
-  submitBid(i: SubmitBidInput): Promise<SubmitBidOutput>
+  /** `signal` aborts when the core stops waiting (its call timed out or was cancelled): nothing may be pressed then. */
+  submitBid(i: SubmitBidInput, signal?: AbortSignal): Promise<SubmitBidOutput>
   sendMessage(i: SendMessageInput): Promise<SendMessageOutput>
 }
 
@@ -52,7 +53,12 @@ const DESCRIPTIONS: Record<ProfiToolName, string> = {
     'Сообщение клиенту через поле чата с проверкой, что чат не изменился, и поиском своего сообщения.',
 }
 
-function call(impl: ProfiToolsImpl, name: ProfiToolName, data: unknown): Promise<object> {
+function call(
+  impl: ProfiToolsImpl,
+  name: ProfiToolName,
+  data: unknown,
+  signal: AbortSignal,
+): Promise<object> {
   switch (name) {
     case 'profi.session_health':
       return impl.sessionHealth(data as SessionHealthInput)
@@ -65,7 +71,7 @@ function call(impl: ProfiToolsImpl, name: ProfiToolName, data: unknown): Promise
     case 'profi.read_chat':
       return impl.readChat(data as ReadChatInput)
     case 'profi.submit_bid':
-      return impl.submitBid(data as SubmitBidInput)
+      return impl.submitBid(data as SubmitBidInput, signal)
     case 'profi.send_message':
       return impl.sendMessage(data as SendMessageInput)
   }
@@ -87,7 +93,8 @@ export function createProfiMcpServer(impl: ProfiToolsImpl): Server {
     })),
   }))
 
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  // A stateless call lives as long as its HTTP request: when the core hangs up, the server closes and aborts `signal`.
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const name = req.params.name as ProfiToolName
     const tool = PROFI_TOOLS[name]
     const fail = (errorClass: ProfiErrorClass, message: string) => ({
@@ -98,7 +105,7 @@ export function createProfiMcpServer(impl: ProfiToolsImpl): Server {
     const input = tool.input.safeParse(req.params.arguments ?? {})
     if (!input.success) return fail('INTERNAL', input.error.message)
     try {
-      const out = await call(impl, name, input.data)
+      const out = await call(impl, name, input.data, extra.signal)
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(out) }],
         structuredContent: out,

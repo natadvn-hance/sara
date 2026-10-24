@@ -44,13 +44,17 @@ async function mcp() {
   return client
 }
 
-const bid = (key = 'bid:1') => ({
-  account_id: 'hance-marketing',
-  order_id: '1',
-  text: 'Добрый день!',
-  idempotency_key: key,
-  permit: signPermit(SECRET, key),
-})
+const bid = (key = 'bid:1') => {
+  const unsigned = {
+    account_id: 'hance-marketing',
+    order_id: '1',
+    text: 'Добрый день!',
+    max_fee_rub: 210,
+    not_after: new Date(Date.now() + 60_000).toISOString(),
+    idempotency_key: key,
+  }
+  return { ...unsigned, permit: signPermit(SECRET, unsigned) }
+}
 
 describe('fake Profi-MCP', () => {
   it('C2: fake tools match the contract names and schemas', async () => {

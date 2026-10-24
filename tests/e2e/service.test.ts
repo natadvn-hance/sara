@@ -84,6 +84,7 @@ describe('Profi-MCP service end to end', () => {
       order_id: orderId,
       text: 'Добрый день! Сделаем лендинг. Когда нужен запуск?',
       price_rub: 30000,
+      max_fee_rub: 71,
       idempotency_key: `bid:${orderId}`,
     })
     expect(r).toEqual({

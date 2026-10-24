@@ -59,6 +59,10 @@ export function createBidTools(o: {
   const clientMs = o.clientMs ?? 3000
   const orderPath = o.parsers.paths.order ?? profiParsers.paths.order ?? ((id) => id)
   const uncertain = () => fail('UNCERTAIN', 'Отклик нажат, но страница его не показала')
+  const tooLate = () =>
+    fail('RATE_LIMITED', 'Срок нажатия прошёл или ядро перестало ждать, отклик не нажат')
+  const dearer = (due: number, max: number) =>
+    fail('PRICE_CHANGED', `Отклик стоит ${due} ₽, а ядро разрешило до ${max} ₽, отклик не нажат`)
 
   const runtime = (id: string) => {
     const r = o.accounts.get(id)
@@ -177,9 +181,11 @@ export function createBidTools(o: {
     r: BidRuntime,
     i: SubmitBidInput,
     t: { go: Go; can(): boolean },
+    late: () => boolean,
   ): Promise<SubmitBidOutput> {
     const page = r.page()
     const id = i.order_id
+    const key = i.idempotency_key
     const opened = await openOrder(page, t.go, id)
     if (!opened.ok) throw fail('RATE_LIMITED', 'Страница заказа не открылась, отклик не нажат')
     await keepFormMap(r, page)
@@ -202,42 +208,77 @@ export function createBidTools(o: {
       throw fail('INTERNAL', 'Профи.ру требует «Стоимость услуги», а цены в отклике нет')
     if (s.feeRub === null || wallet === null)
       throw fail('LAYOUT_CHANGED', 'Не прочитал цену отклика или кошелёк, отклик не нажат')
+    if (s.feeRub > i.max_fee_rub) throw dearer(s.feeRub, i.max_fee_rub)
     if (wallet < s.feeRub)
       throw fail('NO_MONEY', `В кошельке ${wallet} ₽, а отклик стоит ${s.feeRub} ₽`)
     if (s.payment === 'other')
       throw fail('UNSAFE_PAYMENT', 'Профи.ру просит оплату не с кошелька, отклик не нажат')
+    if (late()) throw tooLate()
 
-    if (!(await openForm(page, { words: s.openerText, feeRub: s.feeRub })).open)
-      throw fail('LAYOUT_CHANGED', 'Форма отклика не открылась')
-    const pay = await readPayment(page, wallet)
-    const due = pay.dueRub ?? s.feeRub
-    if (wallet < due) throw fail('NO_MONEY', `В кошельке ${wallet} ₽, а к оплате ${due} ₽`)
-    if (pay.way === 'other')
-      throw fail('UNSAFE_PAYMENT', 'Профи.ру просит оплату не с кошелька, отклик не нажат')
-    const filled = await fillForm(page, { priceRub: price, text: i.text })
-    if (filled === 'no_field') throw fail('LAYOUT_CHANGED', 'Поля формы отклика не нашлись')
-    if (filled === 'not_taken')
-      throw fail('INTERNAL', 'Форма не приняла цену или текст целиком, отклик не нажат')
-    if (!t.can())
-      throw fail('RATE_LIMITED', 'Вкладка аккаунта перестала ходить на сайт, отклик не нажат')
-    if (
-      !(await savePress(o.db, {
-        key: i.idempotency_key,
-        accountId: i.account_id,
-        orderId: id,
-        dueRub: due,
-      }))
-    )
-      return confirm(r, i, due, t)
+    // The press is written down before the opener: should the opener spend after all, a retry only looks.
+    if (!(await savePress(o.db, { key, accountId: i.account_id, orderId: id, dueRub: s.feeRub }))) {
+      const twin = await findBidAttempt(o.db, key)
+      return confirm(r, i, twin?.dueRub ?? s.feeRub, t)
+    }
+    let openerPressed = false
+    /**
+     * A stop before the send button: the written press goes, so a retry may try again, but only when the opener was
+     * not pressed or the wallet on the page shows nothing spent. Anything else may have spent: UNCERTAIN.
+     */
+    const refuse = async (e: ProfiToolError): Promise<never> => {
+      const now = openerPressed ? await walletOnPage(r, page).catch(() => null) : wallet
+      if (now !== wallet) throw uncertain()
+      await o.db.delete(bidAttempt).where(eq(bidAttempt.idempotencyKey, key))
+      throw e
+    }
+    const stopped = () =>
+      !t.can()
+        ? fail('RATE_LIMITED', 'Вкладка аккаунта перестала ходить на сайт, отклик не нажат')
+        : late()
+          ? tooLate()
+          : null
+
+    let due = s.feeRub
+    try {
+      // «Продолжить» is pressed only beside the order's own fee, checked above against max_fee_rub.
+      const form = await openForm(page, { words: s.openerText, feeRub: s.feeRub }, undefined, {
+        may: () => t.can() && !late(),
+      })
+      openerPressed = form.pressed
+      if (!form.open)
+        return await refuse(stopped() ?? fail('LAYOUT_CHANGED', 'Форма отклика не открылась'))
+      const pay = await readPayment(page, wallet)
+      due = pay.dueRub ?? s.feeRub
+      if (due > i.max_fee_rub) return await refuse(dearer(due, i.max_fee_rub))
+      if (wallet < due)
+        return await refuse(fail('NO_MONEY', `В кошельке ${wallet} ₽, а к оплате ${due} ₽`))
+      if (pay.way === 'other')
+        return await refuse(
+          fail('UNSAFE_PAYMENT', 'Профи.ру просит оплату не с кошелька, отклик не нажат'),
+        )
+      const filled = await fillForm(page, { priceRub: price, text: i.text })
+      if (filled === 'no_field')
+        return await refuse(fail('LAYOUT_CHANGED', 'Поля формы отклика не нашлись'))
+      if (filled === 'not_taken')
+        return await refuse(
+          fail('INTERNAL', 'Форма не приняла цену или текст целиком, отклик не нажат'),
+        )
+      const stop = stopped()
+      if (stop) return await refuse(stop)
+      if (due !== s.feeRub)
+        await o.db.update(bidAttempt).set({ dueRub: due }).where(eq(bidAttempt.idempotencyKey, key))
+    } catch (e) {
+      if (e instanceof ProfiToolError) throw e
+      const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
+      return refuse(fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`))
+    }
 
     // From here the bid may be on the site: anything not confirmed is UNCERTAIN, never a failure.
     try {
       const clicked = await clickSubmit(page, s.submitText)
-      if (clicked === 'no_button') {
-        // Nothing was pressed after all: the written press goes, so a retry may try again.
-        await o.db.delete(bidAttempt).where(eq(bidAttempt.idempotencyKey, i.idempotency_key))
-        throw fail('LAYOUT_CHANGED', 'Кнопки отправки отклика нет')
-      }
+      // Nothing was pressed after all.
+      if (clicked === 'no_button')
+        return await refuse(fail('LAYOUT_CHANGED', 'Кнопки отправки отклика нет'))
       if (clicked === 'unsure' || !(await waitFormClosed(page, closeMs))) throw uncertain()
     } catch (e) {
       if (e instanceof ProfiToolError) throw e
@@ -299,9 +340,11 @@ export function createBidTools(o: {
       }
     },
 
-    async submitBid(i) {
-      if (!verifyPermit(o.permitSecret, i.idempotency_key, i.permit))
-        throw fail('INTERNAL', 'Разрешение ядра не подходит к ключу отклика')
+    async submitBid(i, signal) {
+      if (!verifyPermit(o.permitSecret, i))
+        throw fail('INTERNAL', 'Разрешение ядра не подходит к отклику')
+      // The core stopped waiting (the call was cancelled) or the permit's deadline passed: no press any more.
+      const late = () => signal?.aborted === true || Date.now() > Date.parse(i.not_after)
       const r = runtime(i.account_id)
       const known = await findBidAttempt(o.db, i.idempotency_key)
       if (known?.result) return known.result as SubmitBidOutput
@@ -309,12 +352,14 @@ export function createBidTools(o: {
         const due = known.dueRub
         return r.inTab((t) => confirm(r, i, due, t)).catch(() => Promise.reject(uncertain()))
       }
+      if (late()) throw tooLate()
       requireAlive(r.watch)
       return r.inTab(async (t) => {
         // A twin of this call may have pressed while this one waited for the tab.
         const twin = await findBidAttempt(o.db, i.idempotency_key)
         if (twin?.result) return twin.result as SubmitBidOutput
         if (twin) return confirm(r, i, twin.dueRub, t)
+        if (late()) throw tooLate()
         requireAlive(r.watch)
         if (!t.can())
           throw fail(
@@ -322,7 +367,7 @@ export function createBidTools(o: {
             'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
           )
         try {
-          return await bid(r, i, t)
+          return await bid(r, i, t, late)
         } catch (e) {
           if (e instanceof ProfiToolError) throw e
           // A failure of our own before the press (the database, the browser): nothing was pressed.

@@ -1,12 +1,23 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
-export function signPermit(secret: string, idempotencyKey: string): string {
-  return createHmac('sha256', secret).update(idempotencyKey).digest('hex')
+/** What the core's permit for a bid covers: the key, the order, the most it may cost and the last moment to press. */
+export type PermitFields = {
+  idempotency_key: string
+  order_id: string
+  max_fee_rub: number
+  not_after: string
 }
 
-export function verifyPermit(secret: string, idempotencyKey: string, permit: string): boolean {
-  const expected = Buffer.from(signPermit(secret, idempotencyKey), 'hex')
-  const given = Buffer.from(permit, 'hex')
+const signed = (f: PermitFields) =>
+  [f.idempotency_key, f.order_id, String(f.max_fee_rub), f.not_after].join('\n')
+
+export function signPermit(secret: string, f: PermitFields): string {
+  return createHmac('sha256', secret).update(signed(f)).digest('hex')
+}
+
+export function verifyPermit(secret: string, f: PermitFields & { permit: string }): boolean {
+  const expected = Buffer.from(signPermit(secret, f), 'hex')
+  const given = Buffer.from(f.permit, 'hex')
   return given.length === expected.length && timingSafeEqual(given, expected)
 }
 

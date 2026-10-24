@@ -257,6 +257,8 @@ async function deliver(outboxId: string): Promise<void> {
             order_id: p.leadId,
             text: p.text,
             price_rub: p.servicePriceRub ?? null,
+            // The fee on the card Boris pressed: the node pays no more than that.
+            max_fee_rub: p.priceRub,
             idempotency_key: row.idempotencyKey,
           })
           return { kind: 'ok', spent: r.spent_rub, balanceAfter: r.balance_after_rub }
