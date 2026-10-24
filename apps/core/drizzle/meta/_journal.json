@@ -57,6 +57,13 @@
       "when": 1792869809158,
       "tag": "0007_lead_client_info",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792873328281,
+      "tag": "0008_direction_profile",
+      "breakpoints": true
     }
   ]
 }

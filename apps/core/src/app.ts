@@ -10,6 +10,7 @@ import type { Config } from './config'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
 import { applyAmendments } from './direction/amendments'
+import { seedProfile } from './direction/profile'
 import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
@@ -125,6 +126,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   await seedAccounts(db, config.accounts)
   for (const a of config.accounts) {
     await seedDirection(db, a.id)
+    await seedProfile(db, a.id)
     // Rules Boris dictated to a developer become his new version, once (FR-MIND-3).
     await applyAmendments(db, a.id)
   }
