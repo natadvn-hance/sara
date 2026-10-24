@@ -1,9 +1,17 @@
-import type { DirectionCase, DirectionRules, DirectionState, ReplyFormat } from '@sara/shared'
+import type {
+  DirectionCase,
+  DirectionRules,
+  DirectionState,
+  ReplyFormat,
+  StepState,
+} from '@sara/shared'
 
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The machine code of a refusal the screen reacts to (for example `stale`), when the API names one. */
+    readonly code?: string,
   ) {
     super(message)
   }
@@ -18,7 +26,11 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok)
-    throw new ApiError(res.status, (data as { error?: string }).error ?? 'Что-то пошло не так.')
+    throw new ApiError(
+      res.status,
+      (data as { error?: string }).error ?? 'Что-то пошло не так.',
+      (data as { code?: string }).code,
+    )
   return data as T
 }
 
@@ -58,4 +70,13 @@ export type DirectionView = {
     version: number
   }
   onboarding: { open: boolean; step: number } | null
+}
+
+export type OnboardingView = {
+  mode: 'new' | 'edit'
+  basedOn: number | null
+  step: number
+  steps: Record<string, StepState>
+  rules: DirectionRules | null
+  changes: string[]
 }
