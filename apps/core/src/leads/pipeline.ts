@@ -170,6 +170,19 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           })
           if (scored.decision === 'drop') {
             await tx.update(lead).set({ status: 'scored_out' }).where(eq(lead.id, order.order_id))
+            // A dropped order never reaches the task step, so its sorter verdict is journaled here.
+            if (sorted.verdict) {
+              await appendEvent(
+                tx,
+                ev(
+                  'lead.sorted',
+                  { kind: 'lead', id: order.order_id },
+                  correlationId,
+                  'sara',
+                  sorted,
+                ),
+              )
+            }
           }
           await appendEvent(
             tx,
