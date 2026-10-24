@@ -86,14 +86,19 @@ function parseRecord(path: string, text: string): { record: MindRecord } | { err
   let body = (m[2] ?? '').trim()
   const heading = /^# (.+)\n*/.exec(body)
   if (heading) body = body.slice(heading[0].length).trim()
+  const title = front.title ?? heading?.[1]?.trim() ?? front.id
+  return { record: { path, front, title, body, sections: markdownSections(body) } }
+}
+
+/** The second-level sections of a record body by their heading. */
+export function markdownSections(body: string): Record<string, string> {
   const sections: Record<string, string> = {}
   for (const part of body.split(/^## /m).slice(1)) {
     const nl = part.indexOf('\n')
     const name = (nl < 0 ? part : part.slice(0, nl)).trim()
     sections[name] = nl < 0 ? '' : part.slice(nl + 1).trim()
   }
-  const title = front.title ?? heading?.[1]?.trim() ?? front.id
-  return { record: { path, front, title, body, sections } }
+  return sections
 }
 
 /**
