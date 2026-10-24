@@ -21,8 +21,10 @@ type OldLead = {
   sets: string[]
 }
 
-const [inPath, outPath] = process.argv.slice(2)
-if (!inPath || !outPath) throw new Error('Нужно: score:eval <leads.json> <out.jsonl>')
+const [inArg, outArg] = process.argv.slice(2)
+if (!inArg || !outArg) throw new Error('Нужно: score:eval <leads.json> <out.jsonl>')
+const inPath: string = inArg
+const outPath: string = outArg
 const { leads } = JSON.parse(await readFile(inPath, 'utf8')) as { leads: OldLead[] }
 const done = new Map<string, EvalRow>()
 try {
