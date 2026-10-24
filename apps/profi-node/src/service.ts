@@ -11,6 +11,7 @@ import { type Insurance, startInsurance } from './eyes/insurance'
 import type { Parsers } from './eyes/parsers'
 import { activeParsers } from './eyes/profiParsers'
 import { attachRecorder } from './eyes/recorder'
+import { startWatchedMaps } from './eyes/watchedMaps'
 import { serveMcp } from './mcp/http'
 import { createProfiMcpServer } from './mcp/server'
 import { registerScreenRoute } from './screen/screenRoute'
@@ -186,9 +187,16 @@ export async function startProfiService(
         })
         .catch(() => {})
     }, timing.egressEveryMs)
+    // Boris opening the bid form on the live screen calibrates the bid: the node only reads (M2 design 5.B).
+    const watchedMaps = startWatchedMaps({
+      page: () => ab.page,
+      eyes,
+      watched: () => viewers.n > 0 && a.egress.ok && a.watch.state() === 'alive',
+    })
     a.stop = async () => {
       clearInterval(tick)
       clearInterval(egressTimer)
+      watchedMaps.stop()
       a.insurance?.stop()
       await ab.close()
     }
