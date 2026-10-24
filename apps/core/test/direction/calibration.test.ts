@@ -9,13 +9,11 @@ import {
   markItem,
   startCalibration,
 } from '../../src/direction/calibration'
-import { getRun, runWorker } from '../../src/direction/runs'
+import { getRun } from '../../src/direction/runs'
 import { seedDirection } from '../../src/direction/store'
 import { RULES_V1 } from '../../src/direction/v1'
+import { calibrate, idOf, leadsWith } from '../helpers/calibration'
 import { openTestDb, resetDb } from '../helpers/db'
-import { fakeGateway } from '../helpers/gateway'
-import { leadWithScore } from '../helpers/learning'
-import { scorerAnswer } from '../helpers/scorer'
 
 const { db, close } = openTestDb()
 afterAll(close)
@@ -26,18 +24,6 @@ beforeEach(async () => {
   await seedDirection(db, ACC)
 })
 
-const idOf = (i: number) => String(971000 + i)
-/** Leads with these live scores, newest first; the ids are 971000 and up (from `first` on). */
-async function leadsWith(scores: number[], first = 0) {
-  for (const [k, score] of scores.entries()) {
-    const i = first + k
-    await leadWithScore(db, idOf(i), score)
-    await db
-      .update(lead)
-      .set({ seenAt: new Date(Date.now() - i * 60_000).toISOString(), status: 'scored_out' })
-      .where(eq(lead.id, idOf(i)))
-  }
-}
 // Around the threshold of 56 the near group is 44..68: 12 near, 9 above, 9 below.
 const MIX = [
   ...Array.from({ length: 12 }, (_, i) => 46 + i * 2),
@@ -49,7 +35,7 @@ const scoreOf = (id: string) => MIX[Number(id) - 971000] as number
 
 describe('calibration sample', { timeout: 60000 }, () => {
   it('FR-ACC-4: the sample is 20 leads: 8 near the threshold, 6 clearly above, 6 clearly below', async () => {
-    await leadsWith(MIX)
+    await leadsWith(db, MIX)
     const sample = await calibrationSample(db, ACC, RULES_V1, 1)
     expect(sample).toHaveLength(20)
     expect(new Set(sample).size).toBe(20)
@@ -60,7 +46,10 @@ describe('calibration sample', { timeout: 60000 }, () => {
   })
 
   it('FR-ACC-4: leads Boris decided on by card or summary, sorted-out and stale leads, old leads and other accounts are not in it', async () => {
-    await leadsWith(Array.from({ length: 30 }, () => 60))
+    await leadsWith(
+      db,
+      Array.from({ length: 30 }, () => 60),
+    )
     await db.insert(leadLabel).values([
       { leadId: idOf(0), label: 'yes', source: 'card' },
       { leadId: idOf(1), label: 'no', source: 'summary' },
@@ -90,7 +79,10 @@ describe('calibration sample', { timeout: 60000 }, () => {
   })
 
   it('FR-ACC-4: a card nobody pressed (a weak no) does not keep a lead out', async () => {
-    await leadsWith(Array.from({ length: 20 }, () => 60))
+    await leadsWith(
+      db,
+      Array.from({ length: 20 }, () => 60),
+    )
     await db.insert(leadLabel).values(
       Array.from({ length: 20 }, (_, i) => ({
         leadId: idOf(i),
@@ -102,20 +94,26 @@ describe('calibration sample', { timeout: 60000 }, () => {
   })
 
   it('FR-ACC-4: the same seed gives the same sample, another seed another one', async () => {
-    await leadsWith(MIX)
+    await leadsWith(db, MIX)
     const a = await calibrationSample(db, ACC, RULES_V1, 1)
     expect(await calibrationSample(db, ACC, RULES_V1, 1)).toEqual(a)
     expect(await calibrationSample(db, ACC, RULES_V1, 2)).not.toEqual(a)
   })
 
   it('FR-ACC-4: a short group is filled from the nearest groups', async () => {
-    await leadsWith(Array.from({ length: 24 }, () => 56))
+    await leadsWith(
+      db,
+      Array.from({ length: 24 }, () => 56),
+    )
     const sample = await calibrationSample(db, ACC, RULES_V1, 1)
     expect(sample).toHaveLength(20)
   })
 
   it('FR-ACC-4: leads without a live score can still be asked about', async () => {
-    await leadsWith(Array.from({ length: 12 }, () => 56))
+    await leadsWith(
+      db,
+      Array.from({ length: 12 }, () => 56),
+    )
     await db.execute(sql`delete from core.lead_score`)
     expect(await calibrationSample(db, ACC, RULES_V1, 1)).toHaveLength(12)
   })
@@ -128,19 +126,22 @@ describe('calibration marks', { timeout: 60000 }, () => {
       error: 'no_leads',
       have: 0,
     })
-    await leadsWith(Array.from({ length: 9 }, () => 60))
+    await leadsWith(
+      db,
+      Array.from({ length: 9 }, () => 60),
+    )
     expect(await startCalibration(db, { accountId: ACC, rules: RULES_V1 })).toEqual({
       ok: false,
       error: 'too_few',
       have: 9,
     })
-    await leadsWith([60], 9)
+    await leadsWith(db, [60], 9)
     const r = await startCalibration(db, { accountId: ACC, rules: RULES_V1 })
     expect(r).toMatchObject({ ok: true, total: 10 })
   })
 
   it('FR-ACC-4: a started calibration waits for Boris with its sample kept in the run', async () => {
-    await leadsWith(MIX)
+    await leadsWith(db, MIX)
     const r = await startCalibration(db, { accountId: ACC, rules: RULES_V1, seed: 7 })
     if (!r.ok) throw new Error('no run')
     const run = await getRun(db, r.runId)
@@ -151,7 +152,7 @@ describe('calibration marks', { timeout: 60000 }, () => {
   })
 
   it('FR-ACC-4: the screen never gets the score or the decision while Boris marks', async () => {
-    await leadsWith(MIX)
+    await leadsWith(db, MIX)
     const r = await startCalibration(db, { accountId: ACC, rules: RULES_V1 })
     if (!r.ok) throw new Error('no run')
     const text = JSON.stringify(await calibrationView(db, r.runId))
@@ -161,7 +162,7 @@ describe('calibration marks', { timeout: 60000 }, () => {
   })
 
   it('FR-ACC-4: marking the same lead again replaces the mark and counts it once', async () => {
-    await leadsWith(MIX)
+    await leadsWith(db, MIX)
     const r = await startCalibration(db, { accountId: ACC, rules: RULES_V1 })
     if (!r.ok) throw new Error('no run')
     const first = (await calibrationView(db, r.runId)).items[0]?.leadId ?? ''
@@ -179,7 +180,7 @@ describe('calibration marks', { timeout: 60000 }, () => {
   })
 
   it('FR-ACC-4: the last mark sends the run to scoring, and a mark outside the sample or a finished run is refused', async () => {
-    await leadsWith(MIX)
+    await leadsWith(db, MIX)
     const r = await startCalibration(db, { accountId: ACC, rules: RULES_V1 })
     if (!r.ok) throw new Error('no run')
     const ids = (await calibrationView(db, r.runId)).items.map((i) => i.leadId)
@@ -197,20 +198,6 @@ describe('calibration marks', { timeout: 60000 }, () => {
 })
 
 describe('calibration result', { timeout: 120000 }, () => {
-  /**
-   * A calibration marked with `boris` (one mark per lead, in the run's order) and scored with `sara` (one score
-   * per lead, in the same order; 70 shows a lead, 30 drops it, neither is near the threshold).
-   */
-  async function calibrate(boris: ('yes' | 'no' | 'unsure')[], sara: number[], rules = RULES_V1) {
-    await leadsWith(Array.from({ length: boris.length }, () => 60))
-    const r = await startCalibration(db, { accountId: ACC, rules })
-    if (!r.ok) throw new Error('no run')
-    const ids = (await calibrationView(db, r.runId)).items.map((i) => i.leadId)
-    for (const [i, id] of ids.entries()) await markItem(db, r.runId, id, boris[i] ?? 'unsure')
-    const f = await fakeGateway(db, { scorer: { $sequence: sara.map((v) => scorerAnswer(v)) } })
-    await runWorker({ db, ...f }, r.runId)
-    return { runId: r.runId, ids }
-  }
   const yes = (n: number) => Array.from({ length: n }, () => 'yes' as const)
   const no = (n: number) => Array.from({ length: n }, () => 'no' as const)
   const same = (n: number, v: number) => Array.from({ length: n }, () => v)
@@ -218,7 +205,7 @@ describe('calibration result', { timeout: 120000 }, () => {
   it('FR-ACC-4: agreement counts yes and no only, and 17 of 20 passes the 85% target', async () => {
     expect(CALIBRATION_TARGET).toBe(0.85)
     // Sara shows everything: she agrees with Boris's 17 yes and not with his 3 no.
-    const { runId } = await calibrate([...yes(17), ...no(3)], same(20, 70))
+    const { runId } = await calibrate(db, ACC, [...yes(17), ...no(3)], same(20, 70))
     expect(await calibrationResult(db, runId)).toMatchObject({
       decisive: 20,
       unsure: 0,
@@ -230,7 +217,7 @@ describe('calibration result', { timeout: 120000 }, () => {
   })
 
   it('FR-ACC-4: 16 of 20 does not pass', async () => {
-    const { runId } = await calibrate([...yes(16), ...no(4)], same(20, 70))
+    const { runId } = await calibrate(db, ACC, [...yes(16), ...no(4)], same(20, 70))
     expect(await calibrationResult(db, runId)).toMatchObject({
       agreement: 0.8,
       passed: false,
@@ -240,7 +227,7 @@ describe('calibration result', { timeout: 120000 }, () => {
 
   it('FR-ACC-4: "не знаю" is out of the agreement, and fewer than 15 decisive marks is not reliable and not passed', async () => {
     const unsure = Array.from({ length: 8 }, () => 'unsure' as const)
-    const { runId } = await calibrate([...yes(12), ...unsure], same(20, 70))
+    const { runId } = await calibrate(db, ACC, [...yes(12), ...unsure], same(20, 70))
     expect(await calibrationResult(db, runId)).toMatchObject({
       decisive: 12,
       unsure: 8,
@@ -254,7 +241,7 @@ describe('calibration result', { timeout: 120000 }, () => {
     // The first four leads in the run's order: Sara shows 1, 2 and drops 3, 4; Boris: no, no, yes, yes.
     const boris = [...['no', 'no', 'yes', 'yes'], ...yes(16)] as ('yes' | 'no')[]
     const sara = [...[70, 70, 30, 30], ...same(16, 70)]
-    const { runId, ids } = await calibrate(boris, sara)
+    const { runId, ids } = await calibrate(db, ACC, boris, sara)
     const r = await calibrationResult(db, runId)
     expect(r.misses.map((m) => m.kind)).toEqual([
       'sara_no_boris_yes',
@@ -270,19 +257,24 @@ describe('calibration result', { timeout: 120000 }, () => {
   it('FR-ACC-4: the threshold hint appears for a gain of 10 points and names the better threshold', async () => {
     // Boris would take the first ten (Sara scores them 40, below 56, and far enough from it not to be asked twice)
     // and not the last ten (30).
-    const { runId } = await calibrate([...yes(10), ...no(10)], [...same(10, 40), ...same(10, 30)])
+    const { runId } = await calibrate(
+      db,
+      ACC,
+      [...yes(10), ...no(10)],
+      [...same(10, 40), ...same(10, 30)],
+    )
     const r = await calibrationResult(db, runId)
     expect(r.agreement).toBe(0.5)
     expect(r.thresholdHint).toEqual({ from: 56, to: 40, before: 0.5, after: 1 })
   })
 
   it('FR-ACC-4: no threshold hint when another threshold gains less than 10 points', async () => {
-    const { runId } = await calibrate([...yes(19), ...no(1)], same(20, 70))
+    const { runId } = await calibrate(db, ACC, [...yes(19), ...no(1)], same(20, 70))
     expect((await calibrationResult(db, runId)).thresholdHint).toBeNull()
   })
 
   it('FR-ACC-4: a note on a miss is kept', async () => {
-    const { runId, ids } = await calibrate([...no(1), ...yes(19)], same(20, 70))
+    const { runId, ids } = await calibrate(db, ACC, [...no(1), ...yes(19)], same(20, 70))
     const { setNote } = await import('../../src/direction/calibration')
     await setNote(db, runId, ids[0] ?? '', 'копеечный бюджет')
     expect((await calibrationResult(db, runId)).misses[0]?.note).toBe('копеечный бюджет')
