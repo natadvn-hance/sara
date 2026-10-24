@@ -9,6 +9,8 @@ const ROOT = resolve(import.meta.dirname, '../../../..')
 
 export type FakeGateway = {
   gateway: Gateway
+  /** The copy of roles/ the gateway reads: a test may change a role's meta.json there. */
+  rolesDir: string
   /** Every call the fake CLI got, newest last: the role and what it read on its input. */
   calls(): Promise<{ role: string; model: string | undefined; stdin: string }[]>
 }
@@ -39,6 +41,7 @@ export async function fakeGateway(
   })
   return {
     gateway,
+    rolesDir: join(dir, 'roles'),
     async calls() {
       const text = await readFile(join(dir, 'claude.log'), 'utf8').catch(() => '')
       return text
