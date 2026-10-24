@@ -369,8 +369,10 @@ async function bringCard(
     await tx.update(lead).set({ status: 'queued' }).where(eq(lead.id, l.id))
     await appendEvent(
       tx,
+      // Brought from the summary hours after the order: not a lead-to-card time (FR-ANL-3).
       ev('task.created', { kind: 'task', id: decisionId }, l.correlationId, 'sara', {
         lead_id: l.id,
+        via: 'summary',
       }),
     )
     return true

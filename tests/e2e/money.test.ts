@@ -5,6 +5,7 @@ import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
 import { formatRub } from '@sara/shared'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { speedReport } from '../../apps/core/src/analytics/speed'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, outbox, task } from '../../apps/core/src/db/schema'
@@ -268,5 +269,13 @@ describe('held orders in the summary', () => {
     expect(tg.answers[1]?.text).toBe('Уже сделано')
     // Boris has not decided yet: no label is written for the opened card.
     expect(await count('lead.labeled')).toBe(0)
+    // The card came hours after the order: it is not a lead-to-card time (FR-ANL-3).
+    const [l2] = await db.select().from(lead).where(eq(lead.id, held))
+    const created = await db
+      .select({ payload: event.payload })
+      .from(event)
+      .where(sql`${event.correlationId} = ${l2?.correlationId} and ${event.type} = 'task.created'`)
+    expect(created.map((e) => (e.payload as { via?: string }).via)).toEqual(['summary'])
+    expect((await speedReport(db)).leadToCard.count).toBe(1)
   })
 })
