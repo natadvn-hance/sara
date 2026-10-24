@@ -64,6 +64,8 @@ export type BidLook = {
   payWay: 'wallet' | 'sbp'
   /** The form is closed until its opener is pressed, as on the live page. */
   behindOpener: boolean
+  /** A broken site that charges for opening the form: the top bar shows the wallet going down. */
+  openerCharges: number
 }
 
 // The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
@@ -95,7 +97,11 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
     '<div class="payment-methods"><span class="payment-methods__name">${look.payWay === 'sbp' ? 'СБП' : 'Кошелёк'}</span></div>' +
     '<p class="error"></p><button id="bid-send" type="submit">' + s.form.buttons.submit.text + '</button></form>'
   const go = document.getElementById('bid-opener')
-  if (go) go.onclick = (e) => { e.preventDefault(); fetch('/api/bid/open', { method: 'POST' }); document.getElementById('bid-form').hidden = false }
+  if (go) go.onclick = (e) => {
+    e.preventDefault(); fetch('/api/bid/open', { method: 'POST' }); document.getElementById('bid-form').hidden = false
+    const w = document.querySelector('.balance')
+    if (${look.openerCharges} && w) { const left = Number(w.dataset.rub) - ${look.openerCharges}; w.dataset.rub = String(left); w.textContent = left + ' ₽' }
+  }
   document.getElementById('bid-form').onsubmit = async (e) => {
     e.preventDefault()
     const r = await fetch('/api/bid', { method: 'POST', body: JSON.stringify({ orderId: '${id}', price: document.getElementById('bid-price').value, text: document.getElementById('bid-text').value }) })

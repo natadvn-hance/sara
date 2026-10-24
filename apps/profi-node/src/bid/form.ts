@@ -137,6 +137,11 @@ export async function clickSubmit(
   }
 }
 
+/** The bid form's text field is on screen. */
+export async function formOnScreen(page: Page): Promise<boolean> {
+  return (await shown(page, TEXT).count()) > 0
+}
+
 /** The form closed: its text field left the screen within ms (old Sara's one sign of a bid taken). */
 export async function waitFormClosed(page: Page, ms: number): Promise<boolean> {
   const until = Date.now() + ms
