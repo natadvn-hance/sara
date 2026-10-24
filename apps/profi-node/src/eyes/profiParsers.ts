@@ -327,18 +327,19 @@ export const profiParsers: Parsers = {
         })),
       )
       .catch(() => [])
-    const now = new Date().toISOString()
+    const now = Date.now()
     const signals: MessageSignal[] = raw
       .filter((r) => r.id)
-      .map((r) => ({
+      .map((r, i, all) => ({
         t: 'message',
         message: {
           platform_message_id: r.id,
           chat_id: chatId,
           order_id: chatId,
           author: authorFromClasses(String(r.cls).split(/\s+/)),
-          // The page shows only HH:MM badges; the moment the eyes saw it stands in until calibration.
-          sent_at: now,
+          // The page shows only HH:MM badges; the moment the eyes saw it stands in until calibration,
+          // 1 ms apart in page order so one reading keeps its order, the last one at the moment itself.
+          sent_at: new Date(now - (all.length - 1 - i)).toISOString(),
           text: r.text,
           read: true,
         },

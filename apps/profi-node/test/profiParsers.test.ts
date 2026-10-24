@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
+import { createEyes } from '../src/eyes/eyes'
 import { authorFromClasses, orderFromPageText, profiParsers } from '../src/eyes/profiParsers'
-import { nodeTestUrl } from './helpers/db'
+import { createReadTools } from '../src/tools/readTools'
+import { nodeTestUrl, openNodeTestDb, resetNodeDb } from './helpers/db'
 
 let ab: AccountBrowser
 beforeAll(async () => {
@@ -16,7 +18,11 @@ beforeAll(async () => {
     databaseUrl: nodeTestUrl(),
   })
 }, 60000)
-afterAll(() => ab.close())
+const { db, close } = openNodeTestDb()
+afterAll(async () => {
+  await ab.close()
+  await close()
+})
 
 // Shapes from old Sara (src/ingestion/feedPoller.js, src/watcher/messageDom.js), checked live in Sept-Oct 2026.
 const FEED = `<nav><a href="/backoffice/n.php">Заказы</a><a href="/backoffice/chats.php">Чаты</a><span>23 ₽</span></nav>
@@ -89,6 +95,46 @@ describe('Profi.ru page readers', () => {
       ['m3', 'system'],
       ['m4', 'unknown'],
     ])
+  })
+
+  it('FR-CONV-2: messages of one chat reading keep the page order', async () => {
+    await resetNodeDb(db)
+    // Numbers that sort differently as text, all read at once: only the page says which came first.
+    const bubble = (id: string, cls: string, text: string) =>
+      `<div class="cw_msg ${cls}" data-message-content-id="${id}"><div class="cw_xeDn2R"><div class="cw_BFgZYK">${text}</div></div></div>`
+    await ab.page.setContent(
+      [
+        bubble('900', 'cw_cO7-r-', 'Нужна реклама'),
+        bubble('1000', 'cw_iCsdtF', 'Добрый день'),
+        bubble('950', 'cw_cO7-r-', 'Сколько стоит?'),
+      ].join('\n'),
+    )
+    const before = Date.now()
+    const r = await profiParsers.fromChatDom(ab.page, '95100003')
+    const after = Date.now()
+    const times = r.signals.map((s) => (s.t === 'message' ? Date.parse(s.message.sent_at) : 0))
+    expect(times.slice(1).map((t, i) => t - (times[i] ?? 0))).toEqual([1, 1])
+    expect(times[2]).toBeGreaterThanOrEqual(before)
+    expect(times[2]).toBeLessThanOrEqual(after)
+    const eyes = createEyes({ accountId: 'parsers-test', db, parsers: profiParsers })
+    await eyes.onChatRead('95100003', r)
+    const tools = createReadTools({
+      db,
+      accounts: new Map([
+        [
+          'parsers-test',
+          {
+            watch: { state: () => 'alive' as const },
+            eyes: { balance: () => null, presence: () => true, lastRecognizedAt: () => Date.now() },
+            egressIp: () => null,
+            egressOk: () => true,
+            silenceMs: 600000,
+          },
+        ],
+      ]),
+    })
+    const chat = await tools.readChat({ account_id: 'parsers-test', chat_id: '95100003' })
+    expect(chat.messages.map((m) => m.platform_message_id)).toEqual(['900', '1000', '950'])
   })
 
   it('FR-CONV-2: a kept chat record gives each bubble the author its page would, an unknown class stays unknown', () => {
