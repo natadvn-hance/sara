@@ -82,9 +82,14 @@ export function createReadTools(o: {
         .from(rawOrder)
         .where(and(eq(rawOrder.accountId, account_id), eq(rawOrder.orderId, order_id)))
       if (!r) throw new ProfiToolError('NOT_FOUND', `order ${order_id} was not seen`)
-      const { published_at, ...order } = r.body as StoredOrder
+      const { published_at, has_bid, ...order } = r.body as StoredOrder & { has_bid?: boolean }
       // Whether the order closed is not tracked in M1 (order_changed comes later).
-      return { ...order, open: true, published_at: published_at ?? null }
+      return {
+        ...order,
+        open: true,
+        published_at: published_at ?? null,
+        has_bid: typeof has_bid === 'boolean' ? has_bid : null,
+      }
     },
 
     async listChats({ account_id }) {
