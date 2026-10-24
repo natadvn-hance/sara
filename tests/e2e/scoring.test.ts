@@ -44,6 +44,19 @@ export async function until(cond: () => boolean | Promise<boolean>, ms = 8000) {
   throw new Error('condition not met in time')
 }
 const cards = () => tg.sent.filter((m) => m.reply_markup)
+/**
+ * The first 19:30 Moscow time after now: the summary whose window (19:00 yesterday to 19:00 today) holds an
+ * order seen now. After 19:00 an order belongs to tomorrow's summary, so "today 19:30" fails in the evening.
+ */
+function nextSummary(now = new Date()): Date {
+  for (let i = 0; ; i++) {
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(
+      new Date(now.getTime() + i * 86_400_000),
+    )
+    const at = new Date(`${day}T16:30:00Z`)
+    if (at.getTime() - 30 * 60_000 > now.getTime()) return at
+  }
+}
 const statusOf = async (id: string) =>
   (await db.select({ s: lead.status }).from(lead).where(eq(lead.id, id)))[0]?.s
 
@@ -179,10 +192,9 @@ describe('scoring in the lead pipeline', () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
-    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date())
-    expect(
-      await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`)),
-    ).toBe('sent')
+    expect(await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())).toBe(
+      'sent',
+    )
     await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1 заявку. На грани:')))
     const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
       ?.inline_keyboard[0]?.[0]
@@ -255,8 +267,7 @@ describe('scoring in the lead pipeline', () => {
       const dropped = orderId()
       await fake.emitOrder({ order_id: dropped })
       await until(async () => (await statusOf(dropped)) === 'scored_out')
-      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date())
-      await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`))
+      await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())
       await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
       const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
         ?.inline_keyboard[0]?.[0]
