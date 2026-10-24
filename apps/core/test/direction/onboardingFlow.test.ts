@@ -130,6 +130,17 @@ describe('onboarding flow', { timeout: 30000 }, () => {
     expect(v?.rules?.axes.map((a) => a.id)).toEqual(['client', 'task'])
   })
 
+  it('FR-ACC-3: the view says in plain words what the confirmed steps would change', async () => {
+    const { gateway } = await fakeGateway(db, ANSWERS)
+    await startOnboarding(db, ACC, 'edit')
+    expect((await getOnboarding(db, ACC))?.changes).toEqual([])
+    await sayAndConfirm(gateway, 3)
+    const changes = (await getOnboarding(db, ACC))?.changes ?? []
+    expect(changes).toContain('Порог: 56 → 55')
+    expect(changes.some((c) => c.startsWith('Новая ось «Клиент'))).toBe(false)
+    expect(changes.some((c) => c.includes('Убрана ось «Качество клиента»'))).toBe(true)
+  })
+
   it('FR-ACC-3: two finishes at once give one version', async () => {
     const { gateway } = await fakeGateway(db, ANSWERS)
     await startOnboarding(db, ACC, 'edit')
