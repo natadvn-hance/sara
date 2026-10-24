@@ -76,6 +76,10 @@ export type ProfiSite = {
   bids: SiteBid[]
   /** Presses of the send button that reached the site, taken or not. */
   bidPosts: number
+  /** Requests for the board (/api/feed), the first page and the following ones. */
+  feedRequests: number
+  /** The board gives this many orders to a page and the rest by cursor, as the live one does; 0: all at once. */
+  boardPageSize: number
   bidSettings: BidSettings
   setBalance(rub: number): void
   /** Back to a fresh form: no bids, 5000 ₽, the wallet pays, the answer comes. */
@@ -185,7 +189,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
-  const state = { balance: 5000, openerClicks: 0, bidPosts: 0 }
+  const state = { balance: 5000, openerClicks: 0, bidPosts: 0, feedRequests: 0, boardPageSize: 0 }
   const bids: SiteBid[] = []
   const freshBidSettings = (): BidSettings => ({
     mode: 'ok',
@@ -254,7 +258,19 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       return res.writeHead(302, { location: '/login' }).end()
     }
     if (banned) return html(res, bannedPage())
-    if (p === '/api/feed') return json(res, { [layout.feedKey]: orders.filter((x) => x.open) })
+    if (p === '/api/feed') {
+      state.feedRequests++
+      const open = orders.filter((x) => x.open)
+      const size = state.boardPageSize
+      if (size <= 0) return json(res, { [layout.feedKey]: open })
+      // Paged like the live board: a page and the cursor of the next one (here the index of its first order).
+      const from = Number(url.searchParams.get('cursor') ?? 0) || 0
+      const next = from + size
+      return json(res, {
+        [layout.feedKey]: open.slice(from, next),
+        nextCursor: next < open.length ? String(next) : null,
+      })
+    }
     if (p.startsWith('/api/order/')) {
       const found = orders.find((x) => x.id === p.slice('/api/order/'.length))
       return found ? json(res, found) : json(res, { error: 'not found' }, 404)
@@ -372,6 +388,15 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     get bidPosts() {
       return state.bidPosts
     },
+    get feedRequests() {
+      return state.feedRequests
+    },
+    get boardPageSize() {
+      return state.boardPageSize
+    },
+    set boardPageSize(n: number) {
+      state.boardPageSize = n
+    },
     bids,
     bidSettings,
     setBalance(rub) {
@@ -382,6 +407,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.balance = 5000
       state.openerClicks = 0
       state.bidPosts = 0
+      state.feedRequests = 0
+      state.boardPageSize = 0
       Object.assign(bidSettings, freshBidSettings())
     },
     orders,

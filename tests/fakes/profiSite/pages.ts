@@ -52,12 +52,23 @@ export const feedPage = (rtpUrl: string, l: Layout) =>
     'Заказы',
     '<ul id="feed"></ul>',
     `${rtpScript(rtpUrl)}
-async function load() {
-  const data = await (await fetch('/api/feed')).json()
-  document.getElementById('feed').innerHTML = (data[${JSON.stringify(l.feedKey)}] || []).map((o) =>
-    '<li><a class="${l.orderLink}" data-order-id="' + o.id + '" href="/backoffice/n.php?o=' + o.id + '">' + o.subject + '</a> <span class="city">' + o.city + '</span></li>').join('')
+let cursor = null, loading = false
+const row = (o) => '<li style="min-height: 420px"><a class="${l.orderLink}" data-order-id="' + o.id + '" href="/backoffice/n.php?o=' + o.id + '">' + o.subject + '</a> <span class="city">' + o.city + '</span></li>'
+// The first page, or (more) the next one by cursor when the list is scrolled to its end, like the live board.
+async function load(more) {
+  if (loading) return
+  loading = true
+  const data = await (await fetch('/api/feed' + (more && cursor ? '?cursor=' + cursor : ''))).json()
+  const html = (data[${JSON.stringify(l.feedKey)}] || []).map(row).join('')
+  if (more) document.getElementById('feed').insertAdjacentHTML('beforeend', html)
+  else document.getElementById('feed').innerHTML = html
+  cursor = data.nextCursor || null
+  loading = false
 }
-load(); window.__RTP.addEventListener('message', load)`,
+load(false); window.__RTP.addEventListener('message', () => load(false))
+window.addEventListener('scroll', () => {
+  if (cursor && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) load(true)
+})`,
   )
 
 export type BidLook = {

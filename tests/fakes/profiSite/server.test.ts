@@ -86,4 +86,24 @@ describe('stand-in Profi.ru', () => {
     const none = site.addOrder({ klient: null })
     expect((await ask(none)).status).toBe(404)
   })
+
+  it('FR-LEAD-1: a paged board answers the first page with nextCursor and the rest by cursor', async () => {
+    const cookie = await login()
+    for (let i = 0; i < 12; i++) site.addOrder()
+    site.boardPageSize = 5
+    const page = async (cursor?: string) =>
+      (await (
+        await fetch(`${site.url}/api/feed${cursor ? `?cursor=${cursor}` : ''}`, {
+          headers: { cookie },
+        })
+      ).json()) as { items: { id: string }[]; nextCursor?: string | null }
+    const a = await page()
+    expect(a.items).toHaveLength(5)
+    expect(typeof a.nextCursor).toBe('string')
+    const b = await page(a.nextCursor ?? '')
+    const c = await page(b.nextCursor ?? '')
+    expect([b.items.length, c.items.length, c.nextCursor]).toEqual([5, 2, null])
+    expect(new Set([...a.items, ...b.items, ...c.items].map((o) => o.id)).size).toBe(12)
+    expect(site.feedRequests).toBe(3)
+  })
 })

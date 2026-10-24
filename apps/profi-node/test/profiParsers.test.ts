@@ -173,6 +173,30 @@ describe('Profi.ru page readers', () => {
     })
   })
 
+  it('FR-LEAD-1: a board answer says whether the board has more pages (nextCursor), the last page says no', () => {
+    const page = (nextCursor: string | null) => ({
+      data: {
+        boSearchBoardItems: {
+          items: [
+            { id: '95300002', type: 'SNIPPET', title: 'Лендинг', lastUpdateDate: 1792824677 },
+          ],
+          totalCount: 346,
+          nextCursor,
+        },
+      },
+    })
+    expect(profiParsers.fromResponse('https://profi.ru/graphql', page('WzgwLjMxXQ==')).more).toBe(
+      true,
+    )
+    expect(profiParsers.fromResponse('https://profi.ru/graphql', page(null)).more).toBe(false)
+    // An answer without the cursor at all is a board that ends here.
+    expect(
+      profiParsers.fromResponse('https://profi.ru/graphql', {
+        data: { boSearchBoardItems: { items: [], totalCount: 0 } },
+      }).more,
+    ).toBe(false)
+  })
+
   it('ADR-002: other GraphQL answers are not mistaken for the board', () => {
     expect(
       profiParsers.fromResponse('https://profi.ru/graphql', { data: { me: { id: 1 } } }).recognized,

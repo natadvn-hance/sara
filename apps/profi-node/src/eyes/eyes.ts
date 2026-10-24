@@ -26,6 +26,11 @@ export type Eyes = {
   onChatRead(chatId: string, p: ParseResult): Promise<void>
   /** The site's board answer was read in the last 10 minutes. */
   boardWorks(now?: number): boolean
+  /**
+   * The board answers read so far: how many (a counter, to tell a new one from the last) and whether the last one
+   * said the board has more pages. Null before the first. The minute check scrolls the board by it.
+   */
+  board(): { seq: number; more: boolean } | null
   presence(): boolean
   reset(): void
 }
@@ -52,6 +57,7 @@ export function createEyes(o: {
   // The fee from the order page's own answer: truer than the page text, which misses a discount.
   const fees = new Map<string, { rub: number; baseRub: number | null; hasBid: boolean | null }>()
   let boardAt = 0
+  let board: { seq: number; more: boolean } | null = null
   // chat → when the stream named it and which message, for the time the message really came.
   const touched = new Map<string, { at: string; messageId: string | null }>()
 
@@ -180,6 +186,9 @@ export function createEyes(o: {
       if (source === 'response') boardAt = lastRecognized
     }
     await onSignals(p.signals, body)
+    // Counted when its orders are stored and on their way, so a pass that saw the answer arrive leaves nothing behind.
+    if (p.recognized && p.what === 'feed' && source === 'response')
+      board = { seq: (board?.seq ?? 0) + 1, more: p.more === true }
   }
 
   return {
@@ -256,6 +265,7 @@ export function createEyes(o: {
       await onSignals(signals, undefined, quiet)
     },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,
+    board: () => board,
     balance: () => balance,
     presence: () => presence,
     reset() {

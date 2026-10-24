@@ -26,6 +26,22 @@ export type Insurance = {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+export type BoardScroll = {
+  /** Pages of the board a pass loads, the one the page opens with included. */
+  pages?: number
+  /** Every Nth pass reads far more of the board... */
+  fullEvery?: number
+  /** ...up to this many pages. */
+  fullPages?: number
+  /** Between two scrolls a person looks at the page (milliseconds, a little random). */
+  pauseMs?: number
+  /** A pass stops scrolling after this long, so the one tab is not held from the checks and bids behind it. */
+  budgetMs?: number
+}
+// The board answers about 17 orders at a time, by relevance and not by time (346 on 24.10.2026): a new order of low
+// relevance sits far down. The first pages every minute, the whole board about every 10 minutes.
+const BOARD_SCROLL = { pages: 4, fullEvery: 10, fullPages: 30, pauseMs: 1200, budgetMs: 50000 }
+
 /**
  * The minute check (FR-LEAD-1) and the 10-minute chat check (FR-CONV-1): open the feed and unread chats in the
  * same tab, so the site's own answers pass the eyes again. It never touches the tab when canNavigate says no:
@@ -47,9 +63,13 @@ export function startInsurance(o: {
    * calibration, src/bid). It gets the tab's gate to ask again right before it presses anything.
    */
   afterOrderPage?: (orderId: string, may: () => boolean) => Promise<void>
+  /** How the feed pass scrolls the board for its next pages (see scrollBoard); all of it has a default. */
+  board?: BoardScroll
 }): Insurance {
   const can = o.canNavigate ?? (() => true)
   const pause = o.chatPauseMs ?? 2000
+  const scroll = { ...BOARD_SCROLL, ...o.board }
+  let passes = 0
   let busy: Promise<unknown> = Promise.resolve()
   const serial = <T>(f: () => Promise<T>): Promise<T> => {
     const run = busy.then(f, f)
@@ -145,11 +165,70 @@ export function startInsurance(o: {
     onFeed = true
   }
 
+  /**
+   * Scrolls the open board like a person (the mouse over the list, the wheel, a look between), until the page itself
+   * has asked the site for its next part: each answer passes the eyes, so nothing is called by hand. Stops at the
+   * page count, the end of the board, the time budget, or when the tab may not move.
+   */
+  async function scrollBoard(pages: number) {
+    const page = o.ab.page
+    const t0 = Date.now()
+    let loaded = 1
+    let stoppedBy: 'pages' | 'end' | 'quiet' | 'time' | 'gate' = 'pages'
+    while (loaded < pages) {
+      if (!can()) {
+        stoppedBy = 'gate'
+        break
+      }
+      if (Date.now() - t0 >= scroll.budgetMs) {
+        stoppedBy = 'time'
+        break
+      }
+      const before = o.eyes.board()
+      if (!before?.more) {
+        stoppedBy = 'end'
+        break
+      }
+      const [w, h] = await page.evaluate(() => [innerWidth, innerHeight]).catch(() => [1280, 720])
+      await page.mouse.move((w ?? 1280) / 2, (h ?? 720) / 2).catch(() => {})
+      let arrived = false
+      for (let step = 0; step < 14 && !arrived && can(); step++) {
+        await page.mouse.wheel(0, 450 + Math.random() * 250).catch(() => {})
+        await sleep(120 + Math.random() * 120)
+        arrived = (o.eyes.board()?.seq ?? 0) > before.seq
+      }
+      // A slow answer: the page asked, the site is still thinking.
+      for (let wait = 0; wait < 30 && !arrived && can(); wait++) {
+        await sleep(100)
+        arrived = (o.eyes.board()?.seq ?? 0) > before.seq
+      }
+      if (!arrived) {
+        stoppedBy = can() ? 'quiet' : 'gate'
+        break
+      }
+      loaded++
+      await sleep(scroll.pauseMs * (0.7 + Math.random() * 0.6))
+    }
+    // How far the pass got and why it stopped: a note for calibrating the scroll on the live board (no order, no text).
+    await keep({
+      what: 'board_scroll',
+      pages: loaded,
+      wanted: pages,
+      more: o.eyes.board()?.more ?? null,
+      stoppedBy,
+      ms: Date.now() - t0,
+    })
+  }
+
   async function feedOnce() {
     await serial(async () => {
       if (!can()) return
       if (!(await go(o.parsers.paths.feed))) return
       await readNewOrders()
+      passes++
+      // Only on the feed page itself (the page links fallback leaves it) and only a board the eyes know.
+      if (onFeed && can() && o.eyes.boardWorks() && o.eyes.board()?.more)
+        await scrollBoard(passes % scroll.fullEvery === 0 ? scroll.fullPages : scroll.pages)
       await readTouchedChats()
       if (o.parsers.paths.feed && can()) await maybeBackToFeed()
       await o.eyes.onParsed(

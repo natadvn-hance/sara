@@ -24,6 +24,8 @@ export type ParseResult = {
   recognized: boolean
   what?: 'feed' | 'chat' | 'order' | 'stream' | 'client'
   signals: Signal[]
+  /** A board answer: the board has more pages, which the page loads when scrolled (nextCursor). */
+  more?: boolean
 }
 
 export type FeedRef = { orderId: string; snippet: string }
@@ -123,7 +125,12 @@ export const standInParsers: Parsers = {
     const path = new URL(url).pathname
     if (path === '/api/feed') {
       if (!isObj(body) || !Array.isArray(body.items)) return NONE
-      return { recognized: true, what: 'feed', signals: (body.items as StandInOrder[]).map(order) }
+      return {
+        recognized: true,
+        what: 'feed',
+        signals: (body.items as StandInOrder[]).map(order),
+        more: typeof body.nextCursor === 'string',
+      }
     }
     if (path.startsWith('/api/order/') && isObj(body) && typeof body.id === 'string') {
       return { recognized: true, what: 'order', signals: [order(body as unknown as StandInOrder)] }

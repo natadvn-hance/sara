@@ -162,7 +162,9 @@ export function fromSiteAnswer(url: string, body: unknown): ParseResult {
       : { recognized: true, what: 'client', signals: [] }
   }
   const data = (
-    body as { data?: { boSearchBoardItems?: { items?: unknown }; orders?: unknown } } | null
+    body as {
+      data?: { boSearchBoardItems?: { items?: unknown; nextCursor?: unknown }; orders?: unknown }
+    } | null
   )?.data
   if (/\/graphql/.test(url) && Array.isArray(data?.orders)) return fromOrderAnswer(data.orders)
   const board = data?.boSearchBoardItems
@@ -178,7 +180,9 @@ export function fromSiteAnswer(url: string, body: unknown): ParseResult {
     )
     .map((it) => boardOrder(it, now))
     .filter((x): x is OrderSignal => x !== null)
-  return { recognized: true, what: 'feed', signals }
+  // The board holds the first ~17 of its orders in an answer, by relevance, not by time: the next pages come by cursor.
+  const more = typeof board.nextCursor === 'string' && board.nextCursor !== ''
+  return { recognized: true, what: 'feed', signals, more }
 }
 
 const CHAT_NOTICE = new Set(['MSG_CHAT_ORDER_NOTIFY', 'MSG_MESSENGER_UNREAD_NOTIFY'])
