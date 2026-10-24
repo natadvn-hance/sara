@@ -1,4 +1,6 @@
+import { newEventId } from '@sara/shared'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { modelCall } from '../src/db/schema'
 import { buildTestApp, type TestApp, type TestHealth } from './helpers/app'
 import { openTestDb, resetDb } from './helpers/db'
 
@@ -50,6 +52,31 @@ describe('system status', () => {
       checks: { id: string; ok: boolean }[]
     }
     expect(checks.find((c) => c.id === 'claude')?.ok).toBe(true)
+  })
+})
+
+describe('Claude limit on the status screen', () => {
+  it('FR-OPS-3: a probe stopped by the Claude limit says so and asks for no new token', async () => {
+    const cookie = { cookie: t.cookie() }
+    await t.secrets.set('claude_oauth_token', 'tok')
+    await db.insert(modelCall).values({
+      id: newEventId(),
+      role: 'probe',
+      roleVersion: 1,
+      model: 'haiku',
+      priority: 'P0',
+      startedAt: new Date().toISOString(),
+      durationMs: 900,
+      ok: false,
+      errorClass: 'limit_reached',
+    })
+    const { checks } = (
+      await t.app.inject({ method: 'GET', url: '/api/health', headers: cookie })
+    ).json() as { checks: { id: string; ok: boolean; detail: string; fix: string | null }[] }
+    const claude = checks.find((c) => c.id === 'claude')
+    expect(claude?.ok).toBe(false)
+    expect(claude?.detail).toContain('лимит')
+    expect(claude?.fix).not.toContain('токен')
   })
 })
 
