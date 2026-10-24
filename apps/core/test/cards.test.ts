@@ -26,6 +26,27 @@ describe('cards', () => {
     })
   })
 
+  it('FR-LEAD-7: the card shows the score, the rules version and the reason', () => {
+    const text = leadCardText({
+      ...card,
+      bidPriceRub: 148,
+      score: { value: 68, version: 1, reason: 'Зрелый бизнес, понятная задача' },
+    })
+    expect(text).toBe(
+      '🔔 Заявка · Сайт для клиники, Краснодар\nБалл 68 (правила v1). Зрелый бизнес, понятная задача\nОтклик 148\u00a0₽',
+    )
+    expect(text).not.toContain('Подходит:')
+  })
+
+  it('FR-LEAD-7: a card without a score says so', () => {
+    expect(leadCardText({ ...card, score: null, unscored: true }).split('\n')).toEqual([
+      '🔔 Заявка · Сайт для клиники, Краснодар',
+      'Подходит: Нужен сайт',
+      'Без оценки: Оценщик не ответил',
+      'Отклик 210\u00a0₽',
+    ])
+  })
+
   it('FR-LEAD-2: card without a sorter verdict asks Boris to check', () => {
     expect(leadCardText({ ...card, verdict: null, reason: null })).toContain(
       'Сортировщик не ответил, проверь сам',

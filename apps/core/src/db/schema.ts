@@ -9,6 +9,7 @@ import {
   jsonb,
   pgSchema,
   primaryKey,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -168,4 +169,25 @@ export const directionVersion = core.table(
     primaryKey({ columns: [t.accountId, t.version] }),
     uniqueIndex('direction_version_one_active').on(t.accountId).where(sql`${t.active}`),
   ],
+)
+
+/** The Scorer's verdicts (FR-LEAD-3); backtest rows are trial scores under proposed rules, never acted on. */
+export const leadScore = core.table(
+  'lead_score',
+  {
+    id: uuid('id').primaryKey(),
+    leadId: text('lead_id').notNull(),
+    version: integer('version').notNull(),
+    score: integer('score').notNull(),
+    decision: text('decision').notNull(),
+    stopFactor: text('stop_factor'),
+    redFlags: jsonb('red_flags').notNull(),
+    axes: jsonb('axes').notNull(),
+    reason: text('reason').notNull(),
+    confidence: real('confidence').notNull(),
+    model: text('model').notNull(),
+    backtest: boolean('backtest').notNull().default(false),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('lead_score_lead').on(t.leadId, t.backtest)],
 )

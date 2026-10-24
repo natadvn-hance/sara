@@ -1,13 +1,14 @@
 import { cp, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { ProfiOrder, type ScorerOutput } from '@sara/shared'
+import { ProfiOrder } from '@sara/shared'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { RULES_V1 } from '../src/direction/v1'
 import { createGateway } from '../src/gateway/gateway'
 import { decide, scoreOrder, scorerInput } from '../src/leads/scorer'
 import { createSecretStore } from '../src/secrets/store'
 import { openTestDb, resetDb } from './helpers/db'
+import { scorerAnswer } from './helpers/scorer'
 
 const ROOT = resolve(import.meta.dirname, '../../..')
 const { db, close } = openTestDb()
@@ -20,18 +21,6 @@ beforeEach(async () => {
   log = join(dir, 'calls.log')
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
 })
-
-/** A Scorer answer whose five axes all score `v`, so the weighted score is `v`. */
-export function scorerAnswer(v: number, over: Partial<ScorerOutput> = {}): ScorerOutput {
-  return {
-    stop_factor: null,
-    red_flags: [],
-    axes: RULES_V1.axes.map((a) => ({ id: a.id, score: v, why: 'так' })),
-    reason: 'Зрелый бизнес, понятная задача',
-    confidence: 0.9,
-    ...over,
-  }
-}
 
 const order = async () =>
   ProfiOrder.parse(

@@ -17,6 +17,7 @@ export const EVENT_TYPES = [
   'profi.connection_back',
   'lead.found',
   'lead.sorted',
+  'lead.scored',
   'lead.skipped',
   'bid.requested',
   'bid.sent',

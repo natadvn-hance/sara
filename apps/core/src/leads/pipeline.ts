@@ -2,7 +2,8 @@ import { DBOS } from '@dbos-inc/dbos-sdk'
 import { type EventEnvelope, newEventId, ProfiOrder, type TaskAction } from '@sara/shared'
 import { and, desc, eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { event, lead, task } from '../db/schema'
+import { event, lead, leadScore, task } from '../db/schema'
+import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import type { LeadCard } from '../notify/cards'
@@ -11,6 +12,7 @@ import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { recordBid, startOutboxDelivery } from './outbox'
+import { type Scored, scoreOrder } from './scorer'
 import { sortOrder } from './sorter'
 
 export type LeadPipelineDeps = {
@@ -46,6 +48,7 @@ const ev = (
   type:
     | 'lead.found'
     | 'lead.sorted'
+    | 'lead.scored'
     | 'lead.skipped'
     | 'task.created'
     | 'task.resolved'
@@ -130,6 +133,57 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     return
   }
 
+  const accountId = e.account_id ?? 'hance-marketing'
+  const scored = await DBOS.runStep(
+    async (): Promise<(Scored & { version: number }) | null> => {
+      // Any failure here (no rules, the model down) brings the card unscored: the order is never lost.
+      try {
+        const { version, rules } = await activeRules(d().db, accountId)
+        const s = await scoreOrder(d().gateway, order, rules, { correlationId, causationId: e.id })
+        return s ? { ...s, version } : null
+      } catch (err) {
+        console.error('scoring failed', err instanceof Error ? err.message.slice(0, 200) : err)
+        return null
+      }
+    },
+    { name: 'score' },
+  )
+  if (scored) {
+    await DBOS.runStep(
+      () =>
+        d().db.transaction(async (tx) => {
+          await tx.insert(leadScore).values({
+            id: newEventId(),
+            leadId: order.order_id,
+            version: scored.version,
+            score: scored.score,
+            decision: scored.decision,
+            stopFactor: scored.stopFactor,
+            redFlags: scored.redFlags,
+            axes: scored.axes,
+            reason: scored.reason,
+            confidence: scored.confidence,
+            model: scored.model,
+          })
+          if (scored.decision === 'drop') {
+            await tx.update(lead).set({ status: 'scored_out' }).where(eq(lead.id, order.order_id))
+          }
+          await appendEvent(
+            tx,
+            ev('lead.scored', { kind: 'lead', id: order.order_id }, correlationId, 'sara', {
+              score: scored.score,
+              decision: scored.decision,
+              version: scored.version,
+              stop_factor: scored.stopFactor,
+            }),
+          )
+        }),
+      { name: 'scored', ...DB_STEP },
+    )
+    // Below the threshold or a stop factor: kept for the daily summary, nothing goes to Boris.
+    if (scored.decision === 'drop') return
+  }
+
   const taskId = await DBOS.runStep(
     () =>
       d().db.transaction(async (tx) => {
@@ -166,6 +220,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     verdict: sorted.verdict,
     reason: sorted.reason,
     bidPriceRub: order.bid_price_rub,
+    score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
+    unscored: !scored,
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
   try {
@@ -215,6 +271,12 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
     verdict?: 'fit' | 'maybe' | 'reject' | null
     reason?: string | null
   }
+  const [sc] = await d()
+    .db.select()
+    .from(leadScore)
+    .where(and(eq(leadScore.leadId, found.lead.id), eq(leadScore.backtest, false)))
+    .orderBy(desc(leadScore.createdAt))
+    .limit(1)
   return {
     taskId,
     title: found.lead.title,
@@ -222,6 +284,7 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
     verdict: s.verdict === 'fit' || s.verdict === 'maybe' ? s.verdict : null,
     reason: s.reason ?? null,
     bidPriceRub: found.lead.bidPriceRub,
+    score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
     reminder,
   }
 }

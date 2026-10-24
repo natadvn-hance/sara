@@ -7,6 +7,10 @@ export type LeadCard = {
   verdict: 'fit' | 'maybe' | null
   reason: string | null
   bidPriceRub: number
+  /** The Scorer's total by the rules of `version` (FR-LEAD-3); none when the order was not scored. */
+  score?: { value: number; version: number; reason: string } | null
+  /** The Scorer did not answer: the card comes anyway, marked. */
+  unscored?: boolean
   /** The same card again as a reminder, with the buttons, so Boris can act on it. */
   reminder?: boolean
 }
@@ -46,7 +50,10 @@ export function leadCardText(c: LeadCard): string {
   const head = c.reminder
     ? `⏰ Заявка ждёт решения: ${c.title}, ${c.city}`
     : `🔔 Заявка · ${c.title}, ${c.city}`
-  return [head, verdictLine(c), `Отклик ${formatRub(c.bidPriceRub)}`].join('\n')
+  const why = c.score
+    ? [`Балл ${c.score.value} (правила v${c.score.version}). ${c.score.reason}`]
+    : [verdictLine(c), ...(c.unscored ? ['Без оценки: Оценщик не ответил'] : [])]
+  return [head, ...why, `Отклик ${formatRub(c.bidPriceRub)}`].join('\n')
 }
 
 export function leadCardKeyboard(c: LeadCard) {
