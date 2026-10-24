@@ -20,6 +20,7 @@ import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { countEvents } from '../../apps/core/test/helpers/events'
+import { summaryTime } from '../../apps/core/test/helpers/learning'
 import { scorerAnswer } from '../../apps/core/test/helpers/scorer'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
@@ -184,10 +185,9 @@ describe('scoring in the lead pipeline', () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
-    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date())
-    expect(
-      await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`)),
-    ).toBe('sent')
+    expect(await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())).toBe(
+      'sent',
+    )
     await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1 заявку. На грани:')))
     const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
       ?.inline_keyboard[0]?.[0]
@@ -260,8 +260,7 @@ describe('scoring in the lead pipeline', () => {
       const dropped = orderId()
       await fake.emitOrder({ order_id: dropped })
       await until(async () => (await statusOf(dropped)) === 'scored_out')
-      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date())
-      await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`))
+      await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
       await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
       const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
         ?.inline_keyboard[0]?.[0]

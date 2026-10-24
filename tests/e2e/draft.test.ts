@@ -11,6 +11,7 @@ import { seedDirection } from '../../apps/core/src/direction/store'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
+import { summaryTime } from '../../apps/core/test/helpers/learning'
 import { scorerAnswer } from '../../apps/core/test/helpers/scorer'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
@@ -174,8 +175,7 @@ describe('the draft on the card', () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(async () => (await leadOf(id))?.status === 'scored_out')
-    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date())
-    await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`))
+    await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
     await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
     const summary = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))
     tg.pushPress(111, summary?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data ?? '')

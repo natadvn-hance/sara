@@ -119,3 +119,13 @@ export async function heldLead(
     model: 'haiku',
   })
 }
+
+/**
+ * 19:30 Moscow time of the summary whose day holds an order seen now: today's before 19:00, tomorrow's after
+ * (the summary's window ends at its own 19:00).
+ */
+export function summaryTime(now = new Date()): Date {
+  const msk = new Date(now.getTime() + 3 * 3600_000)
+  if (msk.getUTCHours() >= 19) msk.setUTCDate(msk.getUTCDate() + 1)
+  return new Date(`${msk.toISOString().slice(0, 10)}T19:30:00+03:00`)
+}
