@@ -164,6 +164,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     mode: 'ok',
     payWay: 'wallet',
     behindOpener: true,
+    openerCharges: 0,
     openerText: 'Написать клиенту',
     answer: true,
     hasBidField: true,
@@ -260,6 +261,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     }
     if (p === '/api/bid/open') {
       state.openerClicks++
+      state.balance -= bidSettings.openerCharges
       return json(res, { ok: true })
     }
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))

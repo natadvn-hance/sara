@@ -289,6 +289,8 @@ describe('insurance and the account tab', () => {
       fromOrderDom: async () => ({ recognized: false, what: 'order', signals: [] }),
     }
     const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
+    // The page each hook call finds the tab on: the order page itself, still open.
+    const after: string[] = []
     const ins = startInsurance({
       eyes,
       ab,
@@ -297,9 +299,13 @@ describe('insurance and the account tab', () => {
       feedEveryMs: 3_600_000,
       chatsEveryMs: 3_600_000,
       chatPauseMs: 10,
+      afterOrderPage: async (orderId) => {
+        after.push(`${orderId} ${new URL(ab.page.url()).search}`)
+      },
     })
     const id = site.addOrder({ description: 'Клиентский текст про оплату' })
     await ins.feedOnce()
+    expect(after).toContain(`${id} ?o=${id}`)
     ins.stop()
     site.muteRtp(false)
     // Orders of the earlier tests are still on the stand-in feed: only this one is looked at.
