@@ -188,6 +188,7 @@ describe('M4 contracts', () => {
   })
 
   it('FR-CONV-5: conversation settings have the design defaults', () => {
+    expect(SETTINGS['pipeline.conversations'].default).toBe(false)
     expect(SETTINGS['conv.v1_writes'].default).toBe(true)
     expect(SETTINGS['conv.quiet_after_message_s'].default).toBe(45)
     expect(SETTINGS['conv.quiet_after_typing_s'].default).toBe(20)

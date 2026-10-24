@@ -795,7 +795,7 @@ Claude, при двух параллельных около часа, поэто
   `profi.specialist_message` (как `MessageRef`), `profi.client_typing`
   (`chat_id`, `at`), `profi.client_read` (`chat_id`, `platform_message_id`,
   `at`).
-- `contracts/settings.ts`: `conv.v1_writes` (true: тень), `conv.quiet_after_message_s`
+- `contracts/settings.ts`: `pipeline.conversations` (false: сообщения клиентов только сохраняются, ходов нет; выкладка включает, как `pipeline.leads`), `conv.v1_writes` (true: тень), `conv.quiet_after_message_s`
   (45), `conv.quiet_after_typing_s` (20), `conv.max_wait_s` (600),
   `conv.night` ({23, 8}), `conv.reminder_quiet` ({23, 9}),
   `conv.cards_per_day` (10), `conv.autonomy` (уровни тем, по умолчанию

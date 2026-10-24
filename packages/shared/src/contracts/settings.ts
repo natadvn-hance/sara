@@ -53,6 +53,8 @@ export const SETTINGS = {
       .nullable(),
     default: { from: 23, to: 9 } as { from: number; to: number } | null,
   },
+  /** M4: client messages start turns of the conversation; off until the deploy turns it on, as pipeline.leads. */
+  'pipeline.conversations': { schema: z.boolean(), default: false },
   /**
    * Shadow (ADR-024): old Sara still writes to clients from this account. While on, the new Sara sends nothing,
    * not even Boris's own text, and a specialist message is not taken for Boris's.
