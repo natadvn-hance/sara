@@ -339,27 +339,29 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
 }
 
 /**
- * «Взял бы» from the daily summary: Boris's yes on an order Sara dropped. It is a label and a surprise («почему?»),
- * and the order comes back as a normal card so he can bid on it.
+ * A button of the daily summary brings its order back as a normal card with a decision task, once: «Взял бы»
+ * on a dropped order (lead_review, want) or «Показать» on one held over the card cap (lead_held, open).
  */
-async function onWant(reviewId: string): Promise<string> {
-  const [t] = await d().db.select().from(task).where(eq(task.id, reviewId))
-  if (!t || t.kind !== 'lead_review') return TEXTS.alreadyDone
+async function bringCard(
+  fromId: string,
+  kind: 'lead_review' | 'lead_held',
+  action: 'want' | 'open',
+): Promise<typeof lead.$inferSelect | null> {
+  const [t] = await d().db.select().from(task).where(eq(task.id, fromId))
+  if (t?.kind !== kind) return null
   const [l] = await d().db.select().from(lead).where(eq(lead.id, t.entityId))
-  if (!l) return TEXTS.alreadyDone
+  if (!l) return null
   const decisionId = newEventId()
   const resolved = await d().db.transaction(async (tx) => {
     const rows = await tx
       .update(task)
-      .set({ state: 'resolved', resolution: 'want', resolvedAt: new Date().toISOString() })
-      .where(and(eq(task.id, reviewId), eq(task.state, 'open')))
+      .set({ state: 'resolved', resolution: action, resolvedAt: new Date().toISOString() })
+      .where(and(eq(task.id, fromId), eq(task.state, 'open')))
       .returning({ id: task.id })
     if (rows.length === 0) return false
     await appendEvent(
       tx,
-      ev('task.resolved', { kind: 'task', id: reviewId }, l.correlationId, 'boris', {
-        action: 'want',
-      }),
+      ev('task.resolved', { kind: 'task', id: fromId }, l.correlationId, 'boris', { action }),
     )
     await tx
       .insert(task)
@@ -373,15 +375,30 @@ async function onWant(reviewId: string): Promise<string> {
     )
     return true
   })
-  if (!resolved) return TEXTS.alreadyDone
+  if (!resolved) return null
   await startDecisionWait(decisionId, await d().remindAfterMs())
   const card = await cardOfTask(decisionId, false)
   if (card) {
     const m = await d().notifier.sendLeadCard(card)
     await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, decisionId))
   }
+  return l
+}
+
+/**
+ * «Взял бы» from the daily summary: Boris's yes on an order Sara dropped. It is a label and a surprise («почему?»),
+ * and the order comes back as a normal card so he can bid on it.
+ */
+async function onWant(reviewId: string): Promise<string> {
+  const l = await bringCard(reviewId, 'lead_review', 'want')
+  if (!l) return TEXTS.alreadyDone
   learnFrom({ leadId: l.id, label: 'yes', source: 'summary' }, 'why_want', l.title)
   return TEXTS.wantCard
+}
+
+/** «Показать» from the daily summary: an order held over the card cap comes as a card; Boris has not decided yet. */
+async function onOpen(heldId: string): Promise<string> {
+  return (await bringCard(heldId, 'lead_held', 'open')) ? TEXTS.wantCard : TEXTS.alreadyDone
 }
 
 /**
@@ -414,6 +431,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
 
     async onPress({ taskId, action }) {
       if (action === 'want') return onWant(taskId)
+      if (action === 'open') return onOpen(taskId)
       if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)

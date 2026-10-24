@@ -1,4 +1,4 @@
-import { formatCallback, newEventId } from '@sara/shared'
+import { formatCallback, newEventId, plural } from '@sara/shared'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun, task } from '../db/schema'
@@ -10,6 +10,17 @@ export const SUMMARY_HOUR_MSK = 19
 const BORDERLINE_MAX = 3
 /** Borderline: at most this many points under the threshold, no stop factor. */
 const BORDERLINE_BELOW = 10
+/** Orders held over the day's card cap listed with a button; the rest are only counted. */
+const HELD_MAX = 10
+
+/** The «ещё показала бы» part (FR-NOTIF-3); the texts stay here while part C owns notify/cards.ts. */
+const HELD_TEXTS = {
+  head: 'Ещё показала бы, карточек за день было больше лимита:',
+  line: (n: number, h: Held) =>
+    `${n}. ${h.title}, ${h.score === null ? 'без оценки' : `балл ${h.score}`}`,
+  more: (n: number) => `И ещё ${n} ${plural(n, ['заявка', 'заявки', 'заявок'])}`,
+  button: (n: number) => `Показать №${n}`,
+}
 
 const mskParts = (d: Date) => {
   const p = new Intl.DateTimeFormat('en-CA', {
@@ -25,10 +36,12 @@ const mskParts = (d: Date) => {
 }
 
 type Borderline = { leadId: string; title: string; score: number; reason: string }
+type Held = { leadId: string; title: string; score: number | null }
 
 /**
  * Once a Moscow day after 19:00: how many orders Sara dropped since yesterday's summary, and the borderline ones with «Взял бы»
- * (FR-LEAD-7). The day's row in job_run is taken first, so two ticks or two cores send it once.
+ * (FR-LEAD-7); then the orders held over the card cap, best first, with «Показать» (FR-NOTIF-3). The day's row in
+ * job_run is taken first, so two ticks or two cores send it once.
  */
 export async function dailySummary(
   d: { db: Db; notifier: Pick<Notifier, 'sendText' | 'sendButtons'> },
@@ -51,7 +64,19 @@ export async function dailySummary(
     sql`select count(*)::int as n from core.lead l where l.status = 'scored_out' and ${today}`,
   )
   const dropped = counted.rows[0]?.n ?? 0
-  if (dropped === 0) return 'none'
+  // Value first (FR-LEAD-10): the higher score, then the cheaper bid.
+  const heldRows = await d.db.execute<Held>(sql`
+    select l.id as "leadId", l.title, s.score
+    from core.lead l
+    left join lateral (
+      select s.score from core.lead_score s
+      where s.lead_id = l.id and not s.backtest
+      order by s.created_at desc limit 1
+    ) s on true
+    where l.status = 'held' and ${today}
+    order by s.score desc nulls last, l.bid_price_rub, l.seen_at`)
+  const held = heldRows.rows
+  if (dropped === 0 && held.length === 0) return 'none'
 
   const rows = await d.db.execute<Borderline>(sql`
     select l.id as "leadId", l.title, s.score, s.reason
@@ -69,32 +94,50 @@ export async function dailySummary(
     order by s.score desc, l.seen_at
     limit ${BORDERLINE_MAX}`)
   const picks = rows.rows
+  const shown = held.slice(0, HELD_MAX)
+  const lines: string[] = []
+  if (dropped > 0) {
+    if (picks.length === 0) lines.push(TEXTS.summaryNone(dropped))
+    else
+      lines.push(
+        TEXTS.summaryHead(dropped),
+        ...picks.map((p, i) => `${i + 1}. ${p.title}, балл ${p.score}: ${p.reason}`),
+      )
+  }
+  if (shown.length > 0) {
+    if (lines.length > 0) lines.push('')
+    lines.push(HELD_TEXTS.head, ...shown.map((h, i) => HELD_TEXTS.line(picks.length + i + 1, h)))
+    if (held.length > shown.length) lines.push(HELD_TEXTS.more(held.length - shown.length))
+  }
   try {
-    if (picks.length === 0) {
-      await d.notifier.sendText(TEXTS.summaryNone(dropped))
+    if (picks.length === 0 && shown.length === 0) {
+      await d.notifier.sendText(lines.join('\n'))
       return 'sent'
     }
-    const ids = picks.map(() => newEventId())
-    await d.db.insert(task).values(
-      picks.map((p, i) => ({
-        id: ids[i] as string,
-        kind: 'lead_review',
-        entityKind: 'lead',
-        entityId: p.leadId,
-      })),
-    )
+    const items = [
+      ...picks.map((p) => ({ leadId: p.leadId, kind: 'lead_review', action: 'want' as const })),
+      ...shown.map((h) => ({ leadId: h.leadId, kind: 'lead_held', action: 'open' as const })),
+    ].map((x) => ({ ...x, id: newEventId() }))
+    const ids = items.map((x) => x.id)
+    await d.db
+      .insert(task)
+      .values(
+        items.map((x) => ({ id: x.id, kind: x.kind, entityKind: 'lead', entityId: x.leadId })),
+      )
     try {
       await d.notifier.sendButtons(
-        [
-          TEXTS.summaryHead(dropped),
-          ...picks.map((p, i) => `${i + 1}. ${p.title}, балл ${p.score}: ${p.reason}`),
-        ].join('\n'),
-        picks.map((_, i) => [
-          { text: TEXTS.wantButton(i + 1), callbackData: formatCallback(ids[i] as string, 'want') },
+        lines.join('\n'),
+        items.map((x, i) => [
+          {
+            text: x.action === 'want' ? TEXTS.wantButton(i + 1) : HELD_TEXTS.button(i + 1),
+            callbackData: formatCallback(x.id, x.action),
+          },
         ]),
       )
     } catch (e) {
-      await d.db.delete(task).where(and(inArray(task.id, ids), eq(task.kind, 'lead_review')))
+      await d.db
+        .delete(task)
+        .where(and(inArray(task.id, ids), inArray(task.kind, ['lead_review', 'lead_held'])))
       throw e
     }
     return 'sent'

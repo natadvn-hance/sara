@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, outbox, task } from '../../apps/core/src/db/schema'
+import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
@@ -226,5 +227,46 @@ describe('the card flow', () => {
     const [l] = await db.select().from(lead).where(eq(lead.id, held))
     expect(l?.status).toBe('held')
     expect(await decisionTaskOf(held)).toBeUndefined()
+  })
+})
+
+/** 19:30 Moscow time of the summary whose day holds an order seen now. */
+function summaryTime(): Date {
+  const msk = new Date(Date.now() + 3 * 3600_000)
+  if (msk.getUTCHours() >= 19) msk.setUTCDate(msk.getUTCDate() + 1)
+  return new Date(`${msk.toISOString().slice(0, 10)}T19:30:00+03:00`)
+}
+
+describe('held orders in the summary', () => {
+  it('FR-NOTIF-3: «Показать» from the summary brings the held order as a card', async () => {
+    await setSetting(db, 'cards.max_per_day', 1, 'boris')
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => cards().length === 1)
+    const held = orderId()
+    await fake.emitOrder({ order_id: held })
+    await until(async () => (await eventTypesOf(held)).includes('lead.held'))
+    expect(await dailySummary({ db, notifier: app.bot.notifier }, summaryTime())).toBe('sent')
+    const summary = tg.sent.at(-1)
+    expect(summary?.text).toContain('Ещё показала бы')
+    const show = summary?.reply_markup?.inline_keyboard[0]?.[0]
+    expect(show?.text).toBe('Показать №1')
+    tg.pushPress(111, show?.callback_data ?? '')
+    await until(() => tg.answers.length === 1)
+    expect(tg.answers[0]?.text).toBe('Прислала карточку заявки')
+    const card = tg.sent.at(-1)
+    expect(card?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
+    const [l] = await db.select().from(lead).where(eq(lead.id, held))
+    expect(l?.status).toBe('queued')
+    const decisions = await db.select().from(task).where(eq(task.entityId, held))
+    expect(decisions.map((t) => [t.kind, t.state]).sort()).toEqual([
+      ['lead_decision', 'open'],
+      ['lead_held', 'resolved'],
+    ])
+    // A second press on the same button changes nothing.
+    tg.pushPress(111, show?.callback_data ?? '')
+    await until(() => tg.answers.length === 2)
+    expect(tg.answers[1]?.text).toBe('Уже сделано')
+    // Boris has not decided yet: no label is written for the opened card.
+    expect(await count('lead.labeled')).toBe(0)
   })
 })

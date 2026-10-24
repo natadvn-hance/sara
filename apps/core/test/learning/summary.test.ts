@@ -5,7 +5,7 @@ import { seedDirection } from '../../src/direction/store'
 import { dailySummary } from '../../src/learning/summary'
 import type { Notifier } from '../../src/notify/notifier'
 import { openTestDb, resetDb } from '../helpers/db'
-import { droppedLead } from '../helpers/learning'
+import { droppedLead, heldLead } from '../helpers/learning'
 
 const { db, close } = openTestDb()
 afterAll(close)
@@ -119,5 +119,77 @@ describe('daily summary', () => {
     sent = []
     expect(await dailySummary({ db, notifier }, new Date('2026-10-26T16:30:00Z'))).toBe('sent')
     expect(sent[0]?.text).toContain('Заказ 930052')
+  })
+
+  it('FR-NOTIF-3: orders held over the card cap come under «Ещё показала бы» with a button each', async () => {
+    await heldLead(db, '940001', { seenAt: MORNING, score: 70, bidPriceRub: 300 })
+    await heldLead(db, '940002', { seenAt: MORNING, score: 80 })
+    await heldLead(db, '940003', { seenAt: MORNING, score: 70, bidPriceRub: 150 })
+    await heldLead(db, '940004', { seenAt: MORNING, score: null })
+    // Held yesterday: yesterday's summary had it.
+    await heldLead(db, '940005', { seenAt: '2026-10-24T07:00:00Z', score: 90 })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.text.split('\n')).toEqual([
+      'Ещё показала бы, карточек за день было больше лимита:',
+      '1. Заказ 940002, балл 80',
+      '2. Заказ 940003, балл 70',
+      '3. Заказ 940001, балл 70',
+      '4. Заказ 940004, без оценки',
+    ])
+    expect(sent[0]?.rows.map((r) => r.map((b) => b.text))).toEqual([
+      ['Показать №1'],
+      ['Показать №2'],
+      ['Показать №3'],
+      ['Показать №4'],
+    ])
+    expect(sent[0]?.rows[0]?.[0]?.callbackData).toMatch(/^t:.+:open$/)
+    const held = await db.select().from(task).where(eq(task.kind, 'lead_held'))
+    expect(held.map((t) => t.entityId).sort()).toEqual(['940001', '940002', '940003', '940004'])
+  })
+
+  it('FR-NOTIF-3: borderline and held orders share one message and one numbering', async () => {
+    await droppedLead(db, '930061', 55, { seenAt: MORNING })
+    await heldLead(db, '940011', { seenAt: MORNING, score: 70 })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    expect(sent[0]?.text.split('\n')).toEqual([
+      'Сегодня отсеяла 1 заявку. На грани:',
+      '1. Заказ 930061, балл 55: причина 930061',
+      '',
+      'Ещё показала бы, карточек за день было больше лимита:',
+      '2. Заказ 940011, балл 70',
+    ])
+    expect(sent[0]?.rows.map((r) => r.map((b) => b.text))).toEqual([
+      ['Взял бы №1'],
+      ['Показать №2'],
+    ])
+  })
+
+  it('FR-NOTIF-3: past 10 held orders the rest are counted, not listed', async () => {
+    await droppedLead(db, '930071', 20, { seenAt: MORNING })
+    for (let i = 10; i < 22; i++) await heldLead(db, `9400${i}`, { seenAt: MORNING, score: 60 + i })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    const lines = sent[0]?.text.split('\n') ?? []
+    expect(lines.slice(0, 4)).toEqual([
+      'Сегодня отсеяла 1 заявку, пограничных не было',
+      '',
+      'Ещё показала бы, карточек за день было больше лимита:',
+      '1. Заказ 940021, балл 81',
+    ])
+    expect(lines.at(-1)).toBe('И ещё 2 заявки')
+    expect(sent[0]?.rows).toHaveLength(10)
+  })
+
+  it('FR-NOTIF-3: a summary that could not be sent leaves no held tasks behind', async () => {
+    await heldLead(db, '940031', { seenAt: MORNING, score: 70 })
+    const failing: Notifier = {
+      ...notifier,
+      sendButtons: async () => {
+        throw new Error('telegram down')
+      },
+    }
+    await expect(dailySummary({ db, notifier: failing }, AT_1930)).rejects.toThrow()
+    expect(await db.select().from(task)).toHaveLength(0)
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
   })
 })
