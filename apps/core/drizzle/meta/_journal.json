@@ -22,6 +22,27 @@
       "when": 1792734118846,
       "tag": "0002_account",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792844051791,
+      "tag": "0003_direction",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792844552503,
+      "tag": "0004_lead_score",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792844792985,
+      "tag": "0005_learning",
+      "breakpoints": true
     }
   ]
 }

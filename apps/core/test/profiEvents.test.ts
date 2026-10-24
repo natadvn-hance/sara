@@ -13,6 +13,7 @@ let sent: string[]
 const notifier = {
   sendText: async (t: string) => {
     sent.push(t)
+    return { messageId: 1 }
   },
   sendLeadCard: async () => ({ messageId: 1 }),
 }

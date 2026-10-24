@@ -80,6 +80,7 @@ beforeAll(async () => {
   app = await startApp(config, {
     claudeEnv: () => ({ FAKE_CLAUDE_MODE: claudeMode, FAKE_CLAUDE_OUTPUT: FIT }),
     retryDelaysMs: [50, 50, 50, 50, 50],
+    learningTickMs: 3_600_000,
     remindAfterMs: async () => remindMs,
     notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
   })

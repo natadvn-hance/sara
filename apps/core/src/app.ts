@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
 import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
@@ -8,10 +9,14 @@ import { requireSession } from './auth/session'
 import type { Config } from './config'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
+import { seedDirection } from './direction/store'
 import { createGateway } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
+import { handleBorisMessage } from './learning/inbox'
+import { startLearningJobs } from './learning/jobs'
 import { type BotControl, createBotControl } from './notify/botControl'
+import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
 import { registerScreenProxy } from './screen/screenProxy'
@@ -35,6 +40,8 @@ export type StartOptions = {
   retryDelaysMs?: number[]
   remindAfterMs?: () => Promise<number>
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
+  /** How often the learning jobs run (default a minute); tests call them directly instead. */
+  learningTickMs?: number
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -53,10 +60,18 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
 
   let pipeline: LeadPipeline | null = null
+  const transcriber = createTranscriber({
+    ffmpegBin: config.ffmpegBin,
+    whisperBin: config.whisperBin,
+    modelPath: config.whisperModel,
+    workDir: join(config.dataDir, 'voice'),
+  })
   const bot = createBotControl({
     db,
     apiRoot: config.telegramApiRoot,
     onPress: (p) => (pipeline ? pipeline.onPress(p) : Promise.resolve('Сара ещё запускается')),
+    onMessage: (m) => handleBorisMessage({ db, transcriber }, m),
+    voiceDir: join(config.dataDir, 'voice'),
   })
   pipeline = createLeadPipeline({
     db,
@@ -96,6 +111,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     accounts: config.accounts,
   }
   await seedAccounts(db, config.accounts)
+  for (const a of config.accounts) await seedDirection(db, a.id)
   const app = await buildServer(deps)
   await registerScreenProxy(app, {
     profiScreenUrl: config.profiScreenUrl,
@@ -118,6 +134,13 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
 
   const token = await secrets.get('telegram_bot_token')
   if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))
+  const learning = startLearningJobs({
+    db,
+    notifier: bot.notifier,
+    gateway,
+    accountIds: config.accounts.map((a) => a.id),
+    tickMs: o.learningTickMs,
+  })
 
   return {
     url,
@@ -127,6 +150,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     pipeline: lp,
     async close() {
+      learning.stop()
       await bot.stop()
       await app.close()
       await shutdownDbos()

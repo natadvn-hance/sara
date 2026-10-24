@@ -1,7 +1,11 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { newEventId, parseCallback, type TaskAction } from '@sara/shared'
 import { Bot, type Context } from 'grammy'
 import type { Db } from '../db/client'
 import { appendEvent } from '../journal/journal'
+import type { BorisMessage } from '../learning/inbox'
 import { bindChat, boundChat } from './binding'
 import { leadCardKeyboard, leadCardText, TEXTS } from './cards'
 import type { Notifier } from './notifier'
@@ -25,6 +29,10 @@ export function createTelegramRuntime(d: {
   apiRoot?: string
   db: Db
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
+  /** Boris's text or voice (saved to a file first); the answer goes back to him. */
+  onMessage?(m: BorisMessage): Promise<string>
+  /** Where voice messages are saved while they are recognized (default: the system temp folder). */
+  voiceDir?: string
 }): TelegramRuntime {
   const bot = new Bot(d.token, d.apiRoot ? { client: { apiRoot: d.apiRoot } } : undefined)
 
@@ -68,6 +76,54 @@ export function createTelegramRuntime(d: {
       })
     }
     await ctx.reply(TEXTS.bound)
+  })
+
+  bot.on('message:text', async (ctx) => {
+    if (!d.onMessage || ctx.message.text.startsWith('/')) return
+    await ctx.reply(
+      await d.onMessage({
+        text: ctx.message.text,
+        voicePath: null,
+        replyToMessageId: ctx.message.reply_to_message?.message_id ?? null,
+        at: new Date(),
+      }),
+    )
+  })
+
+  bot.on('message:voice', (ctx) => {
+    const onMessage = d.onMessage
+    if (!onMessage) return
+    const fileId = ctx.message.voice.file_id
+    const replyTo = ctx.message.reply_to_message?.message_id ?? null
+    // Recognition takes seconds: it runs on its own, so the bot keeps answering presses meanwhile.
+    void (async () => {
+      const base = d.voiceDir ?? tmpdir()
+      await mkdir(base, { recursive: true })
+      const dir = await mkdtemp(join(base, 'voice-'))
+      try {
+        const file = await ctx.api.getFile(fileId)
+        const res = await fetch(
+          `${d.apiRoot ?? 'https://api.telegram.org'}/file/bot${d.token}/${file.file_path}`,
+          { signal: AbortSignal.timeout(60_000) },
+        )
+        if (!res.ok || !file.file_path) throw new Error(`voice download: ${res.status}`)
+        const path = join(dir, 'voice.oga')
+        await writeFile(path, Buffer.from(await res.arrayBuffer()))
+        await ctx.reply(
+          await onMessage({
+            text: null,
+            voicePath: path,
+            replyToMessageId: replyTo,
+            at: new Date(),
+          }),
+        )
+      } catch (e) {
+        console.error('voice message failed', e instanceof Error ? e.message : e)
+        await ctx.reply(TEXTS.voiceFailed).catch(() => {})
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })()
   })
 
   bot.on('callback_query:data', async (ctx) => {
@@ -138,7 +194,18 @@ export function createTelegramRuntime(d: {
         return { messageId: m.message_id }
       },
       async sendText(text) {
-        await bot.api.sendMessage(await chat(), text)
+        const m = await bot.api.sendMessage(await chat(), text)
+        return { messageId: m.message_id }
+      },
+      async sendButtons(text, rows) {
+        const m = await bot.api.sendMessage(await chat(), text, {
+          reply_markup: {
+            inline_keyboard: rows.map((r) =>
+              r.map((b) => ({ text: b.text, callback_data: b.callbackData })),
+            ),
+          },
+        })
+        return { messageId: m.message_id }
       },
     },
   }

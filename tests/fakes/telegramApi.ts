@@ -16,6 +16,12 @@ export type FakeTelegram = {
   answers: { callback_query_id: string; text?: string }[]
   pushStart(chatId: number): void
   pushPress(chatId: number, data: string): string
+  /** A text message from Boris, optionally a reply to one of the bot's messages. */
+  pushText(chatId: number, text: string, replyTo?: number): void
+  /** A voice message; its file is served by the fake file endpoint. */
+  pushVoice(chatId: number, replyTo?: number): void
+  /** getFile answers an error, like Telegram losing a file. */
+  setFileBroken(on: boolean): void
   /** Simulates another program polling the same bot: getUpdates answers 409. */
   setConflict(on: boolean): void
   close(): Promise<void>
@@ -31,6 +37,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   let nextMessage = 100
   let nextCallback = 1
   let conflict = false
+  let fileBroken = false
   const now = () => Math.floor(Date.now() / 1000)
 
   const server = createServer((req, res) => {
@@ -39,6 +46,10 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
       body += c
     })
     req.on('end', async () => {
+      // Files, like Telegram: GET /file/bot<token>/<file_path>.
+      if ((req.url ?? '').startsWith(`/file/bot${FAKE_TOKEN}/`)) {
+        return res.writeHead(200, { 'content-type': 'audio/ogg' }).end('OggS fake voice')
+      }
       const m = /^\/bot([^/]+)\/(\w+)/.exec(req.url ?? '')
       const reply = (result: unknown) =>
         res
@@ -85,6 +96,22 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
             text: params.text,
           })
         }
+        case 'getFile':
+          if (fileBroken) {
+            return res.writeHead(400, { 'content-type': 'application/json' }).end(
+              JSON.stringify({
+                ok: false,
+                error_code: 400,
+                description: 'Bad Request: file is too big',
+              }),
+            )
+          }
+          return reply({
+            file_id: params.file_id,
+            file_unique_id: `u-${params.file_id}`,
+            file_size: 15,
+            file_path: `voice/${params.file_id}.oga`,
+          })
         case 'answerCallbackQuery':
           answers.push(params)
           return reply(true)
@@ -133,6 +160,59 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
         },
       })
       return id
+    },
+    pushText(chatId, text, replyTo) {
+      updates.push({
+        update_id: nextUpdate++,
+        message: {
+          message_id: nextMessage++,
+          date: now(),
+          chat: { id: chatId, type: 'private' },
+          from: { id: chatId, is_bot: false, first_name: 'Борис' },
+          text,
+          ...(replyTo
+            ? {
+                reply_to_message: {
+                  message_id: replyTo,
+                  date: now(),
+                  chat: { id: chatId, type: 'private' },
+                  text: 'вопрос',
+                },
+              }
+            : {}),
+        },
+      })
+    },
+    pushVoice(chatId, replyTo) {
+      const fileId = `voice-${nextMessage}`
+      updates.push({
+        update_id: nextUpdate++,
+        message: {
+          message_id: nextMessage++,
+          date: now(),
+          chat: { id: chatId, type: 'private' },
+          from: { id: chatId, is_bot: false, first_name: 'Борис' },
+          voice: {
+            file_id: fileId,
+            file_unique_id: `u-${fileId}`,
+            duration: 3,
+            mime_type: 'audio/ogg',
+          },
+          ...(replyTo
+            ? {
+                reply_to_message: {
+                  message_id: replyTo,
+                  date: now(),
+                  chat: { id: chatId, type: 'private' },
+                  text: 'вопрос',
+                },
+              }
+            : {}),
+        },
+      })
+    },
+    setFileBroken(on) {
+      fileBroken = on
     },
     setConflict(on) {
       conflict = on

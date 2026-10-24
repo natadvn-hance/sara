@@ -1,3 +1,4 @@
+export * from './contracts/direction'
 export * from './contracts/event'
 export * from './contracts/eventTypes'
 export * from './contracts/mind'

@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { newEventId } from '@sara/shared'
+import { newEventId, type RoleMeta } from '@sara/shared'
 import { type ZodType, z } from 'zod'
 import type { Db } from '../db/client'
 import { modelCall } from '../db/schema'
@@ -31,7 +31,8 @@ export type Gateway = {
     role: RoleName,
     input: string,
     schema: ZodType<T>,
-    opts?: { correlationId?: string; causationId?: string },
+    /** model: this call's model instead of the role's, with no fallback (the caller chose it). */
+    opts?: { correlationId?: string; causationId?: string; model?: RoleMeta['model'] },
   ): Promise<RoleCallResult<T>>
 }
 
@@ -96,7 +97,11 @@ export function createGateway(d: {
 
   return {
     async call(role, input, schema, opts) {
-      const { meta, promptPath } = await loadRole(d.rolesDir, role)
+      const loaded = await loadRole(d.rolesDir, role)
+      const promptPath = loaded.promptPath
+      const meta = opts?.model
+        ? { ...loaded.meta, model: opts.model, fallbackModel: undefined }
+        : loaded.meta
       const id = newEventId()
       const startedAt = new Date().toISOString()
       // Whitespace is never part of a token (one saved before the wizard cleaned it may carry a line break).

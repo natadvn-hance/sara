@@ -7,6 +7,10 @@ export type LeadCard = {
   verdict: 'fit' | 'maybe' | null
   reason: string | null
   bidPriceRub: number
+  /** The Scorer's total by the rules of `version` (FR-LEAD-3); none when the order was not scored. */
+  score?: { value: number; version: number; reason: string } | null
+  /** The Scorer did not answer: the card comes anyway, marked. */
+  unscored?: boolean
   /** The same card again as a reminder, with the buttons, so Boris can act on it. */
   reminder?: boolean
 }
@@ -34,6 +38,34 @@ export const TEXTS = {
     `🌐 Нет связи с Профи.ру с ${sinceMsk}. Пробую раз в 5 минут.`,
   connectionBack: '🌐 Связь с Профи.ру вернулась. Сверяю, что пришло.',
   reminder: (title: string) => `⏰ Заявка ждёт решения: ${title}`,
+  whySkip: (title: string) => `Почему пропустил «${title}»? Напиши или скажи голосом.`,
+  whyWant: (title: string) => `Почему взял бы «${title}»? Напиши или скажи голосом.`,
+  whyDecline: 'Почему не надо эту поправку? Напиши или скажи голосом.',
+  noted: (text: string) => `Записала: «${text}»`,
+  notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
+  voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',
+  summaryHead: (n: number) => `Сегодня отсеяла ${n}. На грани:`,
+  summaryNone: (n: number) => `Сегодня отсеяла ${n}, пограничных не было`,
+  wantButton: (n: number) => `Взял бы №${n}`,
+  wantCard: 'Прислала карточку заявки',
+  proposal: (
+    from: number,
+    summary: string,
+    why: string,
+    changes: string[],
+    b: { checked: number; changed: number; towardBoris: number; against: number },
+  ) =>
+    [
+      `Предлагаю поправку правил (v${from} → v${from + 1}): ${summary}`,
+      `Почему: ${why}`,
+      `Что меняется: ${changes.join('; ')}`,
+      `На последних ${b.checked} заявках это изменило бы ${b.changed} решений: ${b.towardBoris} в твою сторону, ${b.against} против.`,
+    ].join('\n'),
+  applyButton: 'Применить',
+  dropButton: 'Не надо',
+  applied: (v: number) => `Применила, теперь правила v${v}`,
+  kept: (v: number) => `Хорошо, оставляю v${v}`,
+  proposalStale: 'Правила уже поменялись, предложение устарело',
 }
 
 function verdictLine(c: LeadCard): string {
@@ -46,7 +78,10 @@ export function leadCardText(c: LeadCard): string {
   const head = c.reminder
     ? `⏰ Заявка ждёт решения: ${c.title}, ${c.city}`
     : `🔔 Заявка · ${c.title}, ${c.city}`
-  return [head, verdictLine(c), `Отклик ${formatRub(c.bidPriceRub)}`].join('\n')
+  const why = c.score
+    ? [`Балл ${c.score.value} (правила v${c.score.version}). ${c.score.reason}`]
+    : [verdictLine(c), ...(c.unscored ? ['Без оценки: Оценщик не ответил'] : [])]
+  return [head, ...why, `Отклик ${formatRub(c.bidPriceRub)}`].join('\n')
 }
 
 export function leadCardKeyboard(c: LeadCard) {

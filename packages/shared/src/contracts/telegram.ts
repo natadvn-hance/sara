@@ -8,6 +8,9 @@ export const TASK_ACTIONS = [
   'done',
   'move',
   'open',
+  'want',
+  'apply',
+  'drop',
 ] as const
 export type TaskAction = (typeof TASK_ACTIONS)[number]
 

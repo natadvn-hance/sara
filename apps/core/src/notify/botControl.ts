@@ -1,5 +1,6 @@
 import type { TaskAction } from '@sara/shared'
 import type { Db } from '../db/client'
+import type { BorisMessage } from '../learning/inbox'
 import { boundChat } from './binding'
 import type { Notifier } from './notifier'
 import { createTelegramRuntime, type TelegramRuntime } from './telegram'
@@ -18,6 +19,8 @@ export function createBotControl(d: {
   db: Db
   apiRoot?: string
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
+  onMessage?(m: BorisMessage): Promise<string>
+  voiceDir?: string
 }): BotControl {
   let runtime: TelegramRuntime | null = null
   const current = (): TelegramRuntime => {
@@ -27,7 +30,14 @@ export function createBotControl(d: {
   return {
     async start(token) {
       if (runtime) await runtime.stop()
-      runtime = createTelegramRuntime({ token, apiRoot: d.apiRoot, db: d.db, onPress: d.onPress })
+      runtime = createTelegramRuntime({
+        token,
+        apiRoot: d.apiRoot,
+        db: d.db,
+        onPress: d.onPress,
+        onMessage: d.onMessage,
+        voiceDir: d.voiceDir,
+      })
       await runtime.start()
     },
     async stop() {
@@ -40,6 +50,7 @@ export function createBotControl(d: {
     notifier: {
       sendLeadCard: (c) => current().notifier.sendLeadCard(c),
       sendText: (t) => current().notifier.sendText(t),
+      sendButtons: (t, rows) => current().notifier.sendButtons(t, rows),
     },
   }
 }

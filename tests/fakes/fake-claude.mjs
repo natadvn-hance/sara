@@ -3,7 +3,14 @@
 import { appendFileSync } from 'node:fs'
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? 'ok'
-const output = process.env.FAKE_CLAUDE_OUTPUT ?? '{"ok":true}'
+const argv = process.argv.slice(2)
+const argOf = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined)
+// FAKE_CLAUDE_OUTPUT_BY_ROLE: {"<role>": output, "<role>@<model>": output}; the role comes from the prompt path.
+const role = /roles\/([^/]+)\/role\.md$/.exec(argOf('--system-prompt-file') ?? '')?.[1]
+const byRole = JSON.parse(process.env.FAKE_CLAUDE_OUTPUT_BY_ROLE ?? '{}')
+const picked = byRole[`${role}@${argOf('--model')}`] ?? byRole[role]
+const output =
+  picked !== undefined ? JSON.stringify(picked) : (process.env.FAKE_CLAUDE_OUTPUT ?? '{"ok":true}')
 const log = process.env.FAKE_CLAUDE_ARGS_LOG
 const sleepMs = Number(process.env.FAKE_CLAUDE_SLEEP_MS ?? 300)
 

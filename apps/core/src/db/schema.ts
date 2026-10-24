@@ -4,12 +4,16 @@ import {
   bigserial,
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
   pgSchema,
+  primaryKey,
+  real,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 
@@ -149,3 +153,92 @@ export const ownerAuth = core.table(
   },
   (t) => [check('owner_auth_single_row', sql`${t.id} = 1`)],
 )
+
+/** Versions of an account's direction rules (FR-ACC-2); exactly one is active per account. */
+export const directionVersion = core.table(
+  'direction_version',
+  {
+    accountId: text('account_id').notNull(),
+    version: integer('version').notNull(),
+    rules: jsonb('rules').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    createdBy: text('created_by').notNull(),
+    reason: text('reason').notNull(),
+    active: boolean('active').notNull().default(false),
+  },
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.version] }),
+    uniqueIndex('direction_version_one_active').on(t.accountId).where(sql`${t.active}`),
+  ],
+)
+
+/** The Scorer's verdicts (FR-LEAD-3); backtest rows are trial scores under proposed rules, never acted on. */
+export const leadScore = core.table(
+  'lead_score',
+  {
+    id: uuid('id').primaryKey(),
+    leadId: text('lead_id').notNull(),
+    version: integer('version').notNull(),
+    score: integer('score').notNull(),
+    decision: text('decision').notNull(),
+    stopFactor: text('stop_factor'),
+    redFlags: jsonb('red_flags').notNull(),
+    axes: jsonb('axes').notNull(),
+    reason: text('reason').notNull(),
+    confidence: real('confidence').notNull(),
+    model: text('model').notNull(),
+    backtest: boolean('backtest').notNull().default(false),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('lead_score_lead').on(t.leadId, t.backtest)],
+)
+
+/** Boris's decision on a lead, the example the rules learn from; one per lead. */
+export const leadLabel = core.table('lead_label', {
+  leadId: text('lead_id').primaryKey(),
+  label: text('label').notNull(),
+  source: text('source').notNull(),
+  reason: text('reason'),
+  voice: boolean('voice').notNull().default(false),
+  score: integer('score'),
+  scoreVersion: integer('score_version'),
+  surprise: boolean('surprise').notNull().default(false),
+  at: ts('at').notNull().defaultNow(),
+})
+
+/** Sara's «почему?» to Boris and his answer in his own words. */
+export const question = core.table(
+  'question',
+  {
+    id: uuid('id').primaryKey(),
+    kind: text('kind').notNull(),
+    entityId: text('entity_id').notNull(),
+    telegramMessageId: bigint('telegram_message_id', { mode: 'number' }),
+    askedAt: ts('asked_at').notNull().defaultNow(),
+    answeredAt: ts('answered_at'),
+    answer: text('answer'),
+  },
+  (t) => [index('question_open').on(t.answeredAt, t.askedAt)],
+)
+
+/** Once-a-day jobs: the row for a day is inserted by the one run that does the job. */
+export const jobRun = core.table(
+  'job_run',
+  { name: text('name').notNull(), day: date('day', { mode: 'string' }).notNull() },
+  (t) => [primaryKey({ columns: [t.name, t.day] })],
+)
+
+/** A change of the direction rules Sara proposed; it applies only on Boris's «Применить» (FR-MIND-3). */
+export const ruleProposal = core.table('rule_proposal', {
+  id: uuid('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  fromVersion: integer('from_version').notNull(),
+  rules: jsonb('rules').notNull(),
+  summary: text('summary').notNull(),
+  why: text('why').notNull(),
+  backtest: jsonb('backtest').notNull(),
+  state: text('state').notNull(),
+  taskId: uuid('task_id'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  decidedAt: ts('decided_at'),
+})

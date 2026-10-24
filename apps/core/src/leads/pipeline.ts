@@ -2,15 +2,20 @@ import { DBOS } from '@dbos-inc/dbos-sdk'
 import { type EventEnvelope, newEventId, ProfiOrder, type TaskAction } from '@sara/shared'
 import { and, desc, eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { event, lead, task } from '../db/schema'
+import { event, lead, leadScore, task } from '../db/schema'
+import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
+import { recordLabel } from '../learning/labels'
+import { onProposalPress } from '../learning/proposals'
+import { askWhy } from '../learning/questions'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { recordBid, startOutboxDelivery } from './outbox'
+import { type Scored, scoreOrder } from './scorer'
 import { sortOrder } from './sorter'
 
 export type LeadPipelineDeps = {
@@ -46,6 +51,7 @@ const ev = (
   type:
     | 'lead.found'
     | 'lead.sorted'
+    | 'lead.scored'
     | 'lead.skipped'
     | 'task.created'
     | 'task.resolved'
@@ -130,6 +136,57 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     return
   }
 
+  const accountId = e.account_id ?? 'hance-marketing'
+  const scored = await DBOS.runStep(
+    async (): Promise<(Scored & { version: number }) | null> => {
+      // Any failure here (no rules, the model down) brings the card unscored: the order is never lost.
+      try {
+        const { version, rules } = await activeRules(d().db, accountId)
+        const s = await scoreOrder(d().gateway, order, rules, { correlationId, causationId: e.id })
+        return s ? { ...s, version } : null
+      } catch (err) {
+        console.error('scoring failed', err instanceof Error ? err.message.slice(0, 200) : err)
+        return null
+      }
+    },
+    { name: 'score' },
+  )
+  if (scored) {
+    await DBOS.runStep(
+      () =>
+        d().db.transaction(async (tx) => {
+          await tx.insert(leadScore).values({
+            id: newEventId(),
+            leadId: order.order_id,
+            version: scored.version,
+            score: scored.score,
+            decision: scored.decision,
+            stopFactor: scored.stopFactor,
+            redFlags: scored.redFlags,
+            axes: scored.axes,
+            reason: scored.reason,
+            confidence: scored.confidence,
+            model: scored.model,
+          })
+          if (scored.decision === 'drop') {
+            await tx.update(lead).set({ status: 'scored_out' }).where(eq(lead.id, order.order_id))
+          }
+          await appendEvent(
+            tx,
+            ev('lead.scored', { kind: 'lead', id: order.order_id }, correlationId, 'sara', {
+              score: scored.score,
+              decision: scored.decision,
+              version: scored.version,
+              stop_factor: scored.stopFactor,
+            }),
+          )
+        }),
+      { name: 'scored', ...DB_STEP },
+    )
+    // Below the threshold or a stop factor: kept for the daily summary, nothing goes to Boris.
+    if (scored.decision === 'drop') return
+  }
+
   const taskId = await DBOS.runStep(
     () =>
       d().db.transaction(async (tx) => {
@@ -166,6 +223,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     verdict: sorted.verdict,
     reason: sorted.reason,
     bidPriceRub: order.bid_price_rub,
+    score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
+    unscored: !scored,
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
   try {
@@ -215,6 +274,12 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
     verdict?: 'fit' | 'maybe' | 'reject' | null
     reason?: string | null
   }
+  const [sc] = await d()
+    .db.select()
+    .from(leadScore)
+    .where(and(eq(leadScore.leadId, found.lead.id), eq(leadScore.backtest, false)))
+    .orderBy(desc(leadScore.createdAt))
+    .limit(1)
   return {
     taskId,
     title: found.lead.title,
@@ -222,8 +287,71 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
     verdict: s.verdict === 'fit' || s.verdict === 'maybe' ? s.verdict : null,
     reason: s.reason ?? null,
     bidPriceRub: found.lead.bidPriceRub,
+    score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
     reminder,
   }
+}
+
+/**
+ * «Взял бы» from the daily summary: Boris's yes on an order Sara dropped. It is a label and a surprise («почему?»),
+ * and the order comes back as a normal card so he can bid on it.
+ */
+async function onWant(reviewId: string): Promise<string> {
+  const [t] = await d().db.select().from(task).where(eq(task.id, reviewId))
+  if (!t || t.kind !== 'lead_review') return TEXTS.alreadyDone
+  const [l] = await d().db.select().from(lead).where(eq(lead.id, t.entityId))
+  if (!l) return TEXTS.alreadyDone
+  const decisionId = newEventId()
+  const resolved = await d().db.transaction(async (tx) => {
+    const rows = await tx
+      .update(task)
+      .set({ state: 'resolved', resolution: 'want', resolvedAt: new Date().toISOString() })
+      .where(and(eq(task.id, reviewId), eq(task.state, 'open')))
+      .returning({ id: task.id })
+    if (rows.length === 0) return false
+    await appendEvent(
+      tx,
+      ev('task.resolved', { kind: 'task', id: reviewId }, l.correlationId, 'boris', {
+        action: 'want',
+      }),
+    )
+    await tx
+      .insert(task)
+      .values({ id: decisionId, kind: 'lead_decision', entityKind: 'lead', entityId: l.id })
+    await tx.update(lead).set({ status: 'queued' }).where(eq(lead.id, l.id))
+    await appendEvent(
+      tx,
+      ev('task.created', { kind: 'task', id: decisionId }, l.correlationId, 'sara', {
+        lead_id: l.id,
+      }),
+    )
+    return true
+  })
+  if (!resolved) return TEXTS.alreadyDone
+  await startDecisionWait(decisionId, await d().remindAfterMs())
+  const card = await cardOfTask(decisionId, false)
+  if (card) {
+    const m = await d().notifier.sendLeadCard(card)
+    await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, decisionId))
+  }
+  learnFrom({ leadId: l.id, label: 'yes', source: 'summary' }, 'why_want', l.title)
+  return TEXTS.wantCard
+}
+
+/**
+ * The label and the «почему?» after a decision. Not awaited and never thrown: learning must not hold up or
+ * break a bid or a card that already happened.
+ */
+function learnFrom(
+  label: Parameters<typeof recordLabel>[1],
+  why: 'why_skip' | 'why_want',
+  title: string,
+): void {
+  void (async () => {
+    const labeled = await recordLabel(d().db, label)
+    if (labeled.surprise)
+      await askWhy(d(), { kind: why, entityId: label.leadId, title }, new Date())
+  })().catch((e) => console.error('learning skipped', e instanceof Error ? e.message : e))
 }
 
 export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
@@ -239,6 +367,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     async onPress({ taskId, action }) {
+      if (action === 'want') return onWant(taskId)
+      if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)
       if (!found) return TEXTS.alreadyDone
@@ -287,9 +417,13 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       })
       if (!resolved) return TEXTS.alreadyDone
       await deliverDecision(taskId, action)
-      if (action === 'skip') return TEXTS.skipped
       if (outboxId) await startOutboxDelivery(outboxId, l.id)
-      return TEXTS.bidQueued
+      learnFrom(
+        { leadId: l.id, label: action === 'bid' ? 'yes' : 'no', source: 'card' },
+        'why_skip',
+        l.title,
+      )
+      return action === 'skip' ? TEXTS.skipped : TEXTS.bidQueued
     },
 
     async onReminder(taskId) {

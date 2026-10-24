@@ -17,7 +17,9 @@ export const EVENT_TYPES = [
   'profi.connection_back',
   'lead.found',
   'lead.sorted',
+  'lead.scored',
   'lead.skipped',
+  'lead.labeled',
   'bid.requested',
   'bid.sent',
   'bid.failed',
@@ -26,6 +28,8 @@ export const EVENT_TYPES = [
   'task.created',
   'task.resolved',
   'task.reminded',
+  'question.asked',
+  'question.answered',
   'outbox.queued',
   'outbox.attempted',
   'outbox.confirmed',
@@ -33,6 +37,11 @@ export const EVENT_TYPES = [
   'model.called',
   'model.failed',
   'notify.failed',
+  'direction.version_created',
+  'rules.proposed',
+  'rules.applied',
+  'rules.declined',
+  'rules.proposal_invalid',
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
