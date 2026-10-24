@@ -133,8 +133,8 @@ describe('walking skeleton', () => {
       'lead.found',
       'model.called',
       'model.called',
-      'lead.sorted',
       'lead.drafted',
+      'lead.sorted',
       'task.created',
     ])
   })

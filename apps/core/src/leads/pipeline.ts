@@ -108,6 +108,25 @@ async function draftFor(
   }
 }
 
+/** The draft goes on the lead (one there already, Boris's edit, is kept) and its outcome into the journal. */
+function storeDraft(
+  l: { id: string; correlationId: string },
+  dr: Draft | DraftMiss,
+): Promise<void> {
+  return d().db.transaction(async (tx) => {
+    if (dr.text !== null) {
+      await tx
+        .update(lead)
+        .set({ draftText: dr.text, draftPriceRub: dr.priceRub })
+        .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
+    }
+    await appendEvent(
+      tx,
+      ev('lead.drafted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', draftedPayload(dr)),
+    )
+  })
+}
+
 /** The journal keeps how the draft went, never its text (ADR-016). */
 const draftedPayload = (dr: Draft | DraftMiss) =>
   dr.text !== null
@@ -250,6 +269,12 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         name: 'draft',
       })
     : null
+  if (draft) {
+    await DBOS.runStep(() => storeDraft({ id: order.order_id, correlationId }, draft), {
+      name: 'drafted',
+      ...DB_STEP,
+    })
+  }
 
   const taskId = await DBOS.runStep(
     () =>
@@ -264,25 +289,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         await tx
           .insert(task)
           .values({ id, kind: 'lead_decision', entityKind: 'lead', entityId: order.order_id })
-        await tx
-          .update(lead)
-          .set({
-            status: 'queued',
-            ...(draft?.text ? { draftText: draft.text, draftPriceRub: draft.priceRub } : {}),
-          })
-          .where(eq(lead.id, order.order_id))
-        if (draft) {
-          await appendEvent(
-            tx,
-            ev(
-              'lead.drafted',
-              { kind: 'lead', id: order.order_id },
-              correlationId,
-              'sara',
-              draftedPayload(draft),
-            ),
-          )
-        }
+        await tx.update(lead).set({ status: 'queued' }).where(eq(lead.id, order.order_id))
         await appendEvent(
           tx,
           ev('task.created', { kind: 'task', id }, correlationId, 'sara', {
@@ -380,21 +387,8 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
 
 /** A dropped order Boris wants after all: its draft first (the Scorer's drop wrote none), then its card. */
 async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
-  if (!l.draftText) {
-    const dr = await draftFor(sourceOf(l), { correlationId: l.correlationId })
-    await d().db.transaction(async (tx) => {
-      if (dr.text) {
-        await tx
-          .update(lead)
-          .set({ draftText: dr.text, draftPriceRub: dr.priceRub })
-          .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
-      }
-      await appendEvent(
-        tx,
-        ev('lead.drafted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', draftedPayload(dr)),
-      )
-    })
-  }
+  if (!l.draftText)
+    await storeDraft(l, await draftFor(sourceOf(l), { correlationId: l.correlationId }))
   const card = await cardOfTask(taskId, false)
   if (card) {
     const m = await d().notifier.sendLeadCard(card)
