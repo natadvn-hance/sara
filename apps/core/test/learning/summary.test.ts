@@ -48,7 +48,7 @@ describe('daily summary', () => {
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     expect(sent).toHaveLength(1)
     expect(sent[0]?.text.split('\n')).toEqual([
-      'Сегодня отсеяла 6. На грани:',
+      'Сегодня отсеяла 6 заявок. На грани:',
       '1. Заказ 930001, балл 55: причина 930001',
       '2. Заказ 930002, балл 50: причина 930002',
       '3. Заказ 930003, балл 47: причина 930003',
@@ -86,7 +86,7 @@ describe('daily summary', () => {
   it('FR-LEAD-7: without borderline orders the summary is one line', async () => {
     await droppedLead(db, '930031', 20, { seenAt: MORNING })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
-    expect(sent).toEqual([{ text: 'Сегодня отсеяла 1, пограничных не было', rows: [] }])
+    expect(sent).toEqual([{ text: 'Сегодня отсеяла 1 заявку, пограничных не было', rows: [] }])
   })
 
   it('FR-LEAD-7: a day without dropped orders sends nothing', async () => {
@@ -113,7 +113,7 @@ describe('daily summary', () => {
     await droppedLead(db, '930052', 53, { seenAt: '2026-10-25T16:10:00Z' })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     expect(sent[0]?.text.split('\n')).toEqual([
-      'Сегодня отсеяла 1. На грани:',
+      'Сегодня отсеяла 1 заявку. На грани:',
       '1. Заказ 930051, балл 52: причина 930051',
     ])
     sent = []

@@ -2,11 +2,18 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { lead, leadLabel, leadScore, ruleProposal, task } from '../../apps/core/src/db/schema'
+import {
+  event,
+  lead,
+  leadLabel,
+  leadScore,
+  ruleProposal,
+  task,
+} from '../../apps/core/src/db/schema'
 import { activeRules, seedDirection } from '../../apps/core/src/direction/store'
 import { RULES_V1 } from '../../apps/core/src/direction/v1'
 import { dailySummary } from '../../apps/core/src/learning/summary'
@@ -111,6 +118,18 @@ describe('scoring in the lead pipeline', () => {
     expect(cards()).toHaveLength(0)
   })
 
+  it('FR-LEAD-3: an order the Scorer dropped keeps its sorter verdict in the journal', async () => {
+    byRole = { sorter: FIT, scorer: scorerAnswer(30) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(async () => (await statusOf(id)) === 'scored_out')
+    const sorted = await db
+      .select({ payload: event.payload })
+      .from(event)
+      .where(and(eq(event.type, 'lead.sorted'), eq(event.entityId, id)))
+    expect(sorted.map((e) => e.payload)).toEqual([{ verdict: 'fit', reason: 'Нужен сайт' }])
+  })
+
   it('FR-LEAD-3: a stop factor drops a high score', async () => {
     byRole = { sorter: FIT, scorer: scorerAnswer(90, { stop_factor: 'direct' }) }
     const id = orderId()
@@ -164,7 +183,7 @@ describe('scoring in the lead pipeline', () => {
     expect(
       await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`)),
     ).toBe('sent')
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1. На грани:')))
+    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1 заявку. На грани:')))
     const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
       ?.inline_keyboard[0]?.[0]
     expect(want?.text).toBe('Взял бы №1')

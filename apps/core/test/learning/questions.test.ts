@@ -1,4 +1,5 @@
-import { eq } from 'drizzle-orm'
+import { newEventId } from '@sara/shared'
+import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { leadLabel, question } from '../../src/db/schema'
 import { seedDirection } from '../../src/direction/store'
@@ -70,6 +71,81 @@ describe('questions', () => {
         at(24 * 60),
       ),
     ).toBe(true)
+  })
+
+  it('FR-LEAD-7: two surprises at once after two questions make one more question, not two', async () => {
+    for (const id of ['910041', '910042', '910043', '910044']) {
+      await leadWithScore(db, id, 80)
+      await recordLabel(db, { leadId: id, label: 'no', source: 'card' })
+    }
+    for (const id of ['910041', '910042'])
+      await askWhy({ db, notifier }, { kind: 'why_skip', entityId: id, title: 'Т' }, NOW)
+    // Telegram and the database both take a while, so without a lock both surprises count 2 before either
+    // question is written or sent.
+    const slow: Notifier = {
+      ...notifier,
+      sendText: async (t) => {
+        await new Promise((r) => setTimeout(r, 100))
+        return notifier.sendText(t)
+      },
+    }
+    await db.execute(
+      sql`create or replace function core.slow_question() returns trigger language plpgsql as $$ begin perform pg_sleep(0.2); return new; end $$`,
+    )
+    await db.execute(sql`drop trigger if exists slow_question on core.question`)
+    await db.execute(
+      sql`create trigger slow_question before insert on core.question for each row execute function core.slow_question()`,
+    )
+    let asked: boolean[]
+    try {
+      asked = await Promise.all(
+        ['910043', '910044'].map((id) =>
+          askWhy({ db, notifier: slow }, { kind: 'why_skip', entityId: id, title: 'Т' }, NOW),
+        ),
+      )
+    } finally {
+      await db.execute(sql`drop trigger if exists slow_question on core.question`)
+    }
+    expect(asked.sort()).toEqual([false, true])
+    expect(sent).toHaveLength(3)
+    expect(await db.select().from(question)).toHaveLength(3)
+  })
+
+  it('FR-LEAD-7: a question Telegram did not take does not use up the day', async () => {
+    await leadWithScore(db, '910051', 80)
+    const failing: Notifier = {
+      ...notifier,
+      sendText: async () => {
+        throw new Error('telegram down')
+      },
+    }
+    for (let i = 0; i < 3; i++)
+      await expect(
+        askWhy(
+          { db, notifier: failing },
+          { kind: 'why_skip', entityId: '910051', title: 'Т' },
+          NOW,
+        ),
+      ).rejects.toThrow()
+    expect(await db.select().from(question)).toHaveLength(0)
+    expect(
+      await askWhy({ db, notifier }, { kind: 'why_skip', entityId: '910051', title: 'Т' }, NOW),
+    ).toBe(true)
+    expect((await db.select().from(question))[0]?.telegramMessageId).toBe(500)
+  })
+
+  it('FR-LEAD-7: a question that never reached Boris takes no answer', async () => {
+    // What a crash between taking the day's place and sending leaves behind.
+    await db.insert(question).values({
+      id: newEventId(),
+      kind: 'why_skip',
+      entityId: '910061',
+      telegramMessageId: null,
+      askedAt: NOW.toISOString(),
+    })
+    expect(
+      await answerQuestion(db, { text: 'привет', replyToMessageId: null, voice: false, at: at(1) }),
+    ).toBeNull()
   })
 
   it('FR-LEAD-7: a reply to the question is its reason', async () => {
