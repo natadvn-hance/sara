@@ -230,6 +230,147 @@ test('FR-UI-3: a draft that does not read shows a message and can be cancelled',
   await expect(page.getByRole('button', { name: 'Отправить' })).toHaveCount(0)
 })
 
+
+const RECOMPUTE = `${DIRECTION}/recompute`
+const RUN_ID = '11111111-1111-4111-8111-111111111111'
+const RUNS = `**/api/directions/${ACCOUNT}/runs`
+const AXES = [
+  { id: 'client', score: 30, why: 'Мелкий клиент' },
+  { id: 'system', score: 50, why: 'Задача не про систему' },
+]
+/** A finished run as the API tells it, with one lead the new rules would stop showing. */
+const doneRun = {
+  id: RUN_ID,
+  kind: 'recompute',
+  state: 'done',
+  total: 2,
+  done: 2,
+  skipped: 0,
+  stop_reason: null,
+  result: {
+    checked: 2,
+    skipped: 0,
+    changed: 1,
+    toDrop: 1,
+    toShow: 0,
+    withBoris: 2,
+    agreementBefore: 0.5,
+    agreementAfter: 1,
+    items: [
+      {
+        leadId: '1',
+        title: 'Заявка про сайт',
+        city: 'Москва',
+        before: { score: 70, decision: 'show' },
+        after: {
+          score: 40,
+          decision: 'drop',
+          reason: 'Копеечный бюджет без признаков зрелости',
+          stopFactor: null,
+          redFlags: [],
+          axes: AXES,
+        },
+        boris: 'no',
+      },
+    ],
+  },
+}
+/** Stubs the run API: starting gives RUN_ID, reading gives `run`. */
+async function stubRuns(page: Page, run: object) {
+  await page.route(RUNS, (route) => route.fulfill({ status: 202, json: { id: RUN_ID } }))
+  await page.route(`${RUNS}/${RUN_ID}`, (route) => route.fulfill({ json: run }))
+}
+
+test('FR-ACC-5: Boris starts a recompute, sees the progress and then the result', async ({
+  page,
+}) => {
+  test.setTimeout(90_000)
+  await page.goto(RECOMPUTE)
+  await page
+    .getByLabel('Какие правила попробовать')
+    .selectOption({ label: 'v1, как было при запуске' })
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await expect(page.getByText('Решения не изменились ни у одной заявки.')).toBeVisible({
+    timeout: 60_000,
+  })
+  await expect(page.getByText('Проверено заявок: 22')).toBeVisible()
+})
+
+test('FR-ACC-5: the progress shows "28 из 50" and the result lists the changed leads with "Почему так"', async ({
+  page,
+}) => {
+  await page.route(RUNS, (route) => route.fulfill({ status: 202, json: { id: RUN_ID } }))
+  let calls = 0
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({
+      json:
+        calls++ === 0
+          ? { ...doneRun, state: 'running', total: 50, done: 28, result: null }
+          : doneRun,
+    }),
+  )
+  await page.goto(RECOMPUTE)
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await expect(page.getByRole('progressbar')).toBeVisible()
+  await expect(page.getByText('28 из 50')).toBeVisible()
+  await expect(page.getByText('Изменилось решение у 1 заявки из 2')).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(page.getByText('Заявка про сайт')).toBeVisible()
+  await expect(page.getByText('было 70, показать')).toBeVisible()
+  await expect(page.getByText('стало 40, отсеять')).toBeVisible()
+  await expect(page.getByText('ты: не взял бы')).toBeVisible()
+  await expect(page.getByText('Совпадение с твоими решениями: было 50%, стало 100%')).toBeVisible()
+  await page.getByText('Почему так').click()
+  await expect(page.getByText('Копеечный бюджет без признаков зрелости')).toBeVisible()
+  await expect(page.getByText('Мелкий клиент')).toBeVisible()
+})
+
+test('FR-ACC-5: the Claude limit shows "Подожди, лимит Claude" and no endless spinner', async ({
+  page,
+}) => {
+  await stubRuns(page, {
+    ...doneRun,
+    state: 'stopped',
+    done: 1,
+    stop_reason: 'limit',
+    result: null,
+  })
+  await page.goto(RECOMPUTE)
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await expect(page.getByText('Подожди, лимит Claude кончился. Попробуй позже.')).toBeVisible()
+  await expect(page.getByRole('progressbar')).toHaveCount(0)
+})
+
+test('FR-UI-3: the recompute screen says so when there are no leads or another check is running', async ({
+  page,
+}) => {
+  await page.route(RUNS, (route) =>
+    route.fulfill({
+      status: 409,
+      json: { error: 'Заявок для проверки пока нет. Нужно, чтобы разбор заявок был включён.' },
+    }),
+  )
+  await page.goto(RECOMPUTE)
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await expect(page.getByRole('alert')).toContainText('Заявок для проверки пока нет')
+})
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`FR-UI-3: the recompute result fits 360 px in the ${scheme} theme`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await page.setViewportSize({ width: 360, height: 740 })
+    await stubRuns(page, doneRun)
+    await page.goto(RECOMPUTE)
+    await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+    await expect(page.getByText('Заявка про сайт')).toBeVisible()
+    await page.getByText('Почему так').click()
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0)
+    const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    expect(background).toBe(scheme === 'dark' ? 'rgb(18, 18, 18)' : 'rgb(250, 249, 247)')
+  })
+}
+
 // Last: it changes the active rules, and the first test of this file looks at their threshold.
 test('FR-ACC-3: three confirmed steps are saved as new rules, without calibration only with a reason', async ({
   page,
