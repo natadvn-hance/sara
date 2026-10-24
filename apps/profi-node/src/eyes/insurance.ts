@@ -105,9 +105,33 @@ export function startInsurance(o: {
     })
   }
 
+  // The chats list of the real site is drawn without a JSON answer: its addresses (never its text) are kept so the
+  // list reader can be calibrated on them (ST-M1-04).
+  async function keepLinks() {
+    const body = await o.ab.page
+      .evaluate(() => ({
+        links: [
+          ...new Set(
+            [...document.querySelectorAll('a[href]')]
+              .map((a) => new URL((a as HTMLAnchorElement).href, location.href))
+              .filter((u) => u.origin === location.origin)
+              .map((u) => `${u.pathname}${u.search}`),
+          ),
+        ].slice(0, 300),
+        messages: document.querySelectorAll('[data-message-content-id]').length,
+      }))
+      .catch(() => null)
+    if (body) {
+      await o.eyes
+        .onRaw({ kind: 'dom', url: o.ab.page.url(), body, receivedAt: new Date().toISOString() })
+        .catch(() => {})
+    }
+  }
+
   async function chats(pick: (c: { unread: number; lastAt: string | null }) => boolean) {
     await serial(async () => {
       if (!can() || !(await go(chatsPath ?? o.parsers.paths.chats))) return
+      await keepLinks()
       const list = await o.parsers.fromChatsDom(o.ab.page)
       for (const c of list.filter(pick)) {
         if (!can()) return
