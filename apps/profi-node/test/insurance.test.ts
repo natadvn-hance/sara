@@ -300,4 +300,32 @@ describe('insurance and the account tab', () => {
     // Only addresses: no text of the page is kept.
     expect(JSON.stringify(body)).not.toContain('Здравствуйте')
   }, 60000)
+
+  it('ADR-021: a page whose network never goes quiet still counts as opened, not as a lost connection', async () => {
+    await loginStandIn(ab.page, site)
+    const reports: boolean[] = []
+    const parsers: Parsers = {
+      ...standInParsers,
+      paths: { ...standInParsers.paths, chats: '/backoffice/busy.php' },
+    }
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+      onNavigate: (ok) => {
+        reports.push(ok)
+      },
+    })
+    await ins.chatsOnce(false)
+    ins.stop()
+    expect(reports.length).toBeGreaterThan(0)
+    expect(reports.every(Boolean)).toBe(true)
+    const dom = (await db.select().from(rawEvent)).filter((r) => r.kind === 'dom')
+    expect((dom[0]?.body as { links: string[] }).links).toContain('/chats/c-busy')
+  }, 90000)
 })
