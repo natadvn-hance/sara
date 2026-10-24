@@ -1,4 +1,4 @@
-import { cp, mkdtemp } from 'node:fs/promises'
+import { cp, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
@@ -37,7 +37,10 @@ const notifier: Notifier = {
   },
 }
 let dir: string
-async function gateway(byRole: Record<string, unknown>): Promise<Gateway> {
+async function gateway(
+  byRole: Record<string, unknown>,
+  env: Record<string, string> = {},
+): Promise<Gateway> {
   const secrets = createSecretStore(join(dir, 'data'))
   await secrets.set('claude_oauth_token', 'tok')
   return createGateway({
@@ -46,7 +49,11 @@ async function gateway(byRole: Record<string, unknown>): Promise<Gateway> {
     claudeBin: join(ROOT, 'tests/fakes/fake-claude.mjs'),
     rolesDir: join(dir, 'roles'),
     dataDir: join(dir, 'data'),
-    extraEnv: { FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole) },
+    extraEnv: {
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
+      FAKE_CLAUDE_ARGS_LOG: join(dir, 'claude.log'),
+      ...env,
+    },
   })
 }
 const PROPOSAL = {
@@ -76,6 +83,15 @@ async function threeSurprises() {
   await leadWithScore(db, '940004', 70)
   await recordLabel(db, { leadId: '940004', label: 'yes', source: 'card' })
 }
+/** What the proposer got as input in its latest call. */
+async function proposerInput(): Promise<string> {
+  const calls = (await readFile(join(dir, 'claude.log'), 'utf8'))
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+    .filter((c) => c.args.some((a) => a.endsWith('rules-proposer/role.md')))
+  return calls.at(-1)?.stdin ?? ''
+}
 const proposalTask = async () =>
   (await db.select().from(task).where(eq(task.kind, 'rule_proposal')))[0]?.id ?? ''
 
@@ -97,7 +113,7 @@ describe('rule proposals', () => {
       'Предлагаю поправку правил (v1 → v2): Порог выше: 60 вместо 56',
       'Почему: Ты пропускал заявки с высоким баллом: «копейки, не наш клиент»',
       'Что меняется: Порог: 56 → 60',
-      'На последних 4 заявках это изменило бы 4 решений: 3 в твою сторону, 1 против.',
+      'На последних 4 заявках это изменило бы 4 решения: 3 в твою сторону, 1 против.',
     ])
     expect(msg?.rows.flat().map((b) => b.text)).toEqual(['Применить', 'Не надо'])
     expect(await countEvents(db, 'rules.proposed')).toBe(1)
@@ -159,6 +175,62 @@ describe('rule proposals', () => {
     expect(sent.length).toBe(before)
     expect(await countEvents(db, 'rules.proposal_invalid')).toBe(1)
     expect(await db.select().from(ruleProposal)).toHaveLength(0)
+  })
+
+  it('FR-MIND-3: an answer that breaks the answer schema is journaled as an invalid proposal', async () => {
+    await threeSurprises()
+    const gw = await gateway({
+      'rules-proposer': { summary: 'Порог выше', why: 'так' },
+      scorer: scorerAnswer(58),
+    })
+    const before = sent.length
+    expect(await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)).toBe('invalid')
+    expect(sent.length).toBe(before)
+    expect(await countEvents(db, 'rules.proposal_invalid')).toBe(1)
+    expect(await db.select().from(ruleProposal)).toHaveLength(0)
+  })
+
+  it('FR-MIND-3: a proposer that did not answer at all is not an invalid proposal', async () => {
+    await threeSurprises()
+    const gw = await gateway({ 'rules-proposer': PROPOSAL }, { FAKE_CLAUDE_MODE: 'limit' })
+    expect(await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)).toBe('not_yet')
+    expect(await countEvents(db, 'rules.proposal_invalid')).toBe(0)
+  })
+
+  it('FR-MIND-3: the proposer is told what Boris declined and why', async () => {
+    await threeSurprises()
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    expect(await proposerInput()).not.toContain('Борис уже отказался')
+    await onProposalPress({ db, notifier }, await proposalTask(), 'drop')
+    const [why] = await db.select().from(question).where(eq(question.kind, 'why_decline'))
+    await answerQuestion(db, {
+      text: 'маленький бюджет у нас тоже берут',
+      replyToMessageId: why?.telegramMessageId ?? -1,
+      voice: false,
+      at: new Date(),
+    })
+    expect(
+      await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-26T09:00:00Z')),
+    ).toBe('asked')
+    expect(await proposerInput()).toContain(
+      [
+        'Поправки, от которых Борис уже отказался:',
+        '- Порог выше: 60 вместо 56. Его причина: маленький бюджет у нас тоже берут',
+      ].join('\n'),
+    )
+  })
+
+  it('FR-MIND-3: a proposal that went stale is not a refusal', async () => {
+    await threeSurprises()
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    await rollbackTo(db, ACC, 1)
+    await onProposalPress({ db, notifier }, await proposalTask(), 'apply')
+    expect((await db.select().from(ruleProposal))[0]?.state).toBe('declined')
+    await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-26T09:00:00Z'))
+    expect(await proposerInput()).toContain('Случаи, где решение Бориса')
+    expect(await proposerInput()).not.toContain('Борис уже отказался')
   })
 
   it('FR-MIND-3: a proposal made for v1 is not applied after the rules changed', async () => {

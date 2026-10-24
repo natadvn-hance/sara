@@ -1,5 +1,5 @@
 import { newEventId } from '@sara/shared'
-import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { leadLabel, question } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -27,22 +27,32 @@ export async function askWhy(
   q: { kind: QuestionKind; entityId: string; title: string },
   now: Date,
 ): Promise<boolean> {
-  const [{ n } = { n: 0 }] = await d.db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(question)
-    .where(
-      sql`(${question.askedAt} at time zone 'Europe/Moscow')::date = (${now.toISOString()}::timestamptz at time zone 'Europe/Moscow')::date`,
-    )
-  if (n >= QUESTIONS_PER_DAY) return false
-  const m = await d.notifier.sendText(textOf(q.kind, q.title))
   const id = newEventId()
-  await d.db.insert(question).values({
-    id,
-    kind: q.kind,
-    entityId: q.entityId,
-    telegramMessageId: m.messageId,
-    askedAt: now.toISOString(),
+  // The day's place is taken under a lock before anything is sent: two surprises at once never make a 4th question.
+  const reserved = await d.db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('questions'))`)
+    const [{ n } = { n: 0 }] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(question)
+      .where(
+        sql`(${question.askedAt} at time zone 'Europe/Moscow')::date = (${now.toISOString()}::timestamptz at time zone 'Europe/Moscow')::date`,
+      )
+    if (n >= QUESTIONS_PER_DAY) return false
+    await tx
+      .insert(question)
+      .values({ id, kind: q.kind, entityId: q.entityId, askedAt: now.toISOString() })
+    return true
   })
+  if (!reserved) return false
+  let m: { messageId: number }
+  try {
+    m = await d.notifier.sendText(textOf(q.kind, q.title))
+  } catch (e) {
+    // Not asked: the place goes back to the day.
+    await d.db.delete(question).where(eq(question.id, id))
+    throw e
+  }
+  await d.db.update(question).set({ telegramMessageId: m.messageId }).where(eq(question.id, id))
   await appendEvent(d.db, {
     type: 'question.asked',
     v: 1,
@@ -60,7 +70,8 @@ export async function askWhy(
 
 /**
  * Boris's words become the answer to a question: the one he replied to, or else the latest open one asked in
- * the last 30 minutes. For a lead the answer is also the reason on its label.
+ * the last 30 minutes (and sent: a place taken for a question that never went out answers nothing). For a lead
+ * the answer is also the reason on its label.
  */
 export async function answerQuestion(
   db: Db,
@@ -79,6 +90,7 @@ export async function answerQuestion(
           .where(
             and(
               open,
+              isNotNull(question.telegramMessageId),
               gte(question.askedAt, new Date(a.at.getTime() - ANSWER_WINDOW_MS).toISOString()),
             ),
           )

@@ -53,6 +53,30 @@ describe('cards', () => {
     )
   })
 
+  it('NFR-UX-1: the summary counts orders in the right Russian form', () => {
+    expect(TEXTS.summaryHead(1)).toBe('Сегодня отсеяла 1 заявку. На грани:')
+    expect(TEXTS.summaryHead(3)).toBe('Сегодня отсеяла 3 заявки. На грани:')
+    expect(TEXTS.summaryHead(11)).toBe('Сегодня отсеяла 11 заявок. На грани:')
+    expect(TEXTS.summaryNone(21)).toBe('Сегодня отсеяла 21 заявку, пограничных не было')
+    expect(TEXTS.summaryNone(25)).toBe('Сегодня отсеяла 25 заявок, пограничных не было')
+  })
+
+  it('NFR-UX-1: the proposal counts decisions in the right Russian form', () => {
+    const last = (b: { checked: number; changed: number }) =>
+      TEXTS.proposal(1, 'с', 'п', ['Порог: 56 → 60'], { ...b, towardBoris: 1, against: 0 })
+        .split('\n')
+        .at(-1)
+    expect(last({ checked: 21, changed: 1 })).toBe(
+      'На последних 21 заявке это изменило бы 1 решение: 1 в твою сторону, 0 против.',
+    )
+    expect(last({ checked: 100, changed: 3 })).toBe(
+      'На последних 100 заявках это изменило бы 3 решения: 1 в твою сторону, 0 против.',
+    )
+    expect(last({ checked: 100, changed: 12 })).toBe(
+      'На последних 100 заявках это изменило бы 12 решений: 1 в твою сторону, 0 против.',
+    )
+  })
+
   it('NFR-UX-1: no card text contains a long dash', () => {
     const texts = [
       leadCardText(card),

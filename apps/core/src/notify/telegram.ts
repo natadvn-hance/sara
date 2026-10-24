@@ -19,6 +19,9 @@ export type TelegramRuntime = {
   notifier: Notifier
 }
 
+/** A long or en dash, which the model, a voice or an order text can bring; Boris never gets one. */
+const DASHES = /[\u2013\u2014]/g
+
 function chatOf(ctx: Context): number | undefined {
   return ctx.chat?.id ?? ctx.callbackQuery?.message?.chat.id ?? ctx.from?.id
 }
@@ -35,6 +38,12 @@ export function createTelegramRuntime(d: {
   voiceDir?: string
 }): TelegramRuntime {
   const bot = new Bot(d.token, d.apiRoot ? { client: { apiRoot: d.apiRoot } } : undefined)
+  // Every text leaves through here (messages, replies, button answers), so a dash in it becomes a short hyphen once.
+  bot.api.config.use((prev, method, payload, signal) => {
+    const text = (payload as { text?: unknown }).text
+    if (typeof text !== 'string') return prev(method, payload, signal)
+    return prev(method, { ...payload, text: text.replace(DASHES, '-') }, signal)
+  })
 
   async function logForeign(chatId: number | undefined): Promise<void> {
     await appendEvent(d.db, {

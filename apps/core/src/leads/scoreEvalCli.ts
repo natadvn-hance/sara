@@ -1,5 +1,6 @@
-// pnpm --filter @sara/core score:eval <leads.json> <out.jsonl>: the Scorer with the active rules (as in the
-// pipeline, sonnet when borderline) over old Sara's leads, then how it compares with her decisions (Task 9).
+// pnpm --filter @sara/core score:eval <leads.json> <out.jsonl>: the Scorer with rules v1 from the code (RULES_V1,
+// not the active version in the database; sonnet when borderline, as in the pipeline) over old Sara's leads, then
+// how it compares with her decisions (Task 9).
 // Resumable: leads already in out.jsonl are skipped. Runs where the Claude token is, inside the core container.
 import { appendFile, readFile } from 'node:fs/promises'
 import { ProfiOrder } from '@sara/shared'

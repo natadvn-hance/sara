@@ -1,4 +1,4 @@
-import { formatCallback, formatRub } from '@sara/shared'
+import { formatCallback, formatRub, plural } from '@sara/shared'
 
 export type LeadCard = {
   taskId: string
@@ -14,6 +14,8 @@ export type LeadCard = {
   /** The same card again as a reminder, with the buttons, so Boris can act on it. */
   reminder?: boolean
 }
+
+const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
 
 /** Every text Sara sends Boris in Telegram (Russian, plain, no long dash). */
 export const TEXTS = {
@@ -44,8 +46,8 @@ export const TEXTS = {
   noted: (text: string) => `Записала: «${text}»`,
   notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
   voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',
-  summaryHead: (n: number) => `Сегодня отсеяла ${n}. На грани:`,
-  summaryNone: (n: number) => `Сегодня отсеяла ${n}, пограничных не было`,
+  summaryHead: (n: number) => `Сегодня отсеяла ${orders(n)}. На грани:`,
+  summaryNone: (n: number) => `Сегодня отсеяла ${orders(n)}, пограничных не было`,
   wantButton: (n: number) => `Взял бы №${n}`,
   wantCard: 'Прислала карточку заявки',
   proposal: (
@@ -59,7 +61,7 @@ export const TEXTS = {
       `Предлагаю поправку правил (v${from} → v${from + 1}): ${summary}`,
       `Почему: ${why}`,
       `Что меняется: ${changes.join('; ')}`,
-      `На последних ${b.checked} заявках это изменило бы ${b.changed} решений: ${b.towardBoris} в твою сторону, ${b.against} против.`,
+      `На последних ${b.checked} ${plural(b.checked, ['заявке', 'заявках', 'заявках'])} это изменило бы ${b.changed} ${plural(b.changed, ['решение', 'решения', 'решений'])}: ${b.towardBoris} в твою сторону, ${b.against} против.`,
     ].join('\n'),
   applyButton: 'Применить',
   dropButton: 'Не надо',

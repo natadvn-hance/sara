@@ -86,6 +86,14 @@ describe("Boris's words in the bot", () => {
     expect(await label()).toMatchObject({ reason: 'бюджет копейки', voice: true })
   })
 
+  it('NFR-UX-1: a long dash in the recognized voice comes back to Boris as a hyphen', async () => {
+    const q = await asked()
+    heard = `бюджет ${String.fromCharCode(0x2014)} копейки`
+    tg.pushVoice(111, q)
+    await until(() => tg.sent.some((m) => m.text.startsWith('Записала:')))
+    expect(tg.sent.at(-1)?.text).toBe('Записала: «бюджет - копейки»')
+  })
+
   it('FR-LEAD-7: an unrecognized voice asks for text and notes nothing', async () => {
     const q = await asked()
     heard = null

@@ -89,6 +89,35 @@ describe('telegram bot', () => {
     expect(tg.sent[1]?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toBe(`t:${taskId}:bid`)
   })
 
+  it('NFR-UX-1: no long dash reaches Boris, whatever text the model or the order brought', async () => {
+    const DASH = String.fromCharCode(0x2014)
+    const EN_DASH = String.fromCharCode(0x2013)
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    await bot.notifier.sendText(`Почему: клиент ${DASH} сеть клиник`)
+    await bot.notifier.sendButtons(`Бюджет 10${EN_DASH}20 тысяч, а не ${EN_DASH} 5`, [
+      [{ text: 'Применить', callbackData: `t:${taskId}:apply` }],
+    ])
+    await bot.notifier.sendLeadCard({
+      taskId,
+      title: `Сайт${DASH}лендинг`,
+      city: 'Краснодар',
+      verdict: null,
+      reason: null,
+      bidPriceRub: 210,
+      score: { value: 70, version: 2, reason: `Зрелый бизнес ${DASH} понятная задача` },
+    })
+    onPress.mockResolvedValueOnce(`Готово ${DASH} отклик ушёл`)
+    tg.pushPress(111, `t:${taskId}:bid`)
+    await until(() => tg.answers.length === 1)
+    expect(tg.sent.slice(1).map((m) => m.text)).toEqual([
+      'Почему: клиент - сеть клиник',
+      'Бюджет 10-20 тысяч, а не - 5',
+      '🔔 Заявка · Сайт-лендинг, Краснодар\nБалл 70 (правила v2). Зрелый бизнес - понятная задача\nОтклик 210 ₽',
+    ])
+    expect(tg.answers[0]?.text).toBe('Готово - отклик ушёл')
+  })
+
   it('FR-OPS-2: another program polling the same bot does not crash the core and is reported', async () => {
     await bot.stop()
     tg.setConflict(true)
