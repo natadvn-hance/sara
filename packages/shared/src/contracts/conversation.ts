@@ -150,47 +150,60 @@ export const CHECK_SEVERITY = {
 export type CheckId = keyof typeof CHECK_SEVERITY
 export const CHECK_IDS = Object.keys(CHECK_SEVERITY) as CheckId[]
 
-const ExamMessage = z.object({
-  author: z.enum(['client', 'boris', 'sara', 'sara_v1']),
-  text: z.string().min(1),
-  at: z.iso.datetime(),
-})
+/** A message of an exam scenario; a specialist message of unknown voice stays `unknown` (ADR-024). */
+const ExamMessage = z
+  .object({
+    author: z.enum(CHAT_AUTHORS),
+    text: z.string().min(1),
+    at: z.iso.datetime(),
+  })
+  .strict()
 
 /** One exam scenario (FR-TRAIN-8, M4 design 5.13): the chat so far, and what Sara should do next. */
-export const ExamScenario = z.object({
-  id: z.string().regex(/^x-[a-z0-9-]+$/),
-  title: z.string().min(1),
-  source: z.object({ kind: z.enum(['history', 'handmade']), ref: z.string().nullable() }),
-  tags: z.object({
-    question_type: z.string().nullable(),
-    stage: z.enum(CONV_STAGES),
-    tone: z.enum(TONES),
-    archetype: z.string().nullable(),
-    hard: z.boolean(),
-  }),
-  golden: z.boolean(),
-  order: z.object({
-    title: z.string(),
-    text: z.string(),
-    budget_text: z.string().nullable(),
-    city: z.string(),
-  }),
-  client_name: z.string().nullable(),
-  messages: z.array(ExamMessage).min(1),
-  state: z.object({
-    owner: z.enum(['sara', 'boris']),
-    owner_reason: z.enum(['take', 'wrote']).nullable(),
-    boris_note: z.string().nullable(),
-  }),
-  now: z.iso.datetime(),
-  expect: z.object({
-    move: z.enum(MOVES),
-    urgent: z.boolean().optional(),
-    topic: z.enum(TOPICS).optional(),
-    must_not_contain: z.array(z.string()).default([]),
-    must_mention_any: z.array(z.string()).default([]),
-    boris_reply: z.string().nullable().default(null),
-  }),
-  rubric: z.string().nullable().default(null),
-})
+export const ExamScenario = z
+  .object({
+    id: z.string().regex(/^x-[a-z0-9-]+$/),
+    title: z.string().min(1),
+    source: z.object({ kind: z.enum(['history', 'handmade']), ref: z.string().nullable() }),
+    tags: z.object({
+      question_type: z.string().nullable(),
+      stage: z.enum(CONV_STAGES),
+      tone: z.enum(TONES),
+      archetype: z.string().nullable(),
+      hard: z.boolean(),
+    }),
+    golden: z.boolean(),
+    order: z.object({
+      title: z.string(),
+      category: z.string().default(''),
+      text: z.string(),
+      budget_text: z.string().nullable(),
+      city: z.string(),
+    }),
+    client_name: z.string().nullable(),
+    /** The bid that opened the chat and whose it was; null when the scenario does not need it. */
+    bid: z
+      .object({ text: z.string().min(1), author: z.enum(CHAT_AUTHORS) })
+      .nullable()
+      .default(null),
+    messages: z.array(ExamMessage).min(1),
+    state: z.object({
+      owner: z.enum(['sara', 'boris', 'paused']),
+      owner_reason: z.enum(['take', 'wrote']).nullable(),
+      boris_note: z.string().nullable(),
+    }),
+    now: z.iso.datetime(),
+    expect: z.object({
+      move: z.enum(MOVES),
+      urgent: z.boolean().optional(),
+      topic: z.enum(TOPICS).optional(),
+      /** Whether the reply must start with a greeting (true) or must not (false); absent: by the new day rule. */
+      greeting: z.boolean().optional(),
+      must_not_contain: z.array(z.string()).default([]),
+      must_mention_any: z.array(z.string()).default([]),
+      boris_reply: z.string().nullable().default(null),
+    }),
+    rubric: z.string().nullable().default(null),
+  })
+  .strict()
 export type ExamScenario = z.infer<typeof ExamScenario>

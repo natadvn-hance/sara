@@ -8,7 +8,7 @@ import {
   type SubmitBidInput,
   type SubmitBidOutput,
 } from '@sara/shared'
-import { verifyPermit } from '@sara/shared/permit'
+import { verifyMessagePermit, verifyPermit } from '@sara/shared/permit'
 import { type ExtraRoute, serveMcp } from '../mcp/http'
 import { createProfiMcpServer, ProfiToolError } from '../mcp/server'
 import { sampleOrders } from './sampleOrders'
@@ -87,8 +87,9 @@ export async function createFakeProfi(o: {
       return out
     },
     async sendMessage(i: SendMessageInput) {
-      if (!verifyPermit(o.permitSecret, i.idempotency_key, i.permit)) {
-        throw new ProfiToolError('INTERNAL', 'permit does not match idempotency_key')
+      const m = { accountId: i.account_id, chatId: i.chat_id, text: i.text, key: i.idempotency_key }
+      if (!verifyMessagePermit(o.permitSecret, m, i.permit)) {
+        throw new ProfiToolError('INTERNAL', 'permit does not match this message')
       }
       let out = sentMessages.get(i.idempotency_key)
       if (!out) {

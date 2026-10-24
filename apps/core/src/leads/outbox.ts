@@ -209,12 +209,17 @@ type Attempt =
   | { kind: 'uncertain' }
   | { kind: 'failed'; errorClass: string }
 
+/** Only a queued bid goes down the bid path; a message row (M4) has its own delivery. */
+export function isBidRow(r: { kind: string; state: string }): boolean {
+  return r.kind === 'bid' && r.state === 'queued'
+}
+
 async function deliver(outboxId: string): Promise<void> {
   const [row] = await DBOS.runStep(
     () => d().db.select().from(outbox).where(eq(outbox.id, outboxId)),
     { name: 'load', ...DB_STEP },
   )
-  if (!row || row.state !== 'queued') return
+  if (!row || !isBidRow(row)) return
   const p = row.payload as BidPayload
 
   const allowed = await DBOS.runStep(() => getSetting(d().db, 'outbound.bids'), {

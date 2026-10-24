@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { signPermit } from '@sara/shared/permit'
+import { signMessagePermit, signPermit } from '@sara/shared/permit'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeProfi, type FakeProfi } from '../src/fake/fakeProfi'
 
@@ -96,7 +96,12 @@ describe('fake Profi-MCP', () => {
       text: 'Добрый день',
       expect_last_message_id: null,
       idempotency_key: 'msg:t:1',
-      permit: signPermit(SECRET, 'msg:t:1'),
+      permit: signMessagePermit(SECRET, {
+        accountId: 'hance-marketing',
+        chatId: '95147898',
+        text: 'Добрый день',
+        key: 'msg:t:1',
+      }),
     }
     const a = await c.callTool({ name: 'profi.send_message', arguments: msg })
     const b = await c.callTool({ name: 'profi.send_message', arguments: msg })
@@ -108,6 +113,12 @@ describe('fake Profi-MCP', () => {
       arguments: { ...msg, permit: 'bad' },
     })
     expect(bad.isError).toBe(true)
+    const other = await c.callTool({
+      name: 'profi.send_message',
+      arguments: { ...msg, text: 'Другой текст', idempotency_key: 'msg:t:2' },
+    })
+    expect(other.isError).toBe(true)
+    expect(fake.messages).toHaveLength(1)
     await c.close()
   })
 

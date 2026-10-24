@@ -14,25 +14,27 @@ export async function proposeMind(
   p: { path: string; content: string; kind: ProposalKind; source: string },
 ): Promise<boolean> {
   const id = newEventId()
-  const rows = await db
-    .insert(mindProposal)
-    .values({ id, ...p })
-    .onConflictDoNothing()
-    .returning({ id: mindProposal.id })
-  if (rows.length === 0) return false
-  await appendEvent(db, {
-    type: 'mind.proposed',
-    v: 1,
-    entity: { kind: 'mind_proposal', id },
-    account_id: null,
-    actor: 'sara',
-    occurred_at: new Date().toISOString(),
-    causation_id: null,
-    correlation_id: id,
-    reason: null,
-    payload: { kind: p.kind },
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .insert(mindProposal)
+      .values({ id, ...p })
+      .onConflictDoNothing()
+      .returning({ id: mindProposal.id })
+    if (rows.length === 0) return false
+    await appendEvent(tx, {
+      type: 'mind.proposed',
+      v: 1,
+      entity: { kind: 'mind_proposal', id },
+      account_id: null,
+      actor: 'sara',
+      occurred_at: new Date().toISOString(),
+      causation_id: null,
+      correlation_id: id,
+      reason: null,
+      payload: { kind: p.kind },
+    })
+    return true
   })
-  return true
 }
 
 /** Writes the new proposals as files under `toDir` and marks them exported. Part B writes the body. */

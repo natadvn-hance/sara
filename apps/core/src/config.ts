@@ -14,7 +14,10 @@ export type Config = {
   claudeBin: string
   telegramApiRoot: string | undefined
   rolesDir: string
-  /** A read-only clone of sara-mind (M4 design 5.2); a missing folder is an empty mind. */
+  /**
+   * The root of a read-only clone of sara-mind (M4 design 5.2): records under `<mindDir>/mind/`, exam scenarios under
+   * `<mindDir>/exam/`. A missing folder is an empty mind.
+   */
   mindDir: string
   /** Voice recognition on the server: whisper.cpp and its model, ffmpeg for the conversion. */
   whisperBin: string

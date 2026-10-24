@@ -29,7 +29,7 @@ it('NFR-UX-1: plural picks the Russian form by the number', () => {
 })
 
 it('FR-TRAIN-1: normalizeText compares messages as people read them', () => {
-  expect(normalizeText('  Ёлка \u2014  Сайт– под\n\nключ.  ')).toBe('елка - сайт- под ключ')
+  expect(normalizeText('  Ёлка \u2014  Сайт\u2013 под\n\nключ.  ')).toBe('елка - сайт- под ключ')
   expect(normalizeText('«Добрый день!»')).toBe(normalizeText('добрый день'))
   expect(normalizeText('Цена 50 000 ₽')).toBe('цена 50 000 ₽')
 })

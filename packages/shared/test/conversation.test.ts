@@ -150,12 +150,38 @@ describe('M4 contracts', () => {
     const parsed = ExamScenario.parse(scenario)
     expect(parsed.expect.must_not_contain).toEqual([])
     expect(parsed.expect.boris_reply).toBeNull()
+    expect(parsed.bid).toBeNull()
+  })
+
+  it('FR-TRAIN-8: a scenario keeps an unknown specialist author, the bid, the category and the greeting', () => {
+    const full = {
+      ...scenario,
+      order: { ...scenario.order, category: 'Сайты' },
+      bid: { text: 'Анна, добрый день! Понимаю задачу.', author: 'unknown' },
+      messages: [
+        { author: 'unknown', text: 'Ответ нашей стороны', at: scenario.now },
+        ...scenario.messages,
+      ],
+      expect: { move: 'reply', greeting: true },
+    }
+    const parsed = ExamScenario.parse(full)
+    expect(parsed.bid?.author).toBe('unknown')
+    expect(parsed.order.category).toBe('Сайты')
+    expect(parsed.expect.greeting).toBe(true)
+    expect(ExamScenario.safeParse({ ...full, extra: 1 }).success).toBe(false)
+    expect(
+      ExamScenario.safeParse({ ...full, state: { ...full.state, owner: 'paused' } }).success,
+    ).toBe(true)
   })
 
   it('FR-CONV-10: specialist message, typing and read events carry no text', () => {
     expect(PROFI_EVENT_PAYLOADS['profi.specialist_message'].safeParse(ref).success).toBe(true)
     expect(
       PROFI_EVENT_PAYLOADS['profi.specialist_message'].safeParse({ ...ref, text: 'привет' })
+        .success,
+    ).toBe(false)
+    expect(
+      PROFI_EVENT_PAYLOADS['profi.specialist_message'].safeParse({ ...ref, author: 'client' })
         .success,
     ).toBe(false)
     expect(
@@ -203,6 +229,23 @@ describe('M4 contracts', () => {
     expect(autonomy.default.process).toBe('draft')
     expect(autonomy.schema.safeParse({ ...autonomy.default, price: 'self' }).success).toBe(false)
     expect(autonomy.schema.safeParse({ ...autonomy.default, process: 'self' }).success).toBe(true)
+  })
+
+  it('FR-AUTO-2: a saved autonomy value survives a change of the topic list', () => {
+    const schema = SETTINGS['conv.autonomy'].schema
+    const old = schema.parse({
+      price: 'call',
+      contract: 'call',
+      discount: 'call',
+      nda: 'call',
+      process: 'self',
+      gone: 'self',
+    })
+    expect(old.process).toBe('self')
+    expect(old.timeline).toBe('draft')
+    expect('gone' in old).toBe(false)
+    expect(schema.safeParse({ process: 'self' }).data?.price).toBe('call')
+    expect(schema.safeParse({ price: 'draft' }).success).toBe(false)
   })
 
   it('FR-CONV-11: the draft card buttons good and close fit the callback', () => {

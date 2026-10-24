@@ -1,9 +1,10 @@
 import { newEventId } from '@sara/shared'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { checkReplyText } from '../../src/conversation/check/codeChecks'
 import { planTurn } from '../../src/conversation/engine'
-import { mindProposal, outbox } from '../../src/db/schema'
-import { resumeQueuedOutbox } from '../../src/leads/outbox'
+import { event, mindProposal, outbox } from '../../src/db/schema'
+import { isBidRow, resumeQueuedOutbox } from '../../src/leads/outbox'
 import { proposeMind } from '../../src/mind/proposals'
 import { createMindSearch } from '../../src/mind/search'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -50,6 +51,14 @@ describe('M4 part 0', () => {
     expect(await proposeMind(db, { ...p, content: 'другое' })).toBe(false)
     expect(await db.select().from(mindProposal)).toHaveLength(1)
     expect(await countEvents(db, 'mind.proposed')).toBe(1)
+    const [e] = await db.select().from(event).where(eq(event.type, 'mind.proposed'))
+    expect(JSON.stringify(e?.payload)).not.toMatch(/e-h-1|id:/)
+  })
+
+  it('NFR-REL-4: bid delivery never takes a message row', async () => {
+    expect(isBidRow({ kind: 'message', state: 'queued' })).toBe(false)
+    expect(isBidRow({ kind: 'bid', state: 'queued' })).toBe(true)
+    expect(isBidRow({ kind: 'bid', state: 'confirmed' })).toBe(false)
   })
 
   it('FR-MIND-2: the empty mind answers nothing until part B lands', async () => {

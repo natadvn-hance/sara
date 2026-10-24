@@ -192,7 +192,7 @@ export const PROFI_EVENT_PAYLOADS = {
   'profi.client_message': MessageRef,
   'profi.author_unclear': MessageRef,
   /** A new message from our side of the chat: Boris's, old Sara's or new Sara's (ADR-024). */
-  'profi.specialist_message': MessageRef,
+  'profi.specialist_message': MessageRef.extend({ author: z.literal('specialist') }).strict(),
   'profi.client_typing': z.object({ chat_id: z.string().min(1), at: z.iso.datetime() }).strict(),
   'profi.client_read': z
     .object({

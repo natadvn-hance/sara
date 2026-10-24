@@ -13,7 +13,7 @@ import {
   type SubmitBidInput,
   SubmitBidOutput,
 } from '@sara/shared'
-import { signPermit } from '@sara/shared/permit'
+import { signMessagePermit, signPermit } from '@sara/shared/permit'
 import type { ZodType } from 'zod'
 
 export class ProfiError extends Error {
@@ -87,7 +87,15 @@ export function createProfiClient(o: { url: string; permitSecret: string }): Pro
     sendMessage: (i) =>
       call(
         'profi.send_message',
-        { ...i, permit: signPermit(o.permitSecret, i.idempotency_key) },
+        {
+          ...i,
+          permit: signMessagePermit(o.permitSecret, {
+            accountId: i.account_id,
+            chatId: i.chat_id,
+            text: i.text,
+            key: i.idempotency_key,
+          }),
+        },
         SendMessageOutput,
       ),
   }

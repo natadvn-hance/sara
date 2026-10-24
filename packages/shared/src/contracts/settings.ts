@@ -74,11 +74,18 @@ export const SETTINGS = {
   'conv.cards_per_day': { schema: z.number().int().positive(), default: 10 },
   /** FR-AUTO-1, FR-AUTO-2: the level of each topic; the locked topics can only call Boris. */
   'conv.autonomy': {
-    schema: z
-      .record(z.enum(TOPICS), LEVEL)
-      .refine((m) => LOCKED_TOPICS.every((t) => m[t] === 'call'), {
+    // A value saved before the topic list changed still reads: missing topics take their default, gone ones drop.
+    schema: z.preprocess(
+      (v) =>
+        v && typeof v === 'object'
+          ? Object.fromEntries(
+              TOPICS.map((t) => [t, (v as Record<string, unknown>)[t] ?? AUTONOMY_DEFAULT[t]]),
+            )
+          : v,
+      z.record(z.enum(TOPICS), LEVEL).refine((m) => LOCKED_TOPICS.every((t) => m[t] === 'call'), {
         message: 'цена, договор, скидки и NDA всегда у Бориса',
       }),
+    ),
     default: AUTONOMY_DEFAULT,
   },
   /** FR-CONV-12: reminders to clients who went quiet. */
