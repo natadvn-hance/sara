@@ -65,3 +65,17 @@ export const outboxNode = node.table(
   },
   (t) => [index('outbox_node_due_idx').on(t.confirmedAt, t.nextTryAt)],
 )
+
+/**
+ * A press of the send button, written before the press: a call with the same key after it may only look whether the
+ * bid is on the page, never press again (NFR-REL-4). result is the confirmed answer, repeated to every later call.
+ */
+export const bidAttempt = node.table('bid_attempt', {
+  idempotencyKey: text('idempotency_key').primaryKey(),
+  accountId: text('account_id').notNull(),
+  orderId: text('order_id').notNull(),
+  /** What the form said it would charge. */
+  dueRub: integer('due_rub').notNull(),
+  pressedAt: ts('pressed_at').notNull(),
+  result: jsonb('result'),
+})

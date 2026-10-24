@@ -2,6 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createProfiClient } from '../../apps/core/src/profi/client'
 import { loadNodeConfig } from '../../apps/profi-node/src/config'
 import { createNodeDb } from '../../apps/profi-node/src/db/client'
 import { standInParsers } from '../../apps/profi-node/src/eyes/parsers'
@@ -73,6 +74,25 @@ describe('Profi-MCP service end to end', () => {
     await until(() => types().includes('profi.client_message'))
     expect(types().filter((t) => t === 'profi.session_dead')).toHaveLength(1)
   }, 60000)
+
+  it('FR-LEAD-8: the service takes submit_bid over MCP and bids through the account tab', async () => {
+    const orderId = site.addOrder({ subject: 'Лендинг для школы', price: 71 })
+    // The core's own client, signing with the service's development secret (no SARA_PERMIT_SECRET set).
+    const profi = createProfiClient({ url: svc.url, permitSecret: 'dev-permit-secret' })
+    const r = await profi.submitBid({
+      account_id: 'hance-marketing',
+      order_id: orderId,
+      text: 'Добрый день! Сделаем лендинг. Когда нужен запуск?',
+      price_rub: 30000,
+      idempotency_key: `bid:${orderId}`,
+    })
+    expect(r).toEqual({
+      found_on_page: true,
+      spent_rub: 71,
+      balance_after_rub: 4929,
+    })
+    expect(site.bids.map((b) => [b.orderId, b.price])).toEqual([[orderId, '30000']])
+  }, 90000)
 })
 
 describe('account on a wrong IP', () => {

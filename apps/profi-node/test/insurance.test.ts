@@ -310,11 +310,58 @@ describe('insurance and the account tab', () => {
         r.url?.endsWith(`n.php?o=${id}`),
     )
     expect(maps).toHaveLength(1)
-    const body = maps[0]?.body as { buttons: { text: string }[]; fields: { name: string }[] }
-    expect(body.buttons.map((b) => b.text)).toContain('Продолжить')
+    const body = maps[0]?.body as { fields: { name: string }[] }
     expect(body.fields.map((f) => f.name)).toContain('comments4client')
     expect(JSON.stringify(body)).not.toContain('Клиентский текст')
-    expect(site.continueClicks).toBe(0)
+    expect(site.openerClicks).toBe(0)
+  }, 60000)
+
+  it('FR-LEAD-8: work in the tab waits for the minute check, then the tab goes back to the feed', async () => {
+    await loginStandIn(ab.page, site)
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const order: string[] = []
+    let may = true
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+      canNavigate: () => may,
+      onNavigate: () => {
+        order.push('nav')
+      },
+    })
+    const feed = ins.feedOnce()
+    const work = ins.inTab(async ({ go, can }) => {
+      order.push('work')
+      expect(can()).toBe(true)
+      expect(await go('/chats')).toBe(true)
+      return 42
+    })
+    expect(await work).toBe(42)
+    await feed
+    // The feed page, then the work and its page, then back to the feed.
+    expect(order).toEqual(['nav', 'work', 'nav', 'nav'])
+    expect(new URL(ab.page.url()).pathname).toBe('/backoffice/a.php')
+    // The tab stops moving in the middle of the work: its next page is not opened.
+    const url = ab.page.url()
+    expect(
+      await ins.inTab(async ({ go }) => {
+        may = false
+        return go('/chats')
+      }),
+    ).toBe(false)
+    expect(ab.page.url()).toBe(url)
+    expect(await ins.inTab(async ({ can }) => can())).toBe(false)
+    await expect(
+      ins.inTab(async () => {
+        throw new Error('boom')
+      }),
+    ).rejects.toThrow('boom')
+    ins.stop()
   }, 60000)
 
   it('ST-M1-04: the chats list page leaves the links it showed in node.raw_event, for calibration', async () => {

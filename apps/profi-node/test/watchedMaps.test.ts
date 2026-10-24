@@ -49,7 +49,7 @@ describe('maps while Boris watches the live screen (calibration of the opened fo
     })
     const id = site.addOrder({ price: 216 })
     await ab.page.goto(`${site.url}/backoffice/n.php?o=${id}`)
-    await ab.page.waitForSelector('#bid-continue')
+    await ab.page.waitForSelector('#bid-opener')
     await w.once()
     expect(await maps()).toHaveLength(0)
 
@@ -59,7 +59,7 @@ describe('maps while Boris watches the live screen (calibration of the opened fo
     expect(await maps()).toHaveLength(1)
 
     // Boris opens the form himself on the live screen: the opened form is mapped too.
-    await ab.page.click('#bid-continue')
+    await ab.page.click('#bid-opener')
     await ab.page.waitForSelector('#bid-text')
     await w.once()
     const all = await maps()
@@ -67,7 +67,7 @@ describe('maps while Boris watches the live screen (calibration of the opened fo
     const opened = all.map((r) => r.body as { watched?: boolean; fields: { name: string }[] })
     expect(opened.every((b) => b.watched === true)).toBe(true)
     expect(opened[1]?.fields.map((f) => f.name)).toContain('comments4client')
-    expect(site.continueClicks).toBe(1)
+    expect(site.openerClicks).toBe(1)
 
     await ab.page.goto(`${site.url}/backoffice/a.php`)
     await w.once()

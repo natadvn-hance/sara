@@ -15,6 +15,13 @@
       "when": 1792841729114,
       "tag": "0001_message_history",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792856516731,
+      "tag": "0002_bid_attempt",
+      "breakpoints": true
     }
   ]
 }

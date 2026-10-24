@@ -9,6 +9,11 @@ export type Insurance = {
   feedOnce(): Promise<void>
   chatsOnce(onlyUnread?: boolean): Promise<void>
   reconcile(since: string): Promise<void>
+  /**
+   * Work of its own in the account tab (a bid, an order check), in turn with the checks above; the tab goes back
+   * to the feed afterwards. The work itself asks can() before it moves the tab.
+   */
+  inTab<T>(f: (t: { go(path: string): Promise<boolean>; can(): boolean }) => Promise<T>): Promise<T>
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -32,10 +37,11 @@ export function startInsurance(o: {
 }): Insurance {
   const can = o.canNavigate ?? (() => true)
   const pause = o.chatPauseMs ?? 2000
-  let busy: Promise<void> = Promise.resolve()
-  const serial = (f: () => Promise<void>) => {
-    busy = busy.then(f, f)
-    return busy
+  let busy: Promise<unknown> = Promise.resolve()
+  const serial = <T>(f: () => Promise<T>): Promise<T> => {
+    const run = busy.then(f, f)
+    busy = run.catch(() => {})
+    return run
   }
   async function go(path: string): Promise<boolean> {
     let ok = false
@@ -200,6 +206,22 @@ export function startInsurance(o: {
     },
     feedOnce,
     chatsOnce: (onlyUnread = true) => chats((c) => !onlyUnread || c.unread > 0),
+    inTab: (f) =>
+      serial(async () => {
+        try {
+          return await f({
+            // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
+            go: async (path) => {
+              if (!can()) return false
+              onFeed = false
+              return go(path)
+            },
+            can,
+          })
+        } finally {
+          if (can()) await maybeBackToFeed()
+        }
+      }),
     // After a logout or an outage: the feed and the chats with messages since then, one by one (F8).
     async reconcile(since) {
       await feedOnce()

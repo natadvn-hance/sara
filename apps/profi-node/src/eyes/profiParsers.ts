@@ -263,10 +263,13 @@ export const profiParsers: Parsers = {
 
   async fromHeaderDom(page) {
     const out: Signal[] = []
-    // The wallet sits in the top bar as its own short label, like «23 ₽».
+    // The wallet sits in the top bar as its own short label, like «23 ₽»; its «Баланс» label (old Sara,
+    // paymentPanel.js, checked live 25.09.2026) finds it wherever the bar is drawn.
     const rub = await page
       .evaluate(() => {
-        for (const el of document.querySelectorAll('nav *, header *')) {
+        for (const el of document.querySelectorAll(
+          '[aria-label="Баланс"], [aria-label="Баланс"] *, nav *, header *',
+        )) {
           const t = (el as HTMLElement).innerText?.trim() ?? ''
           if (el.children.length === 0 && /^\d[\d\s\u00a0]*₽$/.test(t))
             return Number(t.replace(/[^\d]/g, ''))

@@ -1,6 +1,7 @@
 import { newEventId, type ProfiOrder } from '@sara/shared'
+import { and, eq, sql } from 'drizzle-orm'
 import type { NodeDbOrTx } from '../db/client'
-import { rawEvent, rawMessage, rawOrder } from '../db/schema'
+import { bidAttempt, rawEvent, rawMessage, rawOrder } from '../db/schema'
 
 export type RawKind = 'rtp' | 'response' | 'dom'
 
@@ -36,6 +37,47 @@ export async function upsertOrder(
     .onConflictDoNothing()
     .returning({ id: rawOrder.orderId })
   return rows.length > 0
+}
+
+/** The order page showed this account's bid: get_order answers so even when the tab may not move. */
+export async function markOrderBid(db: NodeDbOrTx, accountId: string, orderId: string) {
+  await db
+    .update(rawOrder)
+    .set({ body: sql`${rawOrder.body} || '{"has_bid": true}'::jsonb` })
+    .where(and(eq(rawOrder.accountId, accountId), eq(rawOrder.orderId, orderId)))
+}
+
+export type BidAttempt = { dueRub: number; result: unknown }
+
+export async function findBidAttempt(db: NodeDbOrTx, key: string): Promise<BidAttempt | null> {
+  const [r] = await db
+    .select({ dueRub: bidAttempt.dueRub, result: bidAttempt.result })
+    .from(bidAttempt)
+    .where(eq(bidAttempt.idempotencyKey, key))
+  return r ?? null
+}
+
+/** Written before the send button is pressed: false when a press with this key was already written. */
+export async function savePress(
+  db: NodeDbOrTx,
+  p: { key: string; accountId: string; orderId: string; dueRub: number },
+): Promise<boolean> {
+  const rows = await db
+    .insert(bidAttempt)
+    .values({
+      idempotencyKey: p.key,
+      accountId: p.accountId,
+      orderId: p.orderId,
+      dueRub: p.dueRub,
+      pressedAt: new Date().toISOString(),
+    })
+    .onConflictDoNothing()
+    .returning({ key: bidAttempt.idempotencyKey })
+  return rows.length > 0
+}
+
+export async function saveBidResult(db: NodeDbOrTx, key: string, result: unknown): Promise<void> {
+  await db.update(bidAttempt).set({ result }).where(eq(bidAttempt.idempotencyKey, key))
 }
 
 export type StoredMessage = {

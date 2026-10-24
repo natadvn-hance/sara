@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { Socket } from 'node:net'
 import { type WebSocket, WebSocketServer } from 'ws'
 import {
+  type BidLook,
   bannedPage,
   CHANGED_LAYOUT,
   chatPage,
@@ -26,6 +27,23 @@ export type SiteOrder = {
   price: number
   publishedAt: string
   open: boolean
+  /** This account already bid on the order. */
+  hasBid: boolean
+  /** The form will not take a bid without «Стоимость услуги». */
+  priceRequired: boolean
+}
+export type SiteBid = { orderId: string; price: string; text: string }
+/** How the bid form behaves: ok, silent (refused, the form stays), lost (the form closes, no bid on the order). */
+export type BidSettings = BidLook & {
+  mode: 'ok' | 'silent' | 'lost'
+  /** The order page gets its answer at all. */
+  answer: boolean
+  /** The answer says hasBid (a renamed field would not). */
+  hasBidField: boolean
+  /** The top bar shows the wallet. */
+  showWallet: boolean
+  /** The opener's words, in the answer (tariffsBlock.scrollButtonText) and on the page. */
+  openerText: string
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -36,8 +54,16 @@ export type ProfiSite = {
   rtpHost: string
   code: string
   balance: number
-  /** Presses of «Продолжить» on an order page: the eyes never press it. */
-  continueClicks: number
+  /** Presses of what opens the bid form on an order page: the eyes never press it. */
+  openerClicks: number
+  /** Bids the form sent and the site took. */
+  bids: SiteBid[]
+  /** Presses of the send button that reached the site, taken or not. */
+  bidPosts: number
+  bidSettings: BidSettings
+  setBalance(rub: number): void
+  /** Back to a fresh form: no bids, 5000 ₽, the wallet pays, the answer comes. */
+  resetBids(): void
   orders: SiteOrder[]
   addOrder(o?: Partial<SiteOrder>): string
   addMessage(chatId: string, author: SiteAuthor, text: string): string
@@ -61,6 +87,67 @@ function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
+const COMMENT_PLACEHOLDER =
+  'Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену.'
+
+/** The order page answer in the shape of the live one (tests/fixtures/profi/response/order-page.json). */
+function orderScreen(o: SiteOrder, s: BidSettings) {
+  const fee = String(o.price)
+  const submit = { text: 'Откликнуться', style: 'PRIMARY' }
+  return {
+    id: o.id,
+    ...(s.hasBidField && { hasBid: o.hasBid }),
+    price: { value: fee, baseValue: fee, bidPromoType: null, currencySymbol: '₽' },
+    disabledBidBlock: o.open ? null : { title: 'Заказ закрыт' },
+    tariffsBlock: {
+      label: 'Тариф',
+      details: 'Детали',
+      formTitle: 'Комиссия за заказ',
+      scrollButtonText: s.openerText,
+      defaultTariffType: 'LEADGEN',
+      tariffs: [
+        { type: 'LEADGEN', title: 'Отклик', price: { value: `${fee} ₽`, currencySymbol: '₽' } },
+      ],
+    },
+    form: o.open
+      ? {
+          buttons: { refuse: null, submit },
+          elements: {
+            amount: {
+              name: 'stavka',
+              type: 'INPUT',
+              label: 'Стоимость услуги',
+              placeholder: 'Сумма',
+            },
+            commentsForClient: {
+              name: 'comments4client',
+              type: 'TEXTAREA',
+              label: 'Предложение или вопрос клиенту',
+              placeholder: COMMENT_PLACEHOLDER,
+            },
+            paymentMethod: null,
+          },
+        }
+      : null,
+    bidForms: o.open
+      ? [
+          {
+            type: 'LEADGEN',
+            bidSlideData: {
+              buttons: { submit },
+              elements: [
+                { name: 'stavka', type: 'INPUT', required: o.priceRequired },
+                { name: 'comments4client', type: 'TEXTAREA', required: false },
+              ],
+              paymentInfo: { value: fee, currencySymbol: '₽' },
+              paymentInfoLabel: 'К оплате:',
+            },
+          },
+        ]
+      : [],
+  }
+}
+
 export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSite> {
   const sessions = new Set<string>()
   const orders: SiteOrder[] = []
@@ -71,13 +158,28 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
-  const state = { balance: 5000, continueClicks: 0 }
+  const state = { balance: 5000, openerClicks: 0, bidPosts: 0 }
+  const bids: SiteBid[] = []
+  const freshBidSettings = (): BidSettings => ({
+    mode: 'ok',
+    payWay: 'wallet',
+    behindOpener: true,
+    openerText: 'Написать клиенту',
+    answer: true,
+    hasBidField: true,
+    showWallet: true,
+  })
+  const bidSettings = freshBidSettings()
 
   const sessOf = (req: IncomingMessage) => /sess=([^;]+)/.exec(req.headers.cookie ?? '')?.[1] ?? ''
   const html = (res: ServerResponse, body: string) =>
     res
       .writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      .end(body.replaceAll('__BALANCE__', String(state.balance)).replaceAll('__PRESENCE__', 'on'))
+      .end(
+        (bidSettings.showWallet ? body : body.replace(/<span class="balance"[\s\S]*?<\/span>/, ''))
+          .replaceAll('__BALANCE__', String(state.balance))
+          .replaceAll('__PRESENCE__', 'on'),
+      )
   const json = (res: ServerResponse, body: unknown, status = 200) =>
     res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
 
@@ -132,12 +234,37 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     }
     if (p.startsWith('/api/chat/'))
       return json(res, { messages: chats.get(p.slice('/api/chat/'.length)) ?? [] })
-    if (p === '/api/bid/continue') {
-      state.continueClicks++
+    if (p === '/graphql' && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}') as { variables?: { id?: string } }
+      const found = orders.find((x) => x.id === body.variables?.id)
+      if (!bidSettings.answer || !found) return json(res, { data: { orders: [] } })
+      return json(res, {
+        data: { orders: [{ _id: found.id, boOrderScreen: orderScreen(found, bidSettings) }] },
+      })
+    }
+    if (p === '/api/bid' && req.method === 'POST') {
+      const b = JSON.parse((await readBody(req)) || '{}') as Partial<SiteBid>
+      const found = orders.find((x) => x.id === b.orderId)
+      const price = String(b.price ?? '')
+      const text = String(b.text ?? '')
+      state.bidPosts++
+      if (!found?.open || found.hasBid || bidSettings.mode === 'silent')
+        return json(res, { ok: false })
+      if (found.priceRequired && !price) return json(res, { ok: false, error: 'Укажите стоимость' })
+      if (text.length > 500 || state.balance < found.price) return json(res, { ok: false })
+      if (bidSettings.mode === 'lost') return json(res, { ok: true })
+      bids.push({ orderId: found.id, price, text })
+      state.balance -= found.price
+      found.hasBid = true
+      return json(res, { ok: true })
+    }
+    if (p === '/api/bid/open') {
+      state.openerClicks++
       return json(res, { ok: true })
     }
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
-    if (p === '/backoffice/n.php') return html(res, orderPage(url.searchParams.get('o') ?? ''))
+    if (p === '/backoffice/n.php')
+      return html(res, orderPage(url.searchParams.get('o') ?? '', bidSettings))
     if (p === '/chats') return html(res, chatsPage())
     // Like the real messenger page: it polls the site all the time, so the network never goes quiet.
     if (p === '/api/ping') return json(res, { ok: true })
@@ -172,8 +299,23 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     get balance() {
       return state.balance
     },
-    get continueClicks() {
-      return state.continueClicks
+    get openerClicks() {
+      return state.openerClicks
+    },
+    get bidPosts() {
+      return state.bidPosts
+    },
+    bids,
+    bidSettings,
+    setBalance(rub) {
+      state.balance = rub
+    },
+    resetBids() {
+      bids.length = 0
+      state.balance = 5000
+      state.openerClicks = 0
+      state.bidPosts = 0
+      Object.assign(bidSettings, freshBidSettings())
     },
     orders,
     addOrder(partial = {}) {
@@ -189,6 +331,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         price: 210,
         publishedAt: new Date().toISOString(),
         open: true,
+        hasBid: false,
+        priceRequired: true,
         ...partial,
       }
       orders.unshift(order)
