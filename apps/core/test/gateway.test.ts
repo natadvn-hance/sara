@@ -144,6 +144,17 @@ describe('model gateway', () => {
     })
   })
 
+  it('FR-OPS-3: the CLI\'s "You\'ve hit your weekly limit" answer is limit_reached', async () => {
+    const gw = await gateway({
+      FAKE_CLAUDE_MODE: 'limit_json',
+      FAKE_CLAUDE_LIMIT_TEXT: "You've hit your weekly limit · resets 2am (Europe/Moscow)",
+    })
+    expect(await gw.call('probe', 'x', ProbeOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'limit_reached',
+    })
+  })
+
   it('LLM-1: other CLI failure gives cli_failed', async () => {
     const gw = await gateway({ FAKE_CLAUDE_MODE: 'exit1' })
     expect(await gw.call('probe', 'x', ProbeOutput)).toMatchObject({

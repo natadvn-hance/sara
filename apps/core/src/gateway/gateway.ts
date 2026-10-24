@@ -37,7 +37,7 @@ export type Gateway = {
   ): Promise<RoleCallResult<T>>
 }
 
-const LIMIT_TEXT = /usage limit|rate limit/i
+const LIMIT_TEXT = /usage limit|rate limit|hit your (?:[\w-]+ )*limit|limit reached/i
 const AUTH_TEXT = /failed to authenticate|invalid api key|oauth|not logged in|please run \/login/i
 
 function classify<T>(

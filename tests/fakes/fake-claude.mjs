@@ -33,8 +33,16 @@ process.stdin.on('end', async () => {
     process.stderr.write('Something went wrong\n')
     process.exit(1)
   }
+  const limitText = process.env.FAKE_CLAUDE_LIMIT_TEXT ?? 'Claude AI usage limit reached'
   if (mode === 'limit') {
-    process.stdout.write('Claude AI usage limit reached\n')
+    process.stdout.write(`${limitText}\n`)
+    process.exit(1)
+  }
+  if (mode === 'limit_json') {
+    // How CLI 2.1.310 answers a spent subscription limit in print mode: an error result, exit code 1.
+    process.stdout.write(
+      JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: limitText }),
+    )
     process.exit(1)
   }
   if (mode === 'auth_error') {
