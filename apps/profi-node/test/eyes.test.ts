@@ -288,16 +288,16 @@ describe('eyes', () => {
     },
     published_at: '2026-10-24T08:00:00.000Z',
   })
-  const fee = (orderId: string, rub: number) => ({
+  const fee = (orderId: string, rub: number, baseRub = rub) => ({
     recognized: true,
     what: 'order' as const,
-    signals: [{ t: 'order_fee' as const, orderId, rub, hasBid: false }],
+    signals: [{ t: 'order_fee' as const, orderId, rub, baseRub, hasBid: false }],
   })
 
   it('ST-M1-06: the fee from the order page answer is preferred to the page text, a discount too', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
     await e.onParsed({ recognized: true, what: 'feed', signals: [boardOrder('911')] }, 'response')
-    await e.onParsed(fee('911', 1), 'response')
+    await e.onParsed(fee('911', 1, 67), 'response')
     expect(await events('profi.order_seen')).toHaveLength(0)
     // The page text missed the discount and read the usual price.
     await e.onParsed(
@@ -317,7 +317,7 @@ describe('eyes', () => {
     const seen = await events('profi.order_seen')
     expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['911', 1]])
     const [stored] = await db.select().from(rawOrder).where(eq(rawOrder.orderId, '911'))
-    expect(stored?.body).toMatchObject({ bid_price_rub: 1, has_bid: false })
+    expect(stored?.body).toMatchObject({ bid_price_rub: 1, bid_base_price_rub: 67, has_bid: false })
   })
 
   it('ST-M1-06: an order whose page text cannot be read still goes out with the answer fee', async () => {
@@ -372,5 +372,56 @@ describe('eyes', () => {
       (await events('profi.client_message')).map((x) => x.payload.platform_message_id),
     ).toEqual(['12', '13', '15'])
     expect((await db.select().from(rawMessage)).length).toBe(6)
+  })
+
+  it('FR-CONV-1: the chats Sara knows are those with news in the last 3 days, newest first, 3 at most', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3600 * 1000).toISOString()
+    const read = (chat: string, id: string, at: string) =>
+      e.onChatRead(chat, {
+        recognized: true,
+        what: 'chat',
+        signals: [
+          {
+            t: 'message',
+            message: {
+              platform_message_id: id,
+              chat_id: chat,
+              order_id: chat,
+              author: 'client',
+              sent_at: at,
+              text: 'x',
+              read: true,
+            },
+          },
+        ],
+      })
+    await read('c-old', '1', hoursAgo(80))
+    await read('c-a', '2', hoursAgo(5))
+    await read('c-b', '3', hoursAgo(1))
+    await read('c-c', '4', hoursAgo(30))
+    await read('c-d', '5', hoursAgo(50))
+    await read('c-a', '6', hoursAgo(2))
+    // Another account's chat is not this tab's.
+    const other = createEyes({ accountId: 'hance-dev', db, parsers: standInParsers })
+    await other.onChatRead('c-other', {
+      recognized: true,
+      what: 'chat',
+      signals: [
+        {
+          t: 'message',
+          message: {
+            platform_message_id: '7',
+            chat_id: 'c-other',
+            order_id: 'c-other',
+            author: 'client',
+            sent_at: hoursAgo(0),
+            text: 'x',
+            read: true,
+          },
+        },
+      ],
+    })
+    expect(await e.knownChats()).toEqual(['c-b', 'c-a', 'c-c'])
   })
 })

@@ -71,4 +71,18 @@ describe('recorder', () => {
       }),
     ).toEqual({ items: [{ id: '1', phone: '[скрыто]' }], auth: '[скрыто]', code: '[скрыто]' })
   })
+
+  it('ADR-022: a login token inside a recorded link is hidden, the rest of the link stays', () => {
+    // The refund link of the profile answer carried bo_tkn on 24.10.2026 (value here made up).
+    expect(
+      redactSecrets({
+        refundLink:
+          'https://profi.ru/backoffice/bill.php?boFormType=MONEY_REFUND&bo_tkn=5S1lQqEJWkwqTBO6',
+        socket: 'wss://online.profi.ru/socket.io/869/qmd3dr1x/websocket?new_auth=1&appId=BO',
+      }),
+    ).toEqual({
+      refundLink: 'https://profi.ru/backoffice/bill.php?boFormType=MONEY_REFUND&bo_tkn=[скрыто]',
+      socket: 'wss://online.profi.ru/socket.io/869/qmd3dr1x/websocket?new_auth=1&appId=BO',
+    })
+  })
 })
