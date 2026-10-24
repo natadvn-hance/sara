@@ -1,0 +1,1 @@
+ALTER TABLE "core"."lead" ADD COLUMN "client_info" jsonb;

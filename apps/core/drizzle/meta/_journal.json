@@ -50,6 +50,13 @@
       "when": 1792858080860,
       "tag": "0006_lead_draft",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792869809158,
+      "tag": "0007_lead_client_info",
+      "breakpoints": true
     }
   ]
 }
