@@ -1,3 +1,5 @@
+import type { DirectionCase, DirectionRules, DirectionState, ReplyFormat } from '@sara/shared'
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -35,4 +37,25 @@ export type HealthCheck = {
 export function go(path: string): void {
   window.history.pushState(null, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+export type DirectionVersionRow = {
+  version: number
+  createdAt: string
+  createdBy: 'seed' | 'boris'
+  reason: string
+  active: boolean
+}
+export type DirectionView = {
+  account: { id: string; title: string }
+  state: DirectionState
+  active: { version: number; rules: DirectionRules }
+  versions: DirectionVersionRow[]
+  profile: {
+    speed: 'normal' | 'fast'
+    reply_format: ReplyFormat | null
+    cases: DirectionCase[]
+    version: number
+  }
+  onboarding: { open: boolean; step: number } | null
 }

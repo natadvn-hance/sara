@@ -47,16 +47,28 @@ export function AccountsPage() {
           <p className="text-sm">
             {`Баланс: ${a.balance_rub === null ? 'неизвестен' : formatRub(a.balance_rub)}. IP: ${a.egress_ip ?? 'неизвестен'}${a.egress_ip && !a.ip_ok ? ' (не свой)' : ''}`}
           </p>
-          <a
-            className="text-accent underline"
-            href={`/accounts/${a.id}/login`}
-            onClick={(e) => {
-              e.preventDefault()
-              go(`/accounts/${a.id}/login`)
-            }}
-          >
-            Войти в Профи.ру
-          </a>
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            <a
+              className="text-accent underline"
+              href={`/accounts/${a.id}/direction`}
+              onClick={(e) => {
+                e.preventDefault()
+                go(`/accounts/${a.id}/direction`)
+              }}
+            >
+              Направление
+            </a>
+            <a
+              className="text-accent underline"
+              href={`/accounts/${a.id}/login`}
+              onClick={(e) => {
+                e.preventDefault()
+                go(`/accounts/${a.id}/login`)
+              }}
+            >
+              Войти в Профи.ру
+            </a>
+          </div>
         </Card>
       ))}
     </main>
