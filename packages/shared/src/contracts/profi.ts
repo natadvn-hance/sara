@@ -86,11 +86,31 @@ export const GetOrderInput = z.object({
   account_id: z.string().min(1),
   order_id: z.string().min(1),
 })
+/**
+ * What the order page says about the client (the backoffice answer getKlientInfo): shown on the card and read by
+ * the Scorer for the client's quality. Every part may be missing on a page that does not show it.
+ */
+export const ClientInfo = z.object({
+  name: z.string().nullable(),
+  /** As the site writes it, e.g. «На Профи.ру с 7 сентября 2020». */
+  on_profi_since: z.string().nullable(),
+  phone_verified: z.boolean().nullable(),
+  /** Other specialists' reviews of this client. */
+  reviews: z
+    .object({ positive: z.number().int().nonnegative(), negative: z.number().int().nonnegative() })
+    .nullable(),
+  /** Short tags of those reviews, newest first («Перестала отвечать»). */
+  review_tags: z.array(z.string()).max(10),
+})
+export type ClientInfo = z.infer<typeof ClientInfo>
+
 export const GetOrderOutput = ProfiOrder.extend({
   open: z.boolean(),
   published_at: z.iso.datetime().nullable(),
   /** This account already bid on the order (from the order page answer); null when not known. */
   has_bid: z.boolean().nullable(),
+  /** The client as the order page shows them; absent from a node that does not read it yet. */
+  client_info: ClientInfo.nullable().optional(),
 })
 export type GetOrderOutput = z.infer<typeof GetOrderOutput>
 

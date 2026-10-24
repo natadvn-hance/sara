@@ -65,6 +65,8 @@ export const lead = core.table('lead', {
   draftPriceRub: integer('draft_price_rub'),
   /** The Analyst's reading of the order and its short разбор (hidden need, risk, condition); null: none. */
   draftAnalysis: jsonb('draft_analysis'),
+  /** What the order page says about the client (contract ClientInfo), read when the order page is opened. */
+  clientInfo: jsonb('client_info'),
 })
 
 export const account = core.table('account', {
