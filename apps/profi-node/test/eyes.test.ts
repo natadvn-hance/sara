@@ -385,6 +385,63 @@ describe('eyes', () => {
     expect((await db.select().from(rawMessage)).length).toBe(6)
   })
 
+  it('FR-CONV-10: a new specialist message is shipped as an event without text', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const m = (id: string, author: 'client' | 'specialist' | 'system', text: string) => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300010',
+        order_id: '95300010',
+        author,
+        sent_at: '2026-10-24T09:00:00.000Z',
+        text,
+        read: true,
+      },
+    })
+    const read = (signals: ReturnType<typeof m>[]) =>
+      e.onChatRead('95300010', { recognized: true, what: 'chat', signals })
+    // The first reading: our answer before the client's last word is history, no event.
+    const first = [
+      m('20', 'client', 'Нужен лендинг'),
+      m('21', 'specialist', 'Добрый день, расскажите подробнее'),
+      m('22', 'client', 'Для кофейни'),
+    ]
+    await read(first)
+    expect(await events('profi.specialist_message')).toHaveLength(0)
+    await read([
+      ...first,
+      m('23', 'specialist', 'Понял, пришлю варианты'),
+      m('24', 'system', 'Вы обменялись контактами'),
+    ])
+    // The same page again: a repeat gives no second event.
+    await read([
+      ...first,
+      m('23', 'specialist', 'Понял, пришлю варианты'),
+      m('24', 'system', 'Вы обменялись контактами'),
+    ])
+    const ours = await events('profi.specialist_message')
+    expect(ours.map((x) => x.payload)).toEqual([
+      {
+        chat_id: '95300010',
+        order_id: '95300010',
+        platform_message_id: '23',
+        sent_at: '2026-10-24T09:00:00.000Z',
+        author: 'specialist',
+      },
+    ])
+    expect(JSON.stringify(ours)).not.toContain('пришлю')
+    const [envelope] = (await db.select().from(outboxNode))
+      .map((r) => r.payload as { type: string; entity: unknown })
+      .filter((x) => x.type === 'profi.specialist_message')
+    expect(envelope?.entity).toEqual({ kind: 'chat', id: '95300010' })
+    // The system notice stays without an event, the client's words go out as before.
+    const all = (await db.select().from(outboxNode)).map(
+      (r) => (r.payload as { type: string }).type,
+    )
+    expect(all.sort()).toEqual(['profi.client_message', 'profi.specialist_message'])
+  })
+
   it('FR-CONV-1: the chats Sara knows are those with news in the last 3 days, newest first, 3 at most', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600 * 1000).toISOString()

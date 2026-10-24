@@ -154,9 +154,14 @@ export function createEyes(o: {
           const m = s.message
           const history = quiet.has(m.platform_message_id)
           const isNew = await upsertMessage(tx, { accountId: o.accountId, message: m, history })
-          if (!isNew || history || m.author === 'specialist' || m.author === 'system') return
+          if (!isNew || history || m.author === 'system') return
           await queueEvent(tx, {
-            type: m.author === 'client' ? 'profi.client_message' : 'profi.author_unclear',
+            type:
+              m.author === 'client'
+                ? 'profi.client_message'
+                : m.author === 'specialist'
+                  ? 'profi.specialist_message'
+                  : 'profi.author_unclear',
             accountId: o.accountId,
             entity: { kind: 'chat', id: m.chat_id },
             payload: {
