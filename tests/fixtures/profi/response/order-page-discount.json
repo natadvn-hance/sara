@@ -1,0 +1,350 @@
+{
+  "kind": "response",
+  "url": "https://profi.ru/graphql",
+  "body": {
+    "data": {
+      "orders": [
+        {
+          "_id": "10000001",
+          "city": {
+            "project": {
+              "_id": "itfl"
+            }
+          },
+          "isLidgen": true,
+          "subjects": "Текст 1 Те",
+          "isAutoAssign": false,
+          "boOrderScreen": {
+            "id": "10000001",
+            "form": {
+              "buttons": {
+                "refuse": null,
+                "submit": {
+                  "url": null,
+                  "code": "[скрыто]",
+                  "icon": null,
+                  "text": "Текст 2 Текс",
+                  "style": "PRIMARY",
+                  "deeplink": null
+                },
+                "deeplink": null
+              },
+              "elements": {
+                "link": null,
+                "amount": {
+                  "name": "stavka",
+                  "type": "INPUT",
+                  "label": "Стоимость услуги",
+                  "title": null,
+                  "value": "",
+                  "placeholder": "Сумма",
+                  "additionalValue": ""
+                },
+                "priceHash": {
+                  "name": "price_hsh",
+                  "type": "HIDDEN",
+                  "label": null,
+                  "title": null,
+                  "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                  "placeholder": null,
+                  "additionalValue": null
+                },
+                "sendContacts": null,
+                "paymentMethod": null,
+                "commentsForClient": {
+                  "name": "comments4client",
+                  "type": "TEXTAREA",
+                  "label": "Предложение или вопрос клиенту",
+                  "title": null,
+                  "value": "",
+                  "placeholder": "Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену.",
+                  "additionalValue": null
+                }
+              }
+            },
+            "tags": [
+              {
+                "text": "Текст 3 Т",
+                "type": "PRICE",
+                "image": null,
+                "textColor": "G500",
+                "borderColor": "G280",
+                "backgroundColor": null
+              }
+            ],
+            "price": {
+              "value": "1",
+              "baseValue": "67",
+              "bidPromoType": null,
+              "currencySymbol": "₽"
+            },
+            "badges": [],
+            "banner": {
+              "url": null,
+              "icon": null,
+              "type": "BID_DISCOUNT",
+              "title": "Текст 4 Текст 4 Текст 4 Текст 4 Текст ",
+              "button": null,
+              "caption": null,
+              "variant": "DEFAULT",
+              "backgroundImage": "https://cdn.profi.ru/backoffice/icons/promo/bg-banner-discount-newbie.png"
+            },
+            "hasBid": false,
+            "params": [
+              {
+                "code": "[скрыто]",
+                "icon": null,
+                "text": "Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст 5 Текст ",
+                "label": "Описание"
+              },
+              {
+                "code": "[скрыто]",
+                "icon": "HOME",
+                "text": "Текст 6 Текст 6 Текст 6 Текст 6 ",
+                "label": "Адрес",
+                "lines": [
+                  {
+                    "name": "Клиент 1",
+                    "colors": []
+                  }
+                ],
+                "address": {
+                  "lat": 45,
+                  "lon": 39,
+                  "addr": "Адрес 1 Адрес 1 Адрес 1 Адрес 1 Адрес 1 Адр"
+                }
+              },
+              {
+                "code": "[скрыто]",
+                "icon": "LOCATION",
+                "text": null,
+                "label": "Клиент может приехать",
+                "lines": [
+                  {
+                    "name": "Клиент 2",
+                    "colors": []
+                  },
+                  {
+                    "name": "Клиент 3",
+                    "colors": []
+                  },
+                  {
+                    "name": "Клиент 4",
+                    "colors": []
+                  },
+                  {
+                    "name": "Клиент 5",
+                    "colors": []
+                  },
+                  {
+                    "name": "Клиент 6",
+                    "colors": []
+                  }
+                ],
+                "address": null
+              },
+              {
+                "code": "[скрыто]",
+                "icon": "CALENDAR",
+                "text": "Текст 7 Текст",
+                "label": "Когда"
+              },
+              {
+                "code": "[скрыто]",
+                "icon": null,
+                "text": "Тек",
+                "label": "Цена отклика",
+                "reason": "",
+                "comment": null,
+                "reprice": null,
+                "oldPrice": null
+              },
+              {
+                "code": "[скрыто]",
+                "icon": null,
+                "text": "Текст 9 Те",
+                "items": [
+                  {
+                    "icon": "CLOCK",
+                    "text": "Текст 10 Текст 10 Текст 10 Текст ",
+                    "color": "G450"
+                  }
+                ],
+                "label": "Детали заказа",
+                "actions": []
+              },
+              {
+                "code": "[скрыто]",
+                "icon": "INFO",
+                "text": "Текст 11 Текст 11 Текст 11 Текст 11 Текст 11 Т",
+                "label": null,
+                "actions": [],
+                "variant": "DEFAULT"
+              }
+            ],
+            "gallery": [],
+            "markers": ["CLIENT_INFO"],
+            "subject": "Текст 12 Те",
+            "bidForms": [
+              {
+                "type": "LEADGEN",
+                "bidSlideData": {
+                  "buttons": {
+                    "refuse": null,
+                    "submit": {
+                      "url": null,
+                      "code": "[скрыто]",
+                      "icon": null,
+                      "text": "Текст 13 Тек",
+                      "style": "PRIMARY",
+                      "deeplink": null,
+                      "description": null
+                    }
+                  },
+                  "elements": [
+                    {
+                      "name": "stavka",
+                      "text": null,
+                      "type": "INPUT",
+                      "edizm": null,
+                      "label": "Стоимость услуги",
+                      "range": 1,
+                      "title": null,
+                      "value": "",
+                      "edizms": [
+                        {
+                          "id": "1",
+                          "name": "Клиент 7",
+                          "quantum": 1,
+                          "selected": true
+                        }
+                      ],
+                      "required": true,
+                      "rangeTabs": null,
+                      "isDisabled": false,
+                      "paragraphs": null,
+                      "description": "Текст 14 Текст 14 Текст 14 Текст 14 Текст 14 Текст 14 Текст 14 Текст",
+                      "placeholder": "Сумма",
+                      "rangeAccess": true,
+                      "clarification": null,
+                      "edizmRequired": true,
+                      "additionalValue": "",
+                      "edizmPlaceholder": "ед. изм.",
+                      "edizmRequiredError": "Пожалуйста, укажите единицу измерения.",
+                      "isCalcPriceAvailable": false
+                    },
+                    {
+                      "name": "comments4client",
+                      "text": null,
+                      "type": "TEXTAREA",
+                      "edizm": null,
+                      "label": "Предложение или вопрос клиенту",
+                      "range": null,
+                      "title": null,
+                      "value": "",
+                      "edizms": null,
+                      "required": false,
+                      "rangeTabs": null,
+                      "isDisabled": null,
+                      "paragraphs": null,
+                      "description": null,
+                      "placeholder": "Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену.",
+                      "rangeAccess": null,
+                      "clarification": null,
+                      "edizmRequired": null,
+                      "additionalValue": null,
+                      "edizmPlaceholder": null,
+                      "edizmRequiredError": null,
+                      "isCalcPriceAvailable": null
+                    },
+                    {
+                      "name": "info_text",
+                      "text": null,
+                      "type": null,
+                      "edizm": null,
+                      "label": null,
+                      "range": null,
+                      "title": "Текст 15",
+                      "value": null,
+                      "edizms": null,
+                      "required": null,
+                      "rangeTabs": null,
+                      "isDisabled": null,
+                      "paragraphs": ["При платном отклике клиент сразу получит ваши контакты"],
+                      "description": null,
+                      "placeholder": null,
+                      "rangeAccess": null,
+                      "clarification": null,
+                      "edizmRequired": null,
+                      "additionalValue": null,
+                      "edizmPlaceholder": null,
+                      "edizmRequiredError": null,
+                      "isCalcPriceAvailable": null
+                    },
+                    {
+                      "name": "banner",
+                      "text": null,
+                      "type": null,
+                      "edizm": null,
+                      "label": null,
+                      "range": null,
+                      "title": "Текст 16 Текст 16 Текст",
+                      "value": null,
+                      "edizms": null,
+                      "required": null,
+                      "rangeTabs": null,
+                      "isDisabled": null,
+                      "paragraphs": null,
+                      "description": "Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Текст 17 Те",
+                      "placeholder": null,
+                      "rangeAccess": null,
+                      "clarification": null,
+                      "edizmRequired": null,
+                      "additionalValue": null,
+                      "edizmPlaceholder": null,
+                      "edizmRequiredError": null,
+                      "isCalcPriceAvailable": null
+                    }
+                  ],
+                  "priceHash": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                  "paymentInfo": {
+                    "value": "1",
+                    "baseValue": null,
+                    "bidPromoType": null,
+                    "currencySymbol": "₽"
+                  },
+                  "hideBidPrice": false,
+                  "promotionInfo": null,
+                  "textAdaptation": null,
+                  "paymentInfoLabel": "К оплате:"
+                }
+              }
+            ],
+            "documents": [],
+            "duplicates": [],
+            "headerStatus": null,
+            "tariffsBlock": null,
+            "analyticsData": {
+              "facebook": null,
+              "orderLimitType": null
+            },
+            "promotionBanner": null,
+            "disabledBidBlock": null,
+            "additionalActions": [
+              {
+                "url": "/backoffice/n.php?boFormType=ORDER_COMPLAIN&boFormRefId=10000001&o=10000001",
+                "code": "[скрыто]",
+                "icon": "https://cdn.profi.ru/backoffice/icons/ic_report_fill.svg",
+                "text": "Текст 18 Текст 18 Тек",
+                "style": null,
+                "deeplink": "backoffice-react-app://profi.ru/bo_forms?type=ORDER_COMPLAIN&refId=10000001"
+              }
+            ],
+            "safeDealBonusLabel": null
+          }
+        }
+      ]
+    }
+  },
+  "receivedAt": "2026-10-24T10:16:36.486Z"
+}

@@ -1,0 +1,16 @@
+{
+  "kind": "dom",
+  "url": "https://profi.ru/backoffice/r.php",
+  "body": {
+    "links": [
+      "/backoffice/",
+      "/backoffice/n.php",
+      "/backoffice/r.php",
+      "/backoffice/bill.php",
+      "/backoffice/a.php",
+      "/backoffice/support.php"
+    ],
+    "messages": 0
+  },
+  "receivedAt": "2026-10-24T14:03:56.856Z"
+}
