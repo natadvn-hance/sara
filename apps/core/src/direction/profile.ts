@@ -22,15 +22,26 @@ export const DEFAULT_REPLY_FORMAT: ReplyFormat = {
 
 export type Profile = DirectionProfileData & { state: DirectionState; version: number }
 
-const NONE: Profile = { state: 'on', version: 0, speed: 'normal', reply_format: null, cases: [] }
+/** The account that works today. Another account starts as a draft and wins no orders until its onboarding ends. */
+export const LIVE_ACCOUNT = 'hance-marketing'
 
-/** A direction with no profile row works as before: on, normal speed, no format and no cases. */
+const startState = (accountId: string): DirectionState =>
+  accountId === LIVE_ACCOUNT ? 'on' : 'draft'
+
+/** A direction with no profile row: normal speed, no format, no cases, working only if it is the live account. */
 export async function getProfile(db: DbOrTx, accountId: string): Promise<Profile> {
   const [row] = await db
     .select()
     .from(directionProfile)
     .where(eq(directionProfile.accountId, accountId))
-  if (!row) return NONE
+  if (!row)
+    return {
+      state: startState(accountId),
+      version: 0,
+      speed: 'normal',
+      reply_format: null,
+      cases: [],
+    }
   return {
     state: DirectionState.parse(row.state),
     version: row.version,
@@ -44,7 +55,10 @@ export async function getProfile(db: DbOrTx, accountId: string): Promise<Profile
 
 /** The row for an account that has none; an existing one is never touched (a restart must not undo Boris). */
 export async function seedProfile(db: Db, accountId: string): Promise<void> {
-  await db.insert(directionProfile).values({ accountId }).onConflictDoNothing()
+  await db
+    .insert(directionProfile)
+    .values({ accountId, state: startState(accountId) })
+    .onConflictDoNothing()
 }
 
 export type ProfilePatch = Partial<DirectionProfileData & { state: DirectionState }>

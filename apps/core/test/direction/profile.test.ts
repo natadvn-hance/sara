@@ -4,6 +4,7 @@ import { event } from '../../src/db/schema'
 import {
   DEFAULT_REPLY_FORMAT,
   getProfile,
+  LIVE_ACCOUNT,
   saveProfile,
   seedProfile,
 } from '../../src/direction/profile'
@@ -42,6 +43,13 @@ describe('direction profile', () => {
     await saveProfile(db, ACC, { cases: [aCase] }, 'boris')
     await seedProfile(db, ACC)
     expect((await getProfile(db, ACC)).cases).toHaveLength(1)
+  })
+
+  it('FR-ACC-2: only the live account is seeded as on, another account starts as a draft that wins nothing', async () => {
+    await seedProfile(db, LIVE_ACCOUNT)
+    await seedProfile(db, 'hance-it')
+    expect(await getProfile(db, LIVE_ACCOUNT)).toMatchObject({ state: 'on', reply_format: null })
+    expect(await getProfile(db, 'hance-it')).toMatchObject({ state: 'draft', reply_format: null })
   })
 
   it('FR-ACC-2: saving the profile grows its version and journals the change without the texts', async () => {
