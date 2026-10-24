@@ -1,6 +1,8 @@
 import { type BrowserContext, chromium, type Page } from 'playwright'
 import { acquireAccountLock } from './lock'
 
+const NAME_HELPER = 'globalThis.__name ??= (f) => f'
+
 export type AccountBrowser = { context: BrowserContext; page: Page; close(): Promise<void> }
 
 /** The one live tab of an account: its own profile and, on the server, its own IP through SOCKS (FR-ACC-1). */
@@ -27,7 +29,12 @@ export async function openAccountBrowser(o: {
     await release()
     throw e
   }
+  // On the server the node runs under tsx, which wraps every inner function in __name(...): a page has no such
+  // helper, so any page read with an inner function would fail there. Every document of the tab gets one.
+  await context.addInitScript(NAME_HELPER)
   const page = context.pages()[0] ?? (await context.newPage())
+  // The tab that is already open got its document before the init script.
+  await Promise.all(context.pages().map((p) => p.evaluate(NAME_HELPER).catch(() => {})))
   return {
     context,
     page,

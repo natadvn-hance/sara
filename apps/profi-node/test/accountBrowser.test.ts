@@ -86,4 +86,21 @@ describe('account browser', () => {
     })
     await a.close()
   }, 60000)
+
+  it('ST-M1-07: code run in the tab may use the __name helper tsx adds on the server', async () => {
+    // On the server the node runs under tsx, which wraps every inner function in __name(...). A page has no
+    // __name, so page reads with inner functions failed silently there (24.10.2026: no form maps, no chat shapes).
+    const ab = await openAccountBrowser(await opts())
+    try {
+      expect(await ab.page.evaluate('__name(() => 7, "seven")()')).toBe(7)
+      await ab.page.goto(`${site.url}/login`)
+      expect(await ab.page.evaluate('__name(() => 8, "eight")()')).toBe(8)
+      const other = await ab.context.newPage()
+      await other.goto(`${site.url}/login`)
+      expect(await other.evaluate('typeof __name')).toBe('function')
+      await other.close()
+    } finally {
+      await ab.close()
+    }
+  })
 })
