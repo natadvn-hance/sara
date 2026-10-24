@@ -307,6 +307,12 @@ describe('«Изменить»', () => {
     tg.pushText(111, NEW, first)
     await until(() => said('Записала новый текст отклика'))
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
+    // The second request is closed too: a later plain message does not rewrite the draft.
+    expect((await editRequests()).map((q) => q.answeredAt !== null)).toEqual([true, true])
+    tg.pushText(111, 'спасибо')
+    await until(() => said('Пока я понимаю только ответы на мои вопросы'))
+    expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
+    expect(cards()).toHaveLength(2)
   })
 
   it('FR-LEAD-7: «Изменить» on a decided card does nothing', async () => {

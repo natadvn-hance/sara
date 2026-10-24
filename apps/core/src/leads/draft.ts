@@ -20,17 +20,21 @@ export type DraftMiss = {
 
 /** What Profi.ru shows instead of a name while it hides one. */
 const PLACEHOLDER = /^(клиент|заказчик|пользовател|имя|аноним|скрыт)/iu
-/** A greeting counts only in the first sentence: «Добрый день!», «Анна, добрый день!», «Здравствуйте, Анна.» */
+/**
+ * A greeting counts only in the first sentence: «Добрый день!», «Анна, добрый день!», «Здравствуйте, Анна.»
+ * Whole words only: «Приветливый персонал» is no greeting.
+ */
 const OPENING_GREETING =
-  /^[^.!?\n]{0,40}?(?<!\p{L})(?:добр(?:ый|ое|ого)\s+(?:день|дня|утро|утра|вечер|вечера|времени)|здравствуй|приветствую|привет)/iu
+  /^[^.!?\n]{0,40}?(?<!\p{L})(?:добр(?:ый|ое|ого)\s+(?:день|дня|утро|утра|вечер|вечера|времени)|здравствуй(?:те)?|приветствую|привет)(?!\p{L})/iu
 const FIRST_SENTENCE = /^[^.!?\n]*[.!?]*\s*/u
 const DASHES = /[\u2013\u2014]/g
 /** The model's own framing or JSON around the text (old Sara, 17.09 and 30.09): never typed into the form. */
 const NOT_PLAIN = /^\s*[{[]|<\/?parameter\b/i
 
+/** The leading letters of the name («Анна(Юля)» gives «Анна»), so only letters and hyphens ever reach a pattern. */
 function firstName(clientName: string): string | null {
-  const word = (clientName.trim().split(/\s+/)[0] ?? '').replace(/[^\p{L}-]+$/u, '')
-  return /^\p{L}/u.test(word) && !PLACEHOLDER.test(word) ? word : null
+  const word = /^\p{L}[\p{L}-]*/u.exec(clientName.trim())?.[0] ?? ''
+  return word && !PLACEHOLDER.test(word) ? word : null
 }
 
 /** «Ирина, добрый день!» when the client's name is known, else «Добрый день!» (Boris, 20.10: a missing hello is rude). */

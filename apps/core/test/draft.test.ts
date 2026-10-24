@@ -53,6 +53,26 @@ describe('bid text rules', () => {
     expect(editOf('Текст', 'Ирина')).toBe('Ирина, добрый день!\n\nТекст')
   })
 
+  it('FR-LEAD-6: a name with brackets or other signs never breaks the greeting', () => {
+    expect(greetingOf('Анна(Юля)')).toBe('Анна, добрый день!')
+    expect(editOf('Текст', 'Анна(Юля)')).toBe('Анна, добрый день!\n\nТекст')
+    expect(editOf('Анна, текст', 'Анна*')).toBe('Анна, добрый день!\n\nТекст')
+  })
+
+  it('FR-LEAD-6: a word that only begins like a greeting is not one', () => {
+    expect(draftOf('Приветливый персонал решает половину задачи.\n\nКогда запуск?', 'Ирина')).toBe(
+      'Ирина, добрый день!\n\nПриветливый персонал решает половину задачи.\n\nКогда запуск?',
+    )
+    expect(editOf('Приветливый сайт сделаем за две недели. Когда старт?', 'Ирина')).toBe(
+      'Ирина, добрый день!\n\nПриветливый сайт сделаем за две недели. Когда старт?',
+    )
+    expect(editOf('Приветствие на сайте поменяем. Когда старт?', '')).toBe(
+      'Добрый день!\n\nПриветствие на сайте поменяем. Когда старт?',
+    )
+    expect(editOf('Здравствуйте! Текст', 'Ирина')).toBe('Здравствуйте! Текст')
+    expect(editOf('Привет, Ирина! Текст', 'Ирина')).toBe('Привет, Ирина! Текст')
+  })
+
   it('NFR-UX-1: long and short dashes in a draft become a hyphen', () => {
     expect(draftOf(`Сайт ${DASH} это просто`, '')).toBe('Добрый день!\n\nСайт - это просто')
     expect(editOf('Сайт – это просто', '')).toBe('Добрый день!\n\nСайт - это просто')

@@ -145,6 +145,20 @@ export async function openQuestion(
   return q ?? null
 }
 
+/** Every open edit request of the task is closed: one text answers them all, a later message lands on none. */
+export async function closeDraftRequests(tx: DbOrTx, taskId: string, at: Date): Promise<void> {
+  await tx
+    .update(question)
+    .set({ answeredAt: at.toISOString() })
+    .where(
+      and(
+        eq(question.kind, 'edit_draft'),
+        eq(question.entityId, taskId),
+        isNull(question.answeredAt),
+      ),
+    )
+}
+
 /** Marks the question answered once, inside the caller's transaction; false when it already was. */
 export async function markAnswered(
   tx: DbOrTx,

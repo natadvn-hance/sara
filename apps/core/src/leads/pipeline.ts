@@ -8,7 +8,13 @@ import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import { recordLabel } from '../learning/labels'
 import { onProposalPress } from '../learning/proposals'
-import { askForDraft, askWhy, type DraftAnswer, markAnswered } from '../learning/questions'
+import {
+  askForDraft,
+  askWhy,
+  closeDraftRequests,
+  type DraftAnswer,
+  markAnswered,
+} from '../learning/questions'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
@@ -399,8 +405,7 @@ async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
 /** «Изменить»: Sara asks for the new text; the card stays as it is until the text comes. */
 async function onEdit(taskId: string): Promise<string> {
   const found = await leadOfTask(taskId)
-  if (!found || found.task.kind !== 'lead_decision' || found.task.state !== 'open')
-    return TEXTS.alreadyDone
+  if (found?.task.kind !== 'lead_decision' || found.task.state !== 'open') return TEXTS.alreadyDone
   await askForDraft(d(), { taskId, title: found.lead.title }, new Date())
   return TEXTS.waitingDraft
 }
@@ -411,9 +416,12 @@ async function onEdit(taskId: string): Promise<string> {
  */
 async function onDraftText(a: DraftAnswer): Promise<string> {
   const found = await leadOfTask(a.question.entityId)
-  if (!found || found.task.state !== 'open') {
-    // Decided meanwhile: the request is closed so a later message does not land on it.
-    await d().db.transaction((tx) => markAnswered(tx, a.question, a))
+  if (found?.task.state !== 'open') {
+    // Decided meanwhile: the requests are closed so a later message does not land on them.
+    await d().db.transaction(async (tx) => {
+      await markAnswered(tx, a.question, a)
+      await closeDraftRequests(tx, a.question.entityId, a.at)
+    })
     return TEXTS.draftLate
   }
   const { lead: l, task: t } = found
@@ -422,6 +430,7 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   if (next.length > BID_TEXT_MAX) return TEXTS.draftTooLong(next.length)
   const saved = await d().db.transaction(async (tx) => {
     if (!(await markAnswered(tx, a.question, a))) return false
+    await closeDraftRequests(tx, t.id, a.at)
     await tx.update(lead).set({ draftText: next }).where(eq(lead.id, l.id))
     await appendEvent(
       tx,
