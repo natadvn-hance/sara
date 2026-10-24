@@ -62,7 +62,9 @@ export function createBidTools(o: {
   async function openOrder(page: Page, go: Go, orderId: string) {
     const answer = page
       .waitForResponse(
+        // Only GraphQL bodies are read: images and scripts of the page pass by untouched.
         async (res) =>
+          /\/graphql/.test(res.url()) &&
           orderScreenFromAnswer(res.url(), await res.json().catch(() => null), orderId) !== null,
         { timeout: answerMs },
       )
