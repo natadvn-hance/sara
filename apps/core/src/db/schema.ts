@@ -250,3 +250,17 @@ export const ruleProposal = core.table('rule_proposal', {
   createdAt: ts('created_at').notNull().defaultNow(),
   decidedAt: ts('decided_at'),
 })
+
+/**
+ * What a direction holds besides its scoring rules (FR-ACC-2): its state, speed mode, reply format and case
+ * library. One row per account; every change grows `version` and is journaled.
+ */
+export const directionProfile = core.table('direction_profile', {
+  accountId: text('account_id').primaryKey(),
+  state: text('state').notNull().default('on'),
+  speed: text('speed').notNull().default('normal'),
+  replyFormat: jsonb('reply_format'),
+  cases: jsonb('cases').notNull().default(sql`'[]'::jsonb`),
+  version: integer('version').notNull().default(1),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
