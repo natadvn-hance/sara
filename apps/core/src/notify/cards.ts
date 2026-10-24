@@ -71,7 +71,18 @@ export const TEXTS = {
   whySkip: (title: string) => `Почему пропустил «${title}»? Напиши или скажи голосом.`,
   whyWant: (title: string) => `Почему взял бы «${title}»? Напиши или скажи голосом.`,
   whyDecline: 'Почему не надо эту поправку? Напиши или скажи голосом.',
-  noted: (text: string) => `Записала: «${text}»`,
+  noted: (text: string, title?: string | null) =>
+    title ? `Записала по «${title}»: «${text}»` : `Записала: «${text}»`,
+  whichQuestion: (waiting: string[]) =>
+    `Не поняла, к какому моему вопросу это. Сейчас жду:\n${waiting.map((w) => `- ${w}`).join('\n')}\nОтветь на нужное моё сообщение ответом, тогда запишу туда.`,
+  waitingFor: {
+    edit_draft: (title: string | null) =>
+      title ? `новый текст отклика на «${title}»` : 'новый текст отклика',
+    why_skip: (title: string | null) =>
+      title ? `почему пропустил «${title}»` : 'почему пропустил',
+    why_want: (title: string | null) => (title ? `почему взял бы «${title}»` : 'почему взял бы'),
+    why_decline: (_title: string | null) => 'почему не надо поправку правил',
+  },
   notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
   voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',
   summaryHead: (n: number) => `Сегодня отсеяла ${orders(n)}. На грани:`,
@@ -108,7 +119,7 @@ export const TEXTS = {
   noDraft: 'Сначала нажми «Изменить» и пришли текст отклика',
   draftTooLong: (n: number) =>
     `С приветствием выходит ${n} ${plural(n, ['знак', 'знака', 'знаков'])}, а Профи.ру принимает до 500. Пришли текст короче.`,
-  draftSaved: 'Записала новый текст отклика',
+  draftSaved: (title: string) => `Записала новый текст отклика для «${title}»`,
   draftLate: 'Заявка уже решена, текст не поменяла',
 }
 

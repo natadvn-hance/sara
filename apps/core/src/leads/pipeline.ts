@@ -596,7 +596,7 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   })
   if (!saved) return TEXTS.alreadyDone
   await sendCard(t.id, 'edit')
-  return TEXTS.draftSaved
+  return TEXTS.draftSaved(l.title)
 }
 
 /**
