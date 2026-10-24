@@ -261,6 +261,66 @@ describe('calibration samples', () => {
     expect(JSON.stringify(anonymize(r))).not.toContain(dash)
   })
 
+  it('ST-M1-10: a kept chat page record becomes a sample with its numbers renamed, its classes and times kept', () => {
+    // The shape the tab keeps of a chat page (apps/profi-node/src/eyes/pageShape.ts): no text of a bubble.
+    const r = {
+      kind: 'dom' as const,
+      url: 'https://profi.ru/backoffice/r.php?id=95147898',
+      receivedAt: '2026-10-25T10:00:00.000Z',
+      body: {
+        chatId: '95147898',
+        messages: [
+          {
+            id: '1912345678',
+            classes: ['cw_msg', 'cw_cO7-r-'],
+            parts: ['div.cw_xeDn2R', 'div.cw_BFgZYK', 'span.cw_t1'],
+            time: '12:30',
+          },
+        ],
+        shape: [
+          {
+            depth: 3,
+            tag: 'div',
+            classes: ['cw_row'],
+            data: [{ attr: 'data-chat', id: '95147898' }],
+          },
+          { depth: 4, tag: 'b', classes: ['cw_badge'], data: [], badge: '2' },
+        ],
+      },
+    }
+    const out = anonymize(r)
+    expect(findLeaks(r, out)).toEqual([])
+    const text = JSON.stringify(out)
+    expect(text).not.toMatch(/95147898|1912345678/)
+    const body = out.body as typeof r.body
+    expect(out.url).toBe(`https://profi.ru/backoffice/r.php?id=${body.chatId}`)
+    expect(body.shape[0]?.data).toEqual([{ attr: 'data-chat', id: body.chatId }])
+    expect(body.messages[0]).toMatchObject({
+      classes: ['cw_msg', 'cw_cO7-r-'],
+      parts: ['div.cw_xeDn2R', 'div.cw_BFgZYK', 'span.cw_t1'],
+      time: '12:30',
+    })
+    expect(body.shape[1]?.badge).toBe('2')
+  })
+
+  it('ST-M1-10: order and chat numbers in link parameters are renamed like any other number of an order', () => {
+    // The chats list record keeps the page's addresses only.
+    const r = {
+      kind: 'dom' as const,
+      url: 'https://profi.ru/backoffice/r.php',
+      receivedAt: '2026-10-25T10:00:00.000Z',
+      body: {
+        links: ['/backoffice/r.php?id=95147898', '/backoffice/n.php?o=95147898&from=chat'],
+        messages: 0,
+      },
+    }
+    const out = anonymize(r)
+    expect(JSON.stringify(out)).not.toContain('95147898')
+    const [chat, order] = (out.body as typeof r.body).links
+    expect(/[?&]id=(\d+)/.exec(chat ?? '')?.[1]).toBe(/[?&]o=(\d+)/.exec(order ?? '')?.[1])
+    expect(findLeaks(r, { ...r, body: r.body })).toContain('95147898')
+  })
+
   it('ST-M1-10: records exported from the server become named sample files by kind', async () => {
     const root = await mkdtemp(join(tmpdir(), 'samples-'))
     const res = await writeSamples([{ ...raw, name: 'order-page' }], root)

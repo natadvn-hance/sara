@@ -16,6 +16,12 @@ const SIDE: Record<string, MessageAuthor> = {
   cw_GK6qZJ: 'system',
 }
 
+/** A bubble's author by its classes, on the page or in a kept chat record; an unknown class is never guessed (FR-CONV-2). */
+export function authorFromClasses(classes: string[]): MessageAuthor {
+  const side = classes.find((c) => SIDE[c])
+  return side ? (SIDE[side] ?? 'unknown') : 'unknown'
+}
+
 /** The order page's text: anchored on its fixed section headers (old Sara, extractOrderFieldsFromPage). */
 export function orderFromPageText(
   text: string,
@@ -311,25 +317,19 @@ export const profiParsers: Parsers = {
     const now = new Date().toISOString()
     const signals: MessageSignal[] = raw
       .filter((r) => r.id)
-      .map((r) => {
-        const cls = String(r.cls)
-          .split(/\s+/)
-          .find((c) => SIDE[c])
-        return {
-          t: 'message',
-          message: {
-            platform_message_id: r.id,
-            chat_id: chatId,
-            order_id: chatId,
-            // An unknown class is never guessed (FR-CONV-2).
-            author: cls ? (SIDE[cls] ?? 'unknown') : 'unknown',
-            // The page shows only HH:MM badges; the moment the eyes saw it stands in until calibration.
-            sent_at: now,
-            text: r.text,
-            read: true,
-          },
-        }
-      })
+      .map((r) => ({
+        t: 'message',
+        message: {
+          platform_message_id: r.id,
+          chat_id: chatId,
+          order_id: chatId,
+          author: authorFromClasses(String(r.cls).split(/\s+/)),
+          // The page shows only HH:MM badges; the moment the eyes saw it stands in until calibration.
+          sent_at: now,
+          text: r.text,
+          read: true,
+        },
+      }))
     return { recognized: raw.length > 0, what: 'chat', signals }
   },
 }

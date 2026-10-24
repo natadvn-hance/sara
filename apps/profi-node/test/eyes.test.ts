@@ -375,4 +375,55 @@ describe('eyes', () => {
     ).toEqual(['12', '13', '15'])
     expect((await db.select().from(rawMessage)).length).toBe(6)
   })
+
+  it('FR-CONV-1: the chats Sara knows are those with news in the last 3 days, newest first, 3 at most', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3600 * 1000).toISOString()
+    const read = (chat: string, id: string, at: string) =>
+      e.onChatRead(chat, {
+        recognized: true,
+        what: 'chat',
+        signals: [
+          {
+            t: 'message',
+            message: {
+              platform_message_id: id,
+              chat_id: chat,
+              order_id: chat,
+              author: 'client',
+              sent_at: at,
+              text: 'x',
+              read: true,
+            },
+          },
+        ],
+      })
+    await read('c-old', '1', hoursAgo(80))
+    await read('c-a', '2', hoursAgo(5))
+    await read('c-b', '3', hoursAgo(1))
+    await read('c-c', '4', hoursAgo(30))
+    await read('c-d', '5', hoursAgo(50))
+    await read('c-a', '6', hoursAgo(2))
+    // Another account's chat is not this tab's.
+    const other = createEyes({ accountId: 'hance-dev', db, parsers: standInParsers })
+    await other.onChatRead('c-other', {
+      recognized: true,
+      what: 'chat',
+      signals: [
+        {
+          t: 'message',
+          message: {
+            platform_message_id: '7',
+            chat_id: 'c-other',
+            order_id: 'c-other',
+            author: 'client',
+            sent_at: hoursAgo(0),
+            text: 'x',
+            read: true,
+          },
+        },
+      ],
+    })
+    expect(await e.knownChats()).toEqual(['c-b', 'c-a', 'c-c'])
+  })
 })
