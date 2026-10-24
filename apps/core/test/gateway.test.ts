@@ -441,7 +441,8 @@ describe('Claude limit in the gateway', () => {
       ok: false,
       errorClass: 'limit_reached',
     })
-    expect(Date.now() - started).toBeGreaterThanOrEqual(400)
+    // Node's timers may fire a millisecond early by Date.now() (CI saw 399), so allow a few.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(395)
     expect((await calls()).map(roleOf)).toEqual(['sorter'])
     expect(await countRows()).toBe(1)
   })
