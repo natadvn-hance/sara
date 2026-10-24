@@ -50,6 +50,8 @@ export function createEyes(o: {
   // Board orders lack the fee, which only their page shows; bounded so a stuck tab cannot grow it.
   const waiting = new Map<string, OrderSignal>()
   const WAITING_MAX = 100
+  // The fee from the order page's own answer: truer than the page text, which misses a discount.
+  const fees = new Map<string, { rub: number; hasBid: boolean | null }>()
   let boardAt = 0
   // chat → when the stream named it and which message, for the time the message really came.
   const touched = new Map<string, { at: string; messageId: string | null }>()
@@ -63,19 +65,28 @@ export function createEyes(o: {
     return rows.length > 0
   }
 
-  /** A page reading completes the board one: the board's text and budget, the page's fee. */
+  /**
+   * A page reading completes the board one: the board's text and budget, the page's fee. The fee of the page's
+   * answer, when it came, wins over the one read from the page text.
+   */
   function withBoard(s: OrderSignal): OrderSignal {
-    const b = waiting.get(s.order.order_id)
-    if (!b) return s
-    waiting.delete(s.order.order_id)
+    const id = s.order.order_id
+    const fee = fees.get(id)
+    fees.delete(id)
+    const b = waiting.get(id)
+    waiting.delete(id)
+    const order = b
+      ? {
+          ...b.order,
+          budget_text: b.order.budget_text ?? s.order.budget_text,
+          bid_price_rub: s.order.bid_price_rub || b.order.bid_price_rub,
+        }
+      : s.order
     return {
       t: 'order',
-      order: {
-        ...b.order,
-        budget_text: b.order.budget_text ?? s.order.budget_text,
-        bid_price_rub: s.order.bid_price_rub || b.order.bid_price_rub,
-      },
-      published_at: b.published_at ?? s.published_at,
+      order: fee ? { ...order, bid_price_rub: fee.rub } : order,
+      published_at: b?.published_at ?? s.published_at,
+      hasBid: fee?.hasBid ?? s.hasBid ?? null,
     }
   }
 
@@ -89,6 +100,13 @@ export function createEyes(o: {
       if (s.t === 'chat_touched') {
         if (touched.size < WAITING_MAX || touched.has(s.chatId))
           touched.set(s.chatId, { at: new Date().toISOString(), messageId: s.messageId })
+        continue
+      }
+      if (s.t === 'order_fee') {
+        // Kept until its order is completed; the oldest goes first, so a stuck tab cannot grow it.
+        fees.delete(s.orderId)
+        if (fees.size >= WAITING_MAX) fees.delete(fees.keys().next().value ?? '')
+        fees.set(s.orderId, { rub: s.rub, hasBid: s.hasBid })
         continue
       }
       if (s.t === 'order' && s.needsPage) {
@@ -124,7 +142,11 @@ export function createEyes(o: {
             const isNew = await upsertOrder(tx, {
               accountId: o.accountId,
               order: s.order,
-              body: { ...s.order, published_at: s.published_at },
+              body: {
+                ...s.order,
+                published_at: s.published_at,
+                ...(typeof s.hasBid === 'boolean' && { has_bid: s.hasBid }),
+              },
             })
             if (!isNew) return
             await queueEvent(tx, {

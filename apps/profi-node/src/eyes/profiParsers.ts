@@ -113,10 +113,39 @@ function fromProfileAnswer(body: unknown): ParseResult {
   return { recognized: true, signals: [{ t: 'balance', rub: Math.floor(data.balance) }] }
 }
 
+type OrderScreen = {
+  _id?: unknown
+  boOrderScreen?: { id?: unknown; price?: { value?: unknown } | null; hasBid?: unknown } | null
+}
+
+/**
+ * The order page's GraphQL answer (orders[].boOrderScreen, recorded live 24.10.2026). Its price is what a bid
+ * costs this account now: with a discount it is «1» while baseValue keeps the usual price.
+ */
+function fromOrderAnswer(orders: unknown[]): ParseResult {
+  const signals: Signal[] = []
+  for (const o of orders as (OrderScreen | null)[]) {
+    const screen = o?.boOrderScreen
+    const orderId = String(o?._id ?? screen?.id ?? '')
+    const digits = String(screen?.price?.value ?? '').replace(/[^\d]/g, '')
+    if (!/^\d+$/.test(orderId) || digits === '') continue
+    signals.push({
+      t: 'order_fee',
+      orderId,
+      rub: Number(digits),
+      hasBid: typeof screen?.hasBid === 'boolean' ? screen.hasBid : null,
+    })
+  }
+  return { recognized: true, what: 'order', signals }
+}
+
 export function fromSiteAnswer(url: string, body: unknown): ParseResult {
   if (/\/backoffice\/api\//.test(url)) return fromProfileAnswer(body)
-  const board = (body as { data?: { boSearchBoardItems?: { items?: unknown } } } | null)?.data
-    ?.boSearchBoardItems
+  const data = (
+    body as { data?: { boSearchBoardItems?: { items?: unknown }; orders?: unknown } } | null
+  )?.data
+  if (/\/graphql/.test(url) && Array.isArray(data?.orders)) return fromOrderAnswer(data.orders)
+  const board = data?.boSearchBoardItems
   if (!/\/graphql/.test(url) || !board || !Array.isArray(board.items))
     return { recognized: false, signals: [] }
   const now = new Date().toISOString()

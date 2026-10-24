@@ -1,10 +1,11 @@
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { outboxNode, rawEvent, rawMessage } from '../src/db/schema'
+import { outboxNode, rawEvent, rawMessage, rawOrder } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { startInsurance } from '../src/eyes/insurance'
 import { standInParsers } from '../src/eyes/parsers'
@@ -268,6 +269,71 @@ describe('eyes', () => {
       ['902', 0, 'Полный текст с доски'],
     ])
     expect(seen[0]?.payload.budget_text).toBe('до 50 000 ₽')
+    expect(e.ordersWantingPage()).toEqual([])
+  })
+
+  const boardOrder = (id: string) => ({
+    t: 'order' as const,
+    needsPage: true,
+    order: {
+      order_id: id,
+      title: 'Реклама на ТВ',
+      category: 'Реклама на ТВ',
+      city: 'Дистанционно · Москва',
+      text: 'Полный текст с доски',
+      client_name: 'Андрей',
+      budget_text: 'до 50 000 ₽',
+      bid_price_rub: 0,
+      seen_at: new Date().toISOString(),
+    },
+    published_at: '2026-10-24T08:00:00.000Z',
+  })
+  const fee = (orderId: string, rub: number) => ({
+    recognized: true,
+    what: 'order' as const,
+    signals: [{ t: 'order_fee' as const, orderId, rub, hasBid: false }],
+  })
+
+  it('ST-M1-06: the fee from the order page answer is preferred to the page text, a discount too', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    await e.onParsed({ recognized: true, what: 'feed', signals: [boardOrder('911')] }, 'response')
+    await e.onParsed(fee('911', 1), 'response')
+    expect(await events('profi.order_seen')).toHaveLength(0)
+    // The page text missed the discount and read the usual price.
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'order',
+        signals: [
+          {
+            t: 'order',
+            order: { ...boardOrder('911').order, bid_price_rub: 67 },
+            published_at: null,
+          },
+        ],
+      },
+      'dom',
+    )
+    const seen = await events('profi.order_seen')
+    expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['911', 1]])
+    const [stored] = await db.select().from(rawOrder).where(eq(rawOrder.orderId, '911'))
+    expect(stored?.body).toMatchObject({ bid_price_rub: 1, has_bid: false })
+  })
+
+  it('ST-M1-06: an order whose page text cannot be read still goes out with the answer fee', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    await e.onParsed({ recognized: true, what: 'feed', signals: [boardOrder('912')] }, 'response')
+    await e.onParsed(fee('912', 145), 'response')
+    await e.settleOrder('912')
+    const seen = await events('profi.order_seen')
+    expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['912', 145]])
+  })
+
+  it('ST-M1-06: an order page answer alone never makes an order', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    await e.onParsed(fee('913', 88), 'response')
+    expect(await events('profi.order_seen')).toHaveLength(0)
+    expect(await e.knowsOrder('913')).toBe(false)
     expect(e.ordersWantingPage()).toEqual([])
   })
 
