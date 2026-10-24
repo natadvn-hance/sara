@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
 import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
@@ -12,8 +13,10 @@ import { seedDirection } from './direction/store'
 import { createGateway } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
+import { handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
 import { type BotControl, createBotControl } from './notify/botControl'
+import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
 import { registerScreenProxy } from './screen/screenProxy'
@@ -55,10 +58,18 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
 
   let pipeline: LeadPipeline | null = null
+  const transcriber = createTranscriber({
+    ffmpegBin: config.ffmpegBin,
+    whisperBin: config.whisperBin,
+    modelPath: config.whisperModel,
+    workDir: join(config.dataDir, 'voice'),
+  })
   const bot = createBotControl({
     db,
     apiRoot: config.telegramApiRoot,
     onPress: (p) => (pipeline ? pipeline.onPress(p) : Promise.resolve('Сара ещё запускается')),
+    onMessage: (m) => handleBorisMessage({ db, transcriber }, m),
+    voiceDir: join(config.dataDir, 'voice'),
   })
   pipeline = createLeadPipeline({
     db,

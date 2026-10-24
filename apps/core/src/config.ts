@@ -14,6 +14,10 @@ export type Config = {
   claudeBin: string
   telegramApiRoot: string | undefined
   rolesDir: string
+  /** Voice recognition on the server: whisper.cpp and its model, ffmpeg for the conversion. */
+  whisperBin: string
+  whisperModel: string
+  ffmpegBin: string
   production: boolean
 }
 
@@ -28,9 +32,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       throw new Error(`Не задана переменная ${name}: без неё Сара в работе не запускается.`)
     return devDefault
   }
+  const dataDir = resolve(env.SARA_DATA_DIR ?? resolve(ROOT, '.sara'))
   return {
     databaseUrl: env.DATABASE_URL ?? 'postgres://sara:sara@localhost:54329/sara',
-    dataDir: resolve(env.SARA_DATA_DIR ?? resolve(ROOT, '.sara')),
+    dataDir,
     port: Number(env.SARA_PORT ?? 3300),
     host: env.SARA_HOST ?? '127.0.0.1',
     publicUrl: env.SARA_PUBLIC_URL ?? 'http://localhost:5173',
@@ -49,6 +54,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     claudeBin: env.SARA_CLAUDE_BIN ?? 'claude',
     telegramApiRoot: env.SARA_TELEGRAM_API_ROOT || undefined,
     rolesDir: resolve(env.SARA_ROLES_DIR ?? resolve(ROOT, 'roles')),
+    whisperBin: env.SARA_WHISPER_BIN ?? 'whisper-cli',
+    whisperModel: env.SARA_WHISPER_MODEL ?? resolve(dataDir, 'whisper/ggml-small.bin'),
+    ffmpegBin: env.SARA_FFMPEG_BIN ?? 'ffmpeg',
     production,
   }
 }
