@@ -133,6 +133,13 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
     if (p === '/backoffice/n.php') return html(res, orderPage(url.searchParams.get('o') ?? ''))
     if (p === '/chats') return html(res, chatsPage())
+    // Like the real messenger page: it polls the site all the time, so the network never goes quiet.
+    if (p === '/api/ping') return json(res, { ok: true })
+    if (p === '/backoffice/busy.php')
+      return html(
+        res,
+        `<!doctype html><a href="/chats/c-busy">c-busy</a><script>setInterval(() => fetch('/api/ping'), 200)</script>`,
+      )
     if (p.startsWith('/chats/'))
       return html(res, chatPage(rtp.url, p.slice('/chats/'.length), layout))
     res.writeHead(404).end()
