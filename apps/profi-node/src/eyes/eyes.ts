@@ -156,7 +156,7 @@ export function createEyes(o: {
               type: 'profi.order_seen',
               accountId: o.accountId,
               entity: { kind: 'order', id: s.order.order_id },
-              payload: s.order,
+              payload: { ...s.order, published_at: s.published_at },
             })
             return
           }

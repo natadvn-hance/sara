@@ -15,6 +15,7 @@ import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
+import { isStale } from './cardFlow'
 import { readWallet, refuseSpend } from './money'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
@@ -57,6 +58,8 @@ const ev = (
     | 'lead.sorted'
     | 'lead.scored'
     | 'lead.skipped'
+    | 'lead.stale'
+    | 'lead.held'
     | 'task.created'
     | 'task.resolved'
     | 'task.reminded',
@@ -84,9 +87,12 @@ type Sorted = { verdict: 'fit' | 'maybe' | 'reject' | null; reason: string | nul
 async function processOrder(e: EventEnvelope): Promise<void> {
   const order = ProfiOrder.parse(e.payload)
   const correlationId = e.correlation_id
+  // Runs recorded before M2 return a boolean; 'stale' is a new order too old to offer (FR-LEAD-10).
   const isNew = await DBOS.runStep(
-    () =>
+    (): Promise<boolean | 'stale'> =>
       d().db.transaction(async (tx) => {
+        // Decided before any model call: a stale order costs no sorting or scoring.
+        const stale = isStale(order.published_at, new Date())
         const rows = await tx
           .insert(lead)
           .values({
@@ -101,6 +107,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             bidPriceRub: order.bid_price_rub,
             seenAt: order.seen_at,
             correlationId,
+            ...(stale && { status: 'stale' }),
           })
           .onConflictDoNothing({ target: lead.id })
           .returning({ id: lead.id })
@@ -109,11 +116,18 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           tx,
           ev('lead.found', { kind: 'lead', id: order.order_id }, correlationId, 'sara', {}, e.id),
         )
-        return true
+        if (!stale) return true
+        await appendEvent(
+          tx,
+          ev('lead.stale', { kind: 'lead', id: order.order_id }, correlationId, 'sara', {
+            published_at: order.published_at,
+          }),
+        )
+        return 'stale'
       }),
     { name: 'record', ...DB_STEP },
   )
-  if (!isNew) return
+  if (isNew !== true) return
 
   const sorted = await DBOS.runStep(
     async (): Promise<Sorted> => {

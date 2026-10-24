@@ -158,3 +158,36 @@ describe('money checks before a bid', () => {
     expect(l?.status).toBe('queued')
   })
 })
+
+async function eventTypesOf(id: string): Promise<string[]> {
+  const [l] = await db.select().from(lead).where(eq(lead.id, id))
+  if (!l) return []
+  const rows = await db
+    .select({ type: event.type })
+    .from(event)
+    .where(eq(event.correlationId, l.correlationId))
+    .orderBy(event.id)
+  return rows.map((r) => r.type)
+}
+const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
+
+describe('orders older than 24 hours', () => {
+  it('FR-LEAD-10: an order published over 24 hours ago is not sorted, scored or offered', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id, published_at: hoursAgo(25) })
+    await until(async () => (await eventTypesOf(id)).includes('lead.stale'))
+    await settle()
+    expect(await eventTypesOf(id)).toEqual(['profi.order_seen', 'lead.found', 'lead.stale'])
+    const [l] = await db.select().from(lead).where(eq(lead.id, id))
+    expect(l?.status).toBe('stale')
+    expect(cards()).toHaveLength(0)
+    expect(await count('model.called')).toBe(0)
+  })
+
+  it('FR-LEAD-10: an order published within 24 hours or without a time goes on as before', async () => {
+    await fake.emitOrder({ order_id: orderId(), published_at: hoursAgo(23) })
+    await fake.emitOrder({ order_id: orderId(), published_at: null })
+    await until(() => cards().length === 2)
+    expect(await count('lead.stale')).toBe(0)
+  })
+})

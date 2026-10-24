@@ -10,6 +10,8 @@ export const ProfiOrder = z.object({
   budget_text: z.string().nullable(),
   bid_price_rub: z.number().int().nonnegative(),
   seen_at: z.iso.datetime(),
+  /** When the site published the order; null or absent when not known (an older node, a page without it). */
+  published_at: z.iso.datetime().nullable().optional(),
 })
 export type ProfiOrder = z.infer<typeof ProfiOrder>
 
