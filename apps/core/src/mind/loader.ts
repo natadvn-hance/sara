@@ -62,7 +62,11 @@ async function gitHead(root: string): Promise<string | null> {
   }
 }
 
-function parseRecord(path: string, text: string): { record: MindRecord } | { error: string } {
+/** One record file at `path` (relative to the clone root): its fields, title, body and sections, or why not. */
+export function parseRecord(
+  path: string,
+  text: string,
+): { record: MindRecord } | { error: string } {
   const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text)
   if (!m) return { error: 'нет полей сверху между строками ---' }
   let data: unknown

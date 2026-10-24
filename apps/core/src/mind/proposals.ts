@@ -1,4 +1,7 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { newEventId } from '@sara/shared'
+import { and, asc, eq } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { mindProposal } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -37,7 +40,33 @@ export async function proposeMind(
   })
 }
 
-/** Writes the new proposals as files under `toDir` and marks them exported. Part B writes the body. */
-export async function exportProposals(_db: Db, _toDir: string): Promise<number> {
-  throw new Error('mind proposals export is not built')
+/**
+ * Writes the new proposals as files under `toDir` (a developer's sara-mind clone) and marks them exported, so the next
+ * export skips them. A path that would leave `toDir` stops the export before anything is written.
+ */
+export async function exportProposals(db: Db, toDir: string): Promise<number> {
+  const root = resolve(toDir)
+  const rows = await db
+    .select()
+    .from(mindProposal)
+    .where(eq(mindProposal.state, 'new'))
+    .orderBy(asc(mindProposal.createdAt), asc(mindProposal.id))
+  for (const r of rows) {
+    const rel = relative(root, resolve(root, r.path))
+    if (isAbsolute(r.path) || rel === '' || rel === '..' || rel.startsWith(`..${sep}`))
+      throw new Error(`Путь предложения выходит из папки клона: ${r.path}`)
+  }
+  let written = 0
+  for (const r of rows) {
+    const file = resolve(root, r.path)
+    await mkdir(dirname(file), { recursive: true })
+    await writeFile(file, r.content)
+    const done = await db
+      .update(mindProposal)
+      .set({ state: 'exported', exportedAt: new Date().toISOString() })
+      .where(and(eq(mindProposal.id, r.id), eq(mindProposal.state, 'new')))
+      .returning({ id: mindProposal.id })
+    written += done.length
+  }
+  return written
 }
