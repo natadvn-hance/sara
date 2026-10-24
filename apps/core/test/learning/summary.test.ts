@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { task } from '../../src/db/schema'
+import { event, lead, task } from '../../src/db/schema'
 import { seedDirection } from '../../src/direction/store'
 import { dailySummary } from '../../src/learning/summary'
 import type { Notifier } from '../../src/notify/notifier'
@@ -126,7 +126,7 @@ describe('daily summary', () => {
     await heldLead(db, '940002', { seenAt: MORNING, score: 80 })
     await heldLead(db, '940003', { seenAt: MORNING, score: 70, bidPriceRub: 150 })
     await heldLead(db, '940004', { seenAt: MORNING, score: null })
-    // Held yesterday: yesterday's summary had it.
+    // Held a day and a half ago and never shown: too old to offer now.
     await heldLead(db, '940005', { seenAt: '2026-10-24T07:00:00Z', score: 90 })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     expect(sent).toHaveLength(1)
@@ -146,6 +146,35 @@ describe('daily summary', () => {
     expect(sent[0]?.rows[0]?.[0]?.callbackData).toMatch(/^t:.+:open$/)
     const held = await db.select().from(task).where(eq(task.kind, 'lead_held'))
     expect(held.map((t) => t.entityId).sort()).toEqual(['940001', '940002', '940003', '940004'])
+    // The one too old to offer leaves the held orders for good, and the journal says why.
+    const [old] = await db.select().from(lead).where(eq(lead.id, '940005'))
+    expect(old?.status).toBe('stale')
+    const stale = await db.select().from(event).where(eq(event.type, 'lead.stale'))
+    expect(stale.map((e) => e.entityId)).toEqual(['940005'])
+  })
+
+  it('FR-NOTIF-3: an order held after the summary window closed but before the summary ran still comes', async () => {
+    // 19:02 Moscow time, the window of the 19:30 summary ends at 19:00.
+    await heldLead(db, '940041', { seenAt: '2026-10-25T16:02:00Z', score: 70 })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    expect(sent[0]?.text).toContain('Заказ 940041')
+  })
+
+  it('FR-NOTIF-3: an order held at 19:05 yesterday is still in the next summary, 24 hours and a tick later', async () => {
+    await heldLead(db, '940042', { seenAt: '2026-10-24T16:05:00Z', score: 70 })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    expect(sent[0]?.text).toContain('Заказ 940042')
+    expect((await db.select().from(lead).where(eq(lead.id, '940042')))[0]?.status).toBe('held')
+  })
+
+  it('FR-NOTIF-3: an order already offered in a summary is not listed again by the next one', async () => {
+    await heldLead(db, '940043', { seenAt: MORNING, score: 70 })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    sent = []
+    await droppedLead(db, '930091', 55, { seenAt: '2026-10-26T07:00:00Z' })
+    expect(await dailySummary({ db, notifier }, new Date('2026-10-26T16:30:00Z'))).toBe('sent')
+    expect(sent[0]?.text).not.toContain('Заказ 940043')
+    expect(await db.select().from(task).where(eq(task.kind, 'lead_held'))).toHaveLength(1)
   })
 
   it('FR-NOTIF-3: borderline and held orders share one message and one numbering', async () => {

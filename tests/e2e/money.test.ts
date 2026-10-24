@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
 import { formatRub } from '@sara/shared'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { speedReport } from '../../apps/core/src/analytics/speed'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
@@ -178,6 +178,18 @@ async function eventTypesOf(id: string): Promise<string[]> {
     .orderBy(event.id)
   return rows.map((r) => r.type)
 }
+/** The Analyst's calls made for this order (its journal run). */
+async function analystCalls(id: string): Promise<number> {
+  const [l] = await db.select().from(lead).where(eq(lead.id, id))
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(event)
+    .where(
+      sql`${event.correlationId} = ${l?.correlationId} and ${event.type} in ('model.called', 'model.failed') and ${event.payload}->>'role' = 'analyst'`,
+    )
+  return rows[0]?.n ?? 0
+}
+const leadRow = async (id: string) => (await db.select().from(lead).where(eq(lead.id, id)))[0]
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
 
 describe('orders older than 24 hours', () => {
@@ -225,16 +237,15 @@ describe('the card flow', () => {
     await until(async () => (await eventTypesOf(held)).includes('lead.held'))
     await settle()
     expect(cards()).toHaveLength(1)
-    // The draft is written before the cap is checked, so «Показать» later brings the card ready.
+    // No Analyst call for an order that waits for the summary: its draft is written if Boris presses «Показать».
     expect(await eventTypesOf(held)).toEqual([
       'profi.order_seen',
       'lead.found',
       'model.called',
-      'model.called',
-      'lead.drafted',
       'lead.sorted',
       'lead.held',
     ])
+    expect((await leadRow(held))?.draftText).toBeNull()
     const [l] = await db.select().from(lead).where(eq(lead.id, held))
     expect(l?.status).toBe('held')
     expect(await decisionTaskOf(held)).toBeUndefined()
@@ -263,7 +274,11 @@ describe('held orders in the summary', () => {
     expect(show?.text).toBe('Показать №1')
     tg.pushPress(111, show?.callback_data ?? '')
     await until(() => tg.answers.length === 1)
-    expect(tg.answers[0]?.text).toBe('Прислала карточку заявки')
+    // The held order had no draft: the press is answered at once, the card follows its draft.
+    expect(tg.answers[0]?.text).toBe('Пишу черновик, пришлю карточку')
+    // The summary and the first order's card, then this card.
+    await until(() => cards().length === 3)
+    expect(await analystCalls(held)).toBe(1)
     const card = tg.sent.at(-1)
     expect(card?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
     expect(card?.text).toContain(
@@ -301,11 +316,15 @@ describe('held orders in the summary', () => {
     await until(async () => (await eventTypesOf(held)).includes('lead.held'))
     expect(await dailySummary({ db, notifier: app.bot.notifier }, summaryTime())).toBe('sent')
     const show = tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]
-    // Pressed the next evening: the order is over a day old.
+    // Pressed the next evening: the summary and the order are both over a day old.
     await db
       .update(lead)
       .set({ seenAt: hoursAgo(25) })
       .where(eq(lead.id, held))
+    await db
+      .update(task)
+      .set({ createdAt: hoursAgo(25) })
+      .where(and(eq(task.entityId, held), eq(task.kind, 'lead_held')))
     const before = cards().length
     tg.pushPress(111, show?.callback_data ?? '')
     await until(() => tg.answers.length === 1)
@@ -313,5 +332,25 @@ describe('held orders in the summary', () => {
     await settle()
     expect(cards()).toHaveLength(before)
     expect(await decisionTaskOf(held)).toMatchObject({ kind: 'lead_held', state: 'open' })
+  })
+
+  it('FR-NOTIF-3: «Показать» works for any order the summary showed, even one just over a day old', async () => {
+    await setSetting(db, 'cards.max_per_day', 1, 'boris')
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => cards().length === 1)
+    const held = orderId()
+    await fake.emitOrder({ order_id: held })
+    await until(async () => (await eventTypesOf(held)).includes('lead.held'))
+    expect(await dailySummary({ db, notifier: app.bot.notifier }, summaryTime())).toBe('sent')
+    const show = tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]
+    // Held at 19:05, shown by the summary that ran at 19:30 the next evening: over 24 hours old at the press.
+    await db
+      .update(lead)
+      .set({ seenAt: hoursAgo(24.4) })
+      .where(eq(lead.id, held))
+    tg.pushPress(111, show?.callback_data ?? '')
+    await until(() => cards().length === 3)
+    expect(tg.answers[0]?.text).toBe('Пишу черновик, пришлю карточку')
+    expect((await leadRow(held))?.status).toBe('queued')
   })
 })

@@ -2,6 +2,7 @@ import { formatCallback, newEventId, plural } from '@sara/shared'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun, task } from '../db/schema'
+import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 
@@ -12,6 +13,10 @@ const BORDERLINE_MAX = 3
 const BORDERLINE_BELOW = 10
 /** Orders held over the day's card cap listed with a button; the rest are only counted. */
 const HELD_MAX = 10
+/** A held order is offered while it is under a day old (FR-LEAD-10), and an hour more for a summary that runs late. */
+const HELD_MAX_AGE = "interval '25 hours'"
+/** A held order is waiting for Boris once a summary has offered it: it is not offered, or aged out, a second time. */
+const OFFERED = `exists (select 1 from core.task k where k.kind = 'lead_held' and k.entity_id = l.id and k.state = 'open')`
 
 /** The «ещё показала бы» part (FR-NOTIF-3); the texts stay here while part C owns notify/cards.ts. */
 const HELD_TEXTS = {
@@ -40,7 +45,8 @@ type Held = { leadId: string; title: string; score: number | null }
 
 /**
  * Once a Moscow day after 19:00: how many orders Sara dropped since yesterday's summary, and the borderline ones with «Взял бы»
- * (FR-LEAD-7); then the orders held over the card cap, best first, with «Показать» (FR-NOTIF-3). The day's row in
+ * (FR-LEAD-7); then the orders held over the card cap, best first, with «Показать» (FR-NOTIF-3), whenever they were
+ * held. The day's row in
  * job_run is taken first, so two ticks or two cores send it once.
  */
 export async function dailySummary(
@@ -64,6 +70,31 @@ export async function dailySummary(
     sql`select count(*)::int as n from core.lead l where l.status = 'scored_out' and ${today}`,
   )
   const dropped = counted.rows[0]?.n ?? 0
+  // Held orders do not wait for their own window: whichever summary comes next offers them, as long as they are
+  // fresh. Those that outlived that without being offered leave the held orders for good.
+  const at = sql`${now.toISOString()}::timestamptz`
+  const aged = await d.db.execute<{
+    id: string
+    accountId: string
+    correlationId: string
+    seenAt: string
+  }>(sql`
+    update core.lead l set status = 'stale'
+    where l.status = 'held' and l.seen_at <= ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
+    returning l.id, l.account_id as "accountId", l.correlation_id as "correlationId", l.seen_at as "seenAt"`)
+  for (const l of aged.rows)
+    await appendEvent(d.db, {
+      type: 'lead.stale',
+      v: 1,
+      entity: { kind: 'lead', id: l.id },
+      account_id: l.accountId,
+      actor: 'sara',
+      occurred_at: now.toISOString(),
+      causation_id: null,
+      correlation_id: l.correlationId,
+      reason: null,
+      payload: { seen_at: new Date(l.seenAt).toISOString(), held: true },
+    })
   // Value first (FR-LEAD-10): the higher score, then the cheaper bid.
   const heldRows = await d.db.execute<Held>(sql`
     select l.id as "leadId", l.title, s.score
@@ -73,7 +104,7 @@ export async function dailySummary(
       where s.lead_id = l.id and not s.backtest
       order by s.created_at desc limit 1
     ) s on true
-    where l.status = 'held' and ${today}
+    where l.status = 'held' and l.seen_at > ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
     order by s.score desc nulls last, l.bid_price_rub, l.seen_at`)
   const held = heldRows.rows
   if (dropped === 0 && held.length === 0) return 'none'
