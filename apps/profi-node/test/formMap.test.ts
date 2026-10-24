@@ -129,12 +129,15 @@ describe('the bid form map (calibration, M2 design 5.B)', () => {
         <div class="card" style="cursor: pointer" onclick="window.clicked = true"><span>Отклик</span> <span>216 ₽</span></div>
         <a href="#details">Детали</a></div>
       <div role="link" tabindex="0" style="cursor: pointer" onclick="window.clicked = true">Откликнуться</div>
+      <a href="#bid" onclick="window.clicked = true">Написать клиенту</a>
     </main>`)
     const map = await readFormMap(ab.page)
     expect(map?.clickables).toEqual([
       expect.objectContaining({ tag: 'div', text: 'Отклик 216 ₽', inTariffs: true, visible: true }),
       expect.objectContaining({ tag: 'a', text: 'Детали', inTariffs: true }),
       expect.objectContaining({ tag: 'div', text: 'Откликнуться', role: 'link', inTariffs: false }),
+      // The order answer's tariffsBlock.scrollButtonText on the live site (read 24.10.2026).
+      expect.objectContaining({ tag: 'a', text: 'Написать клиенту', inTariffs: false }),
     ])
     expect(map?.payment.map((p) => p.text)).toEqual(
       expect.arrayContaining(['Тариф', 'Отклик 216 ₽', 'Детали']),

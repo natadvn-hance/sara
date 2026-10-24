@@ -129,8 +129,9 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
         })
 
       // Buttons a bid may need, wherever they are: the rest outside the form may carry a client's name.
+      // «Написать клиенту» is what the live order answer names its form opener (tariffsBlock.scrollButtonText).
       const BUTTON =
-        /^(Продолжить|Откликнуться|Отправить|Оплатить|Пополнить|Подтвердить|Предложить|Отклик)/i
+        /^(Продолжить|Откликнуться|Написать клиенту|Отправить|Оплатить|Пополнить|Подтвердить|Предложить|Отклик)/i
       const buttons = [
         ...document.querySelectorAll(
           'button, [role="button"], input[type="submit"], input[type="button"]',
