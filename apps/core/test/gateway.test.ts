@@ -1,11 +1,12 @@
 import { cp, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { ProbeOutput, SorterOutput } from '@sara/shared'
+import { ProbeOutput, ScorerOutput, SorterOutput } from '@sara/shared'
 import { sql } from 'drizzle-orm'
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildClaudeArgs, roleJsonSchema } from '../src/gateway/claudeCli'
-import { createGateway } from '../src/gateway/gateway'
+import { createGateway, withoutLimitWait } from '../src/gateway/gateway'
+import { LIMIT_TEXTS } from '../src/gateway/limit'
 import { createSecretStore } from '../src/secrets/store'
 import { openTestDb, resetDb } from './helpers/db'
 
@@ -23,17 +24,54 @@ beforeEach(async () => {
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
 })
 
-async function gateway(env: Record<string, string>, withToken = true) {
+const stops: (() => void)[] = []
+afterEach(() => {
+  for (const stop of stops.splice(0)) stop()
+})
+
+/** `env` is read on every CLI run, so a test can end the limit by changing it. */
+async function gateway(
+  env: Record<string, string>,
+  withToken = true,
+  more: {
+    sent?: string[]
+    concurrency?: number
+    limit?: { probeEveryMs?: number; maxWaitMs?: number }
+  } = {},
+) {
   const secrets = createSecretStore(join(dir, 'data'))
   if (withToken) await secrets.set('claude_oauth_token', 'tok')
-  return createGateway({
+  const gw = createGateway({
     db,
     secrets,
     claudeBin: FAKE,
     rolesDir: join(dir, 'roles'),
     dataDir: join(dir, 'data'),
-    extraEnv: { FAKE_CLAUDE_ARGS_LOG: log, ...env },
+    extraEnv: () => ({ FAKE_CLAUDE_ARGS_LOG: log, ...env }),
+    notifier: more.sent
+      ? {
+          sendText: async (t) => {
+            more.sent?.push(t)
+            return { messageId: 1 }
+          },
+        }
+      : undefined,
+    limit: more.limit,
+    concurrency: more.concurrency,
   })
+  stops.push(gw.stop)
+  return gw
+}
+
+const roleOf = (c: { args: string[] }) =>
+  /roles\/([^/]+)\/role\.md$/.exec(c.args[c.args.indexOf('--system-prompt-file') + 1] ?? '')?.[1]
+
+async function until(check: () => Promise<boolean> | boolean, ms = 5000): Promise<void> {
+  const end = Date.now() + ms
+  while (!(await check())) {
+    if (Date.now() > end) throw new Error('condition not met in time')
+    await new Promise((r) => setTimeout(r, 20))
+  }
 }
 
 async function calls(): Promise<{ args: string[]; start: number; end: number; token: string }[]> {
@@ -256,5 +294,103 @@ describe('model gateway', () => {
     const [c] = await calls()
     expect(c?.args[c.args.indexOf('--model') + 1]).toBe('opus')
     expect(c?.args).not.toContain('--fallback-model')
+  })
+})
+
+describe('Claude limit in the gateway', () => {
+  const SORTED = { verdict: 'fit', reason: 'да', tags: [], confidence: 0.9 }
+  const BY_ROLE = JSON.stringify({ sorter: SORTED, probe: { ok: true } })
+
+  it('FR-OPS-3: a P2 call that meets the limit waits for its end, then answers', async () => {
+    const env = { FAKE_CLAUDE_MODE: 'limit', FAKE_CLAUDE_OUTPUT_BY_ROLE: BY_ROLE }
+    const sent: string[] = []
+    const gw = await gateway(env, true, { sent, limit: { probeEveryMs: 150 } })
+    const pending = gw.call('sorter', 'x', SorterOutput)
+    await until(async () => (await calls()).some((c) => roleOf(c) === 'probe'))
+    expect(sent).toEqual([LIMIT_TEXTS.started])
+    env.FAKE_CLAUDE_MODE = 'ok'
+    expect(await pending).toMatchObject({ ok: true, output: SORTED })
+    expect(sent).toEqual([LIMIT_TEXTS.started, LIMIT_TEXTS.ended])
+    const rows = await db.execute<{ ok: boolean; error_class: string | null }>(
+      sql`select ok, error_class from core.model_call where role = 'sorter' order by started_at`,
+    )
+    expect(rows.rows).toEqual([
+      { ok: false, error_class: 'limit_reached' },
+      { ok: true, error_class: null },
+    ])
+  })
+
+  it('FR-OPS-3: while the limit holds a P0 call runs at once', async () => {
+    const gw = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
+      limit: { probeEveryMs: 60_000 },
+    })
+    await gw.call('sorter', 'x', SorterOutput, { limitWaitMs: 0 })
+    expect(await gw.call('probe', 'x', ProbeOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'limit_reached',
+    })
+    expect((await calls()).map(roleOf)).toEqual(['sorter', 'probe'])
+  })
+
+  it('FR-OPS-3: a P1-P3 call gives limit_reached after its longest wait, running the CLI once', async () => {
+    const gw = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
+      limit: { probeEveryMs: 60_000, maxWaitMs: 400 },
+    })
+    const started = Date.now()
+    expect(await gw.call('sorter', 'x', SorterOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'limit_reached',
+    })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(400)
+    expect((await calls()).map(roleOf)).toEqual(['sorter'])
+    expect(await countRows()).toBe(1)
+  })
+
+  it('FR-OPS-3: with no wait allowed a P1-P3 call meets the limit at once without the CLI', async () => {
+    const gw = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
+      limit: { probeEveryMs: 60_000 },
+    })
+    await gw.call('sorter', 'x', SorterOutput, { limitWaitMs: 0 })
+    const started = Date.now()
+    expect(await withoutLimitWait(gw).call('scorer', 'x', ScorerOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'limit_reached',
+    })
+    expect(Date.now() - started).toBeLessThan(300)
+    expect((await calls()).map(roleOf)).toEqual(['sorter'])
+  })
+
+  it('FR-OPS-3: a call queued when the limit begins does not spend a run on it', async () => {
+    const gw = await gateway({ FAKE_CLAUDE_MODE: 'limit', FAKE_CLAUDE_DELAY_MS: '300' }, true, {
+      concurrency: 1,
+      limit: { probeEveryMs: 60_000, maxWaitMs: 600 },
+    })
+    const first = gw.call('probe', 'x', ProbeOutput)
+    await new Promise((r) => setTimeout(r, 100))
+    const queued = gw.call('sorter', 'x', SorterOutput)
+    await first
+    expect(await queued).toMatchObject({ ok: false, errorClass: 'limit_reached' })
+    expect((await calls()).map(roleOf)).toEqual(['probe'])
+  })
+
+  it('FR-OPS-3: after a restart during the limit Boris gets no second start message, and the end', async () => {
+    const before: string[] = []
+    const first = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
+      sent: before,
+      limit: { probeEveryMs: 60_000 },
+    })
+    await first.call('sorter', 'x', SorterOutput, { limitWaitMs: 0 })
+    first.stop()
+    expect(before).toEqual([LIMIT_TEXTS.started])
+
+    const after: string[] = []
+    const second = await gateway(
+      { FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT_BY_ROLE: BY_ROLE },
+      true,
+      { sent: after, limit: { probeEveryMs: 60_000 } },
+    )
+    expect(await second.call('sorter', 'x', SorterOutput)).toMatchObject({ ok: true })
+    expect(after).toEqual([LIMIT_TEXTS.ended])
+    expect((await calls()).map(roleOf)).toEqual(['sorter', 'probe', 'sorter'])
   })
 })

@@ -22,6 +22,8 @@ process.stdin.on('data', (c) => {
 process.stdin.on('end', async () => {
   const start = Date.now()
   if (mode === 'sleep') await new Promise((r) => setTimeout(r, sleepMs))
+  // FAKE_CLAUDE_DELAY_MS: any mode answers this much later (a slow limit answer, say).
+  await new Promise((r) => setTimeout(r, Number(process.env.FAKE_CLAUDE_DELAY_MS ?? 0)))
   if (log) {
     appendFileSync(
       log,

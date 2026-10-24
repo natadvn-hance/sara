@@ -10,7 +10,7 @@ import type { Config } from './config'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
 import { seedDirection } from './direction/store'
-import { createGateway } from './gateway/gateway'
+import { createGateway, withoutLimitWait } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { handleBorisMessage } from './learning/inbox'
@@ -49,14 +49,6 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   await migrate(config.databaseUrl)
   const { db, close: closeDb } = createDb(config.databaseUrl)
   const secrets = createSecretStore(config.dataDir)
-  const gateway = createGateway({
-    db,
-    secrets,
-    claudeBin: config.claudeBin,
-    rolesDir: config.rolesDir,
-    dataDir: config.dataDir,
-    extraEnv: o.claudeEnv,
-  })
   const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
 
   let pipeline: LeadPipeline | null = null
@@ -72,6 +64,15 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     onPress: (p) => (pipeline ? pipeline.onPress(p) : Promise.resolve('Сара ещё запускается')),
     onMessage: (m) => handleBorisMessage({ db, transcriber }, m),
     voiceDir: join(config.dataDir, 'voice'),
+  })
+  const gateway = createGateway({
+    db,
+    secrets,
+    claudeBin: config.claudeBin,
+    rolesDir: config.rolesDir,
+    dataDir: config.dataDir,
+    extraEnv: o.claudeEnv,
+    notifier: bot.notifier,
   })
   pipeline = createLeadPipeline({
     db,
@@ -137,7 +138,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const learning = startLearningJobs({
     db,
     notifier: bot.notifier,
-    gateway,
+    // A minute tick must not stand still for hours: through a limit the learning waits for tomorrow instead.
+    gateway: withoutLimitWait(gateway),
     accountIds: config.accounts.map((a) => a.id),
     tickMs: o.learningTickMs,
   })
@@ -151,6 +153,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     pipeline: lp,
     async close() {
       learning.stop()
+      gateway.stop()
       await bot.stop()
       await app.close()
       await shutdownDbos()
