@@ -239,6 +239,23 @@ describe('model gateway', () => {
     expect(maxOverlap).toBeLessThanOrEqual(2)
   })
 
+  it('FR-ACC-5: a call with a priority override queues behind the same role at its own priority', async () => {
+    const gw = await gateway({ FAKE_CLAUDE_MODE: 'sleep', FAKE_CLAUDE_SLEEP_MS: '300' }, true, {
+      concurrency: 1,
+    })
+    const first = gw.call('scorer', 'first', ProbeOutput)
+    await new Promise((r) => setTimeout(r, 100))
+    const trial = gw.call('scorer', 'trial', ProbeOutput, { priority: 'P3' })
+    const live = gw.call('scorer', 'live', ProbeOutput)
+    await Promise.all([first, trial, live])
+    const order = (await calls()).sort((a, b) => a.start - b.start).map((c) => c.stdin)
+    expect(order).toEqual(['first', 'live', 'trial'])
+    const rows = await db.execute<{ priority: string }>(
+      sql`select priority from core.model_call order by started_at`,
+    )
+    expect(rows.rows.map((r) => r.priority)).toEqual(['P2', 'P2', 'P3'])
+  })
+
   it('FR-OPS-3: calls start by role priority when the slots are busy', async () => {
     for (const [role, priority] of [
       ['sorter', 'P1'],

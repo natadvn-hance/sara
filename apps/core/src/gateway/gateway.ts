@@ -36,6 +36,8 @@ export type CallOptions = {
   causationId?: string
   /** This call's model instead of the role's, with no fallback (the caller chose it). */
   model?: RoleMeta['model']
+  /** This call's priority instead of the role's: a trial run asks for P3 so live work goes first. */
+  priority?: RoleMeta['priority']
   /** How long a P1-P3 call may wait out the Claude limit (default 6 hours); 0 meets it with limit_reached at once. */
   limitWaitMs?: number
   /** Client names to hide from the model, besides the phones, e-mails and links it never sees (ADR-016). */
@@ -184,7 +186,7 @@ export function createGateway(d: {
       else if (result.ok || result.errorClass === 'bad_output') guard.answered(ranAt)
       return { result, durationMs: run.durationMs }
     } finally {
-      slots.release()
+      slots.release(meta.priority)
     }
   }
 
@@ -244,9 +246,11 @@ export function createGateway(d: {
   ): Promise<RoleCallResult<T>> {
     const loaded = await loadRole(d.rolesDir, role)
     const promptPath = loaded.promptPath
-    const meta = opts?.model
-      ? { ...loaded.meta, model: opts.model, fallbackModel: undefined }
-      : loaded.meta
+    const meta: RoleMeta = {
+      ...loaded.meta,
+      ...(opts?.model ? { model: opts.model, fallbackModel: undefined } : {}),
+      ...(opts?.priority ? { priority: opts.priority } : {}),
+    }
     await limitRead
     const guard = guards[meta.model]
     // Always on: what the model sees has no phone, e-mail, link or given name of a client (ADR-016).
