@@ -51,10 +51,41 @@ export function startInsurance(o: {
     return ok
   }
 
+  let chatsPath: string | null = null
+  let onFeed = true
+
+  // Eyes 3 (old Sara's way): order numbers from the feed page, then each new order's own page, once.
+  async function readNewOrders() {
+    onFeed = true
+    if (!o.parsers.fromFeedDom) return
+    const feed = await o.parsers.fromFeedDom(o.ab.page)
+    await o.eyes.onParsed({ recognized: feed.recognized, what: 'feed', signals: [] }, 'dom')
+    chatsPath = (await o.parsers.chatsUrl?.(o.ab.page)) ?? chatsPath
+    if (!o.parsers.fromOrderDom || !o.parsers.paths.order) return
+    let opened = 0
+    for (const ref of feed.refs) {
+      if (opened >= 5 || !can()) break
+      if (await o.eyes.knowsOrder(ref.orderId)) continue
+      await sleep(pause)
+      if (!(await go(o.parsers.paths.order(ref.orderId)))) return
+      onFeed = false
+      opened++
+      await o.eyes.onParsed(await o.parsers.fromOrderDom(o.ab.page, ref.orderId), 'dom')
+    }
+  }
+
+  async function maybeBackToFeed() {
+    if (onFeed) return
+    await go(o.parsers.paths.feed)
+    onFeed = true
+  }
+
   async function feedOnce() {
     await serial(async () => {
       if (!can()) return
       if (!(await go(o.parsers.paths.feed))) return
+      await readNewOrders()
+      if (o.parsers.paths.feed && can()) await maybeBackToFeed()
       await o.eyes.onParsed(
         { recognized: false, signals: await o.parsers.fromHeaderDom(o.ab.page) },
         'dom',
@@ -64,7 +95,7 @@ export function startInsurance(o: {
 
   async function chats(pick: (c: { unread: number; lastAt: string | null }) => boolean) {
     await serial(async () => {
-      if (!can() || !(await go(o.parsers.paths.chats))) return
+      if (!can() || !(await go(chatsPath ?? o.parsers.paths.chats))) return
       const list = await o.parsers.fromChatsDom(o.ab.page)
       for (const c of list.filter(pick)) {
         if (!can()) return

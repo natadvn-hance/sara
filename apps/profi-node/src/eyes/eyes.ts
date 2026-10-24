@@ -1,4 +1,6 @@
+import { and, eq } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
+import { rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
 import { saveRaw, upsertMessage, upsertOrder } from '../store/raw'
 import type { ParseResult, Parsers, Signal } from './parsers'
@@ -11,6 +13,8 @@ export type Eyes = {
   checkSilence(now?: number, active?: boolean): Promise<void>
   lastRecognizedAt(): number
   balance(): number | null
+  /** The order was already seen on this account (no need to open its page again). */
+  knowsOrder(orderId: string): Promise<boolean>
   presence(): boolean
   reset(): void
 }
@@ -138,6 +142,14 @@ export function createEyes(o: {
       })
     },
     lastRecognizedAt: () => lastRecognized,
+    async knowsOrder(orderId) {
+      const rows = await o.db
+        .select({ id: rawOrder.orderId })
+        .from(rawOrder)
+        .where(and(eq(rawOrder.orderId, orderId), eq(rawOrder.accountId, o.accountId)))
+        .limit(1)
+      return rows.length > 0
+    },
     balance: () => balance,
     presence: () => presence,
     reset() {

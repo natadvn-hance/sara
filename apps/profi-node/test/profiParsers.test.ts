@@ -1,0 +1,109 @@
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
+import { orderFromPageText, profiParsers } from '../src/eyes/profiParsers'
+import { nodeTestUrl } from './helpers/db'
+
+let ab: AccountBrowser
+beforeAll(async () => {
+  ab = await openAccountBrowser({
+    accountId: 'parsers-test',
+    profileDir: await mkdtemp(join(tmpdir(), 'pp-')),
+    proxy: null,
+    headless: true,
+    databaseUrl: nodeTestUrl(),
+  })
+}, 60000)
+afterAll(() => ab.close())
+
+// Shapes from old Sara (src/ingestion/feedPoller.js, src/watcher/messageDom.js), checked live in Sept-Oct 2026.
+const FEED = `<nav><a href="/backoffice/n.php">Заказы</a><a href="/backoffice/chats.php">Чаты</a><span>23 ₽</span></nav>
+<a href="/backoffice/n.php?o=95100001">Сайт для клиники\nНужен сайт с записью\nКраснодар\nИрина</a>
+<a href="/backoffice/n.php?o=95100002">false\nТаргет для кофейни\nСочи</a>
+<a href="/backoffice/n.php?o=95100001">дубль той же карточки</a>`
+
+const ORDER_TEXT = [
+  'Заказы',
+  'Чаты',
+  'Поддержка',
+  'Создание сайтов',
+  'до 150 000 ₽',
+  'Описание',
+  'Нужен сайт для клиники с онлайн-записью.',
+  'Есть логотип.',
+  'Дистанционно',
+  'Краснодар',
+  'Когда',
+  'В ближайшее время',
+  'Детали заказа',
+  'И',
+  'Ирина',
+  'Тариф',
+  'Отклик • 210 ₽',
+].join('\n')
+
+const CHAT = `
+<div class="cw_msg cw_iCsdtF" data-message-content-id="m1"><div class="cw_xeDn2R"><div class="cw_BFgZYK">Добрый день! Готовы помочь.</div></div></div>
+<div class="cw_msg cw_cO7-r-" data-message-content-id="m2"><div class="cw_xeDn2R"><div class="cw_BFgZYK">Сколько стоит?</div></div></div>
+<div class="cw_msg cw_GK6qZJ" data-message-content-id="m3"><div class="cw_xeDn2R"><div class="cw_BFgZYK">Вы обменялись контактами</div></div></div>
+<div class="cw_msg cw_ZZZ999" data-message-content-id="m4"><div class="cw_xeDn2R"><div class="cw_BFgZYK">кто это</div></div></div>`
+
+describe('Profi.ru page readers', () => {
+  it('ST-M1-06: the feed page gives each order number once with its card text', async () => {
+    await ab.page.setContent(FEED)
+    const r = await profiParsers.fromFeedDom?.(ab.page)
+    expect(r?.recognized).toBe(true)
+    expect(r?.refs.map((x) => x.orderId)).toEqual(['95100001', '95100002'])
+  })
+
+  it('ST-M1-06: an order page gives title, budget, text, city, client and bid price', () => {
+    expect(orderFromPageText(ORDER_TEXT, '95100001')).toMatchObject({
+      order_id: '95100001',
+      title: 'Создание сайтов',
+      category: 'Создание сайтов',
+      budget_text: 'до 150 000 ₽',
+      text: 'Нужен сайт для клиники с онлайн-записью.\nЕсть логотип.',
+      city: 'Краснодар',
+      client_name: 'Ирина',
+      bid_price_rub: 210,
+    })
+  })
+
+  it('ST-M1-06: a page without the order sections (closed or gone) gives no order', () => {
+    expect(orderFromPageText('Заказы\nПоддержка\nЗаказ скрыт', '1')).toBeNull()
+  })
+
+  it('FR-CONV-2: chat bubbles get their author from the layout, an unknown class stays unknown', async () => {
+    await ab.page.setContent(CHAT)
+    const r = await profiParsers.fromChatDom(ab.page, '95100001')
+    expect(r.recognized).toBe(true)
+    expect(
+      r.signals.map((s) =>
+        s.t === 'message' ? [s.message.platform_message_id, s.message.author] : null,
+      ),
+    ).toEqual([
+      ['m1', 'specialist'],
+      ['m2', 'client'],
+      ['m3', 'system'],
+      ['m4', 'unknown'],
+    ])
+  })
+
+  it('FR-SET-4: the wallet balance is read from the top bar', async () => {
+    await ab.page.setContent(FEED)
+    expect(await profiParsers.fromHeaderDom(ab.page)).toContainEqual({ t: 'balance', rub: 23 })
+  })
+
+  it('ST-M1-07: the chats page address is found in the site menu', async () => {
+    await ab.page.setContent(FEED)
+    expect(await profiParsers.chatsUrl?.(ab.page)).toBe('/backoffice/chats.php')
+  })
+
+  it('ST-M1-06: the real addresses are those old Sara used', () => {
+    expect(profiParsers.paths.feed).toBe('/backoffice/n.php')
+    expect(profiParsers.paths.order?.('7')).toBe('/backoffice/n.php?o=7')
+    expect(profiParsers.paths.chat('7')).toBe('/backoffice/r.php?id=7')
+  })
+})
