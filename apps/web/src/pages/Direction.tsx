@@ -216,6 +216,18 @@ export function DirectionPage({ accountId }: { accountId: string }) {
           {d.onboarding?.open ? 'Продолжить настройку' : 'Изменить с Claude'}
         </a>
       </div>
+      <p>
+        <a
+          className="text-accent underline"
+          href={`/accounts/${encodeURIComponent(accountId)}/direction/recompute`}
+          onClick={(e) => {
+            e.preventDefault()
+            go(`/accounts/${encodeURIComponent(accountId)}/direction/recompute`)
+          }}
+        >
+          Пересчитать на последних 50 заявках
+        </a>
+      </p>
 
       <Card>
         <h2 className="font-display text-lg">Отклик и кейсы</h2>
