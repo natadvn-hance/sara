@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { EventEnvelope, PROFI_EVENT_PAYLOADS, type ProfiEventType } from '@sara/shared'
 import { signMessagePermit, signPermit } from '@sara/shared/permit'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeProfi, type FakeProfi } from '../src/fake/fakeProfi'
@@ -119,6 +120,287 @@ describe('fake Profi-MCP', () => {
     })
     expect(other.isError).toBe(true)
     expect(fake.messages).toHaveLength(1)
+    await c.close()
+  })
+
+  const send = (chatId: string, text: string, key: string, expect: string | null) => ({
+    account_id: 'hance-marketing',
+    chat_id: chatId,
+    text,
+    expect_last_message_id: expect,
+    idempotency_key: key,
+    permit: signMessagePermit(SECRET, { accountId: 'hance-marketing', chatId, text, key }),
+  })
+  const bodies = () => received.map((r) => (r as { body: EventEnvelope }).body)
+  // Every event is a valid envelope whose payload is exactly the contract's (strict, no text).
+  const checked = () =>
+    bodies().map((b) => {
+      const e = EventEnvelope.parse(b)
+      expect(PROFI_EVENT_PAYLOADS[e.type as ProfiEventType].parse(e.payload)).toEqual(e.payload)
+      return e
+    })
+  const readChat = async (c: Client, chatId: string) =>
+    (
+      (
+        await c.callTool({
+          name: 'profi.read_chat',
+          arguments: { account_id: 'hance-marketing', chat_id: chatId },
+        })
+      ).structuredContent as { messages: Record<string, unknown>[] }
+    ).messages
+
+  it('FR-CONV-1: a chat message is kept and shipped as the event of its author without text', async () => {
+    const before = new Date().toISOString()
+    const client = await fake.addChatMessage({
+      chatId: '95300020',
+      orderId: '95300020',
+      author: 'client',
+      text: 'Нужен сайт для пекарни',
+      sentAt: '2026-10-24T09:00:00.000Z',
+    })
+    const ours = await fake.addChatMessage({
+      chatId: '95300020',
+      author: 'specialist',
+      text: 'Добрый день, подскажу',
+    })
+    const odd = await fake.addChatMessage({ chatId: '95300020', author: 'unknown', text: 'кто?' })
+    const notice = await fake.addChatMessage({
+      chatId: '95300020',
+      author: 'system',
+      text: 'Вы обменялись контактами',
+    })
+    expect([client, ours, odd, notice].map((x) => x.platformMessageId)).toEqual([
+      'fake-1',
+      'fake-2',
+      'fake-3',
+      'fake-4',
+    ])
+    expect(notice.eventId).toBeNull()
+    const events = checked()
+    expect(events.map((e) => [e.id, e.type])).toEqual([
+      [client.eventId, 'profi.client_message'],
+      [ours.eventId, 'profi.specialist_message'],
+      [odd.eventId, 'profi.author_unclear'],
+    ])
+    expect(events[0]?.payload).toEqual({
+      chat_id: '95300020',
+      order_id: '95300020',
+      platform_message_id: 'fake-1',
+      sent_at: '2026-10-24T09:00:00.000Z',
+      author: 'client',
+    })
+    // A message without its order number belongs to the chat's order.
+    expect(events[1]?.payload).toMatchObject({ order_id: '95300020', author: 'specialist' })
+    for (const e of events) {
+      expect(e).toMatchObject({
+        entity: { kind: 'chat', id: '95300020' },
+        account_id: 'hance-marketing',
+        actor: 'profi',
+        causation_id: null,
+      })
+      expect(e.correlation_id).not.toBe(e.id)
+      expect(e.occurred_at >= before).toBe(true)
+    }
+    expect(new Set(events.map((e) => e.correlation_id)).size).toBe(3)
+    expect(JSON.stringify(received)).not.toMatch(/пекарни|подскажу|кто\?/)
+    expect(received.every((r) => (r as { token: string }).token === 'node-tok')).toBe(true)
+    // Messages added in one moment still follow each other in time, as on the page.
+    const last = await fake.addChatMessage({ chatId: '95300020', author: 'client', text: 'а' })
+    const c = await mcp()
+    const msgs = await readChat(c, '95300020')
+    expect(msgs.at(-1)?.platform_message_id).toBe(last.platformMessageId)
+    const at = msgs.map((m) => Date.parse(String(m.sent_at)))
+    expect(at.slice(1).every((t, i) => t > (at[i] ?? 0))).toBe(true)
+    await fake.redeliver(client.eventId ?? '')
+    expect(bodies().at(-1)).toEqual(bodies()[0])
+    await c.close()
+  })
+
+  it('FR-CONV-1: read_chat and list_chats answer from the chats the fake keeps', async () => {
+    await fake.addChatMessage({
+      chatId: '95300021',
+      orderId: '95300021',
+      author: 'client',
+      text: 'Сколько стоит?',
+      sentAt: '2026-10-24T09:00:00.000Z',
+    })
+    await fake.addChatMessage({
+      chatId: '95300021',
+      author: 'specialist',
+      text: 'Зависит от задачи',
+      sentAt: '2026-10-24T09:05:00.000Z',
+    })
+    await fake.addChatMessage({
+      chatId: '95300021',
+      author: 'client',
+      text: 'Лендинг',
+      read: true,
+      sentAt: '2026-10-24T09:06:00.000Z',
+    })
+    await fake.addChatMessage({
+      chatId: '95300022',
+      orderId: null,
+      author: 'client',
+      text: 'Здравствуйте',
+      sentAt: '2026-10-24T10:00:00.000Z',
+    })
+    const c = await mcp()
+    expect(await readChat(c, '95300021')).toEqual([
+      {
+        platform_message_id: 'fake-1',
+        chat_id: '95300021',
+        author: 'client',
+        sent_at: '2026-10-24T09:00:00.000Z',
+        text: 'Сколько стоит?',
+        read: false,
+      },
+      {
+        platform_message_id: 'fake-2',
+        chat_id: '95300021',
+        author: 'specialist',
+        sent_at: '2026-10-24T09:05:00.000Z',
+        text: 'Зависит от задачи',
+        read: false,
+      },
+      {
+        platform_message_id: 'fake-3',
+        chat_id: '95300021',
+        author: 'client',
+        sent_at: '2026-10-24T09:06:00.000Z',
+        text: 'Лендинг',
+        read: true,
+      },
+    ])
+    const none = await c.callTool({
+      name: 'profi.read_chat',
+      arguments: { account_id: 'hance-marketing', chat_id: 'unknown' },
+    })
+    expect(none.isError).toBe(true)
+    expect(JSON.stringify(none.content)).toContain('NOT_FOUND')
+    const list = await c.callTool({
+      name: 'profi.list_chats',
+      arguments: { account_id: 'hance-marketing' },
+    })
+    expect(list.structuredContent).toEqual({
+      chats: [
+        {
+          chat_id: '95300021',
+          order_id: '95300021',
+          last_message_at: '2026-10-24T09:06:00.000Z',
+          unread: 1,
+        },
+        {
+          chat_id: '95300022',
+          order_id: null,
+          last_message_at: '2026-10-24T10:00:00.000Z',
+          unread: 1,
+        },
+      ],
+    })
+    await c.close()
+  })
+
+  it('FR-CONV-6: the client typing and reading are shipped as events', async () => {
+    const before = new Date().toISOString()
+    await fake.emitTyping('95300023')
+    await fake.emitRead('95300023', 'fake-7')
+    const events = checked()
+    expect(events.map((e) => e.type)).toEqual(['profi.client_typing', 'profi.client_read'])
+    expect(events[0]?.payload).toEqual({ chat_id: '95300023', at: events[0]?.occurred_at })
+    expect(events[1]?.payload).toEqual({
+      chat_id: '95300023',
+      platform_message_id: 'fake-7',
+      at: events[1]?.occurred_at,
+    })
+    for (const e of events) {
+      expect(e).toMatchObject({
+        entity: { kind: 'chat', id: '95300023' },
+        account_id: 'hance-marketing',
+        actor: 'profi',
+      })
+      expect(e.occurred_at >= before).toBe(true)
+    }
+  })
+
+  it('FR-CONV-9: send_message appends our message only when the chat did not change', async () => {
+    const first = await fake.addChatMessage({
+      chatId: '95300024',
+      orderId: '95300024',
+      author: 'client',
+      text: 'Нужна реклама',
+    })
+    const c = await mcp()
+    const ok = await c.callTool({
+      name: 'profi.send_message',
+      arguments: send('95300024', 'Добрый день', 'msg:a', first.platformMessageId),
+    })
+    expect(ok.structuredContent).toEqual({ found_on_page: true, platform_message_id: 'fake-2' })
+    // The client wrote meanwhile: the core's last known message is not the last one any more.
+    await fake.addChatMessage({ chatId: '95300024', author: 'client', text: 'И сайт' })
+    const stale = await c.callTool({
+      name: 'profi.send_message',
+      arguments: send('95300024', 'Какой у вас бюджет?', 'msg:b', 'fake-2'),
+    })
+    expect(stale.isError).toBe(true)
+    expect(JSON.stringify(stale.content)).toContain('CHAT_CHANGED')
+    // null means the chat had no messages yet.
+    const empty = await c.callTool({
+      name: 'profi.send_message',
+      arguments: send('95300024', 'Здравствуйте', 'msg:c', null),
+    })
+    expect(empty.isError).toBe(true)
+    expect(JSON.stringify(empty.content)).toContain('CHAT_CHANGED')
+    const msgs = await readChat(c, '95300024')
+    expect(msgs.map((m) => [m.platform_message_id, m.author, m.read])).toEqual([
+      ['fake-1', 'client', false],
+      ['fake-2', 'specialist', false],
+      ['fake-3', 'client', false],
+    ])
+    expect(msgs[1]?.text).toBe('Добрый день')
+    expect(fake.messages.map((m) => m.idempotency_key)).toEqual(['msg:a'])
+    // A first message into a chat the fake does not know yet.
+    const fresh = await c.callTool({
+      name: 'profi.send_message',
+      arguments: send('95300025', 'Добрый день', 'msg:d', null),
+    })
+    expect(fresh.structuredContent).toEqual({ found_on_page: true, platform_message_id: 'fake-4' })
+    const list = await c.callTool({
+      name: 'profi.list_chats',
+      arguments: { account_id: 'hance-marketing' },
+    })
+    expect(
+      (list.structuredContent as { chats: { chat_id: string; unread: number }[] }).chats,
+    ).toMatchObject([
+      { chat_id: '95300024', unread: 2 },
+      { chat_id: '95300025', unread: 0 },
+    ])
+    // Our own sends are answers, not news: the fake ships no event for them.
+    expect(bodies().map((b) => b.type)).toEqual(['profi.client_message', 'profi.client_message'])
+    await c.close()
+  })
+
+  it('NFR-REL-4: a send whose answer was lost is not sent again by a repeat with its key', async () => {
+    const c = await mcp()
+    fake.failNextSendAck()
+    const lost = await c
+      .callTool({
+        name: 'profi.send_message',
+        arguments: send('95300026', 'Добрый день', 'msg:e', null),
+      })
+      .then((r) => ({ answered: !r.isError, text: JSON.stringify(r.content) }))
+      .catch((e: unknown) => ({ answered: false, text: String(e) }))
+    // Not an answer and not a refusal the core would trust: the message may have gone (UNCERTAIN).
+    expect(lost.answered).toBe(false)
+    expect(lost.text).not.toContain('errorClass')
+    expect(fake.messages).toHaveLength(1)
+    // The repeat carries the chat's state from before the send: the key wins over the check.
+    const again = await c.callTool({
+      name: 'profi.send_message',
+      arguments: send('95300026', 'Добрый день', 'msg:e', null),
+    })
+    expect(again.structuredContent).toEqual({ found_on_page: true, platform_message_id: 'fake-1' })
+    expect(fake.messages).toHaveLength(1)
+    expect(await readChat(c, '95300026')).toHaveLength(1)
     await c.close()
   })
 

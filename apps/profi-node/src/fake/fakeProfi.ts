@@ -1,8 +1,12 @@
 import {
+  type ChatMessage,
   type EventEnvelope,
   type GetOrderOutput,
+  type MessageAuthor,
   newEventId,
+  PROFI_EVENT_PAYLOADS,
   type ProfiErrorClass,
+  type ProfiEventType,
   type ProfiOrder,
   type SendMessageInput,
   type SendMessageOutput,
@@ -35,12 +39,37 @@ export type FakeProfi = {
   orderReads: string[]
   emitOrder(o?: Partial<ProfiOrder>): Promise<string>
   setOrderPage(orderId: string, page: FakeOrderPage): void
+  /**
+   * A message appears in a chat: kept for read_chat and shipped as the event its author gives (a system notice
+   * gives none, so its eventId is null). Without sentAt it comes 1 ms after the chat's last message at least.
+   */
+  addChatMessage(m: {
+    chatId: string
+    orderId?: string | null
+    author: MessageAuthor
+    text: string
+    read?: boolean
+    sentAt?: string
+  }): Promise<{ platformMessageId: string; eventId: string | null }>
+  emitTyping(chatId: string): Promise<void>
+  emitRead(chatId: string, platformMessageId: string): Promise<void>
   redeliver(eventId: string): Promise<void>
   failNextAck(): void
   failAcks(n: number): void
+  /** The next send goes out and is recorded, then its answer is lost. */
+  failNextSendAck(): void
   setCoreEventsUrl(url: string): void
   setHealth(h: Partial<SessionHealthOutput>): void
   close(): Promise<void>
+}
+
+type FakeChat = { orderId: string | null; messages: ChatMessage[] }
+
+const ACCOUNT = 'hance-marketing'
+const MESSAGE_EVENTS: Partial<Record<MessageAuthor, ProfiEventType>> = {
+  client: 'profi.client_message',
+  specialist: 'profi.specialist_message',
+  unknown: 'profi.author_unclear',
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -61,6 +90,8 @@ export async function createFakeProfi(o: {
   const messages: SendMessageInput[] = []
   const sentMessages = new Map<string, SendMessageOutput>()
   const sent = new Map<string, EventEnvelope>()
+  const chats = new Map<string, FakeChat>()
+  let lastMessageNo = 0
   let health: SessionHealthOutput = {
     alive: true,
     balance_rub: 5000,
@@ -69,13 +100,45 @@ export async function createFakeProfi(o: {
   }
   let balance = 5000
   let dropAcks = 0
+  let dropSendAcks = 0
   let coreEventsUrl = o.coreEventsUrl
+
+  /** Appends to the chat in page order; a message without its own time comes after the chat's last one. */
+  function append(
+    chatId: string,
+    m: {
+      orderId?: string | null
+      author: MessageAuthor
+      text: string
+      read: boolean
+      sentAt?: string
+    },
+  ): { message: ChatMessage; orderId: string | null } {
+    let chat = chats.get(chatId)
+    if (!chat) {
+      chat = { orderId: null, messages: [] }
+      chats.set(chatId, chat)
+    }
+    if (m.orderId !== undefined) chat.orderId = m.orderId
+    const last = chat.messages.at(-1)
+    const at = Math.max(Date.now(), last ? Date.parse(last.sent_at) + 1 : 0)
+    const message: ChatMessage = {
+      platform_message_id: `fake-${++lastMessageNo}`,
+      chat_id: chatId,
+      author: m.author,
+      sent_at: m.sentAt ?? new Date(at).toISOString(),
+      text: m.text,
+      read: m.read,
+    }
+    chat.messages.push(message)
+    return { message, orderId: chat.orderId }
+  }
 
   const impl = {
     async sessionHealth() {
       return health
     },
-    // The fake keeps no feed or chats: read tools answer empty, as a fresh account would.
+    // The fake keeps no feed: list_feed answers empty, as a fresh account would.
     async listFeed() {
       return { orders: [] }
     },
@@ -97,10 +160,22 @@ export async function createFakeProfi(o: {
       }
     },
     async listChats() {
-      return { chats: [] }
+      return {
+        chats: [...chats].map(([chatId, c]) => ({
+          chat_id: chatId,
+          order_id: c.orderId,
+          last_message_at: c.messages.reduce<string | null>(
+            (a, m) => (a === null || Date.parse(m.sent_at) > Date.parse(a) ? m.sent_at : a),
+            null,
+          ),
+          unread: c.messages.filter((m) => m.author === 'client' && !m.read).length,
+        })),
+      }
     },
-    async readChat(i: { chat_id: string }): Promise<never> {
-      throw new ProfiToolError('NOT_FOUND', `chat ${i.chat_id} is not known to the fake`)
+    async readChat(i: { chat_id: string }) {
+      const chat = chats.get(i.chat_id)
+      if (!chat) throw new ProfiToolError('NOT_FOUND', `chat ${i.chat_id} is not known to the fake`)
+      return { messages: chat.messages.map((m) => ({ ...m })) }
     },
     async submitBid(i: SubmitBidInput) {
       if (!verifyPermit(o.permitSecret, i.idempotency_key, i.permit)) {
@@ -125,11 +200,25 @@ export async function createFakeProfi(o: {
       if (!verifyMessagePermit(o.permitSecret, m, i.permit)) {
         throw new ProfiToolError('INTERNAL', 'permit does not match this message')
       }
+      // A repeat answers first, before the check: its chat already has the message it sent.
       let out = sentMessages.get(i.idempotency_key)
       if (!out) {
+        const last = chats.get(i.chat_id)?.messages.at(-1)?.platform_message_id ?? null
+        if (i.expect_last_message_id !== last) {
+          throw new ProfiToolError(
+            'CHAT_CHANGED',
+            `chat ${i.chat_id} ends with ${last ?? 'nothing'}, not ${i.expect_last_message_id ?? 'nothing'}`,
+          )
+        }
+        const { message } = append(i.chat_id, { author: 'specialist', text: i.text, read: false })
         messages.push(i)
-        out = { found_on_page: true, platform_message_id: `fake-sent-${messages.length}` }
+        out = { found_on_page: true, platform_message_id: message.platform_message_id }
         sentMessages.set(i.idempotency_key, out)
+      }
+      // A lost answer: the message is in the chat, the caller never hears back.
+      if (dropSendAcks > 0) {
+        dropSendAcks--
+        throw new Error('connection reset after the message went out')
       }
       return out
     },
@@ -156,6 +245,31 @@ export async function createFakeProfi(o: {
     throw lastError
   }
 
+  /** A chat event as the live node queues it (src/ship/outbox.ts): the contract's payload, no client text. */
+  async function shipChatEvent(
+    type: ProfiEventType,
+    chatId: string,
+    payload: (at: string) => unknown,
+  ): Promise<string> {
+    const at = new Date().toISOString()
+    const e: EventEnvelope = {
+      id: newEventId(),
+      type,
+      v: 1,
+      entity: { kind: 'chat', id: chatId },
+      account_id: ACCOUNT,
+      actor: 'profi',
+      occurred_at: at,
+      causation_id: null,
+      correlation_id: newEventId(),
+      reason: null,
+      payload: PROFI_EVENT_PAYLOADS[type].parse(payload(at)),
+    }
+    sent.set(e.id, e)
+    await deliver(e)
+    return e.id
+  }
+
   return {
     url: server.url,
     bids,
@@ -174,7 +288,7 @@ export async function createFakeProfi(o: {
         type: 'profi.order_seen',
         v: 1,
         entity: { kind: 'order', id: order.order_id },
-        account_id: 'hance-marketing',
+        account_id: ACCOUNT,
         actor: 'profi',
         occurred_at: order.seen_at,
         causation_id: null,
@@ -186,6 +300,30 @@ export async function createFakeProfi(o: {
       await deliver(e)
       return e.id
     },
+    async addChatMessage(m) {
+      const { message, orderId } = append(m.chatId, { ...m, read: m.read ?? false })
+      const type = MESSAGE_EVENTS[m.author]
+      const eventId = type
+        ? await shipChatEvent(type, m.chatId, () => ({
+            chat_id: m.chatId,
+            order_id: orderId,
+            platform_message_id: message.platform_message_id,
+            sent_at: message.sent_at,
+            author: message.author,
+          }))
+        : null
+      return { platformMessageId: message.platform_message_id, eventId }
+    },
+    async emitTyping(chatId) {
+      await shipChatEvent('profi.client_typing', chatId, (at) => ({ chat_id: chatId, at }))
+    },
+    async emitRead(chatId, platformMessageId) {
+      await shipChatEvent('profi.client_read', chatId, (at) => ({
+        chat_id: chatId,
+        platform_message_id: platformMessageId,
+        at,
+      }))
+    },
     async redeliver(eventId) {
       const e = sent.get(eventId)
       if (!e) throw new Error(`unknown event ${eventId}`)
@@ -196,6 +334,9 @@ export async function createFakeProfi(o: {
     },
     failAcks(n) {
       dropAcks = n
+    },
+    failNextSendAck() {
+      dropSendAcks = 1
     },
     setCoreEventsUrl(url) {
       coreEventsUrl = url
