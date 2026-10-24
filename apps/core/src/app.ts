@@ -12,6 +12,7 @@ import type { Config } from './config'
 import { forwardTurn, sendTurnCard } from './conversation/cards'
 import { onConvEdit, onConvPress, onConvReply } from './conversation/commands'
 import { compareTurn } from './conversation/compare'
+import { startConvDaySummary } from './conversation/daySummary'
 import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
 import { sendTextNow, sendTurnReply } from './conversation/outbox'
 import { startReconcile } from './conversation/reconcile'
@@ -256,6 +257,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     tickMs: o.learningTickMs,
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
+  const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
   const reconcile = startReconcile(
     conversationDeps,
     config.accounts.map((a) => a.id),
@@ -272,6 +274,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()
+      conversationSummary.stop()
       gateway.stop()
       await bot.stop()
       await app.close()
