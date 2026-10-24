@@ -1,5 +1,5 @@
 {
-  "id": "a198acc0-1cc0-4331-8323-e265d897cd7b",
+  "id": "f186f4ee-2aae-45ee-8010-98bd1ea166d6",
   "prevId": "db5adb70-17d4-4a5e-b95c-22bf1ecbf7bf",
   "version": "7",
   "dialect": "postgresql",
@@ -527,6 +527,12 @@
         "draft_price_rub": {
           "name": "draft_price_rub",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "draft_analysis": {
+          "name": "draft_analysis",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         }

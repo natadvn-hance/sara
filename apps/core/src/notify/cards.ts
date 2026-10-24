@@ -15,6 +15,8 @@ export type LeadCard = {
   reminder?: boolean
   /** The bid text with its greeting and the «Стоимость услуги» (FR-LEAD-6); none: the Analyst did not answer. */
   draft?: { text: string; priceRub: number | null } | null
+  /** The Analyst's short разбор of the order: what the client really needs, the main risk, the condition. */
+  analysis?: { hiddenNeed: string; risk: string; condition: string } | null
 }
 
 const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
@@ -103,7 +105,14 @@ export function leadCardText(c: LeadCard): string {
         `Стоимость услуги: ${c.draft.priceRub ? formatRub(c.draft.priceRub) : 'не указана'}`,
       ]
     : ['Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст.']
-  return [head, ...why, `Отклик ${formatRub(c.bidPriceRub)}`, '', ...draft].join('\n')
+  const analysis = c.analysis
+    ? [
+        `Разбор: ${c.analysis.hiddenNeed}`,
+        `Риск: ${c.analysis.risk}. Условие: ${c.analysis.condition}`,
+        '',
+      ]
+    : []
+  return [head, ...why, `Отклик ${formatRub(c.bidPriceRub)}`, '', ...analysis, ...draft].join('\n')
 }
 
 export function leadCardKeyboard(c: LeadCard) {

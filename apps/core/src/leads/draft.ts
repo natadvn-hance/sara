@@ -11,12 +11,28 @@ export type DraftSource = Pick<
   'title' | 'category' | 'city' | 'budget_text' | 'text' | 'client_name'
 >
 
-export type Draft = { text: string; priceRub: number | null; attempts: number }
+/** The Analyst's reading of the order and its short разбор, kept beside the draft. */
+export type Analysis = Pick<AnalystOutput, 'reading' | 'hidden_need' | 'risk' | 'condition'>
+export type Draft = {
+  text: string
+  priceRub: number | null
+  attempts: number
+  analysis: Analysis
+}
+/** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
   text: null
   reason: 'no_answer' | 'too_long' | 'not_plain'
   attempts: number
+  analysis: Analysis | null
 }
+
+const analysisOf = (o: AnalystOutput): Analysis => ({
+  reading: o.reading,
+  hidden_need: o.hidden_need,
+  risk: o.risk,
+  condition: o.condition,
+})
 
 /** What Profi.ru shows instead of a name while it hides one. */
 const PLACEHOLDER = /^(клиент|заказчик|пользовател|имя|аноним|скрыт)/iu
@@ -97,9 +113,11 @@ export async function writeDraft(
   const base = analystInput(o, maxBody)
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
+  let analysis: Analysis | null = null
   for (let attempts = 1; attempts <= 2; attempts++) {
     const r = await gw.call('analyst', input, AnalystOutput, opts)
-    if (!r.ok) return { text: null, reason: 'no_answer', attempts }
+    if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
+    analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
     const text = draftOf(r.output.text, o.client_name)
     if (!body || NOT_PLAIN.test(body)) {
@@ -109,8 +127,13 @@ export async function writeDraft(
       reason = 'too_long'
       input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${BID_TEXT_MAX}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
     } else {
-      return { text, priceRub: priceWithin(r.output.price_rub, o.budget_text), attempts }
+      return {
+        text,
+        priceRub: priceWithin(r.output.price_rub, o.budget_text),
+        attempts,
+        analysis,
+      }
     }
   }
-  return { text: null, reason, attempts: 2 }
+  return { text: null, reason, attempts: 2, analysis }
 }

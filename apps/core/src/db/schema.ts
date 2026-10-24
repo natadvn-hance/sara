@@ -63,6 +63,8 @@ export const lead = core.table('lead', {
   draftText: text('draft_text'),
   /** The «Стоимость услуги» for the bid form; null leaves the field empty. */
   draftPriceRub: integer('draft_price_rub'),
+  /** The Analyst's reading of the order and its short разбор (hidden need, risk, condition); null: none. */
+  draftAnalysis: jsonb('draft_analysis'),
 })
 
 export const account = core.table('account', {

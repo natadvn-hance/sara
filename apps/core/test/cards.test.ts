@@ -12,6 +12,11 @@ const card: LeadCard = {
 const DASH = String.fromCharCode(0x2014)
 const NBSP = ' '
 const DRAFT = { text: 'Ирина, добрый день!\n\nПонимаю задачу.', priceRub: 90000 }
+const ANALYSIS = {
+  hiddenNeed: 'Боится долгого запуска',
+  risk: 'Объём больше, чем звучит',
+  condition: 'Брать, если сроки понятны',
+}
 
 describe('cards', () => {
   it('FR-NOTIF-1: lead card text, buttons and callback format', () => {
@@ -63,6 +68,17 @@ describe('cards', () => {
       '',
       `Стоимость услуги: 90${NBSP}000${NBSP}₽`,
     ])
+  })
+
+  it('FR-LEAD-7: the card shows the разбор in two lines above the draft', () => {
+    const lines = leadCardText({ ...card, draft: DRAFT, analysis: ANALYSIS }).split('\n')
+    expect(lines.slice(3, 7)).toEqual([
+      '',
+      'Разбор: Боится долгого запуска',
+      'Риск: Объём больше, чем звучит. Условие: Брать, если сроки понятны',
+      '',
+    ])
+    expect(lines[7]).toBe('Черновик отклика:')
   })
 
   it('FR-LEAD-7: a draft without a price says the field stays empty', () => {
@@ -152,6 +168,7 @@ describe('cards', () => {
       leadCardText({ ...card, verdict: 'maybe' }),
       leadCardText({ ...card, draft: DRAFT }),
       leadCardText({ ...card, draft: { ...DRAFT, priceRub: null } }),
+      leadCardText({ ...card, draft: DRAFT, analysis: ANALYSIS }),
       TEXTS.bound,
       TEXTS.alreadyDone,
       TEXTS.bidSent('Сайт', 210),

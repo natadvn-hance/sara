@@ -10,6 +10,7 @@ import { event, lead, outbox, question, task } from '../../apps/core/src/db/sche
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { summaryTime } from '../../apps/core/test/helpers/learning'
 import { scorerAnswer } from '../../apps/core/test/helpers/scorer'
@@ -18,7 +19,7 @@ import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = { verdict: 'fit', reason: 'Нужен сайт', tags: ['сайт'], confidence: 0.9 }
 const BODY = 'Понимаю, клинике важно быстро начать запись.\n\nКогда хотите открыть запись онлайн?'
-const ANALYST = { hidden_need: 'Боится долгого запуска', text: BODY, price_rub: 90000 }
+const ANALYST = analystAnswer(BODY)
 /** The sample order 90000001: client Ирина, budget «до 150 000 ₽». */
 const DRAFT = `Ирина, добрый день!\n\n${BODY}`
 const NBSP = ' '
@@ -132,9 +133,28 @@ describe('the draft on the card', () => {
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain(`Черновик отклика:\n${DRAFT}`)
     expect(cards()[0]?.text).toContain(`Стоимость услуги: 90${NBSP}000${NBSP}₽`)
-    expect(await leadOf(id)).toMatchObject({ draftText: DRAFT, draftPriceRub: 90000 })
+    expect(cards()[0]?.text).toContain(
+      'Разбор: Боится долгого запуска\nРиск: Объём больше, чем звучит. Условие: Брать, если сроки понятны',
+    )
+    expect(await leadOf(id)).toMatchObject({
+      draftText: DRAFT,
+      draftPriceRub: 90000,
+      draftAnalysis: {
+        reading: ANALYST.reading,
+        hidden_need: ANALYST.hidden_need,
+        risk: ANALYST.risk,
+        condition: ANALYST.condition,
+      },
+    })
     expect((await eventsOf('lead.drafted', id)).map((e) => e.payload)).toEqual([
-      { drafted: true, chars: DRAFT.length, price_rub: 90000, attempts: 1, reason: null },
+      {
+        drafted: true,
+        analysis: true,
+        chars: DRAFT.length,
+        price_rub: 90000,
+        attempts: 1,
+        reason: null,
+      },
     ])
   })
 
@@ -144,9 +164,21 @@ describe('the draft on the card', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Черновика нет: Аналитик не ответил.')
-    expect(await leadOf(id)).toMatchObject({ draftText: null, draftPriceRub: null })
+    expect(cards()[0]?.text).not.toContain('Разбор:')
+    expect(await leadOf(id)).toMatchObject({
+      draftText: null,
+      draftPriceRub: null,
+      draftAnalysis: null,
+    })
     expect((await eventsOf('lead.drafted', id)).map((e) => e.payload)).toEqual([
-      { drafted: false, chars: null, price_rub: null, attempts: 1, reason: 'no_answer' },
+      {
+        drafted: false,
+        analysis: false,
+        chars: null,
+        price_rub: null,
+        attempts: 1,
+        reason: 'no_answer',
+      },
     ])
   })
 

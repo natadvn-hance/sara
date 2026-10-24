@@ -1,5 +1,11 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type EventEnvelope, newEventId, ProfiOrder, type TaskAction } from '@sara/shared'
+import {
+  AnalystOutput,
+  type EventEnvelope,
+  newEventId,
+  ProfiOrder,
+  type TaskAction,
+} from '@sara/shared'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
@@ -118,7 +124,7 @@ async function draftFor(
     return await writeDraft(d().gateway, o, opts)
   } catch (err) {
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
-    return { text: null, reason: 'no_answer', attempts: 1 }
+    return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
   }
 }
 
@@ -134,6 +140,13 @@ function storeDraft(
         .set({ draftText: dr.text, draftPriceRub: dr.priceRub })
         .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
     }
+    // The reading stays even when its text did not fit: it is about the client, not the wording.
+    if (dr.analysis) {
+      await tx
+        .update(lead)
+        .set({ draftAnalysis: dr.analysis })
+        .where(and(eq(lead.id, l.id), isNull(lead.draftAnalysis)))
+    }
     await appendEvent(
       tx,
       ev('lead.drafted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', draftedPayload(dr)),
@@ -146,12 +159,30 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
   dr.text !== null
     ? {
         drafted: true,
+        analysis: true,
         chars: dr.text.length,
         price_rub: dr.priceRub,
         attempts: dr.attempts,
         reason: null,
       }
-    : { drafted: false, chars: null, price_rub: null, attempts: dr.attempts, reason: dr.reason }
+    : {
+        drafted: false,
+        analysis: dr.analysis !== null,
+        chars: null,
+        price_rub: null,
+        attempts: dr.attempts,
+        reason: dr.reason,
+      }
+
+const CardAnalysis = AnalystOutput.pick({ hidden_need: true, risk: true, condition: true })
+
+/** The card's two lines of the разбор, from the draft or the lead's stored reading (null: none, or unreadable). */
+function cardAnalysis(a: unknown): LeadCard['analysis'] {
+  const r = CardAnalysis.safeParse(a)
+  return r.success
+    ? { hiddenNeed: r.data.hidden_need, risk: r.data.risk, condition: r.data.condition }
+    : null
+}
 
 /** One order, one durable run (workflow id lead:<order>): record, sort, card, wait for Boris. */
 async function processOrder(e: EventEnvelope): Promise<void> {
@@ -354,6 +385,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
     draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
+    analysis: cardAnalysis(draft?.analysis),
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
   try {
@@ -422,6 +454,7 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
     draft: found.lead.draftText
       ? { text: found.lead.draftText, priceRub: found.lead.draftPriceRub }
       : null,
+    analysis: cardAnalysis(found.lead.draftAnalysis),
   }
 }
 

@@ -11,15 +11,14 @@ import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, outbox, task } from '../../apps/core/src/db/schema'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = '{"verdict":"fit","reason":"Нужен сайт","tags":["сайт"],"confidence":0.9}'
 /** The Analyst's draft, so «Откликнуться» has a text to send. */
-const ANALYST = {
-  analyst: { hidden_need: 'Срочность', text: 'Понимаю задачу.\n\nКогда запуск?', price_rub: null },
-}
+const ANALYST = { analyst: analystAnswer('Понимаю задачу.\n\nКогда запуск?', null) }
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram

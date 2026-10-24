@@ -18,6 +18,7 @@ import { activeRules, seedDirection } from '../../apps/core/src/direction/store'
 import { RULES_V1 } from '../../apps/core/src/direction/v1'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { countEvents } from '../../apps/core/test/helpers/events'
 import { summaryTime } from '../../apps/core/test/helpers/learning'
@@ -26,11 +27,7 @@ import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = { verdict: 'fit', reason: 'Нужен сайт', tags: ['сайт'], confidence: 0.9 }
-const ANALYST = {
-  hidden_need: 'Срочность',
-  text: 'Понимаю задачу.\n\nКогда запуск?',
-  price_rub: null,
-}
+const ANALYST = analystAnswer('Понимаю задачу.\n\nКогда запуск?', null)
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram

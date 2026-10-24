@@ -10,17 +10,16 @@ import { loadConfig } from '../../apps/core/src/config'
 import { deal, event, lead, outbox } from '../../apps/core/src/db/schema'
 import { confirmBid, resumeQueuedOutbox } from '../../apps/core/src/leads/outbox'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = '{"verdict":"fit","reason":"Нужен сайт","tags":["сайт"],"confidence":0.9}'
 const ANALYST = {
-  analyst: {
-    hidden_need: 'Боится долгого запуска',
-    text: 'Понимаю, клинике важно быстро начать запись.\n\nКогда хотите открыть запись онлайн?',
-    price_rub: 90000,
-  },
+  analyst: analystAnswer(
+    'Понимаю, клинике важно быстро начать запись.\n\nКогда хотите открыть запись онлайн?',
+  ),
 }
 const { db, close } = openTestDb()
 
