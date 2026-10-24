@@ -63,7 +63,9 @@ export function registerScreenRoute(
         void stop?.()
       })
       startLiveScreen(ab.page, (frame, w, h) => {
-        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ frame, w, h }))
+        // A slow viewer skips pictures instead of piling them up.
+        if (ws.readyState === ws.OPEN && ws.bufferedAmount < 256_000)
+          ws.send(JSON.stringify({ frame, w, h }))
       })
         .then((s) => {
           stop = s
