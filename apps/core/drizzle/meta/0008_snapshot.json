@@ -1,5 +1,5 @@
 {
-  "id": "2409339a-43dd-4feb-991f-322d308e3c87",
+  "id": "9e185f18-13c0-481f-a458-2fe7cceca64e",
   "prevId": "1670545a-f19e-46a0-bf63-51d2a85922a2",
   "version": "7",
   "dialect": "postgresql",
@@ -184,7 +184,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'on'"
+          "default": "'draft'"
         },
         "speed": {
           "name": "speed",
@@ -211,7 +211,7 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 1
+          "default": 0
         },
         "updated_at": {
           "name": "updated_at",

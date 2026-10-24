@@ -10,6 +10,7 @@ const RollbackBody = z.object({ version: z.number().int().positive() })
 export const DIRECTION_ERRORS = {
   noAccount: 'Такого аккаунта нет.',
   noVersion: 'Такой версии нет.',
+  alreadyActive: 'Эта версия уже действует.',
 } as const
 
 /** The pult's direction pages (FR-ACC-2): what the direction is now, its versions, and the way back. */
@@ -50,8 +51,10 @@ export function registerDirectionRoutes(app: FastifyInstance, d: AppDeps): void 
       const { accountId } = req.params as { accountId: string }
       if (!account(accountId)) return noAccount(reply)
       const { version } = RollbackBody.parse(req.body)
-      if (!(await listVersions(d.db, accountId)).some((v) => v.version === version))
-        return reply.code(404).send({ error: DIRECTION_ERRORS.noVersion })
+      const known = await listVersions(d.db, accountId)
+      const target = known.find((v) => v.version === version)
+      if (!target) return reply.code(404).send({ error: DIRECTION_ERRORS.noVersion })
+      if (target.active) return reply.code(409).send({ error: DIRECTION_ERRORS.alreadyActive })
       return { version: await rollbackTo(d.db, accountId, version) }
     })
   })

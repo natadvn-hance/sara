@@ -43,4 +43,17 @@ describe('direction profile contracts', () => {
       false,
     )
   })
+
+  it('FR-ACC-2: a sample bid is not longer than the bid form takes', () => {
+    expect(ReplyFormat.safeParse({ ...goodFormat, examples: ['а'.repeat(500)] }).success).toBe(true)
+    expect(ReplyFormat.safeParse({ ...goodFormat, examples: ['а'.repeat(501)] }).success).toBe(
+      false,
+    )
+  })
+
+  it('FR-ACC-2: a format has at least one part and each part once', () => {
+    expect(ReplyFormat.safeParse({ ...goodFormat, parts: [] }).success).toBe(false)
+    const part = goodFormat.parts[0]
+    expect(ReplyFormat.safeParse({ ...goodFormat, parts: [part, part] }).success).toBe(false)
+  })
 })

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApiError, api, type DirectionVersionRow, type DirectionView, go } from '../api'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
@@ -27,6 +27,13 @@ function Version({
   busy: boolean
 }) {
   const [asking, setAsking] = useState(false)
+  // The button that opened the question comes back when it is closed, so the keyboard does not lose its place.
+  const trigger = useRef<HTMLButtonElement>(null)
+  const wasAsking = useRef(false)
+  useEffect(() => {
+    if (wasAsking.current && !asking) trigger.current?.focus()
+    wasAsking.current = asking
+  }, [asking])
   return (
     <li className="grid gap-1 border-t border-border py-3 first:border-t-0">
       <div className="flex flex-wrap items-center gap-x-2">
@@ -39,9 +46,10 @@ function Version({
       <p className="text-sm">{v.reason}</p>
       {v.active ? null : asking ? (
         <div className="grid gap-2">
-          <p role="alert">{`Вернуть v${v.version}? Старые версии останутся.`}</p>
+          <p>{`Вернуть v${v.version}? Старые версии останутся.`}</p>
           <div className="flex flex-wrap gap-2">
             <Button
+              autoFocus
               disabled={busy}
               onClick={() => {
                 onRollback(v.version)
@@ -57,7 +65,7 @@ function Version({
         </div>
       ) : (
         <div>
-          <Button variant="secondary" onClick={() => setAsking(true)}>
+          <Button ref={trigger} variant="secondary" disabled={busy} onClick={() => setAsking(true)}>
             Вернуть эту версию
           </Button>
         </div>
@@ -79,6 +87,7 @@ export function DirectionPage({ accountId }: { accountId: string }) {
   }, [q.error])
   const [said, setSaid] = useState<string | null>(null)
   const rollback = useMutation({
+    onMutate: () => setSaid(null),
     mutationFn: (version: number) =>
       api<{ version: number }>(`/api/directions/${encodeURIComponent(accountId)}/rollback`, {
         version,
@@ -88,6 +97,10 @@ export function DirectionPage({ accountId }: { accountId: string }) {
       await qc.invalidateQueries({ queryKey: key })
     },
   })
+
+  useEffect(() => {
+    if (rollback.error instanceof ApiError && rollback.error.status === 401) go('/login')
+  }, [rollback.error])
 
   const back = (
     <a

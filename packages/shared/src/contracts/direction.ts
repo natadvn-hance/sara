@@ -62,17 +62,23 @@ export type DirectionState = z.infer<typeof DirectionState>
 const BID_CHARS_MAX = 500
 
 /** How a bid of this direction is built; the greeting is always the program's and always first. */
-export const ReplyFormat = z.object({
-  parts: z.array(
-    z.object({ id: z.string().regex(/^[a-z_]+$/), title: z.string().min(1), hint: z.string() }),
-  ),
-  max_chars: z.number().int().min(1).max(BID_CHARS_MAX),
-  tone: z.array(z.string().min(1)),
-  /** Bids Boris approved as samples. */
-  examples: z.array(z.string().min(1)).max(3),
-  /** How many cases may go into one bid. */
-  max_cases: z.number().int().min(0).max(3),
-})
+export const ReplyFormat = z
+  .object({
+    parts: z
+      .array(
+        z.object({ id: z.string().regex(/^[a-z_]+$/), title: z.string().min(1), hint: z.string() }),
+      )
+      .min(1),
+    max_chars: z.number().int().min(1).max(BID_CHARS_MAX),
+    tone: z.array(z.string().min(1)),
+    /** Bids Boris approved as samples (the body only: no greeting, no client name). */
+    examples: z.array(z.string().min(1).max(BID_CHARS_MAX)).max(3),
+    /** How many cases may go into one bid. */
+    max_cases: z.number().int().min(0).max(3),
+  })
+  .refine((f) => new Set(f.parts.map((p) => p.id)).size === f.parts.length, {
+    message: 'part ids must be unique',
+  })
 export type ReplyFormat = z.infer<typeof ReplyFormat>
 
 /** A case of the direction's library; the model chooses by id, the program puts the link in. */

@@ -86,6 +86,11 @@ export async function saveProfile(
         cases: patch.cases ?? now.cases,
       }),
     }
+    const changed = (Object.keys(patch) as (keyof ProfilePatch)[])
+      .filter((k) => patch[k] !== undefined && JSON.stringify(patch[k]) !== JSON.stringify(now[k]))
+      .sort()
+    // Nothing to change: no new version and no journal line.
+    if (changed.length === 0) return now.version
     const version = now.version + 1
     await tx
       .insert(directionProfile)
@@ -118,7 +123,7 @@ export async function saveProfile(
       causation_id: null,
       correlation_id: newEventId(),
       reason: null,
-      payload: { version, changed: Object.keys(patch).sort() },
+      payload: { version, changed },
     })
     return version
   })

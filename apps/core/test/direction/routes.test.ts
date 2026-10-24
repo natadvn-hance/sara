@@ -80,6 +80,25 @@ describe('direction page API', () => {
     expect((await activeRules(db, ACC)).version).toBe(1)
   })
 
+  it('FR-MIND-3: rolling back to the version that is already active is a 409 and makes no version', async () => {
+    const r = await post(`/api/directions/${ACC}/rollback`, { version: 1 })
+    expect(r.statusCode).toBe(409)
+    expect(r.json()).toEqual({ error: 'Эта версия уже действует.' })
+    expect((await activeRules(db, ACC)).version).toBe(1)
+  })
+
+  it('FR-MIND-3: rollback needs a session, a known account and a valid body', async () => {
+    const bare = await t.app.inject({
+      method: 'POST',
+      url: `/api/directions/${ACC}/rollback`,
+      payload: { version: 1 },
+    })
+    expect(bare.statusCode).toBe(401)
+    expect((await post('/api/directions/nobody/rollback', { version: 1 })).statusCode).toBe(404)
+    expect((await post(`/api/directions/${ACC}/rollback`, { version: 'one' })).statusCode).toBe(400)
+    expect((await post(`/api/directions/${ACC}/rollback`, { version: -1 })).statusCode).toBe(400)
+  })
+
   it('FR-ACC-2: an unknown account is a 404', async () => {
     const r = await get('/api/directions/nobody')
     expect(r.statusCode).toBe(404)
