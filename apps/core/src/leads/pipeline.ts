@@ -6,6 +6,7 @@ import { event, lead, leadScore, task } from '../db/schema'
 import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
+import { recordLabel } from '../learning/labels'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
@@ -349,6 +350,11 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         return true
       })
       if (!resolved) return TEXTS.alreadyDone
+      await recordLabel(d().db, {
+        leadId: l.id,
+        label: action === 'bid' ? 'yes' : 'no',
+        source: 'card',
+      })
       await deliverDecision(taskId, action)
       if (action === 'skip') return TEXTS.skipped
       if (outboxId) await startOutboxDelivery(outboxId, l.id)

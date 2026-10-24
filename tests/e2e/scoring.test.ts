@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { lead, leadScore } from '../../apps/core/src/db/schema'
+import { lead, leadLabel, leadScore } from '../../apps/core/src/db/schema'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
@@ -123,5 +123,20 @@ describe('scoring in the lead pipeline', () => {
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Без оценки: Оценщик не ответил')
     expect(await db.select().from(leadScore).where(eq(leadScore.leadId, id))).toHaveLength(0)
+  })
+
+  it('FR-LEAD-7: a press on the card writes its label', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const skip = cards()[0]?.reply_markup?.inline_keyboard[0]?.find((b) =>
+      b.callback_data.endsWith(':skip'),
+    )
+    tg.pushPress(111, skip?.callback_data ?? '')
+    await until(
+      async () => (await db.select().from(leadLabel).where(eq(leadLabel.leadId, id))).length === 1,
+    )
+    const [l] = await db.select().from(leadLabel).where(eq(leadLabel.leadId, id))
+    expect(l).toMatchObject({ label: 'no', source: 'card', score: 70, surprise: false })
   })
 })

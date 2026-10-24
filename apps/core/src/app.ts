@@ -12,6 +12,7 @@ import { seedDirection } from './direction/store'
 import { createGateway } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
+import { startLearningJobs } from './learning/jobs'
 import { type BotControl, createBotControl } from './notify/botControl'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
@@ -120,6 +121,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
 
   const token = await secrets.get('telegram_bot_token')
   if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))
+  const learning = startLearningJobs({ db, notifier: bot.notifier, gateway })
 
   return {
     url,
@@ -129,6 +131,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     pipeline: lp,
     async close() {
+      learning.stop()
       await bot.stop()
       await app.close()
       await shutdownDbos()
