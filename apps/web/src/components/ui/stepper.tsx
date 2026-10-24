@@ -1,12 +1,12 @@
 export type StepItem = {
   n: number
   title: string
-  state: 'done' | 'current' | 'todo' | 'soon'
+  state: 'done' | 'skipped' | 'current' | 'todo' | 'soon'
   /** Present when the step can be opened. */
   onOpen?: () => void
 }
 
-const MARK = { done: '✓', current: '•', todo: '○', soon: '○' } as const
+const MARK = { done: '✓', skipped: '–', current: '•', todo: '○', soon: '○' } as const
 
 /** «Шаг N из M» and the list of steps; a step that is not built yet says «скоро» and cannot be opened. */
 export function Stepper({ steps, current }: { steps: StepItem[]; current: number }) {
@@ -20,7 +20,7 @@ export function Stepper({ steps, current }: { steps: StepItem[]; current: number
               <button
                 type="button"
                 onClick={s.onOpen}
-                className={`min-h-8 underline ${s.state === 'current' ? 'font-medium text-text' : 'text-accent'}`}
+                className={`min-h-11 underline ${s.state === 'current' ? 'font-medium text-text' : 'text-accent'}`}
               >
                 {`${MARK[s.state]} ${s.n}. ${s.title}`}
               </button>

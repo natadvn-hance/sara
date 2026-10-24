@@ -19,7 +19,7 @@ const RollbackBody = z.object({ version: z.number().int().positive() })
 const StartBody = z.object({ mode: z.enum(['new', 'edit']) })
 const SayBody = z.object({
   say: z.string().trim().min(1).max(4000),
-  fix: z.string().max(2000).optional(),
+  fix: z.string().trim().min(1).max(2000).optional(),
 })
 const FinishBody = z.object({ override: z.object({ reason: z.string().max(1000) }).optional() })
 const StepParams = z.object({ accountId: z.string(), n: z.coerce.number().int() })
@@ -33,6 +33,7 @@ export const DIRECTION_ERRORS = {
   cannotSkip: 'Этот шаг пропустить нельзя.',
   badStep: 'Такого шага нет.',
   noAnswer: 'Claude не ответил. Попробуй ещё раз.',
+  broken: 'Черновик не читается: отмени его и начни настройку заново.',
   invalid: 'Не получилось собрать, попробуй сказать иначе.',
   limit: 'Лимит Claude исчерпан. Попробуй позже.',
   closed: 'Настройка уже закончена или отменена.',
@@ -119,6 +120,7 @@ export function registerDirectionRoutes(app: FastifyInstance, d: AppDeps): void 
         no_answer: [502, DIRECTION_ERRORS.noAnswer],
         invalid: [422, DIRECTION_ERRORS.invalid],
         limit: [503, DIRECTION_ERRORS.limit],
+        broken: [409, DIRECTION_ERRORS.broken],
       } as const
       const [status, error] = answer[r.reason]
       return reply.code(status).send({ error, reason: r.reason })

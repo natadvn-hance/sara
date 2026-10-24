@@ -203,6 +203,33 @@ test('FR-UI-3: a failed model call shows the reason and keeps the text in the fi
   await expect(page.getByLabel('Расскажи своими словами')).toHaveValue('Мои слова')
 })
 
+test('FR-UI-3: a draft that does not read shows a message and can be cancelled', async ({
+  page,
+}) => {
+  await page.route(`**/api/directions/${ACCOUNT}/onboarding`, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({
+          json: {
+            onboarding: {
+              mode: 'edit',
+              basedOn: 1,
+              step: 1,
+              steps: {},
+              rules: null,
+              changes: [],
+              changed: false,
+              broken: true,
+            },
+          },
+        })
+      : route.continue(),
+  )
+  await page.goto(ONBOARDING)
+  await expect(page.getByRole('alert')).toContainText('Черновик не читается')
+  await expect(page.getByRole('button', { name: 'Отменить настройку' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Отправить' })).toHaveCount(0)
+})
+
 // Last: it changes the active rules, and the first test of this file looks at their threshold.
 test('FR-ACC-3: three confirmed steps are saved as new rules, without calibration only with a reason', async ({
   page,

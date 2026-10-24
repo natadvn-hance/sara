@@ -46,6 +46,7 @@ export const EVENT_TYPES = [
   'direction.onboarding_started',
   'direction.step_confirmed',
   'direction.onboarding_finished',
+  'direction.onboarding_cancelled',
   'direction.profile_changed',
   'direction.run_finished',
   'lead.routed',

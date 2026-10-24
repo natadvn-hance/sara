@@ -79,4 +79,6 @@ export type OnboardingView = {
   steps: Record<string, StepState>
   rules: DirectionRules | null
   changes: string[]
+  changed: boolean
+  broken?: boolean
 }

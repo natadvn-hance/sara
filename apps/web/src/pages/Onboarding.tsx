@@ -1,6 +1,6 @@
 import type { OnbAbout, OnbIdeal, OnbStops } from '@sara/shared'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApiError, api, go, type OnboardingView } from '../api'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
@@ -120,6 +120,9 @@ function StepCard({
   const a = useAction()
   const ask = ASK[n]
   const previous = st ? st.attempts.slice(0, -1) : []
+  // The card is new for every step: the keyboard starts at its heading instead of falling to the page.
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => heading.current?.focus(), [])
 
   async function send(withFix: boolean) {
     await a.run(async () => {
@@ -145,12 +148,15 @@ function StepCard({
 
   return (
     <Card>
-      <h2 className="font-display text-lg">{`Шаг ${n}. ${TITLES[n - 1]}`}</h2>
+      <h2 ref={heading} tabIndex={-1} className="font-display text-lg outline-none">
+        {`Шаг ${n}. ${TITLES[n - 1]}`}
+      </h2>
       <p>{ask?.hint}</p>
       <Textarea
         label="Расскажи своими словами"
         value={say}
         onChange={(e) => setSay(e.target.value)}
+        maxLength={4000}
         placeholder={ask?.example}
       />
       <div className="flex flex-wrap gap-2">
@@ -169,10 +175,10 @@ function StepCard({
       {st?.proposal ? (
         <div className="grid gap-3 border-t border-border pt-4">
           <h3 className="font-medium">Я поняла так:</h3>
-          <p>{st.proposal.understood}</p>
+          <p className="break-words">{st.proposal.understood}</p>
           <details>
             <summary className="cursor-pointer text-sm">Как это запишется</summary>
-            <div className="mt-2">
+            <div className="mt-2 break-words">
               <Recorded step={n} data={st.proposal.data} />
             </div>
           </details>
@@ -183,7 +189,7 @@ function StepCard({
                 {previous.map((p, i) => (
                   // The attempts are only ever appended, so the position is a stable key.
                   // biome-ignore lint/suspicious/noArrayIndexKey: append-only list
-                  <li key={i}>
+                  <li key={i} className="break-words">
                     {p.fix ? <span className="text-muted">{`Поправка: ${p.fix}. `}</span> : null}
                     {p.understood}
                   </li>
@@ -199,6 +205,7 @@ function StepCard({
                 label="Что не так?"
                 value={fix}
                 onChange={(e) => setFix(e.target.value)}
+                maxLength={2000}
                 rows={3}
               />
               <div className="flex flex-wrap gap-2">
@@ -240,7 +247,7 @@ function FinishCard({
   const qc = useQueryClient()
   const [reason, setReason] = useState('')
   const a = useAction()
-  const unchanged = view.changes.length === 0
+  const unchanged = !view.changed
 
   return (
     <Card>
@@ -266,6 +273,7 @@ function FinishCard({
           label="Зачем сохраняешь без проверки?"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
+          maxLength={1000}
         />
       )}
       <Error_ message={a.error?.message ?? null} />
@@ -291,9 +299,10 @@ function FinishCard({
               const r = await api<{ version: number | null }>(`${path(accountId)}/finish`, {
                 ...(unchanged ? {} : { override: { reason } }),
               })
+              // First the saved card, then the refetch that finds the draft closed: no flash of the start card.
+              onSaved(r.version)
               await qc.invalidateQueries({ queryKey: ['direction', accountId] })
               await qc.invalidateQueries({ queryKey: ['onboarding', accountId] })
-              onSaved(r.version)
             })
           }
         >
@@ -328,14 +337,20 @@ function Wizard({
     return {
       n,
       title,
-      state: n === step ? 'current' : !built ? 'soon' : done ? 'done' : 'todo',
+      state:
+        n === step ? 'current' : !built ? 'soon' : st?.skipped ? 'skipped' : done ? 'done' : 'todo',
       onOpen: built ? () => setSelected(n) : undefined,
     }
   })
   return (
     <>
-      <Stepper steps={items} current={Math.min(step, TITLES.length)} />
-      {step <= 3 ? (
+      {view.broken ? (
+        <Card>
+          <p role="alert">Черновик не читается: отмени его и начни настройку заново.</p>
+        </Card>
+      ) : null}
+      {view.broken ? null : <Stepper steps={items} current={Math.min(step, TITLES.length)} />}
+      {view.broken ? null : step <= 3 ? (
         <StepCard
           key={step}
           n={step}

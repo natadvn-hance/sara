@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { directionOnboarding, event } from '../../src/db/schema'
+import { directionOnboarding, directionOverride, event } from '../../src/db/schema'
 import {
   cancelOnboarding,
   confirmStep,
@@ -206,7 +206,9 @@ describe('onboarding flow', { timeout: 30000 }, () => {
     const r = await finishOnboarding(db, ACC, { override: { reason: 'секретное слово Бориса' } })
     expect(r).toEqual({ ok: true, version: 2 })
     const [row] = await db.select().from(directionOnboarding)
-    expect(row).toMatchObject({ state: 'finished', overrideReason: 'секретное слово Бориса' })
+    expect(row?.state).toBe('finished')
+    const kept = await db.select().from(directionOverride)
+    expect(kept).toMatchObject([{ accountId: ACC, version: 2, reason: 'секретное слово Бориса' }])
     const events = await db.select().from(event)
     expect(JSON.stringify(events)).not.toContain('секретное слово Бориса')
     expect(JSON.stringify(events)).not.toContain('слова для шага')
@@ -264,5 +266,109 @@ describe('onboarding flow', { timeout: 30000 }, () => {
       reason: 'bad_step',
     })
     expect(await confirmStep(db, ACC, 1)).toBeNull()
+  })
+
+  it('FR-ACC-3: a step said again after «Да, правильно» is pending until it is confirmed again', async () => {
+    const { gateway } = await fakeGateway(db, ANSWERS)
+    await startOnboarding(db, ACC, 'edit')
+    await sayAndConfirm(gateway, 1)
+    expect((await getOnboarding(db, ACC))?.step).toBe(2)
+    expect((await getOnboarding(db, ACC))?.changes).toContain('Изменено описание направления')
+    await submitStep({ db, gateway }, ACC, 1, { say: 'иначе' })
+    const v = await getOnboarding(db, ACC)
+    expect(v?.steps['1']?.confirmed).toBeNull()
+    expect(v?.step).toBe(1)
+    // The old reading is not what a finish would save.
+    expect(v?.changes).toEqual([])
+  })
+
+  it('FR-ACC-3: rules the model returned in another order are no change, for the view and for finishing', async () => {
+    const reordered = {
+      ...IDEAL,
+      axes: [...RULES_V1.axes].reverse(),
+      threshold: RULES_V1.threshold,
+      notes: [...RULES_V1.notes].reverse(),
+    }
+    const { gateway } = await fakeGateway(db, { ...ANSWERS, 'onboarding-ideal': reordered })
+    await startOnboarding(db, ACC, 'edit')
+    await skipStep(db, ACC, 1)
+    await skipStep(db, ACC, 2)
+    await sayAndConfirm(gateway, 3)
+    const v = await getOnboarding(db, ACC)
+    expect(v).toMatchObject({ changed: false, changes: [] })
+    expect(await finishOnboarding(db, ACC, {})).toEqual({ ok: true, version: null })
+    expect(await versions()).toHaveLength(1)
+  })
+
+  it('FR-ACC-3: the reason for saving below the target stays after the next onboarding starts', async () => {
+    const { gateway } = await fakeGateway(db, ANSWERS)
+    await startOnboarding(db, ACC, 'edit')
+    for (const step of [1, 2, 3] as const) await sayAndConfirm(gateway, step)
+    await finishOnboarding(db, ACC, { override: { reason: 'проверю позже' } })
+    await startOnboarding(db, ACC, 'edit')
+    const rows = (
+      await db.execute(sql`select account_id, version, reason from core.direction_override`)
+    ).rows
+    expect(rows).toEqual([{ account_id: ACC, version: 2, reason: 'проверю позже' }])
+  })
+
+  it('FR-ACC-3: cancelling a finished onboarding changes nothing and cancelling an open one is journaled', async () => {
+    const { gateway } = await fakeGateway(db, ANSWERS)
+    await startOnboarding(db, ACC, 'edit')
+    for (const step of [1, 2, 3] as const) await sayAndConfirm(gateway, step)
+    await finishOnboarding(db, ACC, { override: { reason: 'да' } })
+    await cancelOnboarding(db, ACC)
+    const [row] = await db.select().from(directionOnboarding)
+    expect(row?.state).toBe('finished')
+    expect(await countEvents(db, 'direction.onboarding_cancelled')).toBe(0)
+    await startOnboarding(db, ACC, 'edit')
+    await cancelOnboarding(db, ACC)
+    expect(await countEvents(db, 'direction.onboarding_cancelled')).toBe(1)
+  })
+
+  it('FR-ACC-3: a finish that changed nothing is journaled too', async () => {
+    const { gateway } = await fakeGateway(db, { ...ANSWERS, 'onboarding-about': SAME_ABOUT })
+    await startOnboarding(db, ACC, 'edit')
+    await sayAndConfirm(gateway, 1)
+    await skipStep(db, ACC, 2)
+    await skipStep(db, ACC, 3)
+    await finishOnboarding(db, ACC, {})
+    const [e] = await db.select().from(event).where(eq(event.type, 'direction.onboarding_finished'))
+    expect(e?.payload).toMatchObject({ version: null })
+  })
+
+  it('FR-ACC-3: a slow answer for a cancelled draft does not land in the next one', async () => {
+    const { gateway } = await fakeGateway(db, ANSWERS, { FAKE_CLAUDE_DELAY_MS: '600' })
+    await startOnboarding(db, ACC, 'edit')
+    const slow = submitStep({ db, gateway }, ACC, 1, { say: 'медленно' })
+    await new Promise((r) => setTimeout(r, 200))
+    await cancelOnboarding(db, ACC)
+    await startOnboarding(db, ACC, 'new')
+    expect(await slow).toMatchObject({ ok: false, reason: 'no_onboarding' })
+    expect((await getOnboarding(db, ACC))?.steps['1']).toBeUndefined()
+  })
+
+  it('FR-ACC-3: a draft that no longer reads is reported as broken and can be cancelled', async () => {
+    const { gateway } = await fakeGateway(db, ANSWERS)
+    await startOnboarding(db, ACC, 'edit')
+    await db.execute(sql`update core.direction_onboarding set draft = '{"steps": 5}'::jsonb`)
+    expect(await getOnboarding(db, ACC)).toMatchObject({ broken: true, step: 1, steps: {} })
+    expect(await submitStep({ db, gateway }, ACC, 1, { say: 'x' })).toMatchObject({
+      ok: false,
+      reason: 'broken',
+    })
+    expect(await confirmStep(db, ACC, 1)).toBeNull()
+    await cancelOnboarding(db, ACC)
+    expect(await getOnboarding(db, ACC)).toBeNull()
+  })
+
+  it('FR-ACC-3: step 3 sees the texts of the stop factors, not only their ids', async () => {
+    const { gateway, calls } = await fakeGateway(db, ANSWERS)
+    await startOnboarding(db, ACC, 'edit')
+    await sayAndConfirm(gateway, 2)
+    await submitStep({ db, gateway }, ACC, 3, { say: 'лучшие заказы' })
+    const last = (await calls()).at(-1)
+    expect(last?.role).toBe('onboarding-ideal')
+    expect(last?.stdin).toContain('Только Директ')
   })
 })

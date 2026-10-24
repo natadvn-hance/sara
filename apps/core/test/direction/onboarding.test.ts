@@ -73,10 +73,12 @@ describe('onboarding steps', { timeout: 30000 }, () => {
     expect(await calls()).toHaveLength(2)
   })
 
-  it('FR-ACC-3: an answer off the schema is asked once more, then a miss', async () => {
+  it('FR-ACC-3: an answer off the schema is asked once more with what was wrong, then a miss', async () => {
     const { gateway, calls } = await fakeGateway(db, { 'onboarding-about': { oops: 1 } })
     expect(await proposeStep({ gateway }, 1, NOTHING)).toEqual({ ok: false, reason: 'invalid' })
-    expect(await calls()).toHaveLength(2)
+    const all = await calls()
+    expect(all).toHaveLength(2)
+    expect(all[1]?.stdin).toMatch(/Прошлый ответ не подошёл: Ответ не подошёл к схеме: .{10,}/)
   })
 
   it('FR-ACC-3: a model failure is a miss', async () => {
@@ -115,7 +117,10 @@ describe('onboarding steps', { timeout: 30000 }, () => {
     const { gateway, calls } = await fakeGateway(db, { 'onboarding-ideal': IDEAL })
     await proposeStep({ gateway }, 3, {
       say: 'лучшие заказы про системность',
-      confirmed: { about: 'Подтверждённое описание', stopFactorIds: ['direct'] },
+      confirmed: {
+        about: 'Подтверждённое описание',
+        stopFactors: [{ id: 'direct', text: 'Только Директ' }],
+      },
       current: RULES_V1,
     })
     const [call] = await calls()

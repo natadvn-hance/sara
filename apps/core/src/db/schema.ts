@@ -454,8 +454,21 @@ export const directionOnboarding = core.table('direction_onboarding', {
   basedOnVersion: integer('based_on_version'),
   draft: jsonb('draft').notNull(),
   state: text('state').notNull().default('open'),
-  /** Why Boris saved below the calibration target; kept here, never in the journal. */
-  overrideReason: text('override_reason'),
   startedAt: ts('started_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 })
+
+/**
+ * Why Boris saved a rules version below the calibration target (his words, so never in the journal). Kept for
+ * good: the draft row that first held it is replaced by the next onboarding.
+ */
+export const directionOverride = core.table(
+  'direction_override',
+  {
+    accountId: text('account_id').notNull(),
+    version: integer('version').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.version] })],
+)

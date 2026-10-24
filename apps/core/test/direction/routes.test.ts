@@ -1,6 +1,7 @@
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { sql } from 'drizzle-orm'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { seedAccounts } from '../../src/accounts/accounts'
 import { seedProfile } from '../../src/direction/profile'
@@ -204,6 +205,23 @@ describe('direction page API', () => {
       expect((await post(`/api/directions/${ACC}/onboarding/steps/2/confirm`, {})).statusCode).toBe(
         409,
       )
+    })
+
+    it('FR-ACC-3: a correction of spaces only and a text that is too long are refused', async () => {
+      await post(`/api/directions/${ACC}/onboarding`, { mode: 'edit' })
+      expect((await say(1, { say: 'слова', fix: '   ' })).statusCode).toBe(400)
+      expect((await say(1, { say: 'а'.repeat(4001) })).statusCode).toBe(400)
+    })
+
+    it('FR-ACC-3: a broken draft does not break the direction page', async () => {
+      await post(`/api/directions/${ACC}/onboarding`, { mode: 'edit' })
+      await db.execute(sql`update core.direction_onboarding set draft = '{"steps": 5}'::jsonb`)
+      const page = await get(`/api/directions/${ACC}`)
+      expect(page.statusCode).toBe(200)
+      expect(page.json().onboarding).toEqual({ open: true, step: 1 })
+      expect((await get(`/api/directions/${ACC}/onboarding`)).json().onboarding.broken).toBe(true)
+      expect((await say(1, { say: 'x' })).statusCode).toBe(409)
+      expect((await post(`/api/directions/${ACC}/onboarding/cancel`, {})).statusCode).toBe(200)
     })
 
     it('FR-ACC-3: cancelling closes the draft', async () => {
