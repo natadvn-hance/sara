@@ -2,7 +2,6 @@ import { join } from 'node:path'
 import type { SessionHealthOutput } from '@sara/shared'
 import type { Page } from 'playwright'
 import { type BidRuntime, createBidTools } from './bid/bidTools'
-import { startFormCalibration } from './bid/calibration'
 import { type AccountBrowser, openAccountBrowser } from './browser/accountBrowser'
 import { checkEgress } from './browser/egress'
 import type { NodeConfig } from './config'
@@ -164,15 +163,6 @@ export async function startProfiService(
       viewers.n === 0 &&
       guard.mayNavigate()
 
-    // The node opens the bid form itself to map it, a few times an hour, never sending (src/bid/calibration.ts).
-    const calibration = startFormCalibration({
-      accountId: acc.id,
-      db,
-      page: () => ab.page,
-      eyes,
-      parsers,
-    })
-
     // The site is opened only from the account's own IP; until then the tab stays away from it.
     const start = async () => {
       a.egress = await checkEgress(ab.page, c.egressEchoUrl, acc.egressIp)
@@ -186,7 +176,6 @@ export async function startProfiService(
         chatsEveryMs: timing.chatsEveryMs,
         canNavigate,
         onNavigate: (ok) => guard.report(ok),
-        afterOrderPage: (id) => calibration.afterOrderPage(id),
       })
       await a.insurance.feedOnce()
       await a.watch.tick()
@@ -219,7 +208,6 @@ export async function startProfiService(
       clearInterval(tick)
       clearInterval(egressTimer)
       watchedMaps.stop()
-      calibration.stop()
       a.insurance?.stop()
       await ab.close()
     }

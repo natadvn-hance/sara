@@ -34,8 +34,6 @@ export function startInsurance(o: {
   chatPauseMs?: number
   canNavigate?: () => boolean
   onNavigate?: (ok: boolean) => Promise<void> | void
-  /** On each order page this check opened, while the tab is still there (the form calibration, src/bid). */
-  afterOrderPage?: (orderId: string) => Promise<void>
 }): Insurance {
   const can = o.canNavigate ?? (() => true)
   const pause = o.chatPauseMs ?? 2000
@@ -91,7 +89,6 @@ export function startInsurance(o: {
       opened++
       const page = await fromOrderDom(o.ab.page, id)
       await keepFormMap()
-      if (o.afterOrderPage && can()) await o.afterOrderPage(id).catch(() => {})
       await o.eyes.onParsed(page, 'dom')
       // An expired or changed page still lets a board order through, without its fee.
       if (!page.signals.some((s) => s.t === 'order')) await o.eyes.settleOrder(id)
