@@ -6,7 +6,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { event, lead, task } from '../../apps/core/src/db/schema'
+import { event, lead, outbox, task } from '../../apps/core/src/db/schema'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
@@ -173,5 +173,32 @@ describe('the draft on the card', () => {
       `Черновик отклика:\n${DRAFT}`,
     )
     expect(await leadOf(id)).toMatchObject({ draftText: DRAFT, draftPriceRub: 90000 })
+  })
+})
+
+describe('the bid', () => {
+  it('FR-LEAD-8: «Откликнуться» sends the draft and its price', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    expect(fake.bids).toHaveLength(1)
+    expect(fake.bids[0]).toMatchObject({ order_id: id, text: DRAFT, price_rub: 90000 })
+  })
+
+  it('FR-LEAD-7: «Откликнуться» without a draft asks for «Изменить» and records nothing', async () => {
+    byRole = { ...byRole, analyst: { nothing: true } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.answers.length === 1)
+    expect(tg.answers[0]?.text).toBe('Сначала нажми «Изменить» и пришли текст отклика')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(await db.select().from(outbox)).toHaveLength(0)
+    expect(fake.bids).toHaveLength(0)
+    const [t] = await db.select().from(task).where(eq(task.entityId, id))
+    expect(t?.state).toBe('open')
   })
 })

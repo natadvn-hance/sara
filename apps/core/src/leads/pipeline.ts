@@ -44,10 +44,6 @@ function d(): LeadPipelineDeps {
   return deps
 }
 
-export function bidText(title: string): string {
-  return `Добрый день! Агентство Hance, готовы помочь с задачей «${title}». Расскажите, пожалуйста, подробнее.`
-}
-
 const ev = (
   type:
     | 'lead.found'
@@ -484,6 +480,9 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       ) {
         return TEXTS.bidsPausedPress
       }
+      // No text to send yet: nothing is decided, the card waits for «Изменить».
+      const text = l.draftText
+      if (action === 'bid' && found.task.state === 'open' && text === null) return TEXTS.noDraft
       let outboxId: string | null = null
       const resolved = await d().db.transaction(async (tx) => {
         const rows = await tx
@@ -503,15 +502,18 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
             ev('lead.skipped', { kind: 'lead', id: l.id }, l.correlationId, 'boris'),
           )
         } else {
+          // Checked above; should the draft be gone, the whole decision rolls back rather than bid without it.
+          if (text === null) throw new Error('a bid without its text')
           // Boris's decision and the intent to bid commit together: a crash cannot lose one of them.
           outboxId = (
             await recordBid(tx, {
               leadId: l.id,
               accountId: l.accountId,
-              text: bidText(l.title),
+              text,
               correlationId: l.correlationId,
               title: l.title,
               priceRub: l.bidPriceRub,
+              servicePriceRub: l.draftPriceRub,
               taskId,
             })
           ).outboxId

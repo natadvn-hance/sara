@@ -146,7 +146,7 @@ describe('walking skeleton', () => {
     tg.pushPress(111, lastCardData('bid'))
     await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
     expect(fake.bids).toHaveLength(1)
-    expect(fake.bids[0]?.text).toMatch(/^Добрый день!/)
+    expect(fake.bids[0]?.text).toMatch(/^Ирина, добрый день!\n\nПонимаю, клинике/)
     expect(fake.bids[0]?.idempotency_key).toBe(`bid:${id}`)
     expect(await count('bid.sent')).toBe(1)
     const [d] = await db.select().from(deal).where(eq(deal.leadId, id))
