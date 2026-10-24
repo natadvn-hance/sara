@@ -1,0 +1,7 @@
+{
+  "name": "reminder",
+  "version": 1,
+  "model": "sonnet",
+  "priority": "P1",
+  "timeoutMs": 120000
+}
