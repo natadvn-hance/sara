@@ -1,5 +1,5 @@
 import { formatCallback, newEventId, type TaskAction, type Tone } from '@sara/shared'
-import { and, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, convTurn, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -144,4 +144,49 @@ export async function redrawCard(d: CardDeps, t: Row, tail: string): Promise<voi
     `${CONV_TEXTS.card(view)}\n\n${tail}`,
     rowsFor(t.taskId, t, view.shadow),
   )
+}
+
+/**
+ * The words of a client Boris leads, or of a closed conversation, go to him (FR-NOTIF-1 «Клиент написал») with
+ * «Вернуть Саре». Only after the switch: in shadow old Sara still tells him herself.
+ */
+export async function forwardTurn(
+  d: CardDeps & { notifier: Pick<Notifier, 'sendButtons'> },
+  turnId: string,
+) {
+  if (await getSetting(d.db, 'conv.v1_writes')) return
+  const [t] = await d.db.select().from(convTurn).where(eq(convTurn.id, turnId))
+  if (!t || t.cardMessageId !== null) return
+  const conv = await getConversation(d.db, t.conversationId)
+  const view = await cardView(d.db, t)
+  const words =
+    view.clientWords ||
+    (
+      await d.db
+        .select({ text: chatMessage.text })
+        .from(chatMessage)
+        .where(
+          and(eq(chatMessage.conversationId, t.conversationId), eq(chatMessage.side, 'client')),
+        )
+        .orderBy(desc(chatMessage.sentAt))
+        .limit(1)
+    )[0]?.text ||
+    ''
+  const taskId = newEventId()
+  const m = await d.notifier.sendButtons(
+    CONV_TEXTS.forward(view.name, view.orderTitle, words, conv?.closedAt !== null),
+    [[{ text: CONV_TEXTS.buttons.giveBack, callbackData: formatCallback(taskId, 'return') }]],
+  )
+  await d.db.insert(task).values({
+    id: taskId,
+    kind: 'conv_draft',
+    entityKind: 'conv_turn',
+    entityId: turnId,
+    priority: 'P1',
+    telegramMessageId: m.messageId,
+  })
+  await d.db
+    .update(convTurn)
+    .set({ taskId, cardMessageId: m.messageId })
+    .where(eq(convTurn.id, turnId))
 }
