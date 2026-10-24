@@ -1,0 +1,253 @@
+import { CHECK_IDS } from '@sara/shared'
+import { describe, expect, it } from 'vitest'
+import {
+  checkReplyText,
+  extractNumbers,
+  isNewMoscowDay,
+  startsWithGreeting,
+} from '../../src/conversation/check/codeChecks'
+import type { CheckInput } from '../../src/conversation/types'
+
+const LONG = String.fromCharCode(0x2014)
+const MEDIUM = String.fromCharCode(0x2013)
+const NBSP = '\u00a0'
+
+const input = (over: Partial<CheckInput> = {}): CheckInput => ({
+  text: 'Понимаю, сайт нужен к запуску.\n\nУдобно созвониться и обсудить детали?',
+  move: 'reply',
+  factIds: ['j-constitution', 'k-price-landing'],
+  recalledIds: ['j-constitution', 'k-price-landing', 'k-cases', 'u-price-question'],
+  knowledgeTexts: {
+    'k-price-landing': 'Лендинг стоит от 50 000 рублей, делаем за 2-3 недели. Предоплата 30%.',
+    'k-cases': 'Сайт клиники за 70 000 рублей.',
+  },
+  newDay: false,
+  clientTurnText: 'Сколько стоит лендинг и как быстро сделаете?',
+  ourPrevious: ['Добрый день! Понимаю задачу.\n\nКакой срок запуска для вас важен?'],
+  bannedPhrases: [],
+  ...over,
+})
+const ids = (over: Partial<CheckInput>) => checkReplyText(input(over)).map((x) => x.id)
+
+describe('the code checks of a reply', () => {
+  it('FR-CONV-4: a plain reply on the same day passes every check', () => {
+    expect(checkReplyText(input())).toEqual([])
+  })
+
+  it('FR-CONV-4: a price not in the cited knowledge fails facts.numbers', () => {
+    expect(checkReplyText(input({ text: 'Лендинг обойдётся в 90 000 рублей.' }))).toEqual([
+      { id: 'facts.numbers', detail: 'число 90 000 не из разума' },
+    ])
+    // 70 000 is in a recalled record, but the reply does not cite it.
+    expect(ids({ text: 'Сделаем за 70 000 рублей.' })).toEqual(['facts.numbers'])
+  })
+
+  it('FR-CONV-4: a number of the cited knowledge passes however its spaces and units are written', () => {
+    for (const text of [
+      'Лендинг от 50 000 рублей.',
+      'Лендинг от 50000 рублей.',
+      `Лендинг от 50${NBSP}000 рублей.`,
+      'Лендинг от 50 тысяч рублей.',
+      'Делаем за 2-3 недели, предоплата 30%.',
+    ])
+      expect(ids({ text })).toEqual([])
+  })
+
+  it('FR-CONV-4: a number the client named in this turn is allowed', () => {
+    const text = 'Понимаю, бюджет 120 000.\n\nУдобно созвониться и обсудить детали?'
+    expect(ids({ text, clientTurnText: 'Бюджет 120 000, успеете?' })).toEqual([])
+    // Named before this turn, the number is not the client's word any more.
+    expect(ids({ text, clientTurnText: 'А по срокам как?' })).toEqual(['facts.numbers'])
+  })
+
+  it('FR-CONV-4: times, dates, phones and small numbers inside words are not facts', () => {
+    expect(
+      extractNumbers(
+        'В 15:30 или 9:00, 26.10 или 27.10.2026, тел. 8 (918) 123-45-67, +7 918 123 45 67, 89181234567, 123-45-67, +375 29 123-45-67, B2B, 3D, 1С',
+      ),
+    ).toEqual([])
+    expect(extractNumbers('От 50 000 ₽, срок 2-3 недели, предоплата 30%, 1,5 месяца')).toEqual([
+      '50 000',
+      '2',
+      '3',
+      '30%',
+      '1,5',
+    ])
+  })
+
+  it('FR-CONV-3: a reply without any mind id fails facts.none', () => {
+    expect(checkReplyText(input({ factIds: [] }))).toEqual([
+      { id: 'facts.none', detail: 'в ответе нет ни одного номера записи разума' },
+    ])
+  })
+
+  it('FR-CONV-4: a cited id that was not recalled fails facts.unknown', () => {
+    expect(checkReplyText(input({ factIds: ['j-constitution', 'k-made-up'] }))).toEqual([
+      { id: 'facts.unknown', detail: 'номер k-made-up не из отобранных записей' },
+    ])
+  })
+
+  it('FR-CONV-4: a new Moscow day needs a greeting, the same day forbids it', () => {
+    // 23:50 and 00:10 by Moscow are one UTC day, two Moscow days.
+    expect(isNewMoscowDay('2026-10-24T20:50:00.000Z', new Date('2026-10-24T21:10:00.000Z'))).toBe(
+      true,
+    )
+    // 00:10 and 23:50 of one Moscow day are two UTC days.
+    expect(isNewMoscowDay('2026-10-24T21:10:00.000Z', new Date('2026-10-25T20:50:00.000Z'))).toBe(
+      false,
+    )
+    expect(isNewMoscowDay(null, new Date('2026-10-25T09:00:00.000Z'))).toBe(true)
+
+    const greeted = 'Анна, здравствуйте!\n\nУдобно созвониться и обсудить детали?'
+    const plain = 'Удобно созвониться и обсудить детали?'
+    expect(checkReplyText(input({ newDay: true, text: plain }))).toEqual([
+      { id: 'greeting.missing', detail: 'нет приветствия, а сегодня новый день' },
+    ])
+    expect(ids({ newDay: true, text: greeted })).toEqual([])
+    expect(checkReplyText(input({ newDay: false, text: greeted }))).toEqual([
+      { id: 'greeting.extra', detail: 'снова приветствие, а сегодня уже здоровались' },
+    ])
+  })
+
+  it('FR-CONV-4: a greeting may come with the name before or after it', () => {
+    for (const t of [
+      'Анна, здравствуйте!',
+      'Добрый день, Анна!',
+      'Здравствуйте!',
+      'Доброе утро. Посмотрел',
+      'добрый вечер',
+      '  Добрый день!',
+      '[имя 1], добрый день!',
+    ])
+      expect(startsWithGreeting(t), t).toBe(true)
+    for (const t of ['Приветливый персонал решает', 'Понимаю вас.', 'Анна, понимаю вас.', ''])
+      expect(startsWithGreeting(t), t).toBe(false)
+  })
+
+  it('FR-CONV-4: a long or medium dash anywhere fails', () => {
+    for (const dash of [LONG, MEDIUM])
+      expect(checkReplyText(input({ text: `Понимаю ${dash} это важно.` }))).toEqual([
+        { id: 'dash', detail: 'длинное или среднее тире' },
+      ])
+  })
+
+  it('FR-CONV-4: Sara never promises to call', () => {
+    for (const text of [
+      'Я вам перезвоню завтра.',
+      'Наберу вас после обеда.',
+      'Давайте я вам позвоню?',
+      'Свяжусь с вами по телефону.',
+      'Могу вам позвонить?',
+      'Мы вам перезвоним.',
+      'Созвонимся в 15:00?',
+      'Давайте созвонимся в 11 утра.',
+    ])
+      expect(ids({ text }), text).toEqual(['promise.call'])
+    for (const text of [
+      'Удобно созвониться?',
+      'Давайте созвонимся, когда вам удобно?',
+      'Во сколько вам удобно созвониться?',
+    ])
+      expect(ids({ text }), text).toEqual([])
+  })
+
+  it('FR-CONV-4: banned phrases from the portrait are robotic', () => {
+    expect(
+      checkReplyText(input({ text: 'Понимаю. Всего доброго!', bannedPhrases: ['Всего доброго'] })),
+    ).toEqual([{ id: 'robotic.phrase', detail: 'роботная фраза «Всего доброго»' }])
+    // Case and ё do not hide a phrase, and «Буду рада» is not also «Буду рад».
+    expect(ids({ text: 'Все получится.', bannedPhrases: ['Всё получится'] })).toEqual([
+      'robotic.phrase',
+    ])
+    expect(ids({ text: 'Буду рада обсудить.' })).toEqual(['robotic.phrase'])
+    expect(ids({ text: 'Отличный вопрос! Надеюсь это поможет.' })).toEqual([
+      'robotic.phrase',
+      'robotic.phrase',
+    ])
+    expect(ids({ text: 'Радость клиента важна.' })).toEqual([])
+  })
+
+  it('FR-CONV-4: Sara never speaks of herself as a program', () => {
+    for (const text of [
+      'Я бот, но помогу.',
+      'Как ИИ, я не могу.',
+      'Это пишет искусственный интеллект.',
+      'Ответила нейросеть.',
+      'Я языковая модель.',
+      'Я программа.',
+    ])
+      expect(ids({ text }), text).toEqual(['robotic.ai'])
+  })
+
+  it('FR-CONV-4: lists and markup are robotic', () => {
+    for (const text of ['Есть два пути:\n1. Сайт\n2. Реклама', '- сайт', '• сайт', '* сайт'])
+      expect(ids({ text }), text).toEqual(['robotic.list'])
+    for (const text of ['Это **важно**.', '# Итог', 'Поле `title`.'])
+      expect(ids({ text }), text).toEqual(['robotic.markup'])
+  })
+
+  it('FR-CONV-4: a reply too long for the client turn is robotic', () => {
+    const words = (n: number) => 'слово '.repeat(n).trim()
+    expect(ids({ text: words(101), clientTurnText: 'Расскажите подробнее' })).toEqual([
+      'robotic.length',
+    ])
+    const turn = 'Нам нужен лендинг для курсов английского языка'
+    expect(turn.length).toBeGreaterThan(40)
+    expect(ids({ text: words(4 * 8), clientTurnText: turn })).toEqual(['robotic.length'])
+    expect(ids({ text: words(4 * 7), clientTurnText: turn })).toEqual([])
+    expect(ids({ text: words(50), clientTurnText: 'Короче?' })).toEqual([])
+  })
+
+  it('FR-CONV-4: repeating our message or quoting the client is robotic', () => {
+    const ourPrevious = ['Подскажите, какой срок запуска для вас важен и есть ли уже сайт?']
+    expect(
+      ids({ ourPrevious, text: 'Понимаю. Какой срок запуска для вас важен и когда старт?' }),
+    ).toEqual([])
+    expect(
+      checkReplyText(
+        input({
+          ourPrevious,
+          text: 'Понимаю. Какой срок запуска для вас важен и есть ли уже сайт?',
+        }),
+      ),
+    ).toEqual([
+      {
+        id: 'robotic.repeat',
+        detail: 'повтор прошлого сообщения: «какой срок запуска для вас важен и есть»',
+      },
+    ])
+    const clientTurnText = 'Нам нужен лендинг для курсов английского языка, срочно'
+    expect(ids({ clientTurnText, text: 'Понимаю, лендинг для курсов английского нужен.' })).toEqual(
+      [],
+    )
+    expect(
+      checkReplyText(
+        input({ clientTurnText, text: 'Понимаю, нужен лендинг для курсов английского языка.' }),
+      ),
+    ).toEqual([
+      {
+        id: 'robotic.quote',
+        detail: 'дословно из слов клиента: «нужен лендинг для курсов английского языка»',
+      },
+    ])
+  })
+
+  it('FR-CONV-4: move none and call_boris need no text', () => {
+    expect(checkReplyText(input({ move: 'none', text: null, factIds: [] }))).toEqual([])
+    expect(checkReplyText(input({ move: 'call_boris', text: null, factIds: [] }))).toEqual([])
+    expect(checkReplyText(input({ move: 'reply', text: null }))).toEqual([
+      { id: 'empty', detail: 'ход «ответить», а текста нет' },
+    ])
+    expect(ids({ move: 'reply', text: '  \n ' })).toEqual(['empty'])
+  })
+
+  it('FR-CONV-4: every problem of a reply is found, not only the first', () => {
+    const issues = checkReplyText(
+      input({ newDay: true, factIds: [], text: `Отличный вопрос ${LONG} лендинг за 90 000.` }),
+    )
+    expect(issues.map((x) => x.id).sort()).toEqual(
+      ['dash', 'facts.none', 'facts.numbers', 'greeting.missing', 'robotic.phrase'].sort(),
+    )
+    for (const x of issues) expect(CHECK_IDS).toContain(x.id)
+  })
+})

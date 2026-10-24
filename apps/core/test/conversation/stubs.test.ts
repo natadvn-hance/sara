@@ -1,7 +1,6 @@
 import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { checkReplyText } from '../../src/conversation/check/codeChecks'
 import { event, mindProposal, outbox } from '../../src/db/schema'
 import { isBidRow, resumeQueuedOutbox } from '../../src/leads/outbox'
 import { proposeMind } from '../../src/mind/proposals'
@@ -22,21 +21,6 @@ describe('M4 part 0', () => {
       payload: { chatId: '95147898', text: 'Добрый день' },
     })
     expect(await resumeQueuedOutbox(db)).toBe(0)
-  })
-
-  it('FR-CONV-4: the code checks stub blocks every reply', () => {
-    const issues = checkReplyText({
-      text: 'Добрый день',
-      move: 'reply',
-      factIds: ['j-constitution'],
-      recalledIds: ['j-constitution'],
-      knowledgeTexts: {},
-      newDay: true,
-      clientTurnText: 'Здравствуйте',
-      ourPrevious: [],
-      bannedPhrases: [],
-    })
-    expect(issues.length).toBeGreaterThan(0)
   })
 
   it('FR-MIND-3: a proposal is stored once and journaled', async () => {
