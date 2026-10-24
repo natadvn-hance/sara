@@ -2,6 +2,11 @@ import { sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { getSetting } from '../settings/store'
 
+/** Card flow texts for Boris (Russian, plain, no long dash). */
+export const CARD_FLOW_TEXTS = {
+  staleHeld: 'Заявке больше суток, карточку не присылаю.',
+}
+
 /** FR-LEAD-10: an order older than this is not offered. */
 const STALE_AFTER_MS = 24 * 3600_000
 

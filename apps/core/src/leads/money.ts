@@ -7,6 +7,8 @@ import { getSetting } from '../settings/store'
 /** Why a bid was not recorded, in Boris's words (Russian, plain, no long dash). */
 export const MONEY_TEXTS = {
   noWallet: 'Не вижу баланс кошелька на Профи.ру, отклик не отправила. Нажми ещё раз через минуту.',
+  unknownFee:
+    'Не знаю цену отклика на эту заявку, а потолок или бюджет дня включены. Отклик не отправила.',
   overCeiling: (fee: number, max: number) =>
     `Отклик стоит ${formatRub(fee)}, это выше потолка ${formatRub(max)} за отклик. Отклик не отправила.`,
   lowWallet: (available: number, fee: number, queued: boolean) =>
@@ -17,15 +19,28 @@ export const MONEY_TEXTS = {
     `Сегодня уже ${n} ${plural(n, ['отклик', 'отклика', 'откликов'])} из ${cap}, это дневной лимит. Отклик не отправила.`,
 }
 
-/** The wallet from the session health; null when the node does not answer or does not know it yet. */
+/** How long a press waits for the wallet: Telegram's answer to a button must not expire meanwhile. */
+const WALLET_WAIT_MS = 5000
+
+/**
+ * The wallet from the session health; null when the node does not answer within `waitMs` or does not know it
+ * yet.
+ */
 export async function readWallet(
   profi: Pick<ProfiClient, 'sessionHealth'>,
   accountId: string,
+  waitMs = WALLET_WAIT_MS,
 ): Promise<number | null> {
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), waitMs)
+  })
   try {
-    return (await profi.sessionHealth(accountId)).balance_rub
+    return await Promise.race([profi.sessionHealth(accountId).then((h) => h.balance_rub), late])
   } catch {
     return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -71,11 +86,13 @@ export async function refuseSpend(
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('sara:money'))`)
   if (c.balanceRub === null) return MONEY_TEXTS.noWallet
   const max = await getSetting(tx, 'money.max_fee_rub')
+  const budget = await getSetting(tx, 'money.daily_budget_rub')
+  // The node sends 0 when the order page could not be read: the real fee is charged on the site.
+  if (c.feeRub <= 0 && (max !== null || budget !== null)) return MONEY_TEXTS.unknownFee
   if (max !== null && c.feeRub > max) return MONEY_TEXTS.overCeiling(c.feeRub, max)
   const day = await dayOf(tx, c.now)
   const available = c.balanceRub - day.queuedRub
   if (available < c.feeRub) return MONEY_TEXTS.lowWallet(available, c.feeRub, day.queuedRub > 0)
-  const budget = await getSetting(tx, 'money.daily_budget_rub')
   const spent = day.spent + day.pendingRub
   if (budget !== null && spent + c.feeRub > budget)
     return MONEY_TEXTS.overBudget(budget, spent, c.feeRub)

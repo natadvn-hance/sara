@@ -15,7 +15,7 @@ import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
-import { cardsToday, isStale, lockCards, quietNow } from './cardFlow'
+import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import { readWallet, refuseSpend } from './money'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
@@ -400,6 +400,15 @@ async function onWant(reviewId: string): Promise<string> {
 
 /** «Показать» from the daily summary: an order held over the card cap comes as a card; Boris has not decided yet. */
 async function onOpen(heldId: string): Promise<string> {
+  const found = await leadOfTask(heldId)
+  // FR-LEAD-10 at the press, which may come days after the summary. The lead keeps no publication time; seen_at
+  // is never earlier, so this errs toward showing.
+  if (
+    found?.task.kind === 'lead_held' &&
+    found.task.state === 'open' &&
+    isStale(found.lead.seenAt, new Date())
+  )
+    return CARD_FLOW_TEXTS.staleHeld
   return (await bringCard(heldId, 'lead_held', 'open')) ? TEXTS.wantCard : TEXTS.alreadyDone
 }
 

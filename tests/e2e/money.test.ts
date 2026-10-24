@@ -278,4 +278,27 @@ describe('held orders in the summary', () => {
     expect(created.map((e) => (e.payload as { via?: string }).via)).toEqual(['summary'])
     expect((await speedReport(db)).leadToCard.count).toBe(1)
   })
+
+  it('FR-LEAD-10: «Показать» on an order seen over 24 hours ago brings no card', async () => {
+    await setSetting(db, 'cards.max_per_day', 1, 'boris')
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => cards().length === 1)
+    const held = orderId()
+    await fake.emitOrder({ order_id: held })
+    await until(async () => (await eventTypesOf(held)).includes('lead.held'))
+    expect(await dailySummary({ db, notifier: app.bot.notifier }, summaryTime())).toBe('sent')
+    const show = tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]
+    // Pressed the next evening: the order is over a day old.
+    await db
+      .update(lead)
+      .set({ seenAt: hoursAgo(25) })
+      .where(eq(lead.id, held))
+    const before = cards().length
+    tg.pushPress(111, show?.callback_data ?? '')
+    await until(() => tg.answers.length === 1)
+    expect(tg.answers[0]?.text).toBe('Заявке больше суток, карточку не присылаю.')
+    await settle()
+    expect(cards()).toHaveLength(before)
+    expect(await decisionTaskOf(held)).toMatchObject({ kind: 'lead_held', state: 'open' })
+  })
 })

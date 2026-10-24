@@ -156,6 +156,25 @@ describe('spend check', () => {
     )
   })
 
+  it('FR-LEAD-9: an unknown fee is refused while a ceiling or a budget is set', async () => {
+    const unknown =
+      'Не знаю цену отклика на эту заявку, а потолок или бюджет дня включены. Отклик не отправила.'
+    // Without limits the day's cap still holds and the site checks the wallet itself.
+    expect(await check(0)).toBeNull()
+    await setSetting(db, 'money.max_fee_rub', 300, 'boris')
+    expect(await check(0)).toBe(unknown)
+    await setSetting(db, 'money.max_fee_rub', null, 'boris')
+    await setSetting(db, 'money.daily_budget_rub', 1000, 'boris')
+    expect(await check(0)).toBe(unknown)
+  })
+
+  it('FR-LEAD-9: a node that does not answer in time leaves the wallet unknown', async () => {
+    const hung = () => new Promise<never>(() => {})
+    const started = Date.now()
+    expect(await readWallet({ sessionHealth: hung }, 'hance-marketing', 200)).toBeNull()
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+
   it('FR-LEAD-9: the wallet is read from the session health, unknown when the node does not answer', async () => {
     const health = (balance_rub: number | null) => async () => ({
       alive: true,
