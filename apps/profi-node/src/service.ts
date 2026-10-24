@@ -8,6 +8,7 @@ import { createNodeDb } from './db/client'
 import { migrateNode } from './db/migrate'
 import { createEyes } from './eyes/eyes'
 import { type Insurance, startInsurance } from './eyes/insurance'
+import type { Parsers } from './eyes/parsers'
 import { activeParsers } from './eyes/profiParsers'
 import { attachRecorder } from './eyes/recorder'
 import { serveMcp } from './mcp/http'
@@ -45,6 +46,8 @@ export type ProfiService = {
 export type ServiceOptions = Partial<ServiceTimings> & {
   /** The browser of an account died or hangs: by default the process exits so Docker restarts it cleanly. */
   onBrowserGone?: (accountId: string) => void
+  /** Page readers; the real Profi.ru ones by default (tests use the stand-in site's). */
+  parsers?: Parsers
 }
 
 type Account = {
@@ -72,7 +75,7 @@ export async function startProfiService(
   }
   await migrateNode(c.databaseUrl)
   const { db, close: closeDb } = createNodeDb(c.databaseUrl)
-  const parsers = activeParsers
+  const parsers = t.parsers ?? activeParsers
   const baseHost = new URL(c.profiBaseUrl).host
   const accounts = new Map<string, Account>()
   let closing = false

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { loadNodeConfig } from '../../apps/profi-node/src/config'
 import { createNodeDb } from '../../apps/profi-node/src/db/client'
+import { standInParsers } from '../../apps/profi-node/src/eyes/parsers'
 import { type ProfiService, startProfiService } from '../../apps/profi-node/src/service'
 import { startTestCore } from '../../apps/profi-node/test/helpers/core'
 import { nodeTestUrl, resetNodeDb } from '../../apps/profi-node/test/helpers/db'
@@ -46,6 +47,7 @@ beforeAll(async () => {
     feedEveryMs: 1000,
     chatsEveryMs: 1000,
     shipPollMs: 100,
+    parsers: standInParsers,
   })
 }, 60000)
 afterAll(async () => {
@@ -87,7 +89,13 @@ describe('account on a wrong IP', () => {
         egressEchoUrl: `${site.url}/ip`,
         accounts: [{ id: 'wrong-ip', proxy: null, egressIp: '203.0.113.9' }],
       },
-      { tickMs: 200, feedEveryMs: 1000, chatsEveryMs: 1000, shipPollMs: 100 },
+      {
+        tickMs: 200,
+        feedEveryMs: 1000,
+        chatsEveryMs: 1000,
+        shipPollMs: 100,
+        parsers: standInParsers,
+      },
     )
     await new Promise((r) => setTimeout(r, 1500))
     expect(wrong.page('wrong-ip').url()).toBe('about:blank')
