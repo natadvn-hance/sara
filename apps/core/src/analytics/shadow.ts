@@ -16,7 +16,12 @@ export type ShadowReport = {
   connectionLosses: number
   layoutChanged: number
   lostEvents: number
+  /** Orders published more than OLD_ORDER_HOURS before Sara first saw them: back up the board, not new. */
+  oldOrders: number
 }
+
+/** An order first seen this long after its publication is an old or reposted one, not a new order (FR-LEAD-1). */
+export const OLD_ORDER_HOURS = 6
 
 function percentile(sorted: number[], p: number): number | null {
   if (sorted.length === 0) return null
@@ -54,7 +59,15 @@ export async function shadowReport(db: DbOrTx, from: string, to: string): Promis
     from core.event e
     join node.raw_order o on o.order_id = e.entity_id
     where e.type = 'profi.order_seen' and e.recorded_at >= ${from} and e.recorded_at < ${to}
-      and o.body->>'published_at' is not null`)
+      and o.body->>'published_at' is not null
+      and o.seen_at - (o.body->>'published_at')::timestamptz <= make_interval(hours => ${OLD_ORDER_HOURS})`)
+  const old = await db.execute<{ n: number }>(sql`
+    select count(*)::int as n
+    from core.event e
+    join node.raw_order o on o.order_id = e.entity_id
+    where e.type = 'profi.order_seen' and e.recorded_at >= ${from} and e.recorded_at < ${to}
+      and o.body->>'published_at' is not null
+      and o.seen_at - (o.body->>'published_at')::timestamptz > make_interval(hours => ${OLD_ORDER_HOURS})`)
   const messages = await db.execute<{ ms: number }>(sql`
     select extract(epoch from (e.recorded_at - (e.payload->>'sent_at')::timestamptz)) * 1000 as ms
     from core.event e
@@ -77,6 +90,7 @@ export async function shadowReport(db: DbOrTx, from: string, to: string): Promis
     connectionLosses: await count(db, 'profi.connection_lost', from, to),
     layoutChanged: await count(db, 'profi.layout_changed', from, to),
     lostEvents: Number(lost.rows[0]?.n ?? 0),
+    oldOrders: Number(old.rows[0]?.n ?? 0),
   }
 }
 
@@ -98,6 +112,7 @@ export function formatShadowReport(r: ShadowReport, from: string, to: string): s
   return [
     `Тень новой Сары с ${msk(from)} по ${msk(to)}`,
     `${ok(r.orders.count > 0 && r.orders.under60sShare >= 0.9)} Заявки: ${r.orders.count}, быстрее минуты ${share(r.orders.under60sShare)} (цель 90%), 90% быстрее ${sec(r.orders.p90SeenMs)}`,
+    `Старые и поднятые заказы: ${r.oldOrders} (опубликованы больше чем за ${OLD_ORDER_HOURS} часов до того, как Сара их увидела; в скорость не входят)`,
     `${ok(r.messages.count > 0 && r.messages.under60sShare >= 0.95)} Сообщения клиентов: ${r.messages.count}, быстрее минуты ${share(r.messages.under60sShare)} (цель 95%)`,
     `${ok(r.lostEvents === 0)} Потеряно: ${r.lostEvents}`,
     `${ok(r.authorUnclear === 0)} Автор неясен: ${r.authorUnclear}`,
