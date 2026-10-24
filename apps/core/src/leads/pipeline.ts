@@ -15,7 +15,7 @@ import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
-import { isStale } from './cardFlow'
+import { cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import { readWallet, refuseSpend } from './money'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
@@ -218,15 +218,28 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (scored.decision === 'drop') return
   }
 
+  // Runs recorded before M2 return the id; null is an order held over the day's card cap (FR-NOTIF-3).
   const taskId = await DBOS.runStep(
-    () =>
+    (): Promise<string | null> =>
       d().db.transaction(async (tx) => {
         const id = newEventId()
+        await lockCards(tx)
+        const full =
+          (await cardsToday(tx, new Date())) >= (await getSetting(tx, 'cards.max_per_day'))
         if (sorted.verdict) {
           await appendEvent(
             tx,
             ev('lead.sorted', { kind: 'lead', id: order.order_id }, correlationId, 'sara', sorted),
           )
+        }
+        if (full) {
+          // No decision task, so no reminder: the order waits for the 19:00 summary.
+          await tx.update(lead).set({ status: 'held' }).where(eq(lead.id, order.order_id))
+          await appendEvent(
+            tx,
+            ev('lead.held', { kind: 'lead', id: order.order_id }, correlationId, 'sara'),
+          )
+          return null
         }
         await tx
           .insert(task)
@@ -242,6 +255,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       }),
     { name: 'task', ...DB_STEP },
   )
+  if (taskId === null) return
 
   // The wait starts before the card goes out, so an instant press always finds it.
   const remindAfter = await DBOS.runStep(() => d().remindAfterMs(), { name: 'remindAfter' })
@@ -261,7 +275,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   try {
     await DBOS.runStep(
       async () => {
-        const m = await d().notifier.sendLeadCard(card)
+        const silent = await quietNow(d().db, new Date())
+        const m = await d().notifier.sendLeadCard(card, { silent })
         await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
       },
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
@@ -475,7 +490,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     async onReminder(taskId) {
       const card = await cardOfTask(taskId, true)
       if (!card) return
-      await d().notifier.sendLeadCard(card)
+      await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
       const found = await leadOfTask(taskId)
       if (found) {
         await appendEvent(
@@ -487,7 +502,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
 
     async resendCard(taskId) {
       const card = await cardOfTask(taskId, false)
-      if (card) await d().notifier.sendLeadCard(card)
+      if (card)
+        await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
     },
   }
 }

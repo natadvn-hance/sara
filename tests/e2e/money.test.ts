@@ -191,3 +191,40 @@ describe('orders older than 24 hours', () => {
     expect(await count('lead.stale')).toBe(0)
   })
 })
+
+describe('the card flow', () => {
+  it('FR-NOTIF-2: a card at quiet hours comes without sound', async () => {
+    // Equal hours: quiet all day, whatever the clock of the run.
+    await setSetting(db, 'cards.quiet_hours', { from: 4, to: 4 }, 'boris')
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.disable_notification).toBe(true)
+  })
+
+  it('FR-NOTIF-2: a card outside quiet hours comes with sound', async () => {
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.disable_notification).toBeUndefined()
+  })
+
+  it("FR-NOTIF-3: past the day's card cap a shown order is held, not sent", async () => {
+    await setSetting(db, 'cards.max_per_day', 1, 'boris')
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => cards().length === 1)
+    const held = orderId()
+    await fake.emitOrder({ order_id: held })
+    await until(async () => (await eventTypesOf(held)).includes('lead.held'))
+    await settle()
+    expect(cards()).toHaveLength(1)
+    expect(await eventTypesOf(held)).toEqual([
+      'profi.order_seen',
+      'lead.found',
+      'model.called',
+      'lead.sorted',
+      'lead.held',
+    ])
+    const [l] = await db.select().from(lead).where(eq(lead.id, held))
+    expect(l?.status).toBe('held')
+    expect(await decisionTaskOf(held)).toBeUndefined()
+  })
+})
