@@ -471,4 +471,27 @@ export const directionOverride = core.table(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.accountId, t.version] })],
+
+ * Scores made to try rules out (a recompute, a calibration), cached by the rules' hash so the same lead under the
+ * same rules and the same scorer prompt is never paid for twice. They never act on a lead.
+ */
+export const trialScore = core.table(
+  'trial_score',
+  {
+    rulesHash: text('rules_hash').notNull(),
+    leadId: text('lead_id').notNull(),
+    /** 'plain': haiku only; 'escalated': as in work, sonnet near the threshold. */
+    mode: text('mode').notNull(),
+    roleVersion: integer('role_version').notNull(),
+    score: integer('score').notNull(),
+    decision: text('decision').notNull(),
+    stopFactor: text('stop_factor'),
+    redFlags: jsonb('red_flags').notNull(),
+    axes: jsonb('axes').notNull(),
+    reason: text('reason').notNull(),
+    confidence: real('confidence').notNull(),
+    model: text('model').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.rulesHash, t.leadId, t.mode, t.roleVersion] })],
 )

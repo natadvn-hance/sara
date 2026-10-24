@@ -78,6 +78,13 @@
       "when": 1792878790584,
       "tag": "0010_direction_onboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792874927906,
+      "tag": "0010_trial_score",
+      "breakpoints": true
     }
   ]
 }
