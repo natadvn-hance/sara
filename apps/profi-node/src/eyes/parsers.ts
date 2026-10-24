@@ -16,8 +16,16 @@ export type ParseResult = {
   signals: Signal[]
 }
 
+export type FeedRef = { orderId: string; snippet: string }
+
 export type Parsers = {
-  paths: { feed: string; chats: string; chat(id: string): string }
+  paths: { feed: string; chats: string; chat(id: string): string; order?(id: string): string }
+  /** Eyes 3 on the feed page: order numbers on it (recognized: the page had the shape we know). */
+  fromFeedDom?(page: Page): Promise<{ recognized: boolean; refs: FeedRef[] }>
+  /** Eyes 3 on an order page. */
+  fromOrderDom?(page: Page, orderId: string): Promise<ParseResult>
+  /** Where the chats page is, read from the site's own menu. */
+  chatsUrl?(page: Page): Promise<string | null>
   banMarkers: string[]
   fromRtp(body: unknown): ParseResult
   fromResponse(url: string, body: unknown): ParseResult
@@ -177,6 +185,3 @@ export const standInParsers: Parsers = {
     }
   },
 }
-
-/** The active set. Task 16 switches this to the formats recorded on the live site. */
-export const activeParsers: Parsers = standInParsers

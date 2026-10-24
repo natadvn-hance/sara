@@ -7,7 +7,8 @@ import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountB
 import { outboxNode } from '../src/db/schema'
 import { createEyes } from '../src/eyes/eyes'
 import { startInsurance } from '../src/eyes/insurance'
-import { standInParsers } from '../src/eyes/parsers'
+import { type Parsers, standInParsers } from '../src/eyes/parsers'
+import { profiParsers } from '../src/eyes/profiParsers'
 import { attachRecorder } from '../src/eyes/recorder'
 import { createConnectionGuard } from '../src/watch/connectionGuard'
 import { createSessionWatch } from '../src/watch/sessionWatch'
@@ -133,5 +134,64 @@ describe('insurance and the account tab', () => {
         .filter((t) => t === 'profi.client_message').length
     await expect.poll(messages, { timeout: 10000 }).toBe(2)
     ins.stop()
+  }, 60000)
+
+  it('ST-M1-06: a new order on the feed page is opened once and becomes an order_seen event', async () => {
+    await loginStandIn(ab.page, site)
+    site.muteRtp(true)
+    const opened: string[] = []
+    // Real feed reading (links n.php?o=) over the stand-in; its order page is read by a small stand-in reader.
+    const parsers: Parsers = {
+      ...standInParsers,
+      paths: { ...standInParsers.paths, order: (id) => `/backoffice/n.php?o=${id}` },
+      fromResponse: () => ({ recognized: false, signals: [] }),
+      fromFeedDom: profiParsers.fromFeedDom,
+      async fromOrderDom(page, orderId) {
+        opened.push(orderId)
+        await page.waitForSelector('#order h1', { timeout: 5000 })
+        const title = await page.locator('#order h1').innerText()
+        return {
+          recognized: true,
+          what: 'order',
+          signals: [
+            {
+              t: 'order',
+              order: {
+                order_id: orderId,
+                title,
+                category: '',
+                city: '',
+                text: '',
+                client_name: '',
+                budget_text: null,
+                bid_price_rub: 0,
+                seen_at: new Date().toISOString(),
+              },
+              published_at: null,
+            },
+          ],
+        }
+      },
+    }
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    const id = site.addOrder({ subject: 'Лендинг для школы' })
+    await ins.feedOnce()
+    await ins.feedOnce()
+    ins.stop()
+    site.muteRtp(false)
+    expect(opened.filter((x) => x === id)).toHaveLength(1)
+    const types = (await db.select().from(outboxNode)).map(
+      (r) => r.payload as { type: string; entity: { id: string } },
+    )
+    expect(types.filter((t) => t.type === 'profi.order_seen' && t.entity.id === id)).toHaveLength(1)
   }, 60000)
 })
