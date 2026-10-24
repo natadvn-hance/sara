@@ -287,7 +287,7 @@ test('FR-ACC-5: Boris starts a recompute, sees the progress and then the result'
   await page.goto(RECOMPUTE)
   await page
     .getByLabel('Какие правила попробовать')
-    .selectOption({ label: 'v1, как было при запуске' })
+    .selectOption({ label: 'v1, правила старой Сары' })
   await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
   await expect(page.getByText('Решения не изменились ни у одной заявки.')).toBeVisible({
     timeout: 60_000,

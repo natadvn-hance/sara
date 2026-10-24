@@ -6,6 +6,7 @@ import { HealthPage } from './pages/Health'
 import { LiveScreenPage } from './pages/LiveScreen'
 import { LoginPage } from './pages/Login'
 import { OnboardingPage } from './pages/Onboarding'
+import { RecomputePage } from './pages/Recompute'
 import { SetupPage } from './pages/Setup'
 
 function usePath(): string {
@@ -34,6 +35,8 @@ export function App() {
   if (path.startsWith('/health')) return <HealthPage />
   const login = /^\/accounts\/([^/]+)\/login/.exec(path)
   if (login?.[1]) return <LiveScreenPage accountId={decodeURIComponent(login[1])} />
+  const recompute = /^\/accounts\/([^/]+)\/direction\/recompute\/?$/.exec(path)
+  if (recompute?.[1]) return <RecomputePage accountId={decodeURIComponent(recompute[1])} />
   const onboarding = /^\/accounts\/([^/]+)\/direction\/onboarding\/?$/.exec(path)
   if (onboarding?.[1]) return <OnboardingPage accountId={decodeURIComponent(onboarding[1])} />
   const direction = /^\/accounts\/([^/]+)\/direction\/?$/.exec(path)
