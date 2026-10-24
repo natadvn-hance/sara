@@ -83,7 +83,29 @@ describe('read tools', () => {
     ])
     expect(
       await tools().getOrder({ account_id: 'hance-marketing', order_id: '95147898' }),
-    ).toMatchObject({ open: true, title: 'Сайт' })
+    ).toMatchObject({ open: true, title: 'Сайт', has_bid: null })
+  })
+
+  it('FR-LEAD-5: get_order says whether this account already bid, from the order page answer', async () => {
+    const order = {
+      order_id: '95147899',
+      title: 'Лендинг',
+      category: 'Создание сайтов',
+      city: 'Краснодар',
+      text: 'Нужен лендинг',
+      client_name: 'Ирина',
+      budget_text: null,
+      bid_price_rub: 150,
+      seen_at: '2026-10-23T08:00:00.000Z',
+    }
+    await upsertOrder(db, {
+      accountId: 'hance-marketing',
+      order,
+      body: { ...order, published_at: null, has_bid: true },
+    })
+    expect(
+      (await tools().getOrder({ account_id: 'hance-marketing', order_id: '95147899' })).has_bid,
+    ).toBe(true)
   })
 
   it('C2: submit_bid in M1 is refused and touches nothing', async () => {

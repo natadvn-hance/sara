@@ -288,16 +288,16 @@ describe('eyes', () => {
     },
     published_at: '2026-10-24T08:00:00.000Z',
   })
-  const fee = (orderId: string, rub: number) => ({
+  const fee = (orderId: string, rub: number, baseRub = rub) => ({
     recognized: true,
     what: 'order' as const,
-    signals: [{ t: 'order_fee' as const, orderId, rub, hasBid: false }],
+    signals: [{ t: 'order_fee' as const, orderId, rub, baseRub, hasBid: false }],
   })
 
   it('ST-M1-06: the fee from the order page answer is preferred to the page text, a discount too', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
     await e.onParsed({ recognized: true, what: 'feed', signals: [boardOrder('911')] }, 'response')
-    await e.onParsed(fee('911', 1), 'response')
+    await e.onParsed(fee('911', 1, 67), 'response')
     expect(await events('profi.order_seen')).toHaveLength(0)
     // The page text missed the discount and read the usual price.
     await e.onParsed(
@@ -317,7 +317,7 @@ describe('eyes', () => {
     const seen = await events('profi.order_seen')
     expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['911', 1]])
     const [stored] = await db.select().from(rawOrder).where(eq(rawOrder.orderId, '911'))
-    expect(stored?.body).toMatchObject({ bid_price_rub: 1, has_bid: false })
+    expect(stored?.body).toMatchObject({ bid_price_rub: 1, bid_base_price_rub: 67, has_bid: false })
   })
 
   it('ST-M1-06: an order whose page text cannot be read still goes out with the answer fee', async () => {

@@ -9,6 +9,7 @@
       "!**/*.md",
       "!reports",
       "!.superpowers",
+      "!.claude",
       "!**/drizzle/meta",
       "!playwright-report",
       "!test-results",
