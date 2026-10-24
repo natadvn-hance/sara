@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { outboxNode } from '../src/db/schema'
+import { outboxNode, rawEvent } from '../src/db/schema'
 import { createEyes } from '../src/eyes/eyes'
 import { startInsurance } from '../src/eyes/insurance'
 import { type Parsers, standInParsers } from '../src/eyes/parsers'
@@ -276,5 +276,28 @@ describe('insurance and the account tab', () => {
     expect(seen.map((t) => [t.payload.title, t.payload.bid_price_rub])).toEqual([
       ['Лендинг для школы', 120],
     ])
+  }, 60000)
+
+  it('ST-M1-04: the chats list page leaves the links it showed in node.raw_event, for calibration', async () => {
+    await loginStandIn(ab.page, site)
+    site.addMessage('c-links', 'client', 'Здравствуйте')
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    await ins.chatsOnce(false)
+    ins.stop()
+    const dom = (await db.select().from(rawEvent)).filter((r) => r.kind === 'dom')
+    expect(dom).toHaveLength(1)
+    const body = dom[0]?.body as { links: string[]; messages: number }
+    expect(body.links).toContain('/chats/c-links')
+    // Only addresses: no text of the page is kept.
+    expect(JSON.stringify(body)).not.toContain('Здравствуйте')
   }, 60000)
 })
