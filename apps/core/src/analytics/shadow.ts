@@ -64,7 +64,7 @@ export async function shadowReport(db: DbOrTx, from: string, to: string): Promis
       (select count(*) from node.raw_order o where o.seen_at >= ${from} and o.seen_at < ${to}
          and not exists (select 1 from core.event e where e.type = 'profi.order_seen' and e.entity_id = o.order_id))
     + (select count(*) from node.raw_message m where m.sent_at >= ${from} and m.sent_at < ${to}
-         and m.author in ('client', 'unknown')
+         and m.author in ('client', 'unknown') and not m.history
          and not exists (select 1 from core.event e
            where e.type in ('profi.client_message', 'profi.author_unclear')
              and e.payload->>'platform_message_id' = m.platform_message_id))

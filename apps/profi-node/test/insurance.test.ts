@@ -328,4 +328,38 @@ describe('insurance and the account tab', () => {
     const dom = (await db.select().from(rawEvent)).filter((r) => r.kind === 'dom')
     expect((dom[0]?.body as { links: string[] } | undefined)?.links).toContain('/chats/c-busy')
   }, 90000)
+
+  it('FR-CONV-1: a chat named by the event stream is opened on the next minute check', async () => {
+    await loginStandIn(ab.page, site)
+    site.addMessage('c-touched', 'client', 'Здравствуйте')
+    const visited: string[] = []
+    const onNav = (f: { url(): string }) => visited.push(new URL(f.url()).pathname)
+    ab.page.on('framenavigated', onNav)
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    await eyes.onParsed(
+      {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: 'c-touched', messageId: null }],
+      },
+      'rtp',
+    )
+    await ins.feedOnce()
+    ins.stop()
+    ab.page.off('framenavigated', onNav)
+    expect(visited).toContain('/chats/c-touched')
+    const seen = (await db.select().from(outboxNode))
+      .map((r) => r.payload as { type: string; entity: { id: string } })
+      .filter((t) => t.type === 'profi.client_message')
+    expect(seen.map((t) => t.entity.id)).toEqual(['c-touched'])
+  }, 60000)
 })

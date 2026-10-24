@@ -49,6 +49,8 @@ export const rawMessage = node.table('raw_message', {
   sentAt: ts('sent_at').notNull(),
   text: text('text').notNull(),
   read: boolean('read').notNull().default(false),
+  /** Came before Sara watched this chat (its first reading): kept, never sent as news. */
+  history: boolean('history').notNull().default(false),
 })
 
 export const outboxNode = node.table(

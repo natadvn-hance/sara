@@ -14,6 +14,8 @@ export type Signal =
   | MessageSignal
   | { t: 'balance'; rub: number }
   | { t: 'presence'; on: boolean }
+  /** The event stream says a chat has news: its page is read on the next minute check. */
+  | { t: 'chat_touched'; chatId: string; messageId: string | null }
 
 /** recognized: the source had the shape we know (even if empty). False is how a layout change shows. */
 export type ParseResult = {

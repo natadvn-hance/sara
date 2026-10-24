@@ -1,0 +1,1 @@
+ALTER TABLE "node"."raw_message" ADD COLUMN "history" boolean DEFAULT false NOT NULL;

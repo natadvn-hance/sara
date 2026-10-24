@@ -5,7 +5,7 @@ import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from '.
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
 // src/ingestion/feedPoller.js, src/watcher/messageDom.js, src/negotiator/openChat.js of the old folder.
 // The orders board also comes as a GraphQL answer (boSearchBoardItems, recorded live 24.10.2026).
-// The event stream is recognized after calibration; until then it counts as unknown.
+// The event stream (SockJS frames from online.profi.ru, recorded live 24.10.2026) names chats with news.
 
 const ORDER_LINK = 'a[href*="n.php?o="]'
 const MESSAGE = '[data-message-content-id]'
@@ -126,6 +126,40 @@ export function fromSiteAnswer(url: string, body: unknown): ParseResult {
   return { recognized: true, what: 'feed', signals }
 }
 
+const CHAT_NOTICE = new Set(['MSG_CHAT_ORDER_NOTIFY', 'MSG_MESSENGER_UNREAD_NOTIFY'])
+
+/** One SockJS frame: «o» opens, «h» is a heartbeat, «a[...]» carries JSON strings, one per event. */
+export function fromStreamFrame(body: unknown): ParseResult {
+  const none: ParseResult = { recognized: false, signals: [] }
+  if (body === 'o' || body === 'h') return { recognized: true, what: 'stream', signals: [] }
+  if (typeof body !== 'string' || !body.startsWith('a[')) return none
+  let items: unknown[]
+  try {
+    items = (JSON.parse(body.slice(1)) as unknown[]).map((x) =>
+      typeof x === 'string' ? JSON.parse(x) : x,
+    )
+  } catch {
+    return none
+  }
+  const signals: Signal[] = []
+  for (const it of items as {
+    type?: unknown
+    messengerType?: unknown
+    messengerExtId?: unknown
+    messageId?: unknown
+  }[]) {
+    if (!CHAT_NOTICE.has(String(it?.type)) || it.messengerType !== 'ORDER') continue
+    if (it.messengerExtId === undefined || it.messengerExtId === null) continue
+    signals.push({
+      t: 'chat_touched',
+      // The order chat lives at r.php?id=<order number> (old Sara, checked live on six leads).
+      chatId: String(it.messengerExtId),
+      messageId: it.messageId === undefined || it.messageId === null ? null : String(it.messageId),
+    })
+  }
+  return { recognized: true, what: 'stream', signals }
+}
+
 export const profiParsers: Parsers = {
   paths: {
     feed: '/backoffice/n.php',
@@ -134,7 +168,7 @@ export const profiParsers: Parsers = {
     chat: (id) => `/backoffice/r.php?id=${encodeURIComponent(id)}`,
   },
   banMarkers: ['Профиль заблокирован', 'Ваш профиль заблокирован'],
-  fromRtp: () => ({ recognized: false, signals: [] }),
+  fromRtp: fromStreamFrame,
   fromResponse: fromSiteAnswer,
 
   async fromFeedDom(page) {
