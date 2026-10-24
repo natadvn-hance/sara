@@ -15,6 +15,8 @@ export type FakeTelegram = {
   token: string
   username: string
   sent: SentMessage[]
+  /** editMessageText calls, in order (M4: the shadow card edited with the real reply). */
+  edited: SentMessage[]
   answers: { callback_query_id: string; text?: string }[]
   pushStart(chatId: number): void
   pushPress(chatId: number, data: string): string
@@ -91,6 +93,7 @@ export const FAKE_TOKEN = '123456789:AAFakeTokenForTestsOnly_abcdefghijklmnop'
 
 export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   const sent: SentMessage[] = []
+  const edited: SentMessage[] = []
   const answers: { callback_query_id: string; text?: string }[] = []
   const updates: Record<string, unknown>[] = []
   let nextUpdate = 1
@@ -192,6 +195,14 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
             file_size: 15,
             file_path: `voice/${params.file_id}.oga`,
           })
+        case 'editMessageText':
+          edited.push(params)
+          return reply({
+            message_id: params.message_id,
+            date: now(),
+            chat: { id: params.chat_id, type: 'private' },
+            text: params.text,
+          })
         case 'answerCallbackQuery':
           answers.push(params)
           return reply(true)
@@ -208,6 +219,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     token: FAKE_TOKEN,
     username: 'sara_dev_bot',
     sent,
+    edited,
     answers,
     pushStart(chatId) {
       updates.push({
