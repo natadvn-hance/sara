@@ -106,4 +106,59 @@ describe('Profi.ru page readers', () => {
     expect(profiParsers.paths.order?.('7')).toBe('/backoffice/n.php?o=7')
     expect(profiParsers.paths.chat('7')).toBe('/backoffice/r.php?id=7')
   })
+
+  it('ST-M1-06: the orders board answer of GraphQL gives each order with its place, client and budget', () => {
+    // Shape recorded on the live site 24.10.2026 (values here are made up).
+    const body = {
+      data: {
+        boSearchBoardItems: {
+          items: [
+            {
+              id: '95300001',
+              type: 'SNIPPET',
+              title: 'Реклама на ТВ',
+              description: 'Нужны федеральные каналы',
+              geo: {
+                remote: {
+                  prefix: 'Дистанционно · Москва',
+                  suffix: '',
+                  address: null,
+                  geoplaces: null,
+                },
+                clientMayCome: { prefix: null, suffix: null, address: null, geoplaces: null },
+                orderLocation: { prefix: null, suffix: null, address: null, geoplaces: null },
+              },
+              price: { value: '50 000', prefix: 'до', suffix: '₽', bonusLabel: null },
+              clientInfo: { name: 'Андрей' },
+              lastUpdateDate: 1792824677,
+            },
+            { id: 'promo-1', type: 'BANNER', title: 'Скидка' },
+          ],
+          totalCount: 1,
+        },
+      },
+    }
+    const r = profiParsers.fromResponse('https://profi.ru/graphql', body)
+    expect(r.recognized).toBe(true)
+    expect(r.what).toBe('feed')
+    expect(r.signals).toHaveLength(1)
+    expect(r.signals[0]).toMatchObject({
+      t: 'order',
+      order: {
+        order_id: '95300001',
+        title: 'Реклама на ТВ',
+        text: 'Нужны федеральные каналы',
+        city: 'Дистанционно · Москва',
+        client_name: 'Андрей',
+        budget_text: 'до 50 000 ₽',
+      },
+      published_at: new Date(1792824677 * 1000).toISOString(),
+    })
+  })
+
+  it('ADR-002: other GraphQL answers are not mistaken for the board', () => {
+    expect(
+      profiParsers.fromResponse('https://profi.ru/graphql', { data: { me: { id: 1 } } }).recognized,
+    ).toBe(false)
+  })
 })
