@@ -67,8 +67,8 @@ type Opened = {
   openedBy: string | null
   walletBefore: number | null
   walletAfter: number | null
-  fields: { name: string; visible: boolean }[]
-  payment: { text: string }[]
+  fields: { tag: string; placeholder: string | null; visible: boolean }[]
+  payment: { text: string; testid: string | null }[]
 }
 const openedMaps = async () =>
   (await db.select().from(rawEvent))
@@ -92,9 +92,21 @@ describe('the node opens the bid form itself to map it (Boris, 24.10.2026)', () 
       walletAfter: 5000,
     })
     expect(m?.fields).toContainEqual(
-      expect.objectContaining({ name: 'comments4client', visible: true }),
+      // The live text field has no name: its placeholder tells it.
+      expect.objectContaining({
+        tag: 'textarea',
+        placeholder: expect.stringMatching(/^Расскажите о своём опыте/),
+        visible: true,
+      }),
     )
-    expect(m?.payment.map((p) => p.text)).toContain('К оплате: 216 ₽')
+    // The footer's amount is kept beside the same amount of the tariff block (the live map of 25.10.2026 lost it).
+    expect(m?.payment).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'К оплате:', testid: 'bid_form_footer' }),
+        expect.objectContaining({ text: '216 ₽', testid: 'bid_form_footer' }),
+        expect.objectContaining({ text: 'Кошелёк', testid: 'bid_form_footer' }),
+      ]),
+    )
     expect(await ab.page.inputValue('#bid-text')).toBe('')
   }, 60000)
 

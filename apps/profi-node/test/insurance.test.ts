@@ -341,8 +341,10 @@ describe('insurance and the account tab', () => {
         r.url?.endsWith(`n.php?o=${id}`),
     )
     expect(maps).toHaveLength(1)
-    const body = maps[0]?.body as { fields: { name: string }[] }
-    expect(body.fields.map((f) => f.name)).toContain('comments4client')
+    const body = maps[0]?.body as { fields: { placeholder: string | null }[] }
+    expect(body.fields.map((f) => f.placeholder)).toContainEqual(
+      expect.stringMatching(/^Расскажите о своём опыте/),
+    )
     expect(JSON.stringify(body)).not.toContain('Клиентский текст')
     expect(site.openerClicks).toBe(0)
   }, 60000)

@@ -83,8 +83,10 @@ export type BidLook = {
 
 // The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
 // 24.10.2026: no field and no <button> at first, a tariff block «orderCard/tariffs» with the tariff card «Отклик • N ₽»,
-// «Детали» and the opener «Продолжить» with the fee beside it, all of them divs or links. It opens the form «Комиссия за
-// заказ»: the price, the text, the payment footer, the send button.
+// «Детали» and the opener «Продолжить» with the fee beside it, all of them divs or links. It opens the bid window as
+// the node mapped it on 25.10.2026 (order 95380709): a price range «От» «До» and the text without names, the footer
+// «К оплате:», the amount, the payment way and «Откликнуться» (payment_methods_form_pay_button). Not live: the text's
+// maxlength (the live textarea has none) keeps the 500-character limit of the design testable.
 export const orderPage = (id: string, look: BidLook) =>
   shell(
     'Заказ',
@@ -109,12 +111,11 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
     '<div class="tariff" style="cursor: pointer"><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div><div>Вы платите сразу за предложение услуг, но не каждый отклик приводит к заказу</div></div>' +
     '<a href="#details">' + t.details + '</a>' +
     (hidden ? Array.from({ length: ${look.openers} }, (_, i) => opener(i)).join('') : '') + '</div>' +
-    '<form id="bid-form" data-testid="bid_form"' + (hidden ? ' hidden' : '') + '><h3>' + t.formTitle + '</h3>' +
-    '<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">' +
-    '<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>' +
-    '<div data-testid="bid_form_footer">К оплате: ' + s.price.value + ' ₽</div>' +
-    '<div class="payment-methods"><span class="payment-methods__name">${look.payWay === 'sbp' ? 'СБП' : 'Кошелёк'}</span></div>' +
-    '<p class="error"></p><button id="bid-send" type="submit">' + s.form.buttons.submit.text + '</button></form>'
+    '<div id="bid-form" data-testid="bid_window_container"' + (hidden ? ' hidden' : '') + '><h3>' + t.formTitle + '</h3>' +
+    '<div>' + s.form.elements.amount.label + '</div><label>От <input id="bid-price" type="text"></label><label>До <input id="bid-price-to" type="text"></label>' +
+    '<div>' + s.form.elements.commentsForClient.label + '</div><textarea id="bid-text" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea><textarea hidden></textarea>' +
+    '<p class="error"></p><div data-testid="bid_form_footer"><div>К оплате:</div><div>' + s.price.value + ' ₽</div><div>${look.payWay === 'sbp' ? 'СБП' : 'Кошелёк'}</div>' +
+    '<button id="bid-send" type="button" data-testid="payment_methods_form_pay_button">' + s.form.buttons.submit.text + '</button></div></div>'
   for (const go of document.querySelectorAll('.opener')) go.onclick = async (e) => {
     e.preventDefault(); await fetch('/api/bid/open', { method: 'POST' })
     if (${look.openerLeaves}) { location.href = '/backoffice/pay.php'; return }
@@ -122,9 +123,8 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
     const w = document.querySelector('.balance')
     if (${look.openerCharges} && ${look.openerChargeShown} && w) { const left = Number(w.dataset.rub) - ${look.openerCharges}; w.dataset.rub = String(left); w.textContent = left + ' ₽' }
   }
-  document.getElementById('bid-form').onsubmit = async (e) => {
-    e.preventDefault()
-    const r = await fetch('/api/bid', { method: 'POST', body: JSON.stringify({ orderId: '${id}', price: document.getElementById('bid-price').value, text: document.getElementById('bid-text').value }) })
+  document.getElementById('bid-send').onclick = async () => {
+    const r = await fetch('/api/bid', { method: 'POST', body: JSON.stringify({ orderId: '${id}', price: document.getElementById('bid-price').value, priceTo: document.getElementById('bid-price-to').value, text: document.getElementById('bid-text').value }) })
     const a = await r.json()
     if (a.ok) box.innerHTML = '<p class="bid-done">Отклик отправлен</p>'
     else box.querySelector('.error').textContent = a.error || 'Не получилось'

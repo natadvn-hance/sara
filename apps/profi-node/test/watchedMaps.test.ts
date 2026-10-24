@@ -64,9 +64,13 @@ describe('maps while Boris watches the live screen (calibration of the opened fo
     await w.once()
     const all = await maps()
     expect(all).toHaveLength(2)
-    const opened = all.map((r) => r.body as { watched?: boolean; fields: { name: string }[] })
+    const opened = all.map(
+      (r) => r.body as { watched?: boolean; fields: { placeholder: string | null }[] },
+    )
     expect(opened.every((b) => b.watched === true)).toBe(true)
-    expect(opened[1]?.fields.map((f) => f.name)).toContain('comments4client')
+    expect(opened[1]?.fields.map((f) => f.placeholder)).toContainEqual(
+      expect.stringMatching(/^Расскажите о своём опыте/),
+    )
     expect(site.openerClicks).toBe(1)
 
     await ab.page.goto(`${site.url}/backoffice/a.php`)
