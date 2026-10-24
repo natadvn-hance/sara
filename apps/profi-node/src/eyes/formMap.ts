@@ -20,6 +20,8 @@ export type FormButton = {
   text: string
   testid: string | null
   aria: string | null
+  /** Inside the bid form; a button outside it is kept only when its words are a bid's. */
+  inForm: boolean
   visible: boolean
   disabled: boolean
 }
@@ -36,7 +38,8 @@ export type FormMap = {
 
 /**
  * Maps the bid form of the open page without touching it: no click, no value of any field, no text a client wrote.
- * Payment lines come from the site's own payment blocks, or are short lines of a known payment shape.
+ * The bid form is the block around its text field (or a form, or a bid test id); the site's own words in it are kept.
+ * Outside it a button or a payment line is kept only in a known shape, so a client's name or sentence never is.
  */
 export async function readFormMap(page: Page): Promise<FormMap | null> {
   return page
@@ -49,6 +52,24 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
         el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) &&
         el.getBoundingClientRect().width > 0
       const attr = (el: Element, a: string) => clip(el.getAttribute(a), 80)
+      const textOf = (el: Element) => (el as HTMLElement).innerText ?? el.textContent ?? ''
+
+      // The bid block: up from the text field to the first box with a button, never a box as long as an order.
+      const blocks = [...document.querySelectorAll('form, [data-testid*="bid" i]')]
+      for (const f of document.querySelectorAll(
+        'textarea, [name="stavka"], [name="comments4client"]',
+      )) {
+        let box: Element | null = null
+        for (let up = f.parentElement; up && up !== document.body; up = up.parentElement) {
+          if (textOf(up).length > 2000) break
+          box = up
+          if (up.querySelector('button, [role="button"], input[type="submit"]')) break
+        }
+        if (box) blocks.push(box)
+      }
+      const inForm = (el: Element) => blocks.some((b) => b.contains(el))
+      const BALANCE = '[aria-label="Баланс"]'
+
       // A label's own words: the field inside it (and what was typed there) is left out.
       const labelOf = (el: Element) => {
         const l = (el as HTMLInputElement).labels?.[0]
@@ -58,7 +79,8 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
         return clip(c.textContent, 80)
       }
       const nearOf = (el: Element) => {
-        const t = clip((el.previousElementSibling as HTMLElement | null)?.innerText, 60)
+        if (!inForm(el)) return null
+        const t = clip(textOf(el.previousElementSibling ?? document.createElement('i')), 60)
         return t && t.length <= 40 ? t : null
       }
 
@@ -95,28 +117,31 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
           }
         })
 
+      // Buttons a bid may need, wherever they are: the rest outside the form may carry a client's name.
+      const BUTTON =
+        /^(Продолжить|Откликнуться|Отправить|Оплатить|Пополнить|Подтвердить|Предложить|Отклик)/i
       const buttons = [
         ...document.querySelectorAll(
           'button, [role="button"], input[type="submit"], input[type="button"]',
         ),
       ]
+        .map((el) => {
+          const own = inForm(el)
+          const text =
+            clip(el.tagName === 'INPUT' ? (el as HTMLInputElement).value : textOf(el), 60) ?? ''
+          return {
+            text,
+            testid: attr(el, 'data-testid'),
+            aria: own ? attr(el, 'aria-label') : null,
+            inForm: own,
+            visible: shown(el),
+            disabled:
+              (el as HTMLButtonElement).disabled === true ||
+              el.getAttribute('aria-disabled') === 'true',
+          }
+        })
+        .filter((b) => (b.inForm ? b.text !== '' || b.testid !== null : BUTTON.test(b.text)))
         .slice(0, 60)
-        .map((el) => ({
-          text:
-            clip(
-              el.tagName === 'INPUT'
-                ? (el as HTMLInputElement).value
-                : (el as HTMLElement).innerText,
-              60,
-            ) ?? '',
-          testid: attr(el, 'data-testid'),
-          aria: attr(el, 'aria-label'),
-          visible: shown(el),
-          disabled:
-            (el as HTMLButtonElement).disabled === true ||
-            el.getAttribute('aria-disabled') === 'true',
-        }))
-        .filter((b) => b.text !== '' || b.testid !== null || b.aria !== null)
 
       const payment: { text: string; testid: string | null; visible: boolean }[] = []
       const seen = new Set<string>()
@@ -130,22 +155,25 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
           visible: shown(el),
         })
       }
+      // A short line of a known payment shape; a bare amount only in the form or the wallet of the top bar.
+      const SHAPE =
+        /^(К оплате|Цена отклика|Способ оплаты|Баланс|Пополнить|Отклик\s*•|Кошел[её]к(\s*[:·•]?\s*\d[\d\s]*₽)?$|СБП$|Система быстрых платежей$|SberPay$|Сбер(банк)?$|T-Pay$|Банковская карта$)/
+      const AMOUNT = /^\d[\d\s]*₽$/
+      const fits = (el: Element, t: string) =>
+        SHAPE.test(t) || (AMOUNT.test(t) && (inForm(el) || !!el.closest(BALANCE)))
       // The site's own payment blocks: the wallet in the top bar, the form footer, the payment ways.
       for (const box of document.querySelectorAll(
-        '[aria-label="Баланс"], [class*="payment" i], [data-testid*="pay" i], [data-testid*="footer" i]',
+        `${BALANCE}, [class*="payment" i], [data-testid*="pay" i], [data-testid*="footer" i]`,
       )) {
-        for (const line of ((box as HTMLElement).innerText ?? '').split('\n').slice(0, 10)) {
+        for (const line of textOf(box).split('\n').slice(0, 10)) {
           const t = clip(line, 80)
-          if (t) keep(box, t)
+          if (t && (inForm(box) || (t.length <= 40 && fits(box, t)))) keep(box, t)
         }
       }
-      // Anywhere else only a short line of a known payment shape, so a client's sentence never matches.
-      const SHAPE =
-        /^(К оплате|Цена отклика|Способ оплаты|Баланс|Пополнить|Отклик\s*•|Кошел[её]к(\s*[:·•]?\s*\d[\d\s ]*₽)?$|СБП$|Система быстрых платежей$|SberPay$|Сбер(банк)?$|T-Pay$|Банковская карта$|\d[\d\s ]*₽$)/
       for (const el of document.querySelectorAll('body *')) {
         if (el.children.length > 0) continue
-        const t = clip((el as HTMLElement).innerText, 41)
-        if (t && t.length <= 40 && SHAPE.test(t)) keep(el, t)
+        const t = clip(textOf(el), 41)
+        if (t && t.length <= 40 && fits(el, t)) keep(el, t)
       }
 
       const testids = [
