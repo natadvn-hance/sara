@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { DirectionRulesShape } from './direction'
 
 export const MODELS = ['haiku', 'sonnet', 'opus'] as const
 export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const
@@ -32,6 +33,14 @@ export const ScorerOutput = z.object({
   confidence: z.number().min(0).max(1),
 })
 export type ScorerOutput = z.infer<typeof ScorerOutput>
+
+/** The rules proposer's answer (FR-MIND-3): one change in plain words and the whole new rules. */
+export const RulesProposalOutput = z.object({
+  summary: z.string().max(300),
+  why: z.string().max(300),
+  rules: DirectionRulesShape,
+})
+export type RulesProposalOutput = z.infer<typeof RulesProposalOutput>
 
 export const ProbeOutput = z.object({ ok: z.literal(true) })
 export type ProbeOutput = z.infer<typeof ProbeOutput>

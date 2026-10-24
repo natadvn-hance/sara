@@ -6,8 +6,9 @@ import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { lead, leadLabel, leadScore } from '../../apps/core/src/db/schema'
-import { seedDirection } from '../../apps/core/src/direction/store'
+import { lead, leadLabel, leadScore, ruleProposal, task } from '../../apps/core/src/db/schema'
+import { activeRules, seedDirection } from '../../apps/core/src/direction/store'
+import { RULES_V1 } from '../../apps/core/src/direction/v1'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
@@ -184,5 +185,30 @@ describe('scoring in the lead pipeline', () => {
         m.reply_markup?.inline_keyboard[0]?.some((b) => b.callback_data.endsWith(':bid')),
       ),
     ).toHaveLength(1)
+  })
+
+  it('FR-MIND-3: «Применить» pressed in Telegram makes the proposed rules active', async () => {
+    const proposalId = '0192f3c4-5b6a-7c8d-9e0f-aabbccddeeff'
+    const taskId = '0192f3c4-5b6a-7c8d-9e0f-ffeeddccbbaa'
+    await db.insert(ruleProposal).values({
+      id: proposalId,
+      accountId: 'hance-marketing',
+      fromVersion: 1,
+      rules: { ...RULES_V1, threshold: 60 },
+      summary: 'Порог 60',
+      why: 'так',
+      backtest: { checked: 0, changed: 0, towardBoris: 0, against: 0 },
+      state: 'asked',
+      taskId,
+    })
+    await db.insert(task).values({
+      id: taskId,
+      kind: 'rule_proposal',
+      entityKind: 'rule_proposal',
+      entityId: proposalId,
+    })
+    tg.pushPress(111, `t:${taskId}:apply`)
+    await until(() => tg.answers.some((a) => a.text === 'Применила, теперь правила v2'))
+    expect((await activeRules(db, 'hance-marketing')).rules.threshold).toBe(60)
   })
 })

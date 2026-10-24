@@ -138,6 +138,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     db,
     notifier: bot.notifier,
     gateway,
+    accountIds: config.accounts.map((a) => a.id),
     tickMs: o.learningTickMs,
   })
 

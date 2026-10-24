@@ -7,6 +7,7 @@ import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import { recordLabel } from '../learning/labels'
+import { onProposalPress } from '../learning/proposals'
 import { askWhy } from '../learning/questions'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
@@ -356,6 +357,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
 
     async onPress({ taskId, action }) {
       if (action === 'want') return onWant(taskId)
+      if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)
       if (!found) return TEXTS.alreadyDone

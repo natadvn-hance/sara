@@ -1,36 +1,40 @@
 import { z } from 'zod'
 
-/** The rules of an account's direction (FR-ACC-2): what is never taken, what lowers a lead, how it is scored. */
-export const DirectionRules = z
-  .object({
-    about: z.string().min(1),
-    stop_factors: z.array(
+/** The shape of the rules without the cross-field checks, for a model's structured answer. */
+export const DirectionRulesShape = z.object({
+  about: z.string().min(1),
+  stop_factors: z.array(
+    z.object({
+      id: z.string().regex(/^[a-z_]+$/),
+      text: z.string().min(1),
+      exception: z.string().nullable(),
+      examples: z.array(z.string()),
+    }),
+  ),
+  red_flags: z.array(
+    z.object({ id: z.string().regex(/^[a-z_]+$/), text: z.string().min(1), soft: z.boolean() }),
+  ),
+  axes: z
+    .array(
       z.object({
         id: z.string().regex(/^[a-z_]+$/),
-        text: z.string().min(1),
-        exception: z.string().nullable(),
-        examples: z.array(z.string()),
+        title: z.string().min(1),
+        weight: z.number().int().positive(),
+        how: z.string().min(1),
       }),
-    ),
-    red_flags: z.array(
-      z.object({ id: z.string().regex(/^[a-z_]+$/), text: z.string().min(1), soft: z.boolean() }),
-    ),
-    axes: z
-      .array(
-        z.object({
-          id: z.string().regex(/^[a-z_]+$/),
-          title: z.string().min(1),
-          weight: z.number().int().positive(),
-          how: z.string().min(1),
-        }),
-      )
-      .min(1),
-    threshold: z.number().int().min(0).max(100),
-    notes: z.array(z.string()),
-  })
-  .refine((r) => r.axes.reduce((s, a) => s + a.weight, 0) === 100, {
+    )
+    .min(1),
+  threshold: z.number().int().min(0).max(100),
+  notes: z.array(z.string()),
+})
+
+/** The rules of an account's direction (FR-ACC-2): what is never taken, what lowers a lead, how it is scored. */
+export const DirectionRules = DirectionRulesShape.refine(
+  (r) => r.axes.reduce((s, a) => s + a.weight, 0) === 100,
+  {
     message: 'axis weights must add up to 100',
-  })
+  },
+)
   .refine((r) => new Set(r.axes.map((a) => a.id)).size === r.axes.length, {
     message: 'axis ids must be unique',
   })

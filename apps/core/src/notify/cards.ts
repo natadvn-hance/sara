@@ -48,6 +48,22 @@ export const TEXTS = {
   summaryNone: (n: number) => `Сегодня отсеяла ${n}, пограничных не было`,
   wantButton: (n: number) => `Взял бы №${n}`,
   wantCard: 'Прислала карточку заявки',
+  proposal: (
+    from: number,
+    summary: string,
+    why: string,
+    b: { checked: number; changed: number; towardBoris: number; against: number },
+  ) =>
+    [
+      `Предлагаю поправку правил (v${from} → v${from + 1}): ${summary}`,
+      `Почему: ${why}`,
+      `На последних ${b.checked} заявках это изменило бы ${b.changed} решений: ${b.towardBoris} в твою сторону, ${b.against} против.`,
+    ].join('\n'),
+  applyButton: 'Применить',
+  dropButton: 'Не надо',
+  applied: (v: number) => `Применила, теперь правила v${v}`,
+  kept: (v: number) => `Хорошо, оставляю v${v}`,
+  proposalStale: 'Правила уже поменялись, предложение устарело',
 }
 
 function verdictLine(c: LeadCard): string {

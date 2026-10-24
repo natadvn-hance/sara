@@ -1,0 +1,8 @@
+{
+  "name": "rules-proposer",
+  "version": 1,
+  "model": "sonnet",
+  "fallbackModel": "opus",
+  "priority": "P3",
+  "timeoutMs": 180000
+}
