@@ -1,6 +1,6 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import { type EventEnvelope, newEventId, ProfiOrder, type TaskAction } from '@sara/shared'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
 import { activeRules } from '../direction/store'
@@ -14,6 +14,7 @@ import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
+import { type Draft, type DraftMiss, type DraftSource, writeDraft } from './draft'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
 import { sortOrder } from './sorter'
@@ -53,6 +54,8 @@ const ev = (
     | 'lead.sorted'
     | 'lead.scored'
     | 'lead.skipped'
+    | 'lead.drafted'
+    | 'draft.edited'
     | 'task.created'
     | 'task.resolved'
     | 'task.reminded',
@@ -75,6 +78,41 @@ const ev = (
 })
 
 type Sorted = { verdict: 'fit' | 'maybe' | 'reject' | null; reason: string | null }
+type LeadRow = typeof lead.$inferSelect
+
+const sourceOf = (l: LeadRow): DraftSource => ({
+  title: l.title,
+  category: l.category,
+  city: l.city,
+  budget_text: l.budgetText,
+  text: l.text,
+  client_name: l.clientName,
+})
+
+/** The Analyst's draft, or why there is none; any failure is «no answer», the card comes anyway. */
+async function draftFor(
+  o: DraftSource,
+  opts: { correlationId: string; causationId?: string },
+): Promise<Draft | DraftMiss> {
+  try {
+    return await writeDraft(d().gateway, o, opts)
+  } catch (err) {
+    console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
+    return { text: null, reason: 'no_answer', attempts: 1 }
+  }
+}
+
+/** The journal keeps how the draft went, never its text (ADR-016). */
+const draftedPayload = (dr: Draft | DraftMiss) =>
+  dr.text !== null
+    ? {
+        drafted: true,
+        chars: dr.text.length,
+        price_rub: dr.priceRub,
+        attempts: dr.attempts,
+        reason: null,
+      }
+    : { drafted: false, chars: null, price_rub: null, attempts: dr.attempts, reason: dr.reason }
 
 /** One order, one durable run (workflow id lead:<order>): record, sort, card, wait for Boris. */
 async function processOrder(e: EventEnvelope): Promise<void> {
@@ -200,6 +238,13 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (scored.decision === 'drop') return
   }
 
+  // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.
+  const draft = (await DBOS.patch('analyst-draft'))
+    ? await DBOS.runStep(() => draftFor(order, { correlationId, causationId: e.id }), {
+        name: 'draft',
+      })
+    : null
+
   const taskId = await DBOS.runStep(
     () =>
       d().db.transaction(async (tx) => {
@@ -213,7 +258,25 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         await tx
           .insert(task)
           .values({ id, kind: 'lead_decision', entityKind: 'lead', entityId: order.order_id })
-        await tx.update(lead).set({ status: 'queued' }).where(eq(lead.id, order.order_id))
+        await tx
+          .update(lead)
+          .set({
+            status: 'queued',
+            ...(draft?.text ? { draftText: draft.text, draftPriceRub: draft.priceRub } : {}),
+          })
+          .where(eq(lead.id, order.order_id))
+        if (draft) {
+          await appendEvent(
+            tx,
+            ev(
+              'lead.drafted',
+              { kind: 'lead', id: order.order_id },
+              correlationId,
+              'sara',
+              draftedPayload(draft),
+            ),
+          )
+        }
         await appendEvent(
           tx,
           ev('task.created', { kind: 'task', id }, correlationId, 'sara', {
@@ -238,6 +301,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     bidPriceRub: order.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
+    draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
   try {
@@ -302,6 +366,33 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
     bidPriceRub: found.lead.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
     reminder,
+    draft: found.lead.draftText
+      ? { text: found.lead.draftText, priceRub: found.lead.draftPriceRub }
+      : null,
+  }
+}
+
+/** A dropped order Boris wants after all: its draft first (the Scorer's drop wrote none), then its card. */
+async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
+  if (!l.draftText) {
+    const dr = await draftFor(sourceOf(l), { correlationId: l.correlationId })
+    await d().db.transaction(async (tx) => {
+      if (dr.text) {
+        await tx
+          .update(lead)
+          .set({ draftText: dr.text, draftPriceRub: dr.priceRub })
+          .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
+      }
+      await appendEvent(
+        tx,
+        ev('lead.drafted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', draftedPayload(dr)),
+      )
+    })
+  }
+  const card = await cardOfTask(taskId, false)
+  if (card) {
+    const m = await d().notifier.sendLeadCard(card)
+    await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
   }
 }
 
@@ -342,11 +433,10 @@ async function onWant(reviewId: string): Promise<string> {
   })
   if (!resolved) return TEXTS.alreadyDone
   await startDecisionWait(decisionId, await d().remindAfterMs())
-  const card = await cardOfTask(decisionId, false)
-  if (card) {
-    const m = await d().notifier.sendLeadCard(card)
-    await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, decisionId))
-  }
+  // The draft takes the Analyst's seconds: the press is answered now, the card follows (a reminder brings it back).
+  void draftThenCard(l, decisionId).catch((err) =>
+    console.error('want card failed', err instanceof Error ? err.message.slice(0, 200) : err),
+  )
   learnFrom({ leadId: l.id, label: 'yes', source: 'summary' }, 'why_want', l.title)
   return TEXTS.wantCard
 }

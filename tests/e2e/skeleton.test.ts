@@ -15,6 +15,13 @@ import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = '{"verdict":"fit","reason":"Нужен сайт","tags":["сайт"],"confidence":0.9}'
+const ANALYST = {
+  analyst: {
+    hidden_need: 'Боится долгого запуска',
+    text: 'Понимаю, клинике важно быстро начать запись.\n\nКогда хотите открыть запись онлайн?',
+    price_rub: 90000,
+  },
+}
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram
@@ -34,7 +41,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 8000) {
 const settle = () => new Promise((r) => setTimeout(r, 1000))
 const cards = () => tg.sent.filter((m) => m.reply_markup)
 const lastCardData = (action: 'bid' | 'skip') => {
-  const kb = cards().at(-1)?.reply_markup?.inline_keyboard[0] ?? []
+  const kb = cards().at(-1)?.reply_markup?.inline_keyboard.flat() ?? []
   return kb.find((b) => b.callback_data.endsWith(`:${action}`))?.callback_data ?? ''
 }
 async function eventTypesOf(id: string): Promise<string[]> {
@@ -78,7 +85,11 @@ beforeAll(async () => {
     telegramApiRoot: tg.apiRoot,
   }
   app = await startApp(config, {
-    claudeEnv: () => ({ FAKE_CLAUDE_MODE: claudeMode, FAKE_CLAUDE_OUTPUT: FIT }),
+    claudeEnv: () => ({
+      FAKE_CLAUDE_MODE: claudeMode,
+      FAKE_CLAUDE_OUTPUT: FIT,
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(ANALYST),
+    }),
     retryDelaysMs: [50, 50, 50, 50, 50],
     learningTickMs: 3_600_000,
     remindAfterMs: async () => remindMs,
@@ -121,7 +132,9 @@ describe('walking skeleton', () => {
       'profi.order_seen',
       'lead.found',
       'model.called',
+      'model.called',
       'lead.sorted',
+      'lead.drafted',
       'task.created',
     ])
   })
@@ -165,7 +178,8 @@ describe('walking skeleton', () => {
     await fake.emitOrder({ order_id: orderId() })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Сортировщик не ответил, проверь сам')
-    expect(await count('model.failed')).toBe(1)
+    // The Sorter and the Analyst both failed; the card still came.
+    expect(await count('model.failed')).toBe(2)
   })
 
   it('FR-LEAD-1: two events with the same order number give one lead and one card', async () => {

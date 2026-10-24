@@ -25,6 +25,11 @@ import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = { verdict: 'fit', reason: 'Нужен сайт', tags: ['сайт'], confidence: 0.9 }
+const ANALYST = {
+  hidden_need: 'Срочность',
+  text: 'Понимаю задачу.\n\nКогда запуск?',
+  price_rub: null,
+}
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram
@@ -88,7 +93,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  byRole = { sorter: FIT, scorer: scorerAnswer(70) }
+  byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(70) }
   await resetDb(db)
   await seedDirection(db, 'hance-marketing')
   tg.sent.length = 0
@@ -110,7 +115,7 @@ describe('scoring in the lead pipeline', () => {
   })
 
   it('FR-LEAD-3: an order below the threshold stays silent as scored_out', async () => {
-    byRole = { sorter: FIT, scorer: scorerAnswer(30) }
+    byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(30) }
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
@@ -119,7 +124,7 @@ describe('scoring in the lead pipeline', () => {
   })
 
   it('FR-LEAD-3: an order the Scorer dropped keeps its sorter verdict in the journal', async () => {
-    byRole = { sorter: FIT, scorer: scorerAnswer(30) }
+    byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(30) }
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
@@ -131,7 +136,7 @@ describe('scoring in the lead pipeline', () => {
   })
 
   it('FR-LEAD-3: a stop factor drops a high score', async () => {
-    byRole = { sorter: FIT, scorer: scorerAnswer(90, { stop_factor: 'direct' }) }
+    byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(90, { stop_factor: 'direct' }) }
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
@@ -151,9 +156,9 @@ describe('scoring in the lead pipeline', () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
-    const skip = cards()[0]?.reply_markup?.inline_keyboard[0]?.find((b) =>
-      b.callback_data.endsWith(':skip'),
-    )
+    const skip = cards()[0]
+      ?.reply_markup?.inline_keyboard.flat()
+      .find((b) => b.callback_data.endsWith(':skip'))
     tg.pushPress(111, skip?.callback_data ?? '')
     await until(
       async () => (await db.select().from(leadLabel).where(eq(leadLabel.leadId, id))).length === 1,
@@ -163,19 +168,19 @@ describe('scoring in the lead pipeline', () => {
   })
 
   it('FR-LEAD-7: skipping a card scored far above the threshold brings «почему?»', async () => {
-    byRole = { sorter: FIT, scorer: scorerAnswer(80) }
+    byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(80) }
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
-    const skip = cards()[0]?.reply_markup?.inline_keyboard[0]?.find((b) =>
-      b.callback_data.endsWith(':skip'),
-    )
+    const skip = cards()[0]
+      ?.reply_markup?.inline_keyboard.flat()
+      .find((b) => b.callback_data.endsWith(':skip'))
     tg.pushPress(111, skip?.callback_data ?? '')
     await until(() => tg.sent.some((m) => m.text.startsWith('Почему пропустил «')))
   })
 
   it('FR-LEAD-7: «Взял бы» is a yes, asks why and brings a normal card; pressing again does nothing', async () => {
-    byRole = { sorter: FIT, scorer: scorerAnswer(50) }
+    byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(50) }
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
@@ -244,14 +249,14 @@ describe('scoring in the lead pipeline', () => {
       const id = orderId()
       await fake.emitOrder({ order_id: id })
       await until(() => cards().length === 1)
-      const bid = cards()[0]?.reply_markup?.inline_keyboard[0]?.find((b) =>
-        b.callback_data.endsWith(':bid'),
-      )
+      const bid = cards()[0]
+        ?.reply_markup?.inline_keyboard.flat()
+        .find((b) => b.callback_data.endsWith(':bid'))
       tg.pushPress(111, bid?.callback_data ?? '')
       await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
       expect(fake.bids.some((b) => b.idempotency_key === `bid:${id}`)).toBe(true)
 
-      byRole = { sorter: FIT, scorer: scorerAnswer(50) }
+      byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(50) }
       const dropped = orderId()
       await fake.emitOrder({ order_id: dropped })
       await until(async () => (await statusOf(dropped)) === 'scored_out')
