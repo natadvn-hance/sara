@@ -53,3 +53,51 @@ export function weightedScore(rules: DirectionRules, axes: Record<string, number
   }
   return Math.round(sum / 100)
 }
+
+/** The state of a direction: still being set up, scoring without winning orders, or working (FR-ACC-2). */
+export const DirectionState = z.enum(['draft', 'shadow', 'on'])
+export type DirectionState = z.infer<typeof DirectionState>
+
+/** The profi.ru bid form takes at most this many characters, the greeting included. */
+const BID_CHARS_MAX = 500
+
+/** How a bid of this direction is built; the greeting is always the program's and always first. */
+export const ReplyFormat = z.object({
+  parts: z.array(
+    z.object({ id: z.string().regex(/^[a-z_]+$/), title: z.string().min(1), hint: z.string() }),
+  ),
+  max_chars: z.number().int().min(1).max(BID_CHARS_MAX),
+  tone: z.array(z.string().min(1)),
+  /** Bids Boris approved as samples. */
+  examples: z.array(z.string().min(1)).max(3),
+  /** How many cases may go into one bid. */
+  max_cases: z.number().int().min(0).max(3),
+})
+export type ReplyFormat = z.infer<typeof ReplyFormat>
+
+/** A case of the direction's library; the model chooses by id, the program puts the link in. */
+export const DirectionCase = z.object({
+  id: z.string().regex(/^[a-z0-9_]+$/),
+  title: z.string().min(1),
+  url: z.string().url().startsWith('https://'),
+  summary: z.string(),
+  tags: z.array(z.string().min(1)),
+  show_when: z.string().min(1),
+  never_when: z.string().min(1).nullable(),
+})
+export type DirectionCase = z.infer<typeof DirectionCase>
+
+export const CASES_MAX = 30
+
+/** What a direction holds beside its scoring rules (those are versioned on their own). */
+export const DirectionProfileData = z.object({
+  speed: z.enum(['normal', 'fast']),
+  reply_format: ReplyFormat.nullable(),
+  cases: z
+    .array(DirectionCase)
+    .max(CASES_MAX)
+    .refine((c) => new Set(c.map((x) => x.id)).size === c.length, {
+      message: 'case ids must be unique',
+    }),
+})
+export type DirectionProfileData = z.infer<typeof DirectionProfileData>
