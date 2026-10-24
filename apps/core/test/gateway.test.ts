@@ -496,4 +496,53 @@ describe('Claude limit in the gateway', () => {
     expect(after).toEqual([LIMIT_TEXTS.ended])
     expect((await calls()).map(roleOf)).toEqual(['sorter', 'probe', 'sorter'])
   })
+
+  it('FR-OPS-3: after a restart the limit counts its 6 hours from its start, not from the restart', async () => {
+    const first = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
+      limit: { probeEveryMs: 60_000 },
+    })
+    await first.call('sorter', 'x', SorterOutput, { limitWaitMs: 0 })
+    first.stop()
+    // The limit began 7 hours ago, as the journal has it.
+    await db.execute(sql`update core.model_call set started_at = now() - interval '7 hours'`)
+    const second = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
+      limit: { probeEveryMs: 60_000 },
+    })
+    const started = Date.now()
+    expect(await second.call('sorter', 'x', SorterOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'limit_reached',
+    })
+    expect(Date.now() - started).toBeLessThan(2000)
+    // The adopted limit's probe (the third row) is still running: it ends before the next test empties the journal.
+    await until(async () => (await countRows()) === 3)
+  })
+
+  it('FR-OPS-3: after a restart a call that cannot outwait the known reset time stops waiting at once', async () => {
+    const reset = Math.floor(Date.now() / 1000) + 3 * 24 * 3600
+    const first = await gateway(
+      {
+        FAKE_CLAUDE_MODE: 'limit',
+        FAKE_CLAUDE_LIMIT_TEXT: `Claude AI usage limit reached|${reset}`,
+      },
+      true,
+      { limit: { probeEveryMs: 60_000 } },
+    )
+    await first.call('sorter', 'x', SorterOutput, { limitWaitMs: 0 })
+    first.stop()
+    // The restarted CLI's probe says nothing about the reset: the journal is all the core has.
+    const second = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
+      limit: { probeEveryMs: 60_000 },
+    })
+    const started = Date.now()
+    expect(await second.call('sorter', 'x', SorterOutput, { limitWaitMs: 3600_000 })).toMatchObject(
+      {
+        ok: false,
+        errorClass: 'limit_reached',
+      },
+    )
+    expect(Date.now() - started).toBeLessThan(2000)
+    // The adopted limit's probe (the third row) is still running: it ends before the next test empties the journal.
+    await until(async () => (await countRows()) === 3)
+  })
 })

@@ -1,10 +1,10 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MODELS, newEventId, ProbeOutput, type RoleMeta } from '@sara/shared'
-import { desc, eq, inArray, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { type ZodType, z } from 'zod'
 import type { Db } from '../db/client'
-import { modelCall } from '../db/schema'
+import { event, modelCall } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { SecretStore } from '../secrets/store'
@@ -52,11 +52,13 @@ export type Gateway = {
 }
 
 const MINUTE_MS = 60_000
+/** How far back the journal is read for a limit: the answers of one model since its last good one. */
+const LIMIT_HISTORY = 500
 type Model = RoleMeta['model']
 
 type Outcome =
   | { ok: true; output: unknown }
-  | { ok: false; errorClass: GatewayErrorClass; message: string }
+  | { ok: false; errorClass: GatewayErrorClass; message: string; resetAt?: string }
 
 /** The subscription limit only: "Context limit reached" and the like are other failures. */
 const LIMIT_TEXT =
@@ -127,22 +129,42 @@ export function createGateway(d: {
     ]),
   ) as Record<Model, LimitGuard>
 
-  // A limit that held when the core stopped holds on: each model's last word decides. Read at once, so Boris hears of
-  // the end even when no call comes.
-  const limitRead = (async () => {
-    const rows = await d.db
-      .selectDistinctOn([modelCall.model], {
-        model: modelCall.model,
-        errorClass: modelCall.errorClass,
-      })
-      .from(modelCall)
-      .where(
-        or(eq(modelCall.ok, true), inArray(modelCall.errorClass, ['limit_reached', 'bad_output'])),
-      )
-      .orderBy(modelCall.model, desc(modelCall.startedAt))
-    const byModel: Partial<Record<string, LimitGuard>> = guards
-    for (const r of rows) if (r.errorClass === 'limit_reached') byModel[r.model]?.adopt()
-  })().catch((e) => {
+  // A limit that held when the core stopped holds on: each model's last word decides, and the journal gives back
+  // when the limit began and the last reset time it named. Read at once, so Boris hears of the end even when no
+  // call comes.
+  const limitRead = Promise.all(
+    MODELS.map(async (model) => {
+      const rows = await d.db
+        .select({
+          errorClass: modelCall.errorClass,
+          at: sql<number>`(extract(epoch from ${modelCall.startedAt}) * 1000)::float8`,
+          resetAt: sql<string | null>`${event.payload}->>'resetAt'`,
+        })
+        .from(modelCall)
+        .leftJoin(
+          event,
+          and(sql`${event.entityId} = ${modelCall.id}::text`, eq(event.type, 'model.failed')),
+        )
+        .where(
+          and(
+            eq(modelCall.model, model),
+            or(
+              eq(modelCall.ok, true),
+              inArray(modelCall.errorClass, ['limit_reached', 'bad_output']),
+            ),
+          ),
+        )
+        .orderBy(desc(modelCall.startedAt))
+        .limit(LIMIT_HISTORY)
+      // The newest rows are limit answers back to the last answer: that run of them is this limit.
+      const end = rows.findIndex((r) => r.errorClass !== 'limit_reached')
+      const held = end < 0 ? rows : rows.slice(0, end)
+      const began = held.at(-1)
+      if (!began) return
+      const reset = held.find((r) => r.resetAt)?.resetAt
+      guards[model].adopt(Number(began.at), reset ? new Date(reset) : null)
+    }),
+  ).catch((e) => {
     console.error('model_call not read', e instanceof Error ? e.message : e)
   })
 
@@ -179,9 +201,16 @@ export function createGateway(d: {
         extraEnv: typeof d.extraEnv === 'function' ? d.extraEnv() : d.extraEnv,
       })
       const result = classify(run, schema, hidden.tags)
-      if (!result.ok && result.errorClass === 'limit_reached')
-        guard.hit(parseResetAt(`${run.stdout}\n${run.stderr}`, new Date()), ranAt)
-      else if (result.ok || result.errorClass === 'bad_output') guard.answered(ranAt)
+      if (!result.ok && result.errorClass === 'limit_reached') {
+        const resetAt = parseResetAt(`${run.stdout}\n${run.stderr}`, new Date())
+        guard.hit(resetAt, ranAt)
+        // The reset time goes into the journal: after a restart it is all the core has of this limit.
+        return {
+          result: { ...result, ...(resetAt && { resetAt: resetAt.toISOString() }) },
+          durationMs: run.durationMs,
+        }
+      }
+      if (result.ok || result.errorClass === 'bad_output') guard.answered(ranAt)
       return { result, durationMs: run.durationMs }
     } finally {
       slots.release()
@@ -227,13 +256,14 @@ export function createGateway(d: {
         role,
         durationMs,
         ...(result.ok ? {} : { errorClass: result.errorClass }),
+        ...(!result.ok && result.resetAt ? { resetAt: result.resetAt } : {}),
         ...(waitedMs > 0 ? { waitedMs } : {}),
         ...redacted,
       },
     })
-    return result.ok
-      ? { ok: true, output: result.output, durationMs, modelCallId: id }
-      : { ...result, durationMs, modelCallId: id }
+    if (result.ok) return { ok: true, output: result.output, durationMs, modelCallId: id }
+    const { resetAt: _, ...failure } = result
+    return { ...failure, durationMs, modelCallId: id }
   }
 
   async function call<T>(

@@ -83,8 +83,11 @@ export type LimitGuard = {
   hit(resetAt: Date | null, runStartedAt: number): void
   /** The model answered a run that started at `runStartedAt`: the limit, if any, is over and the waiting calls go. */
   answered(runStartedAt: number): void
-  /** A limit that held before a restart: on again quietly, and probed at once. */
-  adopt(): void
+  /**
+   * A limit that held before a restart: on again quietly, and probed at once. `since` (epoch ms) is when it began and
+   * `resetAt` the last reset time it gave, as far as the journal has them: the wait is not counted anew.
+   */
+  adopt(since?: number, resetAt?: Date | null): void
   /**
    * Resolves 'go' when there is no limit or it ends, 'expired' at `deadline` (epoch ms), after the limit has held for
    * `maxWaitMs`, or at once when its known reset comes too late.
@@ -110,7 +113,16 @@ export function createLimitGuard(o: {
   let endedAt = Number.NEGATIVE_INFINITY
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
-  const waiters = new Map<(r: 'go' | 'expired') => void, ReturnType<typeof setTimeout>>()
+  const waiters = new Map<
+    (r: 'go' | 'expired') => void,
+    { timer: ReturnType<typeof setTimeout>; until: number }
+  >()
+  /** A reset time that falls past a waiting call's end ends that wait now. */
+  function trim() {
+    const resetAt = state?.resetAt?.getTime()
+    if (!resetAt) return
+    for (const [done, w] of [...waiters]) if (resetAt + AFTER_RESET_MS > w.until) done('expired')
+  }
 
   function schedule(ms: number) {
     if (timer) clearTimeout(timer)
@@ -145,6 +157,7 @@ export function createLimitGuard(o: {
       } else if (resetAt && resetAt.getTime() !== state.resetAt?.getTime()) {
         state.resetAt = resetAt
         schedule(nextCheckMs())
+        trim()
       } else if (!timer) {
         schedule(nextCheckMs())
       }
@@ -158,11 +171,12 @@ export function createLimitGuard(o: {
       o.onChange('ended')
       for (const [done] of [...waiters]) done('go')
     },
-    adopt() {
+    adopt(since = Date.now(), resetAt = null) {
       if (stopped || state) return
-      state = { since: Date.now(), resetAt: null }
+      state = { since, resetAt }
       o.onChange('adopted')
       schedule(0)
+      trim()
     },
     wait(deadline) {
       if (!state) return Promise.resolve('go')
@@ -173,20 +187,20 @@ export function createLimitGuard(o: {
         return Promise.resolve('expired')
       return new Promise((resolve) => {
         const done = (r: 'go' | 'expired') => {
-          clearTimeout(waiters.get(done))
+          clearTimeout(waiters.get(done)?.timer)
           waiters.delete(done)
           resolve(r)
         }
-        const t = setTimeout(() => done('expired'), until - Date.now())
-        t.unref?.()
-        waiters.set(done, t)
+        const timer = setTimeout(() => done('expired'), until - Date.now())
+        timer.unref?.()
+        waiters.set(done, { timer, until })
       })
     },
     stop() {
       stopped = true
       if (timer) clearTimeout(timer)
       timer = null
-      for (const t of waiters.values()) clearTimeout(t)
+      for (const w of waiters.values()) clearTimeout(w.timer)
       waiters.clear()
     },
   }
