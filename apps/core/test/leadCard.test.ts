@@ -263,20 +263,23 @@ describe('the «Разбор» press', () => {
     expect(texts).toHaveLength(0)
   })
 
-  it('FR-LEAD-7: a client text with tags and an ampersand is escaped in the message', async () => {
+  it('FR-LEAD-7: a client text with tags and an ampersand is escaped in the message, the reading and the order text', async () => {
     const taskId = await openLead('92007', {
       title: 'A & B <b>',
-      text: '<script>x</script> & "q"',
+      // Long enough that the card cuts it and the message carries it whole.
+      text: '<script>x</script> & "q" '.repeat(200),
       draftAnalysis: {
         ...ANALYSIS,
         reading: { ...ANSWER.reading, said: '<i>сказал</i> & ушёл' },
       },
     })
     await pipeline.onPress({ taskId, action: 'razbor' })
-    const msg = texts[0]?.text ?? ''
-    expect(msg).toContain('<b>Разбор: A &amp; B &lt;b&gt;</b>')
-    expect(msg).toContain('&lt;i&gt;сказал&lt;/i&gt; &amp; ушёл')
-    expect(msg).not.toContain('<script>')
+    const all = texts.map((t) => t.text).join('\n')
+    expect(all).toContain('<b>Разбор: A &amp; B &lt;b&gt;</b>')
+    expect(all).toContain('&lt;i&gt;сказал&lt;/i&gt; &amp; ушёл')
+    expect(all).toContain('&lt;script&gt;x&lt;/script&gt; &amp; "q" ')
+    expect(all).not.toContain('<script>')
+    expect(all).not.toContain('<i>сказал')
   })
 
   it('FR-LEAD-7: when Telegram does not take the message the press says so and works when pressed again', async () => {

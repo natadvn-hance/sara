@@ -4,6 +4,7 @@ import {
   type LeadCard,
   leadCardKeyboard,
   leadCardText,
+  plainFallback,
   renderLeadCard,
   TEXTS,
   telegramTextLength,
@@ -193,6 +194,48 @@ describe('the lead card layout', () => {
   it('FR-LEAD-7: the order text is empty on a card of a lead without one: the block says so', () => {
     expect(leadCardText({ ...card, text: '  ' })).toContain(
       '<b>Заявка</b>\n<blockquote expandable>Текста заявки нет.</blockquote>',
+    )
+  })
+})
+
+describe('the lead card odd values', () => {
+  it('FR-LEAD-7: an empty part of the short разбор is left out, not shown as a broken line', () => {
+    const lines = (a: Partial<typeof ANALYSIS>) =>
+      leadCardText({ ...card, analysis: { ...ANALYSIS, ...a } }).split('\n')
+    expect(lines({ hiddenNeed: ' ', risk: '' })).toContain(
+      '<b>Условие:</b> Брать, если сроки понятны',
+    )
+    expect(lines({ hiddenNeed: ' ', risk: '' }).join('\n')).not.toContain('<b>Разбор:</b>')
+    expect(lines({ hiddenNeed: ' ', risk: '' }).join('\n')).not.toContain('<b>Риск:</b>')
+    expect(lines({ condition: '' })).toContain('<b>Риск:</b> Объём больше, чем звучит.')
+    const none = lines({ hiddenNeed: '', risk: '', condition: ' ' }).join('\n')
+    expect(none).not.toMatch(/Разбор:|Риск:|Условие:/)
+  })
+
+  it('FR-LEAD-7: a since text that already starts with «с» does not get a second one', () => {
+    const since = (t: string) =>
+      leadCardText({ ...card, clientInfo: { ...CLIENT, on_profi_since: t, phone_verified: null } })
+    expect(since('с 7 сентября 2020')).toContain('\nНа Профи.ру с 7 сентября 2020\n')
+    expect(since('С 7 сентября 2020')).toContain('\nНа Профи.ру с 7 сентября 2020\n')
+  })
+})
+
+describe('the plain text fallback', () => {
+  it('FR-LEAD-7: a card at the limit still fits 4096 as plain text and keeps the written-out link', () => {
+    const r = renderLeadCard({ ...full, text: 'a '.repeat(9000) })
+    expect(telegramTextLength(r.html)).toBeGreaterThan(3900)
+    const plain = plainFallback(r.html)
+    expect(plain.length).toBeLessThanOrEqual(4096)
+    expect(plain.endsWith('https://profi.ru/backoffice/n.php?o=90001')).toBe(true)
+    expect(plain).not.toMatch(/<\/?[a-z]/)
+    expect(plain).toContain('Стоимость услуги')
+  })
+
+  it('FR-LEAD-7: a short card is just its text without markup, entities decoded, the link written out', () => {
+    const plain = plainFallback(leadCardText({ ...card, text: 'a < b & c' }))
+    expect(plain).toContain('a < b & c')
+    expect(plain.split('\n').at(-1)).toBe(
+      'Открыть заявку на Профи.ру: https://profi.ru/backoffice/n.php?o=90001',
     )
   })
 })
@@ -387,6 +430,30 @@ describe('the «Разбор» message', () => {
     for (const m of msgs) expect(telegramTextLength(m)).toBeLessThanOrEqual(4096)
   })
 
+  it('FR-LEAD-7: a long order text comes whole even when the card did not cut it today: the card may have been cut before an edit', () => {
+    const text = 'Подробности заявки. '.repeat(140)
+    expect(renderLeadCard({ ...full, text }).textCut).toBe(false)
+    const msgs = analysisMessages({ ...full, text })
+    expect(msgs.join('\n')).toContain('<b>Полный текст заявки</b>')
+    expect(msgs.join('\n')).toContain(text.trim())
+  })
+
+  it('FR-LEAD-7: an enormous order text is capped at a few messages and says it is cut', () => {
+    const msgs = analysisMessages({ ...full, text: 'слово '.repeat(50000) })
+    expect(msgs.length).toBeLessThanOrEqual(6)
+    for (const m of msgs) expect(telegramTextLength(m)).toBeLessThanOrEqual(4096)
+    expect(msgs.join('\n')).toContain('…</blockquote>')
+    expect(msgs.at(-1)?.endsWith(LINK)).toBe(true)
+  })
+
+  it('FR-LEAD-7: a stored reading that lost its full part still gives the three short lines', () => {
+    const [msg] = analysisMessages({ ...full, analysis: { ...ANALYSIS, reading: null } })
+    expect(msg).toContain('Боится долгого запуска')
+    expect(msg).toContain('Объём больше, чем звучит')
+    expect(msg).toContain('Брать, если сроки понятны')
+    expect(msg).not.toContain('Разбора для этой заявки нет')
+  })
+
   it('FR-LEAD-7: the reading is escaped', () => {
     const msg = analysisMessages({
       ...full,
@@ -462,7 +529,7 @@ describe('the texts', () => {
     )
   })
 
-  it('NFR-UX-1: no card text contains a long dash', () => {
+  it('NFR-UX-1: the fixed texts of the card and the «Разбор» message contain no long dash', () => {
     const long = `${'а'.repeat(5000)}`
     const texts = [
       leadCardText(card),

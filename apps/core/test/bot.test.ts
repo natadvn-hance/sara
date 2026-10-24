@@ -149,6 +149,19 @@ describe('telegram bot', () => {
     expect(m?.text).toContain('Нужен <сайт> & всё')
     expect(m?.text).toContain('https://profi.ru/backoffice/n.php?o=90001')
     expect(m?.reply_markup?.inline_keyboard.flat().length).toBe(4)
+    expect(m?.link_preview_options).toEqual({ is_disabled: true })
+  })
+
+  it('FR-LEAD-7: should Telegram refuse the markup of a card at the limit, the plain text still fits 4096', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    tg.setRejectHtml(true)
+    await bot.notifier.sendLeadCard({ ...CARD, text: 'a '.repeat(9000) })
+    const m = tg.sent[1]
+    expect(m?.parse_mode).toBeUndefined()
+    expect(m?.text.length).toBeLessThanOrEqual(4096)
+    expect(m?.text.endsWith('https://profi.ru/backoffice/n.php?o=90001')).toBe(true)
+    expect(m?.link_preview_options).toEqual({ is_disabled: true })
   })
 
   it('FR-NOTIF-2: a silent lead card goes with disable_notification, a usual one without', async () => {

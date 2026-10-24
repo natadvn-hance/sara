@@ -152,7 +152,9 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
               ? rejectHtml
                 ? "can't parse entities: unsupported start tag at byte offset 0"
                 : htmlProblem(String(params.text))
-              : null
+              : String(params.text).length > 4096
+                ? 'message is too long'
+                : null
           if (problem) {
             return res.writeHead(400, { 'content-type': 'application/json' }).end(
               JSON.stringify({

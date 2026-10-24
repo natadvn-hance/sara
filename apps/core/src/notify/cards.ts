@@ -115,6 +115,16 @@ export const TEXTS = {
 /** Telegram takes at most this many characters in one message, counted after tags and entities are parsed. */
 export const MESSAGE_LIMIT = 4096
 
+/**
+ * What a card or a «Разбор» message may hold: a little under the limit, so the same message as plain text (the link
+ * written out after its words) still fits when Telegram refuses the markup.
+ */
+const FIT = MESSAGE_LIMIT - 100
+/** From this length the «Разбор» message carries the order text even when today's card is not cut: it may have been. */
+const FULL_TEXT_ABOVE = 2500
+/** The order text in «Разбор» stops here (a few messages); the link to the order is at the end. */
+const FULL_TEXT_MAX = 16000
+
 /** What the card keeps of each value from the site or the model, so the fixed part never fills a message. */
 const CAP = {
   title: 200,
@@ -148,6 +158,15 @@ export function htmlToPlain(html: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
+}
+
+/** The same for sending: within the limit even so, the last line (the written-out link) kept. */
+export function plainFallback(html: string): string {
+  const plain = htmlToPlain(html)
+  if (plain.length <= MESSAGE_LIMIT) return plain
+  const at = plain.lastIndexOf('\n')
+  const link = plain.slice(at + 1)
+  return `${clip(plain.slice(0, Math.max(0, at)), MESSAGE_LIMIT - link.length - 2)}\n\n${link}`
 }
 
 /** `s` cut to at most `max` characters with «…», never in the middle of an emoji. */
@@ -191,7 +210,8 @@ function headLines(c: LeadCard): string[] {
 }
 
 /** «На Профи.ру с 7 сентября 2020» as the site writes it; a bare date gets the beginning. */
-const sinceText = (s: string) => (/^на\s+профи\.ру/i.test(s) ? s : `На Профи.ру с ${s}`)
+const sinceText = (s: string) =>
+  /^на\s+профи\.ру/i.test(s) ? s : `На Профи.ру с ${s.replace(/^с\s+/i, '')}`
 
 function clientLines(c: LeadCard): string[] {
   const info = c.clientInfo ?? null
@@ -231,10 +251,17 @@ function whyLines(c: LeadCard): string[] {
     : [verdictLine(c), ...(c.unscored ? ['Без оценки: Оценщик не ответил'] : [])]
   const a = c.analysis
   if (!a) return why
+  const need = a.hiddenNeed.trim()
+  const risk = noPeriod(a.risk.trim())
+  const condition = a.condition.trim()
+  const riskAndCondition = [
+    risk ? `<b>Риск:</b> ${esc(clip(risk, CAP.reason))}.` : null,
+    condition ? `<b>Условие:</b> ${clean(condition, CAP.reason)}` : null,
+  ].filter(Boolean)
   return [
     ...why,
-    `<b>Разбор:</b> ${clean(a.hiddenNeed, CAP.reason)}`,
-    `<b>Риск:</b> ${esc(noPeriod(clip(a.risk.trim(), CAP.reason)))}. <b>Условие:</b> ${clean(a.condition, CAP.reason)}`,
+    ...(need ? [`<b>Разбор:</b> ${clean(need, CAP.reason)}`] : []),
+    ...(riskAndCondition.length > 0 ? [riskAndCondition.join(' ')] : []),
   ]
 }
 
@@ -276,12 +303,12 @@ function cutText(text: string, keep: number): string {
 export function renderLeadCard(c: LeadCard): { html: string; textCut: boolean } {
   const text = c.text.trim() || NO_TEXT
   let html = cardHtml(c, text)
-  if (telegramTextLength(html) <= MESSAGE_LIMIT) return { html, textCut: false }
+  if (telegramTextLength(html) <= FIT) return { html, textCut: false }
   let keep = text.length
   for (let i = 0; i < 10; i++) {
-    keep = Math.max(0, keep - (telegramTextLength(html) - MESSAGE_LIMIT) - 1)
+    keep = Math.max(0, keep - (telegramTextLength(html) - FIT) - 1)
     html = cardHtml(c, cutText(text, keep))
-    if (telegramTextLength(html) <= MESSAGE_LIMIT) break
+    if (telegramTextLength(html) <= FIT) break
   }
   return { html, textCut: true }
 }
@@ -303,10 +330,10 @@ function addOrderText(text: string, room: { used(): number; flush(): void; add(b
   let first = true
   while (rest.length > 0) {
     const heading = first ? `${TEXT_HEADING}\n` : ''
-    let avail = MESSAGE_LIMIT - room.used() - telegramTextLength(heading)
+    let avail = FIT - room.used() - telegramTextLength(heading)
     if (avail < 500) {
       room.flush()
-      avail = MESSAGE_LIMIT - telegramTextLength(heading)
+      avail = FIT - telegramTextLength(heading)
     }
     let piece = rest
     if (rest.length > avail) {
@@ -335,7 +362,7 @@ export function analysisMessages(c: LeadCard): string[] {
     },
     add(block: string) {
       const next = cur ? `${cur}\n\n${block}` : block
-      if (cur && telegramTextLength(next) > MESSAGE_LIMIT) {
+      if (cur && telegramTextLength(next) > FIT) {
         messages.push(cur)
         cur = block
       } else cur = next
@@ -343,6 +370,7 @@ export function analysisMessages(c: LeadCard): string[] {
   }
   room.add(`<b>Разбор: ${clean(c.title, CAP.title)}</b>`)
   const reading = c.analysis?.reading ?? null
+  const text = c.text.trim() || NO_TEXT
   if (reading) {
     for (const [key, label] of READING_PARTS) {
       const value = reading[key].trim()
@@ -350,10 +378,21 @@ export function analysisMessages(c: LeadCard): string[] {
     }
     const condition = c.analysis?.condition.trim()
     if (condition) room.add(`<b>Условие</b>\n${clean(condition, CAP.reading)}`)
+  } else if (c.analysis) {
+    // Only the short lines were kept: they are the whole reading there is.
+    const parts = [
+      ['Чего хочет на самом деле', c.analysis.hiddenNeed],
+      ['Риски', c.analysis.risk],
+      ['Условие', c.analysis.condition],
+    ] as const
+    for (const [label, value] of parts) {
+      if (value.trim()) room.add(`<b>${label}</b>\n${clean(value, CAP.reading)}`)
+    }
   } else {
     room.add(NO_READING)
   }
-  if (!reading || renderLeadCard(c).textCut) addOrderText(c.text.trim() || NO_TEXT, room)
+  if (!reading || text.length > FULL_TEXT_ABOVE || renderLeadCard(c).textCut)
+    addOrderText(text.length > FULL_TEXT_MAX ? cutText(text, FULL_TEXT_MAX) : text, room)
   room.add(linkLine(c.orderId))
   room.flush()
   return messages

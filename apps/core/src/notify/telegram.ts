@@ -7,7 +7,7 @@ import type { Db } from '../db/client'
 import { appendEvent } from '../journal/journal'
 import type { BorisMessage } from '../learning/inbox'
 import { bindChat, boundChat } from './binding'
-import { htmlToPlain, leadCardKeyboard, leadCardText, TEXTS } from './cards'
+import { leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
 import type { Notifier } from './notifier'
 
 type SendOptions = NonNullable<Parameters<Bot['api']['sendMessage']>[2]>
@@ -182,7 +182,10 @@ export function createTelegramRuntime(d: {
     } catch (err) {
       if (!(err instanceof GrammyError) || !/can't parse entities/i.test(err.description)) throw err
       console.error('telegram refused the markup, sending plain text:', err.description)
-      return bot.api.sendMessage(to, htmlToPlain(html), extra)
+      return bot.api.sendMessage(to, plainFallback(html), {
+        ...extra,
+        link_preview_options: { is_disabled: true },
+      })
     }
   }
 

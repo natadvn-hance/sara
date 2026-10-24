@@ -484,7 +484,6 @@ async function cardOfFound(
     reason: s.reason ?? null,
     bidPriceRub: l.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
-    unscored: !sc,
     reminder,
     draft: l.draftText ? { text: l.draftText, priceRub: l.draftPriceRub } : null,
     analysis: cardAnalysis(l.draftAnalysis),
@@ -541,10 +540,10 @@ async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
 async function onAnalysis(taskId: string): Promise<string> {
   const found = await leadOfTask(taskId)
   if (!found) return TEXTS.noTask
-  // The reminder layout is the longest: if any version of the card cut the order text, this one did.
+  // The reminder layout of an unscored card is the longest: if any version cut the order text, this one does.
   const card = await cardOfFound(found, true)
   try {
-    for (const message of analysisMessages(card)) {
+    for (const message of analysisMessages({ ...card, unscored: !card.score })) {
       await d().notifier.sendText(message, { html: true })
     }
   } catch (err) {
