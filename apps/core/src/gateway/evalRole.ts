@@ -6,17 +6,20 @@ import { loadConfig } from '../config'
 import { createDb } from '../db/client'
 import { sortOrder } from '../leads/sorter'
 import { createSecretStore } from '../secrets/store'
-import { createGateway } from './gateway'
+import { createGateway, withoutLimitWait } from './gateway'
 
 const config = loadConfig()
 const { db, close } = createDb(config.databaseUrl)
-const gw = createGateway({
-  db,
-  secrets: createSecretStore(config.dataDir),
-  claudeBin: config.claudeBin,
-  rolesDir: config.rolesDir,
-  dataDir: config.dataDir,
-})
+// A manual check reports the limit at once rather than wait it out for hours.
+const gw = withoutLimitWait(
+  createGateway({
+    db,
+    secrets: createSecretStore(config.dataDir),
+    claudeBin: config.claudeBin,
+    rolesDir: config.rolesDir,
+    dataDir: config.dataDir,
+  }),
+)
 const ordersDir = join(config.rolesDir, '../tests/fixtures/orders')
 const samples: { order: string; expected: string }[] = JSON.parse(
   await readFile(join(config.rolesDir, 'sorter/evals/samples.json'), 'utf8'),

@@ -26,6 +26,16 @@ export type FormButton = {
   disabled: boolean
 }
 export type PaymentLine = { text: string; testid: string | null; visible: boolean }
+/** Something to press that is no button: a link, a card with a pointer, an element with a role. */
+export type Clickable = {
+  tag: string
+  text: string
+  testid: string | null
+  role: string | null
+  /** In the site's tariff block, where the October page opens its bid form. */
+  inTariffs: boolean
+  visible: boolean
+}
 
 /** What the bid form of an order page is made of, for calibrating the bid (M2 design 5.B). */
 export type FormMap = {
@@ -34,6 +44,7 @@ export type FormMap = {
   buttons: FormButton[]
   payment: PaymentLine[]
   testids: string[]
+  clickables: Clickable[]
 }
 
 /**
@@ -118,8 +129,9 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
         })
 
       // Buttons a bid may need, wherever they are: the rest outside the form may carry a client's name.
+      // «Написать клиенту» is what the live order answer names its form opener (tariffsBlock.scrollButtonText).
       const BUTTON =
-        /^(Продолжить|Откликнуться|Отправить|Оплатить|Пополнить|Подтвердить|Предложить|Отклик)/i
+        /^(Продолжить|Откликнуться|Написать клиенту|Отправить|Оплатить|Пополнить|Подтвердить|Предложить|Отклик)/i
       const buttons = [
         ...document.querySelectorAll(
           'button, [role="button"], input[type="submit"], input[type="button"]',
@@ -143,6 +155,36 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
         .filter((b) => (b.inForm ? b.text !== '' || b.testid !== null : BUTTON.test(b.text)))
         .slice(0, 60)
 
+      // Outermost things with a pointer, a link or a role (the pointer passes down to the children).
+      const TARIFFS = '[data-testid*="tariff" i]'
+      const pointer = (el: Element | null) => !!el && getComputedStyle(el).cursor === 'pointer'
+      const clickables = [
+        ...document.querySelectorAll(
+          'a, [role="link"], [role="tab"], [role="radio"], [role="option"], [tabindex], [onclick], div, span, li, label',
+        ),
+      ]
+        .filter(
+          (el) =>
+            !el.closest('button, [role="button"]') &&
+            (el.tagName === 'A' ||
+              el.hasAttribute('role') ||
+              el.hasAttribute('tabindex') ||
+              el.hasAttribute('onclick') ||
+              pointer(el)) &&
+            !pointer(el.parentElement),
+        )
+        .map((el) => ({
+          tag: el.tagName.toLowerCase(),
+          text: clip(textOf(el), 60) ?? '',
+          testid: attr(el, 'data-testid'),
+          role: attr(el, 'role'),
+          inTariffs: !!el.closest(TARIFFS),
+          visible: shown(el),
+        }))
+        // Outside the form and the tariffs only a bid's words: a link or a card may carry a client's name.
+        .filter((c) => c.inTariffs || BUTTON.test(c.text))
+        .slice(0, 40)
+
       const payment: { text: string; testid: string | null; visible: boolean }[] = []
       const seen = new Set<string>()
       const keep = (el: Element, text: string) => {
@@ -163,11 +205,13 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
         SHAPE.test(t) || (AMOUNT.test(t) && (inForm(el) || !!el.closest(BALANCE)))
       // The site's own payment blocks: the wallet in the top bar, the form footer, the payment ways.
       for (const box of document.querySelectorAll(
-        `${BALANCE}, [class*="payment" i], [data-testid*="pay" i], [data-testid*="footer" i]`,
+        `${BALANCE}, ${TARIFFS}, [class*="payment" i], [data-testid*="pay" i], [data-testid*="footer" i]`,
       )) {
         for (const line of textOf(box).split('\n').slice(0, 10)) {
           const t = clip(line, 80)
-          if (t && (inForm(box) || (t.length <= 40 && fits(box, t)))) keep(box, t)
+          // The form and the tariff block are the site's own words.
+          const own = inForm(box) || !!box.closest(TARIFFS)
+          if (t && (own || (t.length <= 40 && fits(box, t)))) keep(box, t)
         }
       }
       for (const el of document.querySelectorAll('body *')) {
@@ -186,7 +230,7 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
         .filter(Boolean)
         .slice(0, 200)
 
-      return { what: 'bid_form' as const, fields, buttons, payment, testids }
+      return { what: 'bid_form' as const, fields, buttons, payment, testids, clickables }
     })
     .catch(() => null)
 }

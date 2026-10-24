@@ -121,6 +121,33 @@ describe('the bid form map (calibration, M2 design 5.B)', () => {
     expect(map?.payment.map((p) => p.text)).toContain('Оплата с кошелька')
   })
 
+  it('FR-LEAD-8: what opens the form is mapped even when it is no button: bid words and the tariff block', async () => {
+    // The live order page of 24.10.2026: no field, no button, a tariffs block (maps of orders 95373857, 95373714).
+    await ab.page.setContent(`<main data-testid="order_card_container">
+      <div style="cursor: pointer" onclick="window.clicked = true">Ирина Петрова</div>
+      <div data-testid="orderCard/tariffs"><div>Тариф</div>
+        <div class="card" style="cursor: pointer" onclick="window.clicked = true"><span>Отклик</span> <span>216 ₽</span></div>
+        <a href="#details">Детали</a></div>
+      <div role="link" tabindex="0" style="cursor: pointer" onclick="window.clicked = true">Откликнуться</div>
+      <a href="#bid" onclick="window.clicked = true">Написать клиенту</a>
+    </main>`)
+    const map = await readFormMap(ab.page)
+    expect(map?.clickables).toEqual([
+      expect.objectContaining({ tag: 'div', text: 'Отклик 216 ₽', inTariffs: true, visible: true }),
+      expect.objectContaining({ tag: 'a', text: 'Детали', inTariffs: true }),
+      expect.objectContaining({ tag: 'div', text: 'Откликнуться', role: 'link', inTariffs: false }),
+      // The order answer's tariffsBlock.scrollButtonText on the live site (read 24.10.2026).
+      expect.objectContaining({ tag: 'a', text: 'Написать клиенту', inTariffs: false }),
+    ])
+    expect(map?.payment.map((p) => p.text)).toEqual(
+      expect.arrayContaining(['Тариф', 'Отклик 216 ₽', 'Детали']),
+    )
+    expect(JSON.stringify(map)).not.toContain('Ирина')
+    expect(await ab.page.evaluate(() => (window as { clicked?: boolean }).clicked ?? false)).toBe(
+      false,
+    )
+  })
+
   it('FR-LEAD-8: a form hidden behind «Продолжить» is mapped as hidden and nothing is clicked', async () => {
     await ab.page.setContent(`<main>
       <button id="go" onclick="window.clicked = true; document.getElementById('f').hidden = false">Продолжить</button>

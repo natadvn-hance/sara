@@ -22,6 +22,8 @@ process.stdin.on('data', (c) => {
 process.stdin.on('end', async () => {
   const start = Date.now()
   if (mode === 'sleep') await new Promise((r) => setTimeout(r, sleepMs))
+  // FAKE_CLAUDE_DELAY_MS: any mode answers this much later (a slow limit answer, say).
+  await new Promise((r) => setTimeout(r, Number(process.env.FAKE_CLAUDE_DELAY_MS ?? 0)))
   if (log) {
     appendFileSync(
       log,
@@ -33,8 +35,19 @@ process.stdin.on('end', async () => {
     process.stderr.write('Something went wrong\n')
     process.exit(1)
   }
-  if (mode === 'limit') {
-    process.stdout.write('Claude AI usage limit reached\n')
+  const limitText = process.env.FAKE_CLAUDE_LIMIT_TEXT ?? 'Claude AI usage limit reached'
+  // FAKE_CLAUDE_LIMIT_MODELS=sonnet: the limit modes hold only these models, the others answer as usual.
+  const limitModels = process.env.FAKE_CLAUDE_LIMIT_MODELS?.split(',')
+  const limited = !limitModels || limitModels.includes(argOf('--model') ?? '')
+  if (mode === 'limit' && limited) {
+    process.stdout.write(`${limitText}\n`)
+    process.exit(1)
+  }
+  if (mode === 'limit_json' && limited) {
+    // How CLI 2.1.310 answers a spent subscription limit in print mode: an error result, exit code 1.
+    process.stdout.write(
+      JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: limitText }),
+    )
     process.exit(1)
   }
   if (mode === 'auth_error') {

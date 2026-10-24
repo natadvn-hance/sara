@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { directionVersion, question, ruleProposal, task } from '../../src/db/schema'
 import { activeRules, rollbackTo, seedDirection } from '../../src/direction/store'
 import { RULES_V1 } from '../../src/direction/v1'
-import { createGateway, type Gateway } from '../../src/gateway/gateway'
+import { createGateway, type Gateway, withoutLimitWait } from '../../src/gateway/gateway'
 import { backtest } from '../../src/learning/backtest'
 import { recordLabel } from '../../src/learning/labels'
 import { maybePropose, onProposalPress } from '../../src/learning/proposals'
@@ -43,18 +43,21 @@ async function gateway(
 ): Promise<Gateway> {
   const secrets = createSecretStore(join(dir, 'data'))
   await secrets.set('claude_oauth_token', 'tok')
-  return createGateway({
-    db,
-    secrets,
-    claudeBin: join(ROOT, 'tests/fakes/fake-claude.mjs'),
-    rolesDir: join(dir, 'roles'),
-    dataDir: join(dir, 'data'),
-    extraEnv: {
-      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
-      FAKE_CLAUDE_ARGS_LOG: join(dir, 'claude.log'),
-      ...env,
-    },
-  })
+  // As the core wires the learning jobs: through a Claude limit they do not wait (app.ts).
+  return withoutLimitWait(
+    createGateway({
+      db,
+      secrets,
+      claudeBin: join(ROOT, 'tests/fakes/fake-claude.mjs'),
+      rolesDir: join(dir, 'roles'),
+      dataDir: join(dir, 'data'),
+      extraEnv: {
+        FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
+        FAKE_CLAUDE_ARGS_LOG: join(dir, 'claude.log'),
+        ...env,
+      },
+    }),
+  )
 }
 const PROPOSAL = {
   summary: 'Порог выше: 60 вместо 56',
