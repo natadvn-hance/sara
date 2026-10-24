@@ -97,6 +97,35 @@ describe('routing of Profi events', () => {
     await routeProfiEvent(r, ev('profi.session_dead'))
     expect(calls).toEqual(['pipeline', 'account'])
   })
+
+  it('FR-CONV-1: chat events go to the conversation', async () => {
+    const { routeProfiEvent } = await import('../src/accounts/profiEvents')
+    const calls: string[] = []
+    const r = {
+      db,
+      onOrderSeen: async () => {},
+      onAccountEvent: async () => {},
+      onConversationEvent: async (e: { type: string }) => {
+        calls.push(e.type)
+      },
+    }
+    for (const t of [
+      'profi.client_message',
+      'profi.specialist_message',
+      'profi.author_unclear',
+      'profi.client_typing',
+      'profi.client_read',
+    ] as const)
+      await routeProfiEvent(r, ev(t))
+    await routeProfiEvent(r, ev('profi.session_dead'))
+    expect(calls).toEqual([
+      'profi.client_message',
+      'profi.specialist_message',
+      'profi.author_unclear',
+      'profi.client_typing',
+      'profi.client_read',
+    ])
+  })
 })
 
 describe('connection messages', () => {

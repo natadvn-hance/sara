@@ -100,6 +100,8 @@ export async function routeProfiEvent(
     db: Db
     onOrderSeen(e: EventEnvelope): Promise<void>
     onAccountEvent(e: EventEnvelope): Promise<void>
+    /** M4: chat events (FR-CONV-1); without it they are only journaled. */
+    onConversationEvent?(e: EventEnvelope): Promise<void>
   },
   e: EventEnvelope,
 ): Promise<void> {
@@ -108,7 +110,16 @@ export async function routeProfiEvent(
     return
   }
   if (ACCOUNT_EVENTS.has(e.type)) await r.onAccountEvent(e)
+  if (CHAT_EVENTS.has(e.type)) await r.onConversationEvent?.(e)
 }
+
+const CHAT_EVENTS = new Set<string>([
+  'profi.client_message',
+  'profi.specialist_message',
+  'profi.author_unclear',
+  'profi.client_typing',
+  'profi.client_read',
+])
 
 const ACCOUNT_EVENTS = new Set<string>([
   'profi.session_dead',
