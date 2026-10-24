@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { orderFromPageText, profiParsers } from '../src/eyes/profiParsers'
+import { authorFromClasses, orderFromPageText, profiParsers } from '../src/eyes/profiParsers'
 import { nodeTestUrl } from './helpers/db'
 
 let ab: AccountBrowser
@@ -89,6 +89,15 @@ describe('Profi.ru page readers', () => {
       ['m3', 'system'],
       ['m4', 'unknown'],
     ])
+  })
+
+  it('FR-CONV-2: a kept chat record gives each bubble the author its page would, an unknown class stays unknown', () => {
+    // The shape the tab keeps of a chat page (no text), so calibration samples can be checked for authors.
+    expect(authorFromClasses(['cw_msg', 'cw_iCsdtF', 'cw_QbW5I0'])).toBe('specialist')
+    expect(authorFromClasses(['cw_cO7-r-'])).toBe('client')
+    expect(authorFromClasses(['cw_GK6qZJ'])).toBe('system')
+    expect(authorFromClasses(['cw_msg', 'cw_ZZZ999'])).toBe('unknown')
+    expect(authorFromClasses([])).toBe('unknown')
   })
 
   it('FR-SET-4: the wallet balance is read from the top bar', async () => {

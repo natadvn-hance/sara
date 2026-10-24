@@ -1,5 +1,6 @@
 import type { AccountBrowser } from '../browser/accountBrowser'
 import type { Eyes } from './eyes'
+import { BUBBLE, bubbleShapes, pageShape } from './pageShape'
 import type { Parsers } from './parsers'
 
 export type Insurance = {
@@ -86,6 +87,22 @@ export function startInsurance(o: {
     }
   }
 
+  async function keep(body: unknown) {
+    await o.eyes
+      .onRaw({ kind: 'dom', url: o.ab.page.url(), body, receivedAt: new Date().toISOString() })
+      .catch(() => {})
+  }
+
+  // The open chat page: its messages, and a record of its bubbles (never their text) for calibration (ST-M1-04).
+  async function readChat(id: string) {
+    const read = await o.parsers.fromChatDom(o.ab.page, id)
+    const messages = await bubbleShapes(o.ab.page).catch(() => [])
+    // No bubble found: the page's outline shows what the chat is drawn with now.
+    const shape = messages.length === 0 ? await pageShape(o.ab.page).catch(() => []) : undefined
+    await keep({ chatId: id, messages, ...(shape ? { shape } : {}) })
+    await o.eyes.onChatRead(id, read)
+  }
+
   // Chats the event stream named: read within the minute, at most 3 a pass, the rest on the next one.
   async function readTouchedChats() {
     let opened = 0
@@ -95,7 +112,7 @@ export function startInsurance(o: {
       if (!(await go(o.parsers.paths.chat(id)))) return
       onFeed = false
       opened++
-      await o.eyes.onChatRead(id, await o.parsers.fromChatDom(o.ab.page, id))
+      await readChat(id)
     }
   }
 
@@ -119,39 +136,45 @@ export function startInsurance(o: {
     })
   }
 
-  // The chats list of the real site is drawn without a JSON answer: its addresses (never its text) are kept so the
-  // list reader can be calibrated on them (ST-M1-04).
-  async function keepLinks() {
-    const body = await o.ab.page
-      .evaluate(() => ({
-        links: [
-          ...new Set(
-            [...document.querySelectorAll('a[href]')]
-              .map((a) => new URL((a as HTMLAnchorElement).href, location.href))
-              .filter((u) => u.origin === location.origin)
-              .map((u) => `${u.pathname}${u.search}`),
-          ),
-        ].slice(0, 300),
-        messages: document.querySelectorAll('[data-message-content-id]').length,
-      }))
+  // The chats list of the real site is drawn without a JSON answer: its addresses and the outline of its elements
+  // (never its text) are kept so the list reader can be calibrated on them (ST-M1-04).
+  async function keepList() {
+    const links = await o.ab.page
+      .evaluate(
+        (bubble) => ({
+          links: [
+            ...new Set(
+              [...document.querySelectorAll('a[href]')]
+                .map((a) => new URL((a as HTMLAnchorElement).href, location.href))
+                .filter((u) => u.origin === location.origin)
+                .map((u) => `${u.pathname}${u.search}`),
+            ),
+          ].slice(0, 300),
+          messages: document.querySelectorAll(bubble).length,
+        }),
+        BUBBLE,
+      )
       .catch(() => null)
-    if (body) {
-      await o.eyes
-        .onRaw({ kind: 'dom', url: o.ab.page.url(), body, receivedAt: new Date().toISOString() })
-        .catch(() => {})
-    }
+    if (links) await keep({ ...links, shape: await pageShape(o.ab.page).catch(() => []) })
   }
 
   async function chats(pick: (c: { unread: number; lastAt: string | null }) => boolean) {
     await serial(async () => {
       if (!can() || !(await go(chatsPath ?? o.parsers.paths.chats))) return
-      await keepLinks()
-      const list = await o.parsers.fromChatsDom(o.ab.page)
+      await keepList()
+      const shown = await o.parsers.fromChatsDom(o.ab.page)
+      // The real list showed not one chat link on 24.10.2026: the chats Sara already knows are read in its place, so
+      // a message the event stream missed is still found within 10 minutes (FR-CONV-1). Their news on the site is
+      // unknown, so each counts as unread with no known time.
+      const list =
+        shown.length > 0
+          ? shown
+          : (await o.eyes.knownChats()).map((chatId) => ({ chatId, unread: 1, lastAt: null }))
       for (const c of list.filter(pick)) {
         if (!can()) return
         await sleep(pause)
         if (!(await go(o.parsers.paths.chat(c.chatId)))) return
-        await o.eyes.onChatRead(c.chatId, await o.parsers.fromChatDom(o.ab.page, c.chatId))
+        await readChat(c.chatId)
       }
       // Back to the feed, where the event stream lives.
       if (can()) await go(o.parsers.paths.feed)
