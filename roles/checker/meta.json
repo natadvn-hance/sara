@@ -1,0 +1,8 @@
+{
+  "name": "checker",
+  "version": 1,
+  "model": "haiku",
+  "fallbackModel": "sonnet",
+  "priority": "P0",
+  "timeoutMs": 60000
+}
