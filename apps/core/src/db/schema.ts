@@ -471,7 +471,9 @@ export const directionOverride = core.table(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.accountId, t.version] })],
+)
 
+/**
  * Scores made to try rules out (a recompute, a calibration), cached by the rules' hash so the same lead under the
  * same rules and the same scorer prompt is never paid for twice. They never act on a lead.
  */

@@ -230,7 +230,6 @@ test('FR-UI-3: a draft that does not read shows a message and can be cancelled',
   await expect(page.getByRole('button', { name: 'Отправить' })).toHaveCount(0)
 })
 
-
 const RECOMPUTE = `${DIRECTION}/recompute`
 const RUN_ID = '11111111-1111-4111-8111-111111111111'
 const RUNS = `**/api/directions/${ACCOUNT}/runs`
