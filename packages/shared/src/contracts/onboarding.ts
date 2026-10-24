@@ -34,3 +34,19 @@ export type OnbIdeal = z.infer<typeof OnbIdeal>
 /** The steps that talk to Claude; 4 (calibration) and 8 (turning on) are screens. */
 export const ONBOARDING_STEPS = [1, 2, 3, 5, 6, 7] as const
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
+
+/** One step of the draft: Boris's words, Claude's latest reading, the attempts so far and what he confirmed. */
+export const StepState = z.object({
+  say: z.string(),
+  attempts: z.array(z.object({ fix: z.string().nullable(), understood: z.string() })),
+  proposal: z.object({ understood: z.string(), data: z.unknown() }).nullable(),
+  /** The data of the reading Boris confirmed; null until he does. */
+  confirmed: z.unknown(),
+  /** Edit mode only: the step stays as the active rules have it. */
+  skipped: z.boolean(),
+})
+export type StepState = z.infer<typeof StepState>
+
+/** The draft is saved on every step (FR-ACC-3); keys are step numbers. */
+export const OnboardingDraft = z.object({ steps: z.record(z.string(), StepState) })
+export type OnboardingDraft = z.infer<typeof OnboardingDraft>

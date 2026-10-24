@@ -3,35 +3,13 @@ import { proposeStep } from '../../src/direction/onboarding'
 import { RULES_V1 } from '../../src/direction/v1'
 import { openTestDb, resetDb } from '../helpers/db'
 import { fakeGateway } from '../helpers/gateway'
+import { ABOUT, IDEAL, STOPS } from '../helpers/onboarding'
 
 const { db, close } = openTestDb()
 afterAll(close)
 // The gateway remembers a Claude limit from core.model_call, so every case starts from an empty database.
 beforeEach(() => resetDb(db))
 
-const ABOUT = {
-  understood: 'Вы делаете маркетинг для малого бизнеса: стратегия, сайты, воронки.',
-  about: 'Hance: системный маркетинг для малого и среднего бизнеса.',
-  services: ['стратегия', 'сайты', 'воронки'],
-  clients: ['малый бизнес'],
-  budgets: ['от 50 000 ₽'],
-}
-const STOPS = {
-  understood: 'Не берёте узкий Директ и вакансии в штат; цену за копейки считаете красным флагом.',
-  stop_factors: [
-    { id: 'direct', text: 'Только Директ', exception: null, examples: ['настроить Директ'] },
-  ],
-  red_flags: [{ id: 'cheap', text: 'Ищут самого дешёвого', soft: false }],
-}
-const IDEAL = {
-  understood: 'Лучшие заказы: понятная задача, зрелый клиент, бюджет от 50 000 ₽.',
-  axes: [
-    { id: 'client', title: 'Клиент', weight: 60, how: 'Зрелый ли бизнес' },
-    { id: 'task', title: 'Задача', weight: 40, how: 'Понятна ли задача' },
-  ],
-  threshold: 55,
-  notes: ['Скромный бюджет у зрелого клиента не повод отсеивать'],
-}
 const BAD_WEIGHTS = { ...IDEAL, axes: IDEAL.axes.map((a) => ({ ...a, weight: 30 })) }
 const NOTHING = { say: 'слова', confirmed: {}, current: null }
 

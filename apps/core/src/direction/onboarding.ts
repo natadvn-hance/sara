@@ -1,8 +1,23 @@
-import { DirectionRules, OnbAbout, OnbIdeal, type OnboardingStep, OnbStops } from '@sara/shared'
+import {
+  DirectionRules,
+  newEventId,
+  OnbAbout,
+  OnbIdeal,
+  OnboardingDraft,
+  type OnboardingStep,
+  OnbStops,
+  type StepState,
+} from '@sara/shared'
+import { eq, sql } from 'drizzle-orm'
 import type { ZodType } from 'zod'
+import type { Db, DbOrTx, Tx } from '../db/client'
+import { directionOnboarding } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import type { RoleName } from '../gateway/roles'
+import { appendEvent } from '../journal/journal'
 import { rulesText } from '../leads/scorer'
+import { rulesDiff } from './diff'
+import { activeRules, insertVersion } from './store'
 
 export type AboutData = Omit<OnbAbout, 'understood'>
 export type StopsData = Omit<OnbStops, 'understood'>
@@ -129,4 +144,348 @@ export async function proposeStep(
     text = `${base}\n\nПрошлый ответ не подошёл: ${wrong} Ответь ещё раз по схеме.`
   }
   return { ok: false, reason: 'invalid' }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The draft: one open onboarding per account, saved on every step (FR-ACC-3).
+
+export type OnboardingMode = 'new' | 'edit'
+const STEP_KEYS = ['1', '2', '3'] as const
+const isStep = (n: number): n is 1 | 2 | 3 => n === 1 || n === 2 || n === 3
+
+export type OnboardingView = {
+  mode: OnboardingMode
+  basedOn: number | null
+  /** The step to work on now: the first of 1-3 neither confirmed nor skipped; 4 when they are all done. */
+  step: number
+  steps: Record<string, StepState>
+  /** The rules as the confirmed steps would make them; null while a new direction lacks a section. */
+  rules: DirectionRules | null
+}
+
+const emptyStep = (): StepState => ({
+  say: '',
+  attempts: [],
+  proposal: null,
+  confirmed: null,
+  skipped: false,
+})
+
+const AboutSchema = OnbAbout.omit({ understood: true })
+const StopsSchema = OnbStops.omit({ understood: true })
+const IdealSchema = OnbIdeal.omit({ understood: true })
+
+function confirmedOf<T>(schema: ZodType<T>, st: StepState | undefined): T | null {
+  if (!st || st.confirmed == null) return null
+  const r = schema.safeParse(st.confirmed)
+  return r.success ? r.data : null
+}
+
+/**
+ * The rules the confirmed steps make. In edit mode a section Boris did not confirm stays as `base` has it; a new
+ * direction (no base) needs all of steps 1-3, else null.
+ */
+export function assembleRules(
+  base: DirectionRules | null,
+  draft: OnboardingDraft,
+): DirectionRules | null {
+  const about = confirmedOf(AboutSchema, draft.steps['1'])
+  const stops = confirmedOf(StopsSchema, draft.steps['2'])
+  const ideal = confirmedOf(IdealSchema, draft.steps['3'])
+  const r = DirectionRules.safeParse({
+    about: about?.about ?? base?.about,
+    stop_factors: stops?.stop_factors ?? base?.stop_factors,
+    red_flags: stops?.red_flags ?? base?.red_flags,
+    axes: ideal?.axes ?? base?.axes,
+    threshold: ideal?.threshold ?? base?.threshold,
+    notes: ideal?.notes ?? base?.notes,
+  })
+  return r.success ? r.data : null
+}
+
+const canonical = (v: unknown): string =>
+  JSON.stringify(v, (_k, x) =>
+    x && typeof x === 'object' && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b)))
+      : x,
+  )
+
+const lock = (tx: DbOrTx, key: string) =>
+  tx.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`)
+
+type Row = typeof directionOnboarding.$inferSelect
+const draftOf = (row: Row) => OnboardingDraft.parse(row.draft)
+
+async function openRow(db: DbOrTx, accountId: string): Promise<Row | null> {
+  const [row] = await db
+    .select()
+    .from(directionOnboarding)
+    .where(eq(directionOnboarding.accountId, accountId))
+  return row && row.state === 'open' ? row : null
+}
+
+async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
+  const draft = draftOf(row)
+  const mode = row.mode === 'new' ? 'new' : 'edit'
+  const base = mode === 'edit' ? (await activeRules(db, row.accountId)).rules : null
+  const pending = STEP_KEYS.find((k) => {
+    const st = draft.steps[k]
+    return !st || (st.confirmed == null && !st.skipped)
+  })
+  return {
+    mode,
+    basedOn: row.basedOnVersion,
+    step: pending ? Number(pending) : 4,
+    steps: draft.steps,
+    rules: assembleRules(base, draft),
+  }
+}
+
+const journal = (
+  type:
+    | 'direction.onboarding_started'
+    | 'direction.step_confirmed'
+    | 'direction.onboarding_finished',
+  accountId: string,
+  payload: Record<string, unknown>,
+  reason: string | null = null,
+) => ({
+  type,
+  v: 1,
+  entity: { kind: 'direction', id: accountId },
+  account_id: accountId,
+  actor: 'boris' as const,
+  occurred_at: new Date().toISOString(),
+  causation_id: null,
+  correlation_id: newEventId(),
+  reason,
+  payload,
+})
+
+async function write(tx: DbOrTx, accountId: string, draft: OnboardingDraft): Promise<void> {
+  await tx
+    .update(directionOnboarding)
+    .set({ draft, updatedAt: new Date().toISOString() })
+    .where(eq(directionOnboarding.accountId, accountId))
+}
+
+export async function getOnboarding(db: Db, accountId: string): Promise<OnboardingView | null> {
+  const row = await openRow(db, accountId)
+  return row ? viewOf(db, row) : null
+}
+
+/** The open onboarding as it is, or a fresh draft (never two at once, a repeat start changes nothing). */
+export async function startOnboarding(
+  db: Db,
+  accountId: string,
+  mode: OnboardingMode,
+): Promise<OnboardingView> {
+  return db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const open = await openRow(tx, accountId)
+    if (open) return viewOf(tx, open)
+    const based = (await activeRules(tx, accountId)).version
+    const fresh = {
+      accountId,
+      mode,
+      basedOnVersion: based,
+      draft: { steps: {} },
+      state: 'open',
+      overrideReason: null,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    await tx
+      .insert(directionOnboarding)
+      .values(fresh)
+      .onConflictDoUpdate({ target: directionOnboarding.accountId, set: fresh })
+    await appendEvent(tx, journal('direction.onboarding_started', accountId, { mode }))
+    const [row] = await tx
+      .select()
+      .from(directionOnboarding)
+      .where(eq(directionOnboarding.accountId, accountId))
+    if (!row) throw new Error('onboarding row vanished')
+    return viewOf(tx, row)
+  })
+}
+
+export type SubmitResult =
+  | { ok: true; view: OnboardingView }
+  | {
+      ok: false
+      reason: 'no_answer' | 'invalid' | 'limit' | 'no_onboarding' | 'bad_step'
+      view: OnboardingView | null
+    }
+
+/**
+ * Boris says (or corrects) a step: Claude reads it and the reading is stored as the step's proposal beside the
+ * earlier attempts. A miss changes nothing in the draft. The model is called outside any transaction.
+ */
+export async function submitStep(
+  d: { db: Db; gateway: Gateway },
+  accountId: string,
+  step: number,
+  a: { say: string; fix?: string },
+): Promise<SubmitResult> {
+  const row = await openRow(d.db, accountId)
+  if (!row) return { ok: false, reason: 'no_onboarding', view: null }
+  const view = await viewOf(d.db, row)
+  if (!isStep(step)) return { ok: false, reason: 'bad_step', view }
+  const draft = draftOf(row)
+  const confirmed: Confirmed = {
+    about: confirmedOf(AboutSchema, draft.steps['1'])?.about,
+    stopFactorIds: confirmedOf(StopsSchema, draft.steps['2'])?.stop_factors.map((s) => s.id),
+    redFlagIds: confirmedOf(StopsSchema, draft.steps['2'])?.red_flags.map((f) => f.id),
+  }
+  const previous = draft.steps[String(step)]?.proposal
+  const current = view.mode === 'edit' ? (await activeRules(d.db, accountId)).rules : null
+  const r = await proposeStep(d, step, {
+    say: a.say,
+    fix: a.fix,
+    previous: a.fix && previous ? { understood: previous.understood } : undefined,
+    confirmed,
+    current,
+  })
+  if (!r.ok) return { ok: false, reason: r.reason, view }
+  return d.db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const now = await openRow(tx, accountId)
+    if (!now) return { ok: false as const, reason: 'no_onboarding' as const, view: null }
+    const next = draftOf(now)
+    const old = next.steps[String(step)] ?? emptyStep()
+    next.steps[String(step)] = {
+      ...old,
+      say: a.say,
+      proposal: { understood: r.understood, data: r.data },
+      attempts: [...old.attempts, { fix: a.fix ?? null, understood: r.understood }],
+      skipped: false,
+    }
+    await write(tx, accountId, next)
+    return { ok: true as const, view: await viewOf(tx, { ...now, draft: next }) }
+  })
+}
+
+/** «Да, правильно»: the step's latest reading becomes what the draft holds. Null: nothing to confirm. */
+export async function confirmStep(
+  db: Db,
+  accountId: string,
+  step: number,
+): Promise<OnboardingView | null> {
+  return db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const row = await openRow(tx, accountId)
+    if (!row || !isStep(step)) return null
+    const draft = draftOf(row)
+    const st = draft.steps[String(step)]
+    if (!st?.proposal) return null
+    draft.steps[String(step)] = { ...st, confirmed: st.proposal.data, skipped: false }
+    await write(tx, accountId, draft)
+    await appendEvent(tx, journal('direction.step_confirmed', accountId, { step }))
+    return viewOf(tx, { ...row, draft })
+  })
+}
+
+/** Edit mode only: the step stays as the active rules have it. A new direction cannot skip steps 1-3. */
+export async function skipStep(
+  db: Db,
+  accountId: string,
+  step: number,
+): Promise<OnboardingView | null> {
+  return db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const row = await openRow(tx, accountId)
+    if (!row || !isStep(step) || row.mode !== 'edit') return null
+    const draft = draftOf(row)
+    const st = draft.steps[String(step)] ?? emptyStep()
+    draft.steps[String(step)] = { ...st, confirmed: null, skipped: true }
+    await write(tx, accountId, draft)
+    return viewOf(tx, { ...row, draft })
+  })
+}
+
+/** After rules changed under the draft: the confirmed steps stay, the rest comes from the newest active rules. */
+export async function rebaseOnboarding(db: Db, accountId: string): Promise<OnboardingView | null> {
+  return db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const row = await openRow(tx, accountId)
+    if (!row) return null
+    const version = (await activeRules(tx, accountId)).version
+    await tx
+      .update(directionOnboarding)
+      .set({ basedOnVersion: version, updatedAt: new Date().toISOString() })
+      .where(eq(directionOnboarding.accountId, accountId))
+    return viewOf(tx, { ...row, basedOnVersion: version })
+  })
+}
+
+export async function cancelOnboarding(db: Db, accountId: string): Promise<void> {
+  await db
+    .update(directionOnboarding)
+    .set({ state: 'cancelled', updatedAt: new Date().toISOString() })
+    .where(eq(directionOnboarding.accountId, accountId))
+}
+
+const SECTION_NAMES = {
+  about: 'описание',
+  stop_factors: 'стоп-факторы',
+  red_flags: 'красные флаги',
+  axes: 'оси',
+  threshold: 'порог',
+  notes: 'уточнения',
+} as const
+
+export type FinishResult =
+  | { ok: true; version: number | null }
+  | { ok: false; error: 'closed' | 'stale' | 'incomplete' | 'needs_calibration' }
+
+/**
+ * «Включить»: the confirmed steps become Boris's new rules version, in one transaction with closing the draft.
+ * Refused when the rules moved on since the draft began (stale), when a new direction lacks a section, and, until
+ * a calibration passed on exactly these rules, unless Boris saves anyway with a reason. The reason is kept on the
+ * draft row, never in the journal. Rules equal to the active ones make no version.
+ */
+export async function finishOnboarding(
+  db: Db,
+  accountId: string,
+  opts: {
+    override?: { reason: string }
+    calibrated?: (tx: Tx, rules: DirectionRules) => Promise<boolean>
+  },
+): Promise<FinishResult> {
+  return db.transaction(async (tx): Promise<FinishResult> => {
+    // The same lock insertVersion takes, so a version from anywhere else cannot slip in between.
+    await lock(tx, `direction:${accountId}`)
+    const row = await openRow(tx, accountId)
+    if (!row) return { ok: false, error: 'closed' }
+    const active = await activeRules(tx, accountId)
+    if (row.basedOnVersion !== active.version) return { ok: false, error: 'stale' }
+    const rules = assembleRules(row.mode === 'edit' ? active.rules : null, draftOf(row))
+    if (!rules) return { ok: false, error: 'incomplete' }
+    const done = (version: number | null, extra: Record<string, unknown> = {}) =>
+      tx
+        .update(directionOnboarding)
+        .set({ state: 'finished', updatedAt: new Date().toISOString(), ...extra })
+        .where(eq(directionOnboarding.accountId, accountId))
+        .then(() => ({ ok: true as const, version }))
+    if (canonical(rules) === canonical(active.rules)) return done(null)
+    const reason = opts.override?.reason.trim() ?? ''
+    const passed = (await opts.calibrated?.(tx, rules)) ?? false
+    if (!passed && !reason) return { ok: false, error: 'needs_calibration' }
+    const sections = rulesDiff(active.rules, rules).sections
+    const version = await insertVersion(tx, {
+      accountId,
+      rules,
+      createdBy: 'boris',
+      reason: `Онбординг: изменены ${sections.map((x) => SECTION_NAMES[x]).join(', ')}`,
+    })
+    await appendEvent(
+      tx,
+      journal('direction.onboarding_finished', accountId, {
+        version,
+        sections,
+        ...(passed ? {} : { override: true }),
+      }),
+    )
+    return done(version, passed ? {} : { overrideReason: reason })
+  })
 }

@@ -445,3 +445,17 @@ export const examResult = core.table(
   },
   (t) => [primaryKey({ columns: [t.runId, t.scenarioId] })],
 )
+
+/** An open onboarding of a direction (FR-ACC-3): the draft Boris builds step by step; one row per account. */
+export const directionOnboarding = core.table('direction_onboarding', {
+  accountId: text('account_id').primaryKey(),
+  mode: text('mode').notNull(),
+  /** The active rules version the draft started from; finishing over a newer one is refused. */
+  basedOnVersion: integer('based_on_version'),
+  draft: jsonb('draft').notNull(),
+  state: text('state').notNull().default('open'),
+  /** Why Boris saved below the calibration target; kept here, never in the journal. */
+  overrideReason: text('override_reason'),
+  startedAt: ts('started_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
