@@ -326,6 +326,6 @@ describe('insurance and the account tab', () => {
     expect(reports.length).toBeGreaterThan(0)
     expect(reports.every(Boolean)).toBe(true)
     const dom = (await db.select().from(rawEvent)).filter((r) => r.kind === 'dom')
-    expect((dom[0]?.body as { links: string[] }).links).toContain('/chats/c-busy')
+    expect((dom[0]?.body as { links: string[] } | undefined)?.links).toContain('/chats/c-busy')
   }, 90000)
 })
