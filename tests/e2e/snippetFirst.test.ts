@@ -184,7 +184,7 @@ describe('what the page adds to the lead', () => {
       clientName: 'Ирина',
       text: 'Нужен сайт для клиники',
     })
-    expect(cards()[0]?.text).toContain(`Отклик 145${NBSP}₽`)
+    expect(cards()[0]?.text).toContain(`отклик 145${NBSP}₽`)
     expect(
       cards()[0]
         ?.reply_markup?.inline_keyboard.flat()
@@ -300,7 +300,7 @@ describe('what counts as a page that was read', () => {
     await fake.emitOrder({ order_id: id, ...BOARD, bid_price_rub: 99 })
     await until(() => cards().length === 1)
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 99 })
-    expect(cards()[0]?.text).toContain(`Отклик 99${NBSP}₽`)
+    expect(cards()[0]?.text).toContain(`отклик 99${NBSP}₽`)
   })
 })
 
@@ -313,7 +313,7 @@ describe('a page that could not be read', () => {
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 0, clientInfo: null, status: 'queued' })
     // Whatever the card's words, it says the fee is unknown and names no sum.
     expect(cards()[0]?.text).toMatch(/цена.*неизвестна/)
-    expect(cards()[0]?.text).not.toMatch(/Отклик 0/)
+    expect(cards()[0]?.text).not.toMatch(/отклик 0/i)
     expect(
       cards()[0]
         ?.reply_markup?.inline_keyboard.flat()
@@ -358,7 +358,7 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     await until(() => cards().some((m) => m.text.includes('Черновик отклика')))
     expect(fake.orderReads).toEqual([id])
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 145, clientInfo: CLIENT })
-    expect(cards().at(-1)?.text).toContain(`Отклик 145${NBSP}₽`)
+    expect(cards().at(-1)?.text).toContain(`отклик 145${NBSP}₽`)
     expect(inputsOf('analyst')[0]).toContain('На Профи.ру с 7 сентября 2020')
   })
 

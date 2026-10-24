@@ -531,8 +531,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     title: order.title,
     city: order.city,
     budgetText: order.budget_text,
-    clientName: order.client_name,
-    text: order.text,
+    // What the order page added (a name or a text the board lacked) is on the card too.
+    clientName: withPage.client_name,
+    text: withPage.text,
     verdict: sorted.verdict,
     reason: sorted.reason,
     bidPriceRub: withPage.bid_price_rub,
