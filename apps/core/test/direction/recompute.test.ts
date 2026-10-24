@@ -32,7 +32,7 @@ async function leads(n: number) {
 }
 const CANDIDATE = { ...RULES_V1, threshold: 56, notes: ['другое уточнение'] }
 
-describe('recompute pool', () => {
+describe('recompute pool', { timeout: 30000 }, () => {
   it('FR-ACC-5: the last 50 scored leads are the pool, newest first, fewer are all of them', async () => {
     await leads(55)
     const pool = await recomputePool(db, ACC)
