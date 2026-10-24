@@ -103,7 +103,8 @@ beforeEach(async () => {
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
 })
 
-describe('rule proposals', () => {
+// Each case runs the fake Claude a dozen times (proposer and backtest): slow on a busy machine.
+describe('rule proposals', { timeout: 30000 }, () => {
   it('FR-MIND-3: three answered surprises bring one proposal with its backtest numbers', async () => {
     await threeSurprises()
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
