@@ -36,6 +36,8 @@ export type ProfiSite = {
   rtpHost: string
   code: string
   balance: number
+  /** Presses of «Продолжить» on an order page: the eyes never press it. */
+  continueClicks: number
   orders: SiteOrder[]
   addOrder(o?: Partial<SiteOrder>): string
   addMessage(chatId: string, author: SiteAuthor, text: string): string
@@ -69,7 +71,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
-  const state = { balance: 5000 }
+  const state = { balance: 5000, continueClicks: 0 }
 
   const sessOf = (req: IncomingMessage) => /sess=([^;]+)/.exec(req.headers.cookie ?? '')?.[1] ?? ''
   const html = (res: ServerResponse, body: string) =>
@@ -130,6 +132,10 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     }
     if (p.startsWith('/api/chat/'))
       return json(res, { messages: chats.get(p.slice('/api/chat/'.length)) ?? [] })
+    if (p === '/api/bid/continue') {
+      state.continueClicks++
+      return json(res, { ok: true })
+    }
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
     if (p === '/backoffice/n.php') return html(res, orderPage(url.searchParams.get('o') ?? ''))
     if (p === '/chats') return html(res, chatsPage())
@@ -165,6 +171,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     code,
     get balance() {
       return state.balance
+    },
+    get continueClicks() {
+      return state.continueClicks
     },
     orders,
     addOrder(partial = {}) {
