@@ -144,17 +144,29 @@ Code, и единственное, что их связывает, это кон
 
 ## 7. C4. API пульта
 
-Ресурсы по вещам карты сущностей, одна вещь = один ресурс:
+Ресурсы по вещам карты сущностей, одна вещь = один ресурс, все под
+`/api` (уточнено дизайном M7, `docs/superpowers/specs/2026-10-25-m7-pult-design.md`,
+раздел 6):
 
-`/accounts`, `/directions`, `/leads`, `/deals`, `/deals/{id}/messages`,
-`/meetings`, `/tasks`, `/mind`, `/lessons`, `/trainings`, `/exams`,
-`/analytics`, `/settings`, `/health`, `/events`, `/setup`.
+`/accounts`, `/directions/{accountId}`, `/leads`, `/clients` (Клиент:
+разговор M4 и его сделка; заменяет `/deals`), `/clients/{id}` с перепиской,
+`/conversations/{id}/take|return|say|close` (команды M4), `/meetings`,
+`/tasks/{id}/{action}`, `/questions/{id}/answer`, `/inbox` (сборка задач
+и вопросов, ничего не хранит), `/today` (сборка для экрана «Сегодня»),
+`/mind`, `/lessons`, `/trainings`, `/exams`, `/analytics`, `/settings`,
+`/cutover`, `/search`, `/health`, `/journal` (события C1; заменяет
+`/events`), `/journal/trace/{correlationId}`, `/setup`, `/screen/ticket`.
 
-- Живые обновления: `GET /stream` (SSE), события из C1 без данных
-  клиентов, пульт перечитывает нужный ресурс.
+- Живые обновления: `GET /api/stream` (SSE), кадры `{type, entity_kind,
+  entity_id}` из C1 без данных клиентов, пульт перечитывает нужный ресурс;
+  без потока пульт опрашивает открытый экран раз в 20 секунд.
 - Вход: пароль владельца (сессия в cookie) или подпись Telegram Mini App
-  (`initData`, проверка подписи и номера пользователя).
-- Схема: `GET /openapi.json`, генерируется Fastify из схем zod.
+  в заголовке `Authorization: tma <initData>` на каждом запросе (проверка
+  подписи токеном бота, возраста до 24 часов и номера пользователя);
+  WebSocket живого экрана входит одноразовым билетом `/api/screen/ticket`.
+- Ключи переключения (`PROTECTED_KEYS`) меняются только через `/cutover`.
+- Схема: `GET /api/openapi.json`, строится из схем zod пульта
+  (`packages/shared/src/contracts/pult.ts`, `z.toJSONSchema`).
 
 ## 8. C5. Кнопки Telegram
 
