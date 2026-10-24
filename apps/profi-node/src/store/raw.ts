@@ -1,4 +1,5 @@
 import { newEventId, type ProfiOrder } from '@sara/shared'
+import { and, eq, sql } from 'drizzle-orm'
 import type { NodeDbOrTx } from '../db/client'
 import { rawEvent, rawMessage, rawOrder } from '../db/schema'
 
@@ -36,6 +37,14 @@ export async function upsertOrder(
     .onConflictDoNothing()
     .returning({ id: rawOrder.orderId })
   return rows.length > 0
+}
+
+/** The order page showed this account's bid: get_order answers so even when the tab may not move. */
+export async function markOrderBid(db: NodeDbOrTx, accountId: string, orderId: string) {
+  await db
+    .update(rawOrder)
+    .set({ body: sql`${rawOrder.body} || '{"has_bid": true}'::jsonb` })
+    .where(and(eq(rawOrder.accountId, accountId), eq(rawOrder.orderId, orderId)))
 }
 
 export type StoredMessage = {

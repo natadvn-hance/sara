@@ -23,6 +23,26 @@ export type AccountRuntime = {
 
 type StoredOrder = ProfiOrder & { published_at?: string | null }
 
+/** The order as the eyes stored it; whether it closed is known only from its page (src/bid/bidTools.ts). */
+export async function storedOrder(
+  db: NodeDb,
+  accountId: string,
+  orderId: string,
+): Promise<GetOrderOutput> {
+  const [r] = await db
+    .select()
+    .from(rawOrder)
+    .where(and(eq(rawOrder.accountId, accountId), eq(rawOrder.orderId, orderId)))
+  if (!r) throw new ProfiToolError('NOT_FOUND', `order ${orderId} was not seen`)
+  const { published_at, has_bid, ...order } = r.body as StoredOrder & { has_bid?: boolean }
+  return {
+    ...order,
+    open: true,
+    published_at: published_at ?? null,
+    has_bid: typeof has_bid === 'boolean' ? has_bid : null,
+  }
+}
+
 /** C2 for the live service: everything is answered from what the eyes already saw (schema node). */
 export function createReadTools(o: {
   db: NodeDb
@@ -77,19 +97,7 @@ export function createReadTools(o: {
 
     async getOrder({ account_id, order_id }): Promise<GetOrderOutput> {
       alive(account_id)
-      const [r] = await o.db
-        .select()
-        .from(rawOrder)
-        .where(and(eq(rawOrder.accountId, account_id), eq(rawOrder.orderId, order_id)))
-      if (!r) throw new ProfiToolError('NOT_FOUND', `order ${order_id} was not seen`)
-      const { published_at, has_bid, ...order } = r.body as StoredOrder & { has_bid?: boolean }
-      // Whether the order closed is not tracked in M1 (order_changed comes later).
-      return {
-        ...order,
-        open: true,
-        published_at: published_at ?? null,
-        has_bid: typeof has_bid === 'boolean' ? has_bid : null,
-      }
+      return storedOrder(o.db, account_id, order_id)
     },
 
     async listChats({ account_id }) {

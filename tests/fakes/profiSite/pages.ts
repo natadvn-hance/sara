@@ -22,7 +22,7 @@ export const CHANGED_LAYOUT: Layout = {
 
 const shell = (title: string, body: string, script = '') => `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><title>${title}</title></head>
-<body><header><span class="balance" data-rub="__BALANCE__">__BALANCE__ ₽</span>
+<body><header><span class="balance" aria-label="Баланс" data-rub="__BALANCE__">__BALANCE__ ₽</span>
 <span class="presence __PRESENCE__">присутствие</span></header>
 <main>${body}</main><script>${script}</script></body></html>`
 
@@ -60,22 +60,42 @@ async function load() {
 load(); window.__RTP.addEventListener('message', load)`,
   )
 
-// The bid form as the October site describes it in its order answer (boOrderScreen.form): one price field, the
-// text, the send button. Until the recorded maps say otherwise it opens with «Продолжить», as in September.
-const bidForm = `<button id="bid-continue" type="button" onclick="fetch('/api/bid/continue', { method: 'POST' }); document.getElementById('bid-form').hidden = false">Продолжить</button>
-<form id="bid-form" data-testid="bid_form" hidden onsubmit="return false">
-<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">
-<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>
-<div data-testid="bid_form_footer">К оплате: <span class="due"></span> ₽</div>
-<button type="submit">Откликнуться</button></form>`
+export type BidLook = { payWay: 'wallet' | 'sbp'; behindContinue: boolean }
 
-export const orderPage = (id: string) =>
+// The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen, like the October site):
+// one price field, the text, the payment footer, the send button. It opens with «Продолжить», as in September,
+// until the recorded maps say otherwise.
+export const orderPage = (id: string, look: BidLook) =>
   shell(
     'Заказ',
-    `<article id="order" data-order-id="${id}"></article>${bidForm}`,
+    `<article id="order" data-order-id="${id}"></article><section id="bid"></section>`,
     `fetch('/api/order/${id}').then((r) => r.json()).then((o) => {
   document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>'
-  document.querySelector('#bid-form .due').textContent = o.price
+})
+fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationName: 'orders', variables: { id: '${id}' } }) })
+  .then((r) => r.json()).then((d) => {
+  const s = d.data && d.data.orders && d.data.orders[0] && d.data.orders[0].boOrderScreen
+  const box = document.getElementById('bid')
+  if (!s) return
+  if (s.hasBid) { box.innerHTML = '<p class="bid-done">Вы откликнулись</p>'; return }
+  if (s.disabledBidBlock) { box.innerHTML = '<p class="closed">' + s.disabledBidBlock.title + '</p>'; return }
+  const hidden = ${look.behindContinue}
+  box.innerHTML = (hidden ? '<button id="bid-continue" type="button">Продолжить</button>' : '') +
+    '<form id="bid-form" data-testid="bid_form"' + (hidden ? ' hidden' : '') + '>' +
+    '<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">' +
+    '<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>' +
+    '<div data-testid="bid_form_footer">К оплате: ' + s.price.value + ' ₽</div>' +
+    '<div class="payment-methods"><span class="payment-methods__name">${look.payWay === 'sbp' ? 'СБП' : 'Кошелёк'}</span></div>' +
+    '<p class="error"></p><button id="bid-send" type="submit">' + s.form.buttons.submit.text + '</button></form>'
+  const go = document.getElementById('bid-continue')
+  if (go) go.onclick = () => { fetch('/api/bid/continue', { method: 'POST' }); document.getElementById('bid-form').hidden = false }
+  document.getElementById('bid-form').onsubmit = async (e) => {
+    e.preventDefault()
+    const r = await fetch('/api/bid', { method: 'POST', body: JSON.stringify({ orderId: '${id}', price: document.getElementById('bid-price').value, text: document.getElementById('bid-text').value }) })
+    const a = await r.json()
+    if (a.ok) box.innerHTML = '<p class="bid-done">Отклик отправлен</p>'
+    else box.querySelector('.error').textContent = a.error || 'Не получилось'
+  }
 })`,
   )
 

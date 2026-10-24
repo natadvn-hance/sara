@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import type { SessionHealthOutput } from '@sara/shared'
 import type { Page } from 'playwright'
+import { type BidRuntime, createBidTools } from './bid/bidTools'
 import { type AccountBrowser, openAccountBrowser } from './browser/accountBrowser'
 import { checkEgress } from './browser/egress'
 import type { NodeConfig } from './config'
@@ -81,6 +82,7 @@ export async function startProfiService(
   const accounts = new Map<string, Account>()
   let closing = false
   const runtimes = new Map<string, AccountRuntime>()
+  const bidRuntimes = new Map<string, BidRuntime>()
   const browsers = new Map<string, AccountBrowser>()
 
   for (const acc of c.accounts) {
@@ -133,6 +135,15 @@ export async function startProfiService(
       egressIp: () => a.egress.seen,
       egressOk: () => a.egress.ok,
       silenceMs: 600000,
+    })
+
+    bidRuntimes.set(acc.id, {
+      watch: a.watch,
+      eyes,
+      page: () => ab.page,
+      // Until the tab is on the site from its own IP there is no tab to work in: can() is false.
+      inTab: (f) =>
+        a.insurance ? a.insurance.inTab(f) : f({ go: async () => false, can: () => false }),
     })
 
     const guard = createConnectionGuard({
@@ -212,8 +223,12 @@ export async function startProfiService(
   const purge = setInterval(() => void purgeOld(db, new Date()).catch(() => {}), 24 * 3600 * 1000)
 
   const readTools = createReadTools({ db, accounts: runtimes })
+  const tools = {
+    ...readTools,
+    ...createBidTools({ db, permitSecret: c.permitSecret, parsers, accounts: bidRuntimes }),
+  }
   const host = c.production ? '0.0.0.0' : '127.0.0.1'
-  const svc = await serveMcp(() => createProfiMcpServer(readTools), c.port, undefined, host)
+  const svc = await serveMcp(() => createProfiMcpServer(tools), c.port, undefined, host)
   registerScreenRoute(svc.http, {
     nodeToken: c.nodeToken,
     browsers,

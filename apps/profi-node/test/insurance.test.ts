@@ -317,6 +317,46 @@ describe('insurance and the account tab', () => {
     expect(site.continueClicks).toBe(0)
   }, 60000)
 
+  it('FR-LEAD-8: work in the tab waits for the minute check, then the tab goes back to the feed', async () => {
+    await loginStandIn(ab.page, site)
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const order: string[] = []
+    let may = true
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+      canNavigate: () => may,
+      onNavigate: () => {
+        order.push('nav')
+      },
+    })
+    const feed = ins.feedOnce()
+    const work = ins.inTab(async ({ go, can }) => {
+      order.push('work')
+      expect(can()).toBe(true)
+      expect(await go('/chats')).toBe(true)
+      return 42
+    })
+    expect(await work).toBe(42)
+    await feed
+    // The feed page, then the work and its page, then back to the feed.
+    expect(order).toEqual(['nav', 'work', 'nav', 'nav'])
+    expect(new URL(ab.page.url()).pathname).toBe('/backoffice/a.php')
+    may = false
+    expect(await ins.inTab(async ({ can }) => can())).toBe(false)
+    await expect(
+      ins.inTab(async () => {
+        throw new Error('boom')
+      }),
+    ).rejects.toThrow('boom')
+    ins.stop()
+  }, 60000)
+
   it('ST-M1-04: the chats list page leaves the links it showed in node.raw_event, for calibration', async () => {
     await loginStandIn(ab.page, site)
     site.addMessage('c-links', 'client', 'Здравствуйте')
