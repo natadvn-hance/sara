@@ -64,8 +64,14 @@ export type BidLook = {
   payWay: 'wallet' | 'sbp'
   /** The form is closed until its opener is pressed, as on the live page. */
   behindOpener: boolean
-  /** A broken site that charges for opening the form: the top bar shows the wallet going down. */
+  /** A broken site that charges for opening the form (the top bar shows it after a reload). */
   openerCharges: number
+  /** The top bar shows that charge at once. */
+  openerChargeShown: boolean
+  /** The opener leads off the order page (to a payment page without the top bar). */
+  openerLeaves: boolean
+  /** How many openers the tariff block draws. */
+  openers: number
 }
 
 // The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
@@ -89,18 +95,19 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
   const hidden = ${look.behindOpener}
   const t = s.tariffsBlock
   box.innerHTML = '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div>' +
-    (hidden ? '<a id="bid-opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>' : '') + '</div>' +
+    (hidden ? Array.from({ length: ${look.openers} }, (_, i) => '<a id="bid-opener' + (i ? i : '') + '" class="opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>').join('') : '') + '</div>' +
     '<form id="bid-form" data-testid="bid_form"' + (hidden ? ' hidden' : '') + '><h3>' + t.formTitle + '</h3>' +
     '<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">' +
     '<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>' +
     '<div data-testid="bid_form_footer">К оплате: ' + s.price.value + ' ₽</div>' +
     '<div class="payment-methods"><span class="payment-methods__name">${look.payWay === 'sbp' ? 'СБП' : 'Кошелёк'}</span></div>' +
     '<p class="error"></p><button id="bid-send" type="submit">' + s.form.buttons.submit.text + '</button></form>'
-  const go = document.getElementById('bid-opener')
-  if (go) go.onclick = (e) => {
-    e.preventDefault(); fetch('/api/bid/open', { method: 'POST' }); document.getElementById('bid-form').hidden = false
+  for (const go of document.querySelectorAll('.opener')) go.onclick = async (e) => {
+    e.preventDefault(); await fetch('/api/bid/open', { method: 'POST' })
+    if (${look.openerLeaves}) { location.href = '/backoffice/pay.php'; return }
+    document.getElementById('bid-form').hidden = false
     const w = document.querySelector('.balance')
-    if (${look.openerCharges} && w) { const left = Number(w.dataset.rub) - ${look.openerCharges}; w.dataset.rub = String(left); w.textContent = left + ' ₽' }
+    if (${look.openerCharges} && ${look.openerChargeShown} && w) { const left = Number(w.dataset.rub) - ${look.openerCharges}; w.dataset.rub = String(left); w.textContent = left + ' ₽' }
   }
   document.getElementById('bid-form').onsubmit = async (e) => {
     e.preventDefault()

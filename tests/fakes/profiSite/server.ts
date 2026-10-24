@@ -165,6 +165,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     payWay: 'wallet',
     behindOpener: true,
     openerCharges: 0,
+    openerChargeShown: true,
+    openerLeaves: false,
+    openers: 1,
     openerText: 'Написать клиенту',
     answer: true,
     hasBidField: true,
@@ -264,6 +267,11 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.balance -= bidSettings.openerCharges
       return json(res, { ok: true })
     }
+    // A payment page of some other service: no top bar, no wallet.
+    if (p === '/backoffice/pay.php')
+      return res
+        .writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        .end('<!doctype html><h1>Оплата</h1>')
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
     if (p === '/backoffice/n.php')
       return html(res, orderPage(url.searchParams.get('o') ?? '', bidSettings))

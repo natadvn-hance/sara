@@ -79,3 +79,15 @@ export const bidAttempt = node.table('bid_attempt', {
   pressedAt: ts('pressed_at').notNull(),
   result: jsonb('result'),
 })
+
+/** A stop the node set for itself and keeps until a person clears it; never purged. */
+export const nodeFlag = node.table(
+  'node_flag',
+  {
+    accountId: text('account_id').notNull(),
+    name: text('name').notNull(),
+    reason: text('reason').notNull(),
+    setAt: ts('set_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.name] })],
+)

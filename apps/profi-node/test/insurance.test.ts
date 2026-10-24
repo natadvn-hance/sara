@@ -286,10 +286,31 @@ describe('insurance and the account tab', () => {
       paths: { ...standInParsers.paths, order: (id) => `/backoffice/n.php?o=${id}` },
       fromResponse: () => ({ recognized: false, signals: [] }),
       fromFeedDom: profiParsers.fromFeedDom,
-      fromOrderDom: async () => ({ recognized: false, what: 'order', signals: [] }),
+      fromOrderDom: async (_page, orderId) => ({
+        recognized: true,
+        what: 'order',
+        signals: [
+          {
+            t: 'order',
+            order: {
+              order_id: orderId,
+              title: 'Сайт',
+              category: '',
+              city: '',
+              text: '',
+              client_name: '',
+              budget_text: null,
+              bid_price_rub: 0,
+              seen_at: new Date().toISOString(),
+            },
+            published_at: null,
+          },
+        ],
+      }),
     }
     const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
-    // The page each hook call finds the tab on: the order page itself, still open.
+    // Each hook call: the page the tab is on (the order page itself), whether the order already went to the core
+    // (the calibration never delays a new order), and the tab's own gate.
     const after: string[] = []
     const ins = startInsurance({
       eyes,
@@ -299,13 +320,17 @@ describe('insurance and the account tab', () => {
       feedEveryMs: 3_600_000,
       chatsEveryMs: 3_600_000,
       chatPauseMs: 10,
-      afterOrderPage: async (orderId) => {
-        after.push(`${orderId} ${new URL(ab.page.url()).search}`)
+      afterOrderPage: async (orderId, may) => {
+        const sent = (await db.select().from(outboxNode)).some((r) => {
+          const e = r.payload as { type: string; entity: { id: string } }
+          return e.type === 'profi.order_seen' && e.entity.id === orderId
+        })
+        after.push(`${orderId} ${new URL(ab.page.url()).search} ${sent} ${may()}`)
       },
     })
     const id = site.addOrder({ description: 'Клиентский текст про оплату' })
     await ins.feedOnce()
-    expect(after).toContain(`${id} ?o=${id}`)
+    expect(after).toContain(`${id} ?o=${id} true true`)
     ins.stop()
     site.muteRtp(false)
     // Orders of the earlier tests are still on the stand-in feed: only this one is looked at.
