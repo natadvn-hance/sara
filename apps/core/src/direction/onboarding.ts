@@ -161,6 +161,8 @@ export type OnboardingView = {
   steps: Record<string, StepState>
   /** The rules as the confirmed steps would make them; null while a new direction lacks a section. */
   rules: DirectionRules | null
+  /** What those rules change against the active ones, in plain Russian (rulesDiff). */
+  changes: string[]
 }
 
 const emptyStep = (): StepState => ({
@@ -227,17 +229,20 @@ async function openRow(db: DbOrTx, accountId: string): Promise<Row | null> {
 async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
   const draft = draftOf(row)
   const mode = row.mode === 'new' ? 'new' : 'edit'
-  const base = mode === 'edit' ? (await activeRules(db, row.accountId)).rules : null
+  const active = (await activeRules(db, row.accountId)).rules
+  const base = mode === 'edit' ? active : null
   const pending = STEP_KEYS.find((k) => {
     const st = draft.steps[k]
     return !st || (st.confirmed == null && !st.skipped)
   })
+  const rules = assembleRules(base, draft)
   return {
     mode,
     basedOn: row.basedOnVersion,
     step: pending ? Number(pending) : 4,
     steps: draft.steps,
-    rules: assembleRules(base, draft),
+    rules,
+    changes: rules ? rulesDiff(active, rules).lines : [],
   }
 }
 

@@ -137,8 +137,9 @@ describe('onboarding flow', { timeout: 30000 }, () => {
     await sayAndConfirm(gateway, 3)
     const changes = (await getOnboarding(db, ACC))?.changes ?? []
     expect(changes).toContain('Порог: 56 → 55')
-    expect(changes.some((c) => c.startsWith('Новая ось «Клиент'))).toBe(false)
-    expect(changes.some((c) => c.includes('Убрана ось «Качество клиента»'))).toBe(true)
+    expect(changes).toContain('Новая ось «Задача», вес 40')
+    expect(changes).toContain('Убрана ось «Системность задачи»')
+    expect(changes).toContain('Вес «Клиент»: 30 → 60')
   })
 
   it('FR-ACC-3: two finishes at once give one version', async () => {
