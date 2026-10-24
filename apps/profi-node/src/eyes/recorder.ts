@@ -11,9 +11,13 @@ export type RawRecord = {
 /** Answers of login and auth pages are never kept: they carry session tokens and the phone (ADR-022). */
 const SKIP_PATH = /login|logout|auth|token|oauth|session|sms|password|passport|register|code/i
 const SECRET_KEY = /token|password|secret|phone|sms|code|auth|cookie|session/i
+// A link parameter that opens something without a login, like «bo_tkn» in the refund link of the profile.
+const SECRET_PARAM =
+  /([?&][\w-]*(?:tkn|token|key|secret|sig|hash|auth|session)[\w-]*=)[^&#\s"']{8,}/gi
 
-/** Hides values under secret-looking keys anywhere in a recorded answer. */
+/** Hides values under secret-looking keys, and secret-looking link parameters, anywhere in a recorded answer. */
 export function redactSecrets(v: unknown): unknown {
+  if (typeof v === 'string') return v.replace(SECRET_PARAM, '$1[скрыто]')
   if (Array.isArray(v)) return v.map(redactSecrets)
   if (typeof v !== 'object' || v === null) return v
   const out: Record<string, unknown> = {}
