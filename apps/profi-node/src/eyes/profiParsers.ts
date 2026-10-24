@@ -1,10 +1,11 @@
 import type { MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
-import type { MessageSignal, Parsers, Signal } from './parsers'
+import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
 // src/ingestion/feedPoller.js, src/watcher/messageDom.js, src/negotiator/openChat.js of the old folder.
-// The event stream and GraphQL answers are recognized after calibration; until then they count as unknown.
+// The orders board also comes as a GraphQL answer (boSearchBoardItems, recorded live 24.10.2026).
+// The event stream is recognized after calibration; until then it counts as unknown.
 
 const ORDER_LINK = 'a[href*="n.php?o="]'
 const MESSAGE = '[data-message-content-id]'
@@ -62,6 +63,59 @@ export function orderFromPageText(
   }
 }
 
+type Place = { prefix?: string | null } | null | undefined
+type BoardItem = {
+  id?: unknown
+  type?: unknown
+  title?: string | null
+  description?: string | null
+  geo?: { remote?: Place; orderLocation?: Place; clientMayCome?: Place } | null
+  price?: { value?: string | null; prefix?: string | null; suffix?: string | null } | null
+  clientInfo?: { name?: string | null } | null
+  lastUpdateDate?: number | null
+}
+
+/** One order card of the GraphQL board; other item kinds (banners and the like) are skipped. */
+function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
+  if (it.type !== 'SNIPPET' || typeof it.id !== 'string' || !/^\d+$/.test(it.id)) return null
+  const g = it.geo
+  const city = g?.remote?.prefix || g?.orderLocation?.prefix || g?.clientMayCome?.prefix || ''
+  const p = it.price
+  const budget = p?.value ? [p.prefix, p.value, p.suffix].filter(Boolean).join(' ') : null
+  const title = it.title ?? ''
+  return {
+    t: 'order',
+    order: {
+      order_id: it.id,
+      title,
+      category: title,
+      city,
+      text: it.description ?? '',
+      client_name: it.clientInfo?.name ?? '',
+      budget_text: budget,
+      // The fee for a bid is shown only on the order page.
+      bid_price_rub: 0,
+      seen_at: seenAt,
+    },
+    published_at:
+      typeof it.lastUpdateDate === 'number'
+        ? new Date(it.lastUpdateDate * 1000).toISOString()
+        : null,
+  }
+}
+
+export function fromBoardAnswer(url: string, body: unknown): ParseResult {
+  const board = (body as { data?: { boSearchBoardItems?: { items?: unknown } } } | null)?.data
+    ?.boSearchBoardItems
+  if (!/\/graphql/.test(url) || !board || !Array.isArray(board.items))
+    return { recognized: false, signals: [] }
+  const now = new Date().toISOString()
+  const signals = (board.items as BoardItem[])
+    .map((it) => boardOrder(it ?? {}, now))
+    .filter((x): x is OrderSignal => x !== null)
+  return { recognized: true, what: 'feed', signals }
+}
+
 export const profiParsers: Parsers = {
   paths: {
     feed: '/backoffice/n.php',
@@ -71,7 +125,7 @@ export const profiParsers: Parsers = {
   },
   banMarkers: ['Профиль заблокирован', 'Ваш профиль заблокирован'],
   fromRtp: () => ({ recognized: false, signals: [] }),
-  fromResponse: () => ({ recognized: false, signals: [] }),
+  fromResponse: fromBoardAnswer,
 
   async fromFeedDom(page) {
     // Cards render after load; an empty feed simply times out here.
