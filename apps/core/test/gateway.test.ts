@@ -188,6 +188,53 @@ describe('model gateway', () => {
     expect(maxOverlap).toBeLessThanOrEqual(2)
   })
 
+  it('FR-OPS-3: calls start by role priority when the slots are busy', async () => {
+    for (const [role, priority] of [
+      ['sorter', 'P1'],
+      ['scorer', 'P2'],
+      ['rules-proposer', 'P3'],
+    ]) {
+      const path = join(dir, `roles/${role}/meta.json`)
+      await writeFile(
+        path,
+        JSON.stringify({ ...JSON.parse(await readFile(path, 'utf8')), priority }),
+      )
+    }
+    const secrets = createSecretStore(join(dir, 'data'))
+    await secrets.set('claude_oauth_token', 'tok')
+    const gw = createGateway({
+      db,
+      secrets,
+      claudeBin: FAKE,
+      rolesDir: join(dir, 'roles'),
+      dataDir: join(dir, 'data'),
+      concurrency: 1,
+      extraEnv: {
+        FAKE_CLAUDE_ARGS_LOG: log,
+        FAKE_CLAUDE_MODE: 'sleep',
+        FAKE_CLAUDE_SLEEP_MS: '300',
+      },
+    })
+    const first = gw.call('scorer', 'x', ProbeOutput)
+    await new Promise((r) => setTimeout(r, 100))
+    await Promise.all([
+      first,
+      gw.call('rules-proposer', 'x', ProbeOutput),
+      gw.call('scorer', 'x', ProbeOutput),
+      gw.call('probe', 'x', ProbeOutput),
+      gw.call('sorter', 'x', ProbeOutput),
+    ])
+    const order = (await calls())
+      .sort((a, b) => a.start - b.start)
+      .map(
+        (c) =>
+          /roles\/([^/]+)\/role\.md$/.exec(
+            c.args[c.args.indexOf('--system-prompt-file') + 1] ?? '',
+          )?.[1],
+      )
+    expect(order).toEqual(['scorer', 'probe', 'sorter', 'scorer', 'rules-proposer'])
+  })
+
   it('FR-LEAD-3: a call can name its model', async () => {
     // The Sorter has a fallback model: naming the model drops it, the named one is final.
     const gw = await gateway({

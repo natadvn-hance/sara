@@ -7,6 +7,7 @@ import { modelCall } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { SecretStore } from '../secrets/store'
 import { buildClaudeArgs, type CliRun, roleJsonSchema, runClaude } from './claudeCli'
+import { createSlots } from './queue'
 import { loadRole, type RoleName } from './roles'
 
 export type GatewayErrorClass =
@@ -68,7 +69,7 @@ function classify<T>(
   return { ok: true, output: checked.data }
 }
 
-/** Calls Claude roles through `claude -p` on the subscription, at most `concurrency` at once. */
+/** Calls Claude roles through `claude -p` on the subscription, at most `concurrency` at once, P0 first. */
 export function createGateway(d: {
   db: Db
   secrets: SecretStore
@@ -78,22 +79,7 @@ export function createGateway(d: {
   concurrency?: number
   extraEnv?: Record<string, string> | (() => Record<string, string>)
 }): Gateway {
-  const limit = d.concurrency ?? 2
-  let running = 0
-  const waiting: (() => void)[] = []
-
-  async function acquire(): Promise<void> {
-    if (running < limit) {
-      running++
-      return
-    }
-    await new Promise<void>((r) => waiting.push(r))
-  }
-  function release(): void {
-    const next = waiting.shift()
-    if (next) next()
-    else running--
-  }
+  const slots = createSlots(d.concurrency ?? 2)
 
   return {
     async call(role, input, schema, opts) {
@@ -113,7 +99,7 @@ export function createGateway(d: {
       if (!token) {
         result = { ok: false, errorClass: 'not_connected', message: 'no Claude token' }
       } else {
-        await acquire()
+        await slots.acquire(meta.priority)
         try {
           const cwd = join(d.dataDir, 'claude-cwd')
           await mkdir(cwd, { recursive: true })
@@ -129,7 +115,7 @@ export function createGateway(d: {
           durationMs = run.durationMs
           result = classify(run, schema)
         } finally {
-          release()
+          slots.release()
         }
       }
       await d.db.insert(modelCall).values({
