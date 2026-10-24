@@ -12,9 +12,11 @@ type Row = {
   side: string
   author: string
   text: string
+  source: string
 }
 
 const NO_CLIENT_YET = 'Клиент ещё ничего не написал.'
+const UNKNOWN_TURN = 'Неизвестно, что клиент написал перед этим: сообщение из базы старой Сары.'
 
 const moscowDate = (d: Date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(d)
@@ -83,52 +85,63 @@ export async function proposeSpeechExamples(
       side: chatMessage.side,
       author: chatMessage.author,
       text: chatMessage.text,
+      source: chatMessage.source,
     })
     .from(chatMessage)
     .where(eq(chatMessage.accountId, o.accountId))
     .orderBy(asc(chatMessage.chatId), asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+  // Messages known only from the v1 snapshot have made-up times, so they never show what came before what.
   const chats = new Map<string, Row[]>()
+  const examples: { m: Row; turn: string[] | null | 'unknown' }[] = []
   for (const r of rows) {
+    if (r.source === 'v1') {
+      if (r.author === 'boris') examples.push({ m: r, turn: 'unknown' })
+      continue
+    }
     const list = chats.get(r.chatId) ?? []
     list.push(r)
     chats.set(r.chatId, list)
   }
+  for (const chat of chats.values())
+    for (const [i, m] of chat.entries())
+      if (m.author === 'boris') examples.push({ m, turn: clientTurn(chat, i) })
 
   let proposed = 0
   let skipped = 0
   const today = moscowDate(new Date())
-  for (const chat of chats.values()) {
-    for (const [i, m] of chat.entries()) {
-      if (m.author !== 'boris') continue
-      if (m.text.trim().length <= minLength) {
-        skipped++
-        continue
-      }
-      const hidden = m.orderId ? (names.get(m.orderId) ?? []) : []
-      const turn = clientTurn(chat, i)
-      const stages: ConvStage[] = turn === null ? ['bid_sent'] : []
-      const id = `e-h-${m.platformMessageId.replace(/[^\p{L}\p{N}]/gu, '')}`
-      const client = turn === null ? NO_CLIENT_YET : redact(turn.join('\n\n'), hidden).text
-      const content = `${frontmatter({
-        id,
-        type: 'example',
-        scope: 'shared',
-        status: 'proposal',
-        version: 1,
-        sources: [`history:${o.accountId}:${m.platformMessageId}`],
-        valid_from: today,
-        valid_to: null,
-        stages,
-      })}\n## Клиент\n\n${client}\n\n## Борис\n\n${redact(m.text.trim(), hidden).text}\n`
-      const added = await proposeMind(db, {
-        path: `mind/proposals/shared/speech/examples/${id}.md`,
-        content,
-        kind: 'example',
-        source: `history:${o.accountId}:${m.platformMessageId}`,
-      })
-      if (added) proposed++
-      else skipped++
+  for (const { m, turn } of examples) {
+    if (m.text.trim().length <= minLength) {
+      skipped++
+      continue
     }
+    const hidden = m.orderId ? (names.get(m.orderId) ?? []) : []
+    const stages: ConvStage[] = turn === null ? ['bid_sent'] : []
+    const id = `e-h-${m.platformMessageId.replace(/[^\p{L}\p{N}]/gu, '')}`
+    const client =
+      turn === 'unknown'
+        ? UNKNOWN_TURN
+        : turn === null
+          ? NO_CLIENT_YET
+          : redact(turn.join('\n\n'), hidden).text
+    const content = `${frontmatter({
+      id,
+      type: 'example',
+      scope: 'shared',
+      status: 'proposal',
+      version: 1,
+      sources: [`history:${o.accountId}:${m.platformMessageId}`],
+      valid_from: today,
+      valid_to: null,
+      stages,
+    })}\n## Клиент\n\n${client}\n\n## Борис\n\n${redact(m.text.trim(), hidden).text}\n`
+    const added = await proposeMind(db, {
+      path: `mind/proposals/shared/speech/examples/${id}.md`,
+      content,
+      kind: 'example',
+      source: `history:${o.accountId}:${m.platformMessageId}`,
+    })
+    if (added) proposed++
+    else skipped++
   }
   return { proposed, skipped }
 }

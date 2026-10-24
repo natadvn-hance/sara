@@ -22,7 +22,7 @@ async function msg(
   chat: string,
   author: ChatAuthor,
   text: string,
-  o: { id?: string; order?: string | null } = {},
+  o: { id?: string; order?: string | null; source?: 'node' | 'v1' } = {},
 ) {
   n++
   const side = author === 'client' || author === 'system' ? author : 'specialist'
@@ -38,7 +38,8 @@ async function msg(
       author === 'boris' ? 'v1_boris_text' : side === 'specialist' ? 'v1_or_boris' : 'side',
     text,
     sentAt: at(n),
-    source: 'node',
+    approxTime: o.source === 'v1',
+    source: o.source ?? 'node',
   })
 }
 
@@ -108,6 +109,26 @@ describe('speech examples from history', () => {
     const [p] = await proposals()
     expect(p?.content).toContain('stages:\n  - bid_sent\n')
     expect(p?.content).toContain('## Клиент\n\nКлиент ещё ничего не написал.\n')
+  })
+
+  it('FR-SPEECH-2: a message known only from v1 claims no client turn and no stage', async () => {
+    const v1 = { source: 'v1' as const }
+    await msg('9009', 'sara_v1', 'Здравствуйте! Сделаем сайт.', v1)
+    await msg('9009', 'boris', 'Добрый день! Начать можем в понедельник.', {
+      ...v1,
+      id: 'v1:9009:boris:0',
+    })
+    await msg('9009', 'client', 'Хорошо, тогда до понедельника', v1)
+    // A copy v1 alone remembers sits in a chat the node read later: its time says nothing of the order.
+    await msg('9010', 'client', 'Сколько стоит?', v1)
+    await msg('9010', 'boris', 'Посчитаю и пришлю смету сегодня.', { id: 'n-9010' })
+    await proposeSpeechExamples(db, { accountId: ACCOUNT })
+    const [fromNode, fromV1] = await proposals()
+    expect(fromV1?.content).not.toMatch(/stages/)
+    expect(fromV1?.content).toContain(
+      '## Клиент\n\nНеизвестно, что клиент написал перед этим: сообщение из базы старой Сары.\n',
+    )
+    expect(fromNode?.content).toContain('## Клиент\n\nКлиент ещё ничего не написал.\n')
   })
 
   it('NFR-PRIV-2: a speech example holds no client name, phone, e-mail or link', async () => {
