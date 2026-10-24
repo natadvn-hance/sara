@@ -100,7 +100,11 @@ export async function startOutboxDelivery(outboxId: string, leadId: string): Pro
 
 /** On start: delivers bids recorded before a crash that never got their delivery started. */
 export async function resumeQueuedOutbox(db: Db): Promise<number> {
-  const rows = await db.select().from(outbox).where(eq(outbox.state, 'queued'))
+  // Only bids: a message row (M4) has its own delivery and must never go down the bid path.
+  const rows = await db
+    .select()
+    .from(outbox)
+    .where(and(eq(outbox.state, 'queued'), eq(outbox.kind, 'bid')))
   for (const r of rows) await startOutboxDelivery(r.id, (r.payload as BidPayload).leadId)
   return rows.length
 }

@@ -14,6 +14,8 @@ export type Config = {
   claudeBin: string
   telegramApiRoot: string | undefined
   rolesDir: string
+  /** A read-only clone of sara-mind (M4 design 5.2); a missing folder is an empty mind. */
+  mindDir: string
   /** Voice recognition on the server: whisper.cpp and its model, ffmpeg for the conversion. */
   whisperBin: string
   whisperModel: string
@@ -54,6 +56,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     claudeBin: env.SARA_CLAUDE_BIN ?? 'claude',
     telegramApiRoot: env.SARA_TELEGRAM_API_ROOT || undefined,
     rolesDir: resolve(env.SARA_ROLES_DIR ?? resolve(ROOT, 'roles')),
+    mindDir: resolve(env.SARA_MIND_DIR ?? resolve(dataDir, 'mind')),
     whisperBin: env.SARA_WHISPER_BIN ?? 'whisper-cli',
     whisperModel: env.SARA_WHISPER_MODEL ?? resolve(dataDir, 'whisper/ggml-small.bin'),
     ffmpegBin: env.SARA_FFMPEG_BIN ?? 'ffmpeg',
