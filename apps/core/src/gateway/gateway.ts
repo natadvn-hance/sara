@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MODELS, newEventId, ProbeOutput, type RoleMeta } from '@sara/shared'
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, or, sql } from 'drizzle-orm'
 import { type ZodType, z } from 'zod'
 import type { Db } from '../db/client'
 import { event, modelCall } from '../db/schema'
@@ -143,14 +143,20 @@ export function createGateway(d: {
         .from(modelCall)
         .leftJoin(
           event,
-          and(sql`${event.entityId} = ${modelCall.id}::text`, eq(event.type, 'model.failed')),
+          and(
+            eq(event.entityKind, 'model_call'),
+            sql`${event.entityId} = ${modelCall.id}::text`,
+            eq(event.type, 'model.failed'),
+          ),
         )
         .where(
           and(
             eq(modelCall.model, model),
             or(
               eq(modelCall.ok, true),
-              inArray(modelCall.errorClass, ['limit_reached', 'bad_output']),
+              eq(modelCall.errorClass, 'bad_output'),
+              // A limit answer of a real run; a wait that ran out writes a stand-in row (0 ms) that says nothing.
+              and(eq(modelCall.errorClass, 'limit_reached'), gt(modelCall.durationMs, 0)),
             ),
           ),
         )

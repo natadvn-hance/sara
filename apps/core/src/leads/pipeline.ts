@@ -343,7 +343,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   const draft = (await DBOS.patch('analyst-draft'))
     ? await DBOS.runStep(
         async () =>
-          (await capSpent()) ? null : draftFor(order, { correlationId, causationId: e.id }),
+          (await capSpent().catch(() => false))
+            ? null
+            : draftFor(order, { correlationId, causationId: e.id }),
         { name: 'draft' },
       )
     : null

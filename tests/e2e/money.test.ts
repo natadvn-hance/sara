@@ -307,6 +307,29 @@ describe('held orders in the summary', () => {
     expect((await speedReport(db)).leadToCard.count).toBe(1)
   })
 
+  it('FR-NOTIF-3: «Показать» on a held order that already has a draft sends the card at once, with no Analyst call', async () => {
+    await setSetting(db, 'cards.max_per_day', 1, 'boris')
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => cards().length === 1)
+    const held = orderId()
+    await fake.emitOrder({ order_id: held })
+    await until(async () => (await eventTypesOf(held)).includes('lead.held'))
+    // What an order held before this change looks like: it was drafted before the cap was checked.
+    await db
+      .update(lead)
+      .set({ draftText: 'Ирина, добрый день!\n\nЧерновик из прошлого.', draftPriceRub: 5000 })
+      .where(eq(lead.id, held))
+    expect(await dailySummary({ db, notifier: app.bot.notifier }, summaryTime())).toBe('sent')
+    const show = tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]
+    tg.pushPress(111, show?.callback_data ?? '')
+    await until(() => tg.answers.length === 1)
+    expect(tg.answers[0]?.text).toBe('Прислала карточку заявки')
+    // The card is already out when the press is answered.
+    expect(cards()).toHaveLength(3)
+    expect(cards().at(-1)?.text).toContain('Черновик из прошлого.')
+    expect(await analystCalls(held)).toBe(0)
+  })
+
   it('FR-LEAD-10: «Показать» on an order seen over 24 hours ago brings no card', async () => {
     await setSetting(db, 'cards.max_per_day', 1, 'boris')
     await fake.emitOrder({ order_id: orderId() })

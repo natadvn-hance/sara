@@ -58,7 +58,7 @@ export async function askWhy(
 
 /**
  * After «Изменить»: asks for the new bid text. It is Boris's own request, so it never counts toward the day's
- * «почему?»; a reply to it (or the next message within 30 minutes) becomes the draft, not a reason.
+ * «почему?»; a reply to it becomes the draft, and so does a plain message when it is the only request waiting.
  */
 export async function askForDraft(
   d: { db: Db; notifier: Pick<Notifier, 'sendText'> },

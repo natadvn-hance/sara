@@ -38,10 +38,13 @@ export async function handleBorisMessage(
   if (!q) return TEXTS.notAnAnswer
   if ('ambiguous' in q) {
     // A new bid text or a reason: stored on a guess, either would end up on the wrong lead.
+    // Two requests for the same lead are one line.
+    const once = [...new Map(q.ambiguous.map((w) => [`${w.kind}:${w.entityId}`, w])).values()]
     const waiting = await Promise.all(
-      q.ambiguous.map(async (w) =>
-        TEXTS.waitingFor[w.kind as QuestionKind](await titleOf(d.db, w)),
-      ),
+      once.map(async (w) => {
+        const line = TEXTS.waitingFor[w.kind as QuestionKind]
+        return line ? line(await titleOf(d.db, w)) : 'мой вопрос'
+      }),
     )
     return TEXTS.whichQuestion(waiting)
   }

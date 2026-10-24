@@ -118,11 +118,27 @@ describe("Boris's words in the bot", () => {
     tg.pushText(111, 'новый текст отклика')
     await until(() => tg.sent.some((m) => m.text.startsWith('Не поняла')))
     expect(tg.sent.at(-1)?.text).toBe(
-      'Не поняла, к какому моему вопросу это. Сейчас жду:\n- почему пропустил «Реклама на ТВ»\n- новый текст отклика на «Реклама на ТВ»\nОтветь на нужное моё сообщение ответом, тогда запишу туда.',
+      'Не поняла, к какому моему вопросу это. Сейчас жду:\n- почему пропустил «Реклама на ТВ»\n- новый текст отклика на «Реклама на ТВ»\nНажми «Ответить» на нужном моём сообщении и пришли текст ещё раз.',
     )
     expect(onDraftText).not.toHaveBeenCalled()
     expect((await label())?.reason).toBeNull()
     expect(await db.select().from(question).where(isNotNull(question.answeredAt))).toHaveLength(0)
+  })
+
+  it('FR-NOTIF-1: two edit requests for the same lead are listed once when Sara asks which question a text answers', async () => {
+    await asked()
+    const taskId = await leadWithScore(db, '920003', 80)
+    const edit = { db, notifier: bot.notifier }
+    await askForDraft(edit, { taskId, title: 'Сайт клиники' }, new Date())
+    await askForDraft(edit, { taskId, title: 'Сайт клиники' }, new Date())
+    tg.pushText(111, 'новый текст отклика')
+    await until(() => tg.sent.some((m) => m.text.startsWith('Не поняла')))
+    expect(
+      tg.sent
+        .at(-1)
+        ?.text.split('\n')
+        .filter((l) => l.startsWith('- ')),
+    ).toHaveLength(2)
   })
 
   it('NFR-UX-1: a long dash in the recognized voice comes back to Boris as a hyphen', async () => {

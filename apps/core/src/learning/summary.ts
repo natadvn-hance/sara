@@ -73,28 +73,31 @@ export async function dailySummary(
   // Held orders do not wait for their own window: whichever summary comes next offers them, as long as they are
   // fresh. Those that outlived that without being offered leave the held orders for good.
   const at = sql`${now.toISOString()}::timestamptz`
-  const aged = await d.db.execute<{
-    id: string
-    accountId: string
-    correlationId: string
-    seenAt: string
-  }>(sql`
-    update core.lead l set status = 'stale'
-    where l.status = 'held' and l.seen_at <= ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
-    returning l.id, l.account_id as "accountId", l.correlation_id as "correlationId", l.seen_at as "seenAt"`)
-  for (const l of aged.rows)
-    await appendEvent(d.db, {
-      type: 'lead.stale',
-      v: 1,
-      entity: { kind: 'lead', id: l.id },
-      account_id: l.accountId,
-      actor: 'sara',
-      occurred_at: now.toISOString(),
-      causation_id: null,
-      correlation_id: l.correlationId,
-      reason: null,
-      payload: { seen_at: new Date(l.seenAt).toISOString(), held: true },
-    })
+  // The aging and its journal entries are one change: an order never leaves the held ones without its event.
+  await d.db.transaction(async (tx) => {
+    const aged = await tx.execute<{
+      id: string
+      accountId: string
+      correlationId: string
+      seenAt: string
+    }>(sql`
+      update core.lead l set status = 'stale'
+      where l.status = 'held' and l.seen_at <= ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
+      returning l.id, l.account_id as "accountId", l.correlation_id as "correlationId", l.seen_at as "seenAt"`)
+    for (const l of aged.rows)
+      await appendEvent(tx, {
+        type: 'lead.stale',
+        v: 1,
+        entity: { kind: 'lead', id: l.id },
+        account_id: l.accountId,
+        actor: 'sara',
+        occurred_at: now.toISOString(),
+        causation_id: null,
+        correlation_id: l.correlationId,
+        reason: null,
+        payload: { seen_at: new Date(l.seenAt).toISOString(), held: true },
+      })
+  })
   // Value first (FR-LEAD-10): the higher score, then the cheaper bid.
   const heldRows = await d.db.execute<Held>(sql`
     select l.id as "leadId", l.title, s.score

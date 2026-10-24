@@ -167,14 +167,20 @@ describe('daily summary', () => {
     expect((await db.select().from(lead).where(eq(lead.id, '940042')))[0]?.status).toBe('held')
   })
 
-  it('FR-NOTIF-3: an order already offered in a summary is not listed again by the next one', async () => {
-    await heldLead(db, '940043', { seenAt: MORNING, score: 70 })
+  it('FR-NOTIF-3: an order already offered in a summary is neither listed again nor aged out by the next ones', async () => {
+    // 19:20 Moscow time: 24 hours 10 minutes old at the next summary, so only the offer keeps it out of the list.
+    await heldLead(db, '940043', { seenAt: '2026-10-25T16:20:00Z', score: 70 })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     sent = []
     await droppedLead(db, '930091', 55, { seenAt: '2026-10-26T07:00:00Z' })
     expect(await dailySummary({ db, notifier }, new Date('2026-10-26T16:30:00Z'))).toBe('sent')
     expect(sent[0]?.text).not.toContain('Заказ 940043')
     expect(await db.select().from(task).where(eq(task.kind, 'lead_held'))).toHaveLength(1)
+    // Two days on it is far over a day old, but its button is still waiting: the order stays held.
+    await droppedLead(db, '930092', 55, { seenAt: '2026-10-27T07:00:00Z' })
+    expect(await dailySummary({ db, notifier }, new Date('2026-10-27T16:30:00Z'))).toBe('sent')
+    expect((await db.select().from(lead).where(eq(lead.id, '940043')))[0]?.status).toBe('held')
+    expect(await db.select().from(event).where(eq(event.type, 'lead.stale'))).toHaveLength(0)
   })
 
   it('FR-NOTIF-3: borderline and held orders share one message and one numbering', async () => {

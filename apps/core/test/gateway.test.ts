@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { ProbeOutput, ScorerOutput, SorterOutput } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { modelCall } from '../src/db/schema'
 import { buildClaudeArgs, roleJsonSchema } from '../src/gateway/claudeCli'
 import { createGateway, withoutLimitWait } from '../src/gateway/gateway'
 import { LIMIT_TEXTS } from '../src/gateway/limit'
@@ -495,6 +496,36 @@ describe('Claude limit in the gateway', () => {
     expect(await second.call('sorter', 'x', SorterOutput)).toMatchObject({ ok: true })
     expect(after).toEqual([LIMIT_TEXTS.ended])
     expect((await calls()).map(roleOf)).toEqual(['sorter', 'probe', 'sorter'])
+  })
+
+  it('FR-OPS-3: a stand-in row of a wait that ran out is no limit answer: a restart after the limit ended finds none', async () => {
+    const now = Date.now()
+    const row = (id: string, ago: number, ok: boolean, ms: number) => ({
+      id,
+      role: 'sorter',
+      roleVersion: 1,
+      model: 'haiku',
+      priority: 'P1',
+      startedAt: new Date(now - ago).toISOString(),
+      durationMs: ms,
+      ok,
+      errorClass: ok ? null : 'limit_reached',
+      pseudonymized: true,
+    })
+    await db.insert(modelCall).values([
+      row('0192f3c4-5b6a-7c8d-9e0f-aabbccdd0001', 60_000, false, 40),
+      // The probe that ended the limit, then a call that gave up waiting (no run: 0 ms) a little later.
+      row('0192f3c4-5b6a-7c8d-9e0f-aabbccdd0002', 30_000, true, 40),
+      row('0192f3c4-5b6a-7c8d-9e0f-aabbccdd0003', 10_000, false, 0),
+    ])
+    const sent: string[] = []
+    const gw = await gateway(
+      { FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT_BY_ROLE: BY_ROLE },
+      true,
+      { sent, limit: { probeEveryMs: 60_000 } },
+    )
+    expect(await gw.call('sorter', 'x', SorterOutput)).toMatchObject({ ok: true })
+    expect(sent).toEqual([])
   })
 
   it('FR-OPS-3: after a restart the limit counts its 6 hours from its start, not from the restart', async () => {

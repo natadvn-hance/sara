@@ -74,7 +74,7 @@ export const TEXTS = {
   noted: (text: string, title?: string | null) =>
     title ? `Записала по «${title}»: «${text}»` : `Записала: «${text}»`,
   whichQuestion: (waiting: string[]) =>
-    `Не поняла, к какому моему вопросу это. Сейчас жду:\n${waiting.map((w) => `- ${w}`).join('\n')}\nОтветь на нужное моё сообщение ответом, тогда запишу туда.`,
+    `Не поняла, к какому моему вопросу это. Сейчас жду:\n${waiting.map((w) => `- ${w}`).join('\n')}\nНажми «Ответить» на нужном моём сообщении и пришли текст ещё раз.`,
   waitingFor: {
     edit_draft: (title: string | null) =>
       title ? `новый текст отклика на «${title}»` : 'новый текст отклика',
