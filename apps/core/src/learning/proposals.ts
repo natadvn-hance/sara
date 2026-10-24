@@ -245,7 +245,7 @@ export async function maybePropose(
 
 /** «Применить» makes the proposed rules the new version; «Не надо» keeps them and asks why. */
 export async function onProposalPress(
-  d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
+  d: { db: Db; notifier: Pick<Notifier, 'sendText'>; now?: () => Date },
   taskId: string,
   action: 'apply' | 'drop',
 ): Promise<string> {
@@ -288,6 +288,10 @@ export async function onProposalPress(
   })
   if (!done) return TEXTS.alreadyDone
   if (done.ask)
-    await askWhy(d, { kind: 'why_decline', entityId: done.p.id, title: done.p.summary }, new Date())
+    await askWhy(
+      d,
+      { kind: 'why_decline', entityId: done.p.id, title: done.p.summary },
+      d.now?.() ?? new Date(),
+    )
   return done.reply
 }
