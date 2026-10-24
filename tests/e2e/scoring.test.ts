@@ -139,4 +139,16 @@ describe('scoring in the lead pipeline', () => {
     const [l] = await db.select().from(leadLabel).where(eq(leadLabel.leadId, id))
     expect(l).toMatchObject({ label: 'no', source: 'card', score: 70, surprise: false })
   })
+
+  it('FR-LEAD-7: skipping a card scored far above the threshold brings «почему?»', async () => {
+    byRole = { sorter: FIT, scorer: scorerAnswer(80) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const skip = cards()[0]?.reply_markup?.inline_keyboard[0]?.find((b) =>
+      b.callback_data.endsWith(':skip'),
+    )
+    tg.pushPress(111, skip?.callback_data ?? '')
+    await until(() => tg.sent.some((m) => m.text.startsWith('Почему пропустил «')))
+  })
 })

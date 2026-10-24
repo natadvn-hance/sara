@@ -138,7 +138,18 @@ export function createTelegramRuntime(d: {
         return { messageId: m.message_id }
       },
       async sendText(text) {
-        await bot.api.sendMessage(await chat(), text)
+        const m = await bot.api.sendMessage(await chat(), text)
+        return { messageId: m.message_id }
+      },
+      async sendButtons(text, rows) {
+        const m = await bot.api.sendMessage(await chat(), text, {
+          reply_markup: {
+            inline_keyboard: rows.map((r) =>
+              r.map((b) => ({ text: b.text, callback_data: b.callbackData })),
+            ),
+          },
+        })
+        return { messageId: m.message_id }
       },
     },
   }

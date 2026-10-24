@@ -38,6 +38,12 @@ export const TEXTS = {
     `🌐 Нет связи с Профи.ру с ${sinceMsk}. Пробую раз в 5 минут.`,
   connectionBack: '🌐 Связь с Профи.ру вернулась. Сверяю, что пришло.',
   reminder: (title: string) => `⏰ Заявка ждёт решения: ${title}`,
+  whySkip: (title: string) => `Почему пропустил «${title}»? Напиши или скажи голосом.`,
+  whyWant: (title: string) => `Почему взял бы «${title}»? Напиши или скажи голосом.`,
+  whyDecline: 'Почему не надо эту поправку? Напиши или скажи голосом.',
+  noted: (text: string) => `Записала: «${text}»`,
+  notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
+  voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',
 }
 
 function verdictLine(c: LeadCard): string {

@@ -7,6 +7,7 @@ import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import { recordLabel } from '../learning/labels'
+import { askWhy } from '../learning/questions'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
@@ -350,12 +351,18 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         return true
       })
       if (!resolved) return TEXTS.alreadyDone
-      await recordLabel(d().db, {
+      const labeled = await recordLabel(d().db, {
         leadId: l.id,
         label: action === 'bid' ? 'yes' : 'no',
         source: 'card',
       })
       await deliverDecision(taskId, action)
+      // Not awaited: the press is answered at once, the question follows as its own message.
+      if (labeled.surprise) {
+        void askWhy(d(), { kind: 'why_skip', entityId: l.id, title: l.title }, new Date()).catch(
+          (e) => console.error('question not sent', e instanceof Error ? e.message : e),
+        )
+      }
       if (action === 'skip') return TEXTS.skipped
       if (outboxId) await startOutboxDelivery(outboxId, l.id)
       return TEXTS.bidQueued

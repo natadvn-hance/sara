@@ -28,6 +28,8 @@ export const EVENT_TYPES = [
   'task.created',
   'task.resolved',
   'task.reminded',
+  'question.asked',
+  'question.answered',
   'outbox.queued',
   'outbox.attempted',
   'outbox.confirmed',
