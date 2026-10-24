@@ -21,7 +21,7 @@
 - События журнала без текста и имени клиента, только номера (ADR-022).
 - Роли без инструментов, только через `Gateway.call`; имя клиента всегда в `redact.names`.
 - `WORKFLOW_VERSION` остаётся `'1'`. Новые процессы: `convTurn`, `convRemind` (новые имена). Шаги внутри новых процессов не трогают старые.
-- Миграцию добавляет только часть 0 (`0008_conversation`); другим частям новые колонки не нужны. Если `main` уже ушёл дальше 0007, номер берётся следующий и миграция генерируется заново (`pnpm --filter @sara/core exec drizzle-kit generate --name conversation`), ручной SQL дописывается в неё.
+- Миграцию добавляет только часть 0 (`0009_conversation`, после `0008_direction_profile` из M3); другим частям новые колонки не нужны. Если `main` уже ушёл дальше 0007, номер берётся следующий и миграция генерируется заново (`pnpm --filter @sara/core exec drizzle-kit generate --name conversation`), ручной SQL дописывается в неё.
 - Тесты: своя база Postgres на свободном порту 54371-54379 (`docker run -d --name sara-pg-m4-<часть> -p <порт>:5432 -e POSTGRES_USER=sara -e POSTGRES_PASSWORD=sara -e POSTGRES_DB=sara pgvector/pgvector:pg16`), `DATABASE_URL=postgres://sara:sara@localhost:<порт>/sara`; общую базу на 54329 и Plane не трогать. Перед пул-реквестом `pnpm test` и `pnpm check` зелёные, а новый CLI запускается один раз под `node --import tsx` как на сервере.
 - Ни один тест не ходит на живой Профи.ру и не вызывает настоящий Claude (`tests/fakes/fake-claude.mjs`, `FAKE_CLAUDE_OUTPUT_BY_ROLE`).
 - Границы M4: `apps/core/src/{conversation,mind,history,exam}/`, `roles/{interlocutor,checker,reminder,examiner}/`, `tests/exam/`, `tests/e2e/conversation*.test.ts`. Общие файлы только по списку дизайна, раздел 12; `apps/core/src/leads/` и `notify/cards.ts` не трогаются, кроме одной строки фильтра в `leads/outbox.ts` (Task 0.3).
@@ -192,7 +192,7 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 
 **Files:**
 - Modify: `apps/core/src/db/schema.ts`
-- Create: `apps/core/drizzle/0008_conversation.sql` (генерация плюс ручной SQL в начале: `CREATE EXTENSION IF NOT EXISTS vector;`), снимок и журнал drizzle
+- Create: `apps/core/drizzle/0009_conversation.sql` (генерация плюс ручной SQL в начале: `CREATE EXTENSION IF NOT EXISTS vector;`), снимок и журнал drizzle
 - Test: `apps/core/test/db/conversationSchema.test.ts`
 
 **Interfaces:**
