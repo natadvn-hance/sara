@@ -144,6 +144,7 @@ describe('Profi.ru page readers', () => {
     expect(r.signals).toHaveLength(1)
     expect(r.signals[0]).toMatchObject({
       t: 'order',
+      needsPage: true,
       order: {
         order_id: '95300001',
         title: 'Реклама на ТВ',
@@ -160,5 +161,21 @@ describe('Profi.ru page readers', () => {
     expect(
       profiParsers.fromResponse('https://profi.ru/graphql', { data: { me: { id: 1 } } }).recognized,
     ).toBe(false)
+  })
+
+  it('FR-LEAD-9: the wallet comes from the profile answer of the site', () => {
+    const body = {
+      data: { balance: 23, currency: '₽', debt: 0, bonus: { value: 0 } },
+      meta: { method: 'getProfile' },
+      errors: [],
+    }
+    expect(profiParsers.fromResponse('https://profi.ru/backoffice/api/', body)).toEqual({
+      recognized: true,
+      signals: [{ t: 'balance', rub: 23 }],
+    })
+  })
+
+  it('FR-CONV-1: chats are listed at r.php, the menu link «Чаты»', () => {
+    expect(profiParsers.paths.chats).toBe('/backoffice/r.php')
   })
 })

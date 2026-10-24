@@ -214,4 +214,60 @@ describe('eyes', () => {
       (await events('profi.client_message')).map((x) => x.payload.platform_message_id),
     ).toEqual(['good'])
   })
+
+  it('ST-M1-06: an order known only from the board waits for its page and goes out once with the fee', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const board = (id: string) => ({
+      t: 'order' as const,
+      needsPage: true,
+      order: {
+        order_id: id,
+        title: 'Реклама на ТВ',
+        category: 'Реклама на ТВ',
+        city: 'Дистанционно · Москва',
+        text: 'Полный текст с доски',
+        client_name: 'Андрей',
+        budget_text: 'до 50 000 ₽',
+        bid_price_rub: 0,
+        seen_at: new Date().toISOString(),
+      },
+      published_at: '2026-10-24T08:00:00.000Z',
+    })
+    await e.onParsed(
+      { recognized: true, what: 'feed', signals: [board('901'), board('902')] },
+      'response',
+    )
+    expect(await events('profi.order_seen')).toHaveLength(0)
+    expect(e.ordersWantingPage()).toEqual(['901', '902'])
+    // The order page knows the fee; its own reading of the text is rougher than the board's.
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'order',
+        signals: [
+          {
+            t: 'order',
+            order: {
+              ...board('901').order,
+              text: 'обрезано',
+              budget_text: null,
+              bid_price_rub: 145,
+            },
+            published_at: null,
+          },
+        ],
+      },
+      'dom',
+    )
+    // An order page that cannot be read still lets the order through, without a fee.
+    await e.settleOrder('902')
+    await e.onParsed({ recognized: true, what: 'feed', signals: [board('901')] }, 'response')
+    const seen = await events('profi.order_seen')
+    expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub, x.payload.text])).toEqual([
+      ['901', 145, 'Полный текст с доски'],
+      ['902', 0, 'Полный текст с доски'],
+    ])
+    expect(seen[0]?.payload.budget_text).toBe('до 50 000 ₽')
+    expect(e.ordersWantingPage()).toEqual([])
+  })
 })

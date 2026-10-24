@@ -1,7 +1,13 @@
 import type { ChatMessage, MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
 
-export type OrderSignal = { t: 'order'; order: ProfiOrder; published_at: string | null }
+export type OrderSignal = {
+  t: 'order'
+  order: ProfiOrder
+  published_at: string | null
+  /** Seen on the board without the fee: held until its own page is read (or cannot be). */
+  needsPage?: boolean
+}
 export type MessageSignal = { t: 'message'; message: ChatMessage & { order_id: string | null } }
 export type Signal =
   | OrderSignal

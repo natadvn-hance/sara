@@ -194,4 +194,86 @@ describe('insurance and the account tab', () => {
     )
     expect(types.filter((t) => t.type === 'profi.order_seen' && t.entity.id === id)).toHaveLength(1)
   }, 60000)
+
+  it('ST-M1-06: an order seen only on the board is opened once for its fee', async () => {
+    await loginStandIn(ab.page, site)
+    site.muteRtp(true)
+    const opened: string[] = []
+    const parsers: Parsers = {
+      ...standInParsers,
+      paths: { ...standInParsers.paths, order: (id) => `/backoffice/n.php?o=${id}` },
+      fromResponse: () => ({ recognized: false, signals: [] }),
+      fromFeedDom: async () => ({ recognized: true, refs: [] }),
+      async fromOrderDom(_page, orderId) {
+        opened.push(orderId)
+        return {
+          recognized: true,
+          what: 'order',
+          signals: [
+            {
+              t: 'order',
+              order: {
+                order_id: orderId,
+                title: '',
+                category: '',
+                city: '',
+                text: '',
+                client_name: '',
+                budget_text: null,
+                bid_price_rub: 120,
+                seen_at: new Date().toISOString(),
+              },
+              published_at: null,
+            },
+          ],
+        }
+      },
+    }
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+    })
+    await eyes.onParsed(
+      {
+        recognized: true,
+        what: 'feed',
+        signals: [
+          {
+            t: 'order',
+            needsPage: true,
+            order: {
+              order_id: '95300077',
+              title: 'Лендинг для школы',
+              category: 'Лендинг для школы',
+              city: 'Дистанционно · Москва',
+              text: 'Текст с доски',
+              client_name: 'Ирина',
+              budget_text: null,
+              bid_price_rub: 0,
+              seen_at: new Date().toISOString(),
+            },
+            published_at: null,
+          },
+        ],
+      },
+      'response',
+    )
+    await ins.feedOnce()
+    await ins.feedOnce()
+    ins.stop()
+    site.muteRtp(false)
+    expect(opened).toEqual(['95300077'])
+    const seen = (await db.select().from(outboxNode))
+      .map((r) => r.payload as { type: string; payload: { title: string; bid_price_rub: number } })
+      .filter((t) => t.type === 'profi.order_seen')
+    expect(seen.map((t) => [t.payload.title, t.payload.bid_price_rub])).toEqual([
+      ['Лендинг для школы', 120],
+    ])
+  }, 60000)
 })
