@@ -28,6 +28,7 @@
 | `raw_message` | `platform_message_id`, `chat_id`, `account_id`, `author_side` (`client`, `specialist`), `sent_at`, `text` | П | 2 года для закрытых, как в ядре |
 | `outbox_node` | `event_id`, `payload`, `attempts`, `next_try_at`, `confirmed_at` | П | до подтверждения + 7 дней |
 | `bid_attempt` | `idempotency_key`, `account_id`, `order_id`, `due_rub`, `pressed_at`, `result` (jsonb): нажатие «Откликнуться», записанное до нажатия, и подтверждённый ответ | Н | 30 дней |
+| `node_flag` | `account_id`, `name`, `reason`, `set_at`: остановка, которую узел поставил себе сам (например `form_calibration`: кошелёк уменьшился после открытия формы) | Н | пока человек не снимет |
 | `browser_profile` | папка профиля на диске, вне базы | С | пока аккаунт активен |
 
 ## 3. Схема `core`: рабочая база ядра
