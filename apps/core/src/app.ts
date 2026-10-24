@@ -40,6 +40,8 @@ export type StartOptions = {
   retryDelaysMs?: number[]
   remindAfterMs?: () => Promise<number>
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
+  /** How often the learning jobs run (default a minute); tests call them directly instead. */
+  learningTickMs?: number
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -132,7 +134,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
 
   const token = await secrets.get('telegram_bot_token')
   if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))
-  const learning = startLearningJobs({ db, notifier: bot.notifier, gateway })
+  const learning = startLearningJobs({
+    db,
+    notifier: bot.notifier,
+    gateway,
+    tickMs: o.learningTickMs,
+  })
 
   return {
     url,

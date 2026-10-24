@@ -8,6 +8,7 @@ import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { lead, leadLabel, leadScore } from '../../apps/core/src/db/schema'
 import { seedDirection } from '../../apps/core/src/direction/store'
+import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { countEvents } from '../../apps/core/test/helpers/events'
@@ -61,6 +62,7 @@ beforeAll(async () => {
     {
       claudeEnv: () => ({ FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole) }),
       retryDelaysMs: [50, 50, 50, 50, 50],
+      learningTickMs: 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
     },
   )
@@ -150,5 +152,37 @@ describe('scoring in the lead pipeline', () => {
     )
     tg.pushPress(111, skip?.callback_data ?? '')
     await until(() => tg.sent.some((m) => m.text.startsWith('Почему пропустил «')))
+  })
+
+  it('FR-LEAD-7: «Взял бы» is a yes, asks why and brings a normal card; pressing again does nothing', async () => {
+    byRole = { sorter: FIT, scorer: scorerAnswer(50) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(async () => (await statusOf(id)) === 'scored_out')
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date())
+    expect(
+      await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`)),
+    ).toBe('sent')
+    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1. На грани:')))
+    const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
+      ?.inline_keyboard[0]?.[0]
+    expect(want?.text).toBe('Взял бы №1')
+    tg.pushPress(111, want?.callback_data ?? '')
+    await until(() =>
+      cards().some((m) =>
+        m.reply_markup?.inline_keyboard[0]?.some((b) => b.callback_data.endsWith(':bid')),
+      ),
+    )
+    await until(() => tg.sent.some((m) => m.text.startsWith('Почему взял бы «')))
+    const [l] = await db.select().from(leadLabel).where(eq(leadLabel.leadId, id))
+    expect(l).toMatchObject({ label: 'yes', source: 'summary', surprise: true })
+    expect(await statusOf(id)).toBe('queued')
+    tg.pushPress(111, want?.callback_data ?? '')
+    await until(() => tg.answers.some((a) => a.text === 'Уже сделано'))
+    expect(
+      cards().filter((m) =>
+        m.reply_markup?.inline_keyboard[0]?.some((b) => b.callback_data.endsWith(':bid')),
+      ),
+    ).toHaveLength(1)
   })
 })

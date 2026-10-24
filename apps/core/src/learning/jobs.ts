@@ -2,6 +2,7 @@ import type { Db } from '../db/client'
 import type { Gateway } from '../gateway/gateway'
 import type { Notifier } from '../notify/notifier'
 import { sweepIgnored } from './labels'
+import { dailySummary } from './summary'
 
 export type LearningDeps = { db: Db; notifier: Notifier; gateway: Gateway }
 type Step = { name: string; run(d: LearningDeps, now: Date): Promise<unknown> }

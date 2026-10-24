@@ -47,3 +47,39 @@ export async function leadWithScore(
   })
   return taskId
 }
+
+/** An order Sara dropped (scored_out, no task), seen at `seenAt`. */
+export async function droppedLead(
+  db: Db,
+  id: string,
+  score: number,
+  o: { seenAt: string; stopFactor?: string | null; title?: string },
+): Promise<void> {
+  await db.insert(lead).values({
+    id,
+    accountId: 'hance-marketing',
+    title: o.title ?? `Заказ ${id}`,
+    category: 'Маркетинг',
+    city: 'Москва',
+    text: 'Описание',
+    clientName: 'Ирина',
+    budgetText: null,
+    bidPriceRub: 120,
+    seenAt: o.seenAt,
+    status: 'scored_out',
+    correlationId: newEventId(),
+  })
+  await db.insert(leadScore).values({
+    id: newEventId(),
+    leadId: id,
+    version: 1,
+    score,
+    decision: 'drop',
+    stopFactor: o.stopFactor ?? null,
+    redFlags: [],
+    axes: [],
+    reason: `причина ${id}`,
+    confidence: 0.9,
+    model: 'haiku',
+  })
+}

@@ -44,6 +44,10 @@ export const TEXTS = {
   noted: (text: string) => `Записала: «${text}»`,
   notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
   voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',
+  summaryHead: (n: number) => `Сегодня отсеяла ${n}. На грани:`,
+  summaryNone: (n: number) => `Сегодня отсеяла ${n}, пограничных не было`,
+  wantButton: (n: number) => `Взял бы №${n}`,
+  wantCard: 'Прислала карточку заявки',
 }
 
 function verdictLine(c: LeadCard): string {

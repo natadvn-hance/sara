@@ -291,6 +291,57 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
   }
 }
 
+/**
+ * «Взял бы» from the daily summary: Boris's yes on an order Sara dropped. It is a label and a surprise («почему?»),
+ * and the order comes back as a normal card so he can bid on it.
+ */
+async function onWant(reviewId: string): Promise<string> {
+  const [t] = await d().db.select().from(task).where(eq(task.id, reviewId))
+  if (!t || t.kind !== 'lead_review') return TEXTS.alreadyDone
+  const [l] = await d().db.select().from(lead).where(eq(lead.id, t.entityId))
+  if (!l) return TEXTS.alreadyDone
+  const decisionId = newEventId()
+  const resolved = await d().db.transaction(async (tx) => {
+    const rows = await tx
+      .update(task)
+      .set({ state: 'resolved', resolution: 'want', resolvedAt: new Date().toISOString() })
+      .where(and(eq(task.id, reviewId), eq(task.state, 'open')))
+      .returning({ id: task.id })
+    if (rows.length === 0) return false
+    await appendEvent(
+      tx,
+      ev('task.resolved', { kind: 'task', id: reviewId }, l.correlationId, 'boris', {
+        action: 'want',
+      }),
+    )
+    await tx
+      .insert(task)
+      .values({ id: decisionId, kind: 'lead_decision', entityKind: 'lead', entityId: l.id })
+    await tx.update(lead).set({ status: 'queued' }).where(eq(lead.id, l.id))
+    await appendEvent(
+      tx,
+      ev('task.created', { kind: 'task', id: decisionId }, l.correlationId, 'sara', {
+        lead_id: l.id,
+      }),
+    )
+    return true
+  })
+  if (!resolved) return TEXTS.alreadyDone
+  const labeled = await recordLabel(d().db, { leadId: l.id, label: 'yes', source: 'summary' })
+  await startDecisionWait(decisionId, await d().remindAfterMs())
+  const card = await cardOfTask(decisionId, false)
+  if (card) {
+    const m = await d().notifier.sendLeadCard(card)
+    await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, decisionId))
+  }
+  if (labeled.surprise) {
+    void askWhy(d(), { kind: 'why_want', entityId: l.id, title: l.title }, new Date()).catch((e) =>
+      console.error('question not sent', e instanceof Error ? e.message : e),
+    )
+  }
+  return TEXTS.wantCard
+}
+
 export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
   deps = dp
   return {
@@ -304,6 +355,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     async onPress({ taskId, action }) {
+      if (action === 'want') return onWant(taskId)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)
       if (!found) return TEXTS.alreadyDone
