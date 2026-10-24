@@ -55,4 +55,35 @@ describe('stand-in Profi.ru', () => {
     expect(page.status).toBe(302)
     expect(page.headers.get('location')).toBe('/login')
   })
+
+  it('FR-LEAD-5: the backoffice API answers getKlientInfo with the client of the order, in the live shape', async () => {
+    const cookie = await login()
+    const id = site.addOrder({
+      klient: {
+        name: 'Ирина',
+        title: 'На Профи.ру с 7 сентября 2020',
+        verified: true,
+        positive: 3,
+        negative: 1,
+        tags: ['Перестала отвечать'],
+      },
+    })
+    const ask = async (orderId: string) =>
+      fetch(`${site.url}/backoffice/api/`, {
+        method: 'POST',
+        headers: { cookie },
+        body: JSON.stringify({ method: 'getKlientInfo', orderId }),
+      })
+    const r = await ask(id)
+    expect(await r.json()).toEqual({
+      data: {
+        name: 'Ирина',
+        title: 'На Профи.ру с 7 сентября 2020',
+        labels: [{ text: 'Номер подтверждён' }],
+        reviews: { count: { positive: 3, negative: 1 }, list: [{ tags: ['Перестала отвечать'] }] },
+      },
+    })
+    const none = site.addOrder({ klient: null })
+    expect((await ask(none)).status).toBe(404)
+  })
 })

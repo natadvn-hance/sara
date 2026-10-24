@@ -67,8 +67,9 @@ export function startInsurance(o: {
   let chatsPath: string | null = null
   let onFeed = true
 
-  // Eyes 3 (old Sara's way): order numbers from the feed page and the board answer, then each new order's own
-  // page, once: only the page shows the fee for a bid.
+  // Eyes 3, the fallback while the board answer is silent (old Sara's way): the feed page links, then each new
+  // order's own page, once. A board order is never opened here: it goes to the core as the board showed it, and the
+  // core reads its page only if the order passes the Scorer (get_order).
   async function readNewOrders() {
     onFeed = true
     if (!o.parsers.fromFeedDom) return
@@ -77,13 +78,9 @@ export function startInsurance(o: {
     chatsPath = (await o.parsers.chatsUrl?.(o.ab.page)) ?? chatsPath
     const fromOrderDom = o.parsers.fromOrderDom
     const orderPath = o.parsers.paths.order
-    if (!fromOrderDom || !orderPath) {
-      for (const id of o.eyes.ordersWantingPage()) await o.eyes.settleOrder(id)
-      return
-    }
-    // The real feed page links hundreds of old orders too: while the board answers, only its orders are opened.
-    const fromPage = o.eyes.boardWorks() ? [] : feed.refs.map((r) => r.orderId)
-    const ids = [...new Set([...fromPage, ...o.eyes.ordersWantingPage()])]
+    if (!fromOrderDom || !orderPath) return
+    // The real feed page links hundreds of old orders too: while the board answers, none of them is opened.
+    const ids = o.eyes.boardWorks() ? [] : [...new Set(feed.refs.map((r) => r.orderId))]
     let opened = 0
     for (const id of ids) {
       if (opened >= 5 || !can()) break
@@ -95,8 +92,6 @@ export function startInsurance(o: {
       const page = await fromOrderDom(o.ab.page, id)
       await keepFormMap()
       await o.eyes.onParsed(page, 'dom')
-      // An expired or changed page still lets a board order through, without its fee.
-      if (!page.signals.some((s) => s.t === 'order')) await o.eyes.settleOrder(id)
       if (o.afterOrderPage && can()) await o.afterOrderPage(id, can).catch(() => {})
     }
   }

@@ -5,8 +5,6 @@ export type OrderSignal = {
   t: 'order'
   order: ProfiOrder
   published_at: string | null
-  /** Seen on the board without the fee: held until its own page is read (or cannot be). */
-  needsPage?: boolean
   /** What the order page's own answer added: the usual fee beside the one paid now, and whether this account already bid. */
   answer?: { baseRub: number | null; hasBid: boolean | null }
 }
@@ -24,7 +22,7 @@ export type Signal =
 /** recognized: the source had the shape we know (even if empty). False is how a layout change shows. */
 export type ParseResult = {
   recognized: boolean
-  what?: 'feed' | 'chat' | 'order' | 'stream'
+  what?: 'feed' | 'chat' | 'order' | 'stream' | 'client'
   signals: Signal[]
 }
 

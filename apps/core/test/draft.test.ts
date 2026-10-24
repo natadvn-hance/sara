@@ -4,7 +4,14 @@ import { AnalystOutput, ProfiOrder } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
 import { roleJsonSchema } from '../src/gateway/claudeCli'
 import type { CallOptions, Gateway, RoleCallResult } from '../src/gateway/gateway'
-import { draftOf, editOf, greetingOf, priceWithin, writeDraft } from '../src/leads/draft'
+import {
+  analystInput,
+  draftOf,
+  editOf,
+  greetingOf,
+  priceWithin,
+  writeDraft,
+} from '../src/leads/draft'
 
 const ROOT = resolve(import.meta.dirname, '../../..')
 const DASH = String.fromCharCode(0x2014)
@@ -260,5 +267,49 @@ describe('the Analyst', () => {
       priceRub: null,
       attempts: 1,
     })
+  })
+})
+
+describe('what the Analyst is told about the client', () => {
+  const info = {
+    name: 'Ирина',
+    on_profi_since: 'На Профи.ру с 7 сентября 2020',
+    phone_verified: true,
+    reviews: { positive: 3, negative: 1 },
+    review_tags: ['Перестала отвечать', 'Торгуется'],
+  }
+
+  it('FR-LEAD-6: the client facts of the order page go to the Analyst, the name does not', async () => {
+    const o = await order()
+    const input = analystInput({ ...o, client_info: info }, 400)
+    expect(input).toContain(
+      'Клиент на площадке: На Профи.ру с 7 сентября 2020; номер подтверждён; отзывы специалистов: 3 хороших, 1 плохой; отметки в отзывах: Перестала отвечать, Торгуется',
+    )
+    expect(input).not.toContain('Ирина')
+  })
+
+  it('FR-LEAD-6: what the page did not show is left out, an unverified number is said', async () => {
+    const o = await order()
+    const input = analystInput(
+      {
+        ...o,
+        client_info: {
+          name: null,
+          on_profi_since: null,
+          phone_verified: false,
+          reviews: null,
+          review_tags: [],
+        },
+      },
+      400,
+    )
+    expect(input).toContain('Клиент на площадке: номер не подтверждён')
+    expect(input).not.toContain('отзывы')
+  })
+
+  it('FR-LEAD-6: without client info the Analyst input is as before', async () => {
+    const o = await order()
+    expect(analystInput(o, 400)).not.toContain('Клиент на площадке')
+    expect(analystInput({ ...o, client_info: null }, 400)).toBe(analystInput(o, 400))
   })
 })

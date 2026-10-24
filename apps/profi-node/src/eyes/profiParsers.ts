@@ -1,5 +1,6 @@
 import type { MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
+import { clientInfoFromAnswer } from './clientInfo'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
@@ -93,7 +94,6 @@ function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
   const title = it.title ?? ''
   return {
     t: 'order',
-    needsPage: true,
     order: {
       order_id: it.id,
       title,
@@ -102,7 +102,7 @@ function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
       text: it.description ?? '',
       client_name: it.clientInfo?.name ?? '',
       budget_text: budget,
-      // The fee for a bid is shown only on the order page.
+      // The fee for a bid is shown only on the order page, which get_order reads for the orders worth it: 0 is unknown.
       bid_price_rub: 0,
       seen_at: seenAt,
     },
@@ -154,7 +154,13 @@ function fromOrderAnswer(orders: unknown[]): ParseResult {
 }
 
 export function fromSiteAnswer(url: string, body: unknown): ParseResult {
-  if (/\/backoffice\/api\//.test(url)) return fromProfileAnswer(body)
+  if (/\/backoffice\/api\//.test(url)) {
+    const profile = fromProfileAnswer(body)
+    // The client of an order page (getKlientInfo) is read by get_order itself; here it is only a known answer.
+    return profile.recognized || !clientInfoFromAnswer(body)
+      ? profile
+      : { recognized: true, what: 'client', signals: [] }
+  }
   const data = (
     body as { data?: { boSearchBoardItems?: { items?: unknown }; orders?: unknown } } | null
   )?.data

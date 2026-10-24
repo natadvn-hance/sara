@@ -161,7 +161,6 @@ describe('Profi.ru page readers', () => {
     expect(r.signals).toHaveLength(1)
     expect(r.signals[0]).toMatchObject({
       t: 'order',
-      needsPage: true,
       order: {
         order_id: '95300001',
         title: 'Реклама на ТВ',

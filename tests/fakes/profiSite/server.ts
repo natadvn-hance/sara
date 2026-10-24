@@ -14,8 +14,18 @@ import {
   loginPage,
   NORMAL_LAYOUT,
   orderPage,
+  widgetPage,
 } from './pages'
 
+/** What the client of an order shows on the page: the backoffice answer getKlientInfo is drawn from it. */
+export type SiteKlient = {
+  name: string
+  title: string
+  verified: boolean
+  positive: number
+  negative: number
+  tags: string[]
+}
 export type SiteOrder = {
   id: string
   subject: string
@@ -31,6 +41,8 @@ export type SiteOrder = {
   hasBid: boolean
   /** The form will not take a bid without «Стоимость услуги». */
   priceRequired: boolean
+  /** The client as getKlientInfo shows them; null: the site has no answer for this order. */
+  klient: SiteKlient | null
 }
 export type SiteBid = { orderId: string; price: string; text: string }
 /** How the bid form behaves: ok, silent (refused, the form stays), lost (the form closes, no bid on the order). */
@@ -44,6 +56,8 @@ export type BidSettings = BidLook & {
   showWallet: boolean
   /** The opener's words, in the answer (tariffsBlock.scrollButtonText) and on the page. */
   openerText: string
+  /** The client answer (getKlientInfo) comes this late, in ms. */
+  klientDelayMs: number
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -76,6 +90,15 @@ export type ProfiSite = {
 }
 
 let seq = 90000000
+
+const DECOY: SiteKlient = {
+  name: 'Чужой',
+  title: 'На Профи.ру с 1 января 2019',
+  verified: false,
+  positive: 0,
+  negative: 9,
+  tags: ['Не платит'],
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((ok) => {
@@ -171,9 +194,11 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     opener: 'continue',
     openerAmount: null,
     openerText: 'Написать клиенту',
+    klientDecoy: false,
     answer: true,
     hasBidField: true,
     showWallet: true,
+    klientDelayMs: 0,
   })
   const bidSettings = freshBidSettings()
 
@@ -248,6 +273,30 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         data: { orders: [{ _id: found.id, boOrderScreen: orderScreen(found, bidSettings) }] },
       })
     }
+    // The backoffice API of the live site: every method at one address, the method named in the request.
+    if (p === '/backoffice/api/' && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}') as {
+        method?: string
+        orderId?: string
+      }
+      const found = orders.find((x) => x.id === body.orderId)
+      // The widget's question about another client is answered at once.
+      const k = body.orderId === 'decoy' ? DECOY : found?.klient
+      if (body.method !== 'getKlientInfo' || !k) return json(res, { error: 'not found' }, 404)
+      if (body.orderId !== 'decoy' && bidSettings.klientDelayMs > 0)
+        await new Promise((r) => setTimeout(r, bidSettings.klientDelayMs))
+      return json(res, {
+        data: {
+          name: k.name,
+          title: k.title,
+          labels: k.verified ? [{ text: 'Номер подтверждён' }] : [],
+          reviews: {
+            count: { positive: k.positive, negative: k.negative },
+            list: [{ tags: k.tags }],
+          },
+        },
+      })
+    }
     if (p === '/api/bid' && req.method === 'POST') {
       const b = JSON.parse((await readBody(req)) || '{}') as Partial<SiteBid>
       const found = orders.find((x) => x.id === b.orderId)
@@ -277,6 +326,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
     if (p === '/backoffice/n.php')
       return html(res, orderPage(url.searchParams.get('o') ?? '', bidSettings))
+    if (p === '/backoffice/widget.html') return html(res, widgetPage())
     if (p === '/chats') return html(res, chatsPage())
     // Like the real messenger page: it polls the site all the time, so the network never goes quiet.
     if (p === '/api/ping') return json(res, { ok: true })
@@ -345,6 +395,14 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         open: true,
         hasBid: false,
         priceRequired: true,
+        klient: {
+          name: partial.clientName ?? 'Ирина',
+          title: 'На Профи.ру с 7 сентября 2020',
+          verified: true,
+          positive: 2,
+          negative: 0,
+          tags: [],
+        },
         ...partial,
       }
       orders.unshift(order)

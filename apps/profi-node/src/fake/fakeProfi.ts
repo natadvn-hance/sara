@@ -1,6 +1,8 @@
 import {
   type EventEnvelope,
+  type GetOrderOutput,
   newEventId,
+  type ProfiErrorClass,
   type ProfiOrder,
   type SendMessageInput,
   type SendMessageOutput,
@@ -13,11 +15,26 @@ import { type ExtraRoute, serveMcp } from '../mcp/http'
 import { createProfiMcpServer, ProfiToolError } from '../mcp/server'
 import { sampleOrders } from './sampleOrders'
 
+/**
+ * What the order page of a fake order shows when get_order reads it. Without a page set, the fake answers with the
+ * order it emitted: open, not bid on, its fee and words as emitted. `fail` makes the read fail with that class,
+ * `delayMs` makes the answer slow.
+ */
+export type FakeOrderPage = Partial<
+  Pick<
+    GetOrderOutput,
+    'open' | 'has_bid' | 'bid_price_rub' | 'client_name' | 'text' | 'client_info'
+  >
+> & { fail?: ProfiErrorClass; delayMs?: number }
+
 export type FakeProfi = {
   url: string
   bids: SubmitBidInput[]
   messages: SendMessageInput[]
+  /** Order numbers get_order was asked for, in order. */
+  orderReads: string[]
   emitOrder(o?: Partial<ProfiOrder>): Promise<string>
+  setOrderPage(orderId: string, page: FakeOrderPage): void
   redeliver(eventId: string): Promise<void>
   failNextAck(): void
   failAcks(n: number): void
@@ -37,6 +54,9 @@ export async function createFakeProfi(o: {
   extra?: ExtraRoute
 }): Promise<FakeProfi> {
   const bids: SubmitBidInput[] = []
+  const orderReads: string[] = []
+  const emitted = new Map<string, ProfiOrder>()
+  const pages = new Map<string, FakeOrderPage>()
   const results = new Map<string, SubmitBidOutput>()
   const messages: SendMessageInput[] = []
   const sentMessages = new Map<string, SendMessageOutput>()
@@ -59,8 +79,21 @@ export async function createFakeProfi(o: {
     async listFeed() {
       return { orders: [] }
     },
-    async getOrder(i: { order_id: string }): Promise<never> {
-      throw new ProfiToolError('NOT_FOUND', `order ${i.order_id} is not known to the fake`)
+    async getOrder(i: { order_id: string }): Promise<GetOrderOutput> {
+      orderReads.push(i.order_id)
+      const order = emitted.get(i.order_id)
+      if (!order)
+        throw new ProfiToolError('NOT_FOUND', `order ${i.order_id} is not known to the fake`)
+      const { fail, delayMs, ...page } = pages.get(i.order_id) ?? {}
+      if (delayMs) await sleep(delayMs)
+      if (fail) throw new ProfiToolError(fail, `the fake order page fails with ${fail}`)
+      return {
+        ...order,
+        published_at: order.published_at ?? null,
+        open: true,
+        has_bid: false,
+        ...page,
+      }
     },
     async listChats() {
       return { chats: [] }
@@ -126,10 +159,15 @@ export async function createFakeProfi(o: {
     url: server.url,
     bids,
     messages,
+    orderReads,
+    setOrderPage(orderId, page) {
+      pages.set(orderId, page)
+    },
     async emitOrder(partial) {
       const base = sampleOrders()[0]
       if (!base) throw new Error('no sample orders')
       const order: ProfiOrder = { ...base, seen_at: new Date().toISOString(), ...partial }
+      emitted.set(order.order_id, order)
       const e: EventEnvelope = {
         id: newEventId(),
         type: 'profi.order_seen',

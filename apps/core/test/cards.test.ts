@@ -565,4 +565,14 @@ describe('the texts', () => {
     // The minus of the reviews is the mathematical one, not a dash.
     expect(leadCardText(full)).toContain('−1')
   })
+
+  it('FR-LEAD-7: a fee the page did not show is said to be unknown, and the button names no sum', () => {
+    const unknown = { ...card, bidPriceRub: 0 }
+    expect(leadCardText(unknown).split('\n')[2]).toBe('Отклик: цена неизвестна')
+    expect(leadCardText(unknown)).not.toContain('0\u00a0₽')
+    expect(leadCardKeyboard(unknown).inline_keyboard[0]?.[0]).toEqual({
+      text: 'Откликнуться',
+      callback_data: `t:${card.taskId}:bid`,
+    })
+  })
 })

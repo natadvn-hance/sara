@@ -1,0 +1,30 @@
+{
+  "kind": "response",
+  "url": "https://profi.ru/backoffice/api/",
+  "body": {
+    "data": {
+      "name": "Ирина",
+      "title": "На Профи.ру с 7 сентября 2020",
+      "labels": [
+        {
+          "text": "Номер подтверждён"
+        }
+      ],
+      "reviews": {
+        "count": {
+          "positive": 3,
+          "negative": 1
+        },
+        "list": [
+          {
+            "tags": ["Перестала отвечать"]
+          },
+          {
+            "tags": ["Вежливый клиент", "Чётко ставит задачу"]
+          }
+        ]
+      }
+    }
+  },
+  "receivedAt": "2026-10-24T12:00:00.000Z"
+}
