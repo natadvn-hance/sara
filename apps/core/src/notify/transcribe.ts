@@ -56,9 +56,10 @@ export function createTranscriber(c: {
           ['-m', c.modelPath, '-l', 'ru', '-nt', '-np', '-f', wav],
           timeoutMs,
         )
+        // whisper marks silence and sounds in brackets ([BLANK_AUDIO], [музыка], (смех)): those are not words.
         const text = r.out
-          .split('\n')
-          .map((l) => l.trim())
+          .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
+          .split(/\s+/)
           .filter(Boolean)
           .join(' ')
         return r.ok && text ? text : null

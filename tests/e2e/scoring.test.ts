@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
@@ -211,4 +211,40 @@ describe('scoring in the lead pipeline', () => {
     await until(() => tg.answers.some((a) => a.text === 'Применила, теперь правила v2'))
     expect((await activeRules(db, 'hance-marketing')).rules.threshold).toBe(60)
   })
+
+  it('FR-LEAD-8: a broken label write never blocks the bid or the «Взял бы» card', async () => {
+    await setSetting(db, 'outbound.bids', true, 'boris')
+    await db.execute(
+      sql`create or replace function core.fail_label() returns trigger language plpgsql as $$ begin raise exception 'label down'; end $$`,
+    )
+    await db.execute(sql`drop trigger if exists fail_label on core.lead_label`)
+    await db.execute(
+      sql`create trigger fail_label before insert on core.lead_label for each row execute function core.fail_label()`,
+    )
+    try {
+      const id = orderId()
+      await fake.emitOrder({ order_id: id })
+      await until(() => cards().length === 1)
+      const bid = cards()[0]?.reply_markup?.inline_keyboard[0]?.find((b) =>
+        b.callback_data.endsWith(':bid'),
+      )
+      tg.pushPress(111, bid?.callback_data ?? '')
+      await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+      expect(fake.bids.some((b) => b.idempotency_key === `bid:${id}`)).toBe(true)
+
+      byRole = { sorter: FIT, scorer: scorerAnswer(50) }
+      const dropped = orderId()
+      await fake.emitOrder({ order_id: dropped })
+      await until(async () => (await statusOf(dropped)) === 'scored_out')
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date())
+      await dailySummary({ db: app.db, notifier: app.bot.notifier }, new Date(`${day}T16:30:00Z`))
+      await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
+      const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
+        ?.inline_keyboard[0]?.[0]
+      tg.pushPress(111, want?.callback_data ?? '')
+      await until(() => cards().length === 3)
+    } finally {
+      await db.execute(sql`drop trigger if exists fail_label on core.lead_label`)
+    }
+  }, 30000)
 })

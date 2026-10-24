@@ -110,4 +110,30 @@ describe("Boris's words in the bot", () => {
     expect(onMessage).not.toHaveBeenCalled()
     expect(tg.sent).toHaveLength(1)
   })
+
+  it('FR-LEAD-7: a voice that cannot be downloaded gets «Не смогла разобрать голосовое»', async () => {
+    const q = await asked()
+    tg.setFileBroken(true)
+    tg.pushVoice(111, q)
+    await until(() => said('Не смогла разобрать голосовое, напиши текстом, пожалуйста'))
+    expect(transcribe).not.toHaveBeenCalled()
+  })
+
+  it('FR-LEAD-7: while a voice is being recognized, button presses are still answered', async () => {
+    const q = await asked()
+    let release: () => void = () => {}
+    transcribe.mockImplementationOnce(
+      () =>
+        new Promise<string | null>((r) => {
+          release = () => r('бюджет копейки')
+        }),
+    )
+    tg.pushVoice(111, q)
+    await until(() => transcribe.mock.calls.length === 1)
+    tg.pushPress(111, 't:0192f3c4-5b6a-7c8d-9e0f-112233445566:skip')
+    await until(() => tg.answers.length === 1)
+    expect(said('Записала: «бюджет копейки»')).toBe(false)
+    release()
+    await until(() => said('Записала: «бюджет копейки»'))
+  })
 })

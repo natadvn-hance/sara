@@ -8,7 +8,8 @@ import {
 import { and, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun, ruleProposal, task } from '../db/schema'
-import { activeRules, addVersion } from '../direction/store'
+import { rulesDiff } from '../direction/diff'
+import { activeRules, insertVersion } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import { rulesText } from '../leads/scorer'
@@ -146,7 +147,23 @@ export async function maybePropose(
     )
     return 'invalid'
   }
-  const bt = await backtest(d, accountId, rules.data, active.version + 1)
+  // One change at a time, and Boris sees it as computed from the rules, not only as the model tells it.
+  const diff = rulesDiff(active.rules, rules.data)
+  if (diff.sections.length !== 1) {
+    await appendEvent(
+      d.db,
+      journal(
+        'rules.proposal_invalid',
+        accountId,
+        id,
+        'sara',
+        { sections: diff.sections },
+        'not one change',
+      ),
+    )
+    return 'invalid'
+  }
+  const bt = await backtest(d, accountId, active.rules, rules.data, active.version + 1)
   const taskId = newEventId()
   await d.db.transaction(async (tx) => {
     await tx.insert(ruleProposal).values({
@@ -168,12 +185,24 @@ export async function maybePropose(
       journal('rules.proposed', accountId, id, 'sara', { from: active.version, ...bt }),
     )
   })
-  await d.notifier.sendButtons(TEXTS.proposal(active.version, r.output.summary, r.output.why, bt), [
-    [
-      { text: TEXTS.applyButton, callbackData: formatCallback(taskId, 'apply') },
-      { text: TEXTS.dropButton, callbackData: formatCallback(taskId, 'drop') },
-    ],
-  ])
+  try {
+    await d.notifier.sendButtons(
+      TEXTS.proposal(active.version, r.output.summary, r.output.why, diff.lines, bt),
+      [
+        [
+          { text: TEXTS.applyButton, callbackData: formatCallback(taskId, 'apply') },
+          { text: TEXTS.dropButton, callbackData: formatCallback(taskId, 'drop') },
+        ],
+      ],
+    )
+  } catch (e) {
+    // Boris never saw it: nothing may wait for his answer, or no proposal would ever come again.
+    await d.db.transaction(async (tx) => {
+      await tx.delete(task).where(eq(task.id, taskId))
+      await tx.delete(ruleProposal).where(eq(ruleProposal.id, id))
+    })
+    throw e
+  }
   return 'asked'
 }
 
@@ -183,38 +212,45 @@ export async function onProposalPress(
   taskId: string,
   action: 'apply' | 'drop',
 ): Promise<string> {
-  const resolved = await d.db
-    .update(task)
-    .set({ state: 'resolved', resolution: action, resolvedAt: new Date().toISOString() })
-    .where(and(eq(task.id, taskId), eq(task.kind, 'rule_proposal'), eq(task.state, 'open')))
-    .returning({ proposalId: task.entityId })
-  const proposalId = resolved[0]?.proposalId
-  if (!proposalId) return TEXTS.alreadyDone
-  const [p] = await d.db.select().from(ruleProposal).where(eq(ruleProposal.id, proposalId))
-  if (!p) return TEXTS.alreadyDone
-  const decided = (state: 'applied' | 'declined') =>
-    d.db
-      .update(ruleProposal)
-      .set({ state, decidedAt: new Date().toISOString() })
-      .where(eq(ruleProposal.id, p.id))
-  if (action === 'drop') {
-    await decided('declined')
-    await appendEvent(d.db, journal('rules.declined', p.accountId, p.id, 'boris', {}))
-    await askWhy(d, { kind: 'why_decline', entityId: p.id, title: p.summary }, new Date())
-    return TEXTS.kept(p.fromVersion)
-  }
-  // Made for older rules (a rollback or another change came in between): it is not applied blindly.
-  if ((await activeRules(d.db, p.accountId)).version !== p.fromVersion) {
-    await decided('declined')
-    return TEXTS.proposalStale
-  }
-  const version = await addVersion(d.db, {
-    accountId: p.accountId,
-    rules: DirectionRules.parse(p.rules),
-    createdBy: 'boris',
-    reason: p.summary,
+  // All or nothing: the press, the new version and the proposal's state commit together, so a failed write
+  // leaves the buttons working.
+  const done = await d.db.transaction(async (tx) => {
+    const resolved = await tx
+      .update(task)
+      .set({ state: 'resolved', resolution: action, resolvedAt: new Date().toISOString() })
+      .where(and(eq(task.id, taskId), eq(task.kind, 'rule_proposal'), eq(task.state, 'open')))
+      .returning({ proposalId: task.entityId })
+    const proposalId = resolved[0]?.proposalId
+    if (!proposalId) return null
+    const [p] = await tx.select().from(ruleProposal).where(eq(ruleProposal.id, proposalId))
+    if (!p) return null
+    const decided = (state: 'applied' | 'declined') =>
+      tx
+        .update(ruleProposal)
+        .set({ state, decidedAt: new Date().toISOString() })
+        .where(eq(ruleProposal.id, p.id))
+    if (action === 'drop') {
+      await decided('declined')
+      await appendEvent(tx, journal('rules.declined', p.accountId, p.id, 'boris', {}))
+      return { p, reply: TEXTS.kept(p.fromVersion), ask: true }
+    }
+    // Made for older rules (a rollback or another change came in between): it is not applied blindly.
+    if ((await activeRules(tx, p.accountId)).version !== p.fromVersion) {
+      await decided('declined')
+      return { p, reply: TEXTS.proposalStale, ask: false }
+    }
+    const version = await insertVersion(tx, {
+      accountId: p.accountId,
+      rules: DirectionRules.parse(p.rules),
+      createdBy: 'boris',
+      reason: p.summary,
+    })
+    await decided('applied')
+    await appendEvent(tx, journal('rules.applied', p.accountId, p.id, 'boris', { version }))
+    return { p, reply: TEXTS.applied(version), ask: false }
   })
-  await decided('applied')
-  await appendEvent(d.db, journal('rules.applied', p.accountId, p.id, 'boris', { version }))
-  return TEXTS.applied(version)
+  if (!done) return TEXTS.alreadyDone
+  if (done.ask)
+    await askWhy(d, { kind: 'why_decline', entityId: done.p.id, title: done.p.summary }, new Date())
+  return done.reply
 }

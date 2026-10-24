@@ -105,4 +105,19 @@ describe('daily summary', () => {
     await expect(dailySummary({ db, notifier: failing }, AT_1930)).rejects.toThrow()
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
   })
+
+  it('FR-LEAD-7: the summary covers 19:00 yesterday to 19:00 today, so evening orders are not lost', async () => {
+    // 20:00 Moscow on the 24th: after yesterday's summary, so it belongs to today's.
+    await droppedLead(db, '930051', 52, { seenAt: '2026-10-24T17:00:00Z' })
+    // 19:10 Moscow today: after today's summary time, it waits for tomorrow's.
+    await droppedLead(db, '930052', 53, { seenAt: '2026-10-25T16:10:00Z' })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    expect(sent[0]?.text.split('\n')).toEqual([
+      'Сегодня отсеяла 1. На грани:',
+      '1. Заказ 930051, балл 52: причина 930051',
+    ])
+    sent = []
+    expect(await dailySummary({ db, notifier }, new Date('2026-10-26T16:30:00Z'))).toBe('sent')
+    expect(sent[0]?.text).toContain('Заказ 930052')
+  })
 })

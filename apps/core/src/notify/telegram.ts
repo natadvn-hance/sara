@@ -90,33 +90,40 @@ export function createTelegramRuntime(d: {
     )
   })
 
-  bot.on('message:voice', async (ctx) => {
-    if (!d.onMessage) return
-    const base = d.voiceDir ?? tmpdir()
-    await mkdir(base, { recursive: true })
-    const dir = await mkdtemp(join(base, 'voice-'))
-    try {
-      const file = await ctx.api.getFile(ctx.message.voice.file_id)
-      const res = await fetch(
-        `${d.apiRoot ?? 'https://api.telegram.org'}/file/bot${d.token}/${file.file_path}`,
-      )
-      if (!res.ok || !file.file_path) {
-        await ctx.reply(TEXTS.voiceFailed)
-        return
+  bot.on('message:voice', (ctx) => {
+    const onMessage = d.onMessage
+    if (!onMessage) return
+    const fileId = ctx.message.voice.file_id
+    const replyTo = ctx.message.reply_to_message?.message_id ?? null
+    // Recognition takes seconds: it runs on its own, so the bot keeps answering presses meanwhile.
+    void (async () => {
+      const base = d.voiceDir ?? tmpdir()
+      await mkdir(base, { recursive: true })
+      const dir = await mkdtemp(join(base, 'voice-'))
+      try {
+        const file = await ctx.api.getFile(fileId)
+        const res = await fetch(
+          `${d.apiRoot ?? 'https://api.telegram.org'}/file/bot${d.token}/${file.file_path}`,
+          { signal: AbortSignal.timeout(60_000) },
+        )
+        if (!res.ok || !file.file_path) throw new Error(`voice download: ${res.status}`)
+        const path = join(dir, 'voice.oga')
+        await writeFile(path, Buffer.from(await res.arrayBuffer()))
+        await ctx.reply(
+          await onMessage({
+            text: null,
+            voicePath: path,
+            replyToMessageId: replyTo,
+            at: new Date(),
+          }),
+        )
+      } catch (e) {
+        console.error('voice message failed', e instanceof Error ? e.message : e)
+        await ctx.reply(TEXTS.voiceFailed).catch(() => {})
+      } finally {
+        await rm(dir, { recursive: true, force: true })
       }
-      const path = join(dir, 'voice.oga')
-      await writeFile(path, Buffer.from(await res.arrayBuffer()))
-      await ctx.reply(
-        await d.onMessage({
-          text: null,
-          voicePath: path,
-          replyToMessageId: ctx.message.reply_to_message?.message_id ?? null,
-          at: new Date(),
-        }),
-      )
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
+    })()
   })
 
   bot.on('callback_query:data', async (ctx) => {

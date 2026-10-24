@@ -21,24 +21,24 @@ type Row = {
   bid_price_rub: number
   seen_at: string
   label: string
-  decision: string
 }
 
 /**
- * The last 50 leads with Boris's decision and a live score, rescored under `rules` (haiku, no retry). A change is
- * a decision that differs from the live one; it is toward Boris when the new decision matches his label.
- * The trial scores are kept as backtest rows and never act on a lead.
+ * The last 50 leads with Boris's decision and a live score, rescored under the old and the new rules on the same
+ * model (haiku, no retry), so a change is the rules' doing and not a different model's. It is toward Boris when
+ * the new decision matches his label. The new rules' scores are kept as backtest rows and never act on a lead.
  */
 export async function backtest(
   d: { db: Db; gateway: Gateway },
   accountId: string,
+  oldRules: DirectionRules,
   rules: DirectionRules,
   version: number,
 ): Promise<Backtest> {
   const rows = await d.db.execute<Row>(sql`
     select l.id, l.title, l.category, l.city, l.text, l.client_name, l.budget_text, l.bid_price_rub,
       to_char(l.seen_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as seen_at,
-      b.label, s.decision
+      b.label
     from core.lead_label b
     join core.lead l on l.id = b.lead_id
     join lateral (
@@ -62,8 +62,9 @@ export async function backtest(
       bid_price_rub: r.bid_price_rub,
       seen_at: r.seen_at,
     })
+    const before = await scoreOrder(d.gateway, order, oldRules, { escalate: false })
     const s = await scoreOrder(d.gateway, order, rules, { escalate: false })
-    if (!s) continue
+    if (!before || !s) continue
     out.checked++
     await d.db.insert(leadScore).values({
       id: newEventId(),
@@ -79,7 +80,7 @@ export async function backtest(
       model: s.model,
       backtest: true,
     })
-    if (s.decision === r.decision) continue
+    if (s.decision === before.decision) continue
     out.changed++
     const wanted = r.label === 'yes' ? 'show' : 'drop'
     if (s.decision === wanted) out.towardBoris++

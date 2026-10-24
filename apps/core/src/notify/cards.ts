@@ -52,11 +52,13 @@ export const TEXTS = {
     from: number,
     summary: string,
     why: string,
+    changes: string[],
     b: { checked: number; changed: number; towardBoris: number; against: number },
   ) =>
     [
       `Предлагаю поправку правил (v${from} → v${from + 1}): ${summary}`,
       `Почему: ${why}`,
+      `Что меняется: ${changes.join('; ')}`,
       `На последних ${b.checked} заявках это изменило бы ${b.changed} решений: ${b.towardBoris} в твою сторону, ${b.against} против.`,
     ].join('\n'),
   applyButton: 'Применить',

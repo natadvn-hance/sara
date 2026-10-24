@@ -56,4 +56,15 @@ describe('voice recognition', () => {
     })
     expect(await t.transcribe(path)).toBeNull()
   })
+
+  it('FR-LEAD-7: silence and sound marks are not words', async () => {
+    const { path } = await voice()
+    const work = await mkdtemp(join(tmpdir(), 'work-'))
+    env.FAKE_WHISPER_TEXT = ' [BLANK_AUDIO]\n'
+    expect(await transcriber(work).transcribe(path)).toBeNull()
+    env.FAKE_WHISPER_TEXT = '[музыка] (смех)'
+    expect(await transcriber(work).transcribe(path)).toBeNull()
+    env.FAKE_WHISPER_TEXT = '[музыка] бюджет копейки (смех)'
+    expect(await transcriber(work).transcribe(path)).toBe('бюджет копейки')
+  })
 })

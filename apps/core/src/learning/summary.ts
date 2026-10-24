@@ -27,7 +27,7 @@ const mskParts = (d: Date) => {
 type Borderline = { leadId: string; title: string; score: number; reason: string }
 
 /**
- * Once a Moscow day after 19:00: how many orders Sara dropped today, and the borderline ones with «Взял бы»
+ * Once a Moscow day after 19:00: how many orders Sara dropped since yesterday's summary, and the borderline ones with «Взял бы»
  * (FR-LEAD-7). The day's row in job_run is taken first, so two ticks or two cores send it once.
  */
 export async function dailySummary(
@@ -43,7 +43,10 @@ export async function dailySummary(
     .returning({ day: jobRun.day })
   if (taken.length === 0) return 'already'
 
-  const today = sql`(l.seen_at at time zone 'Europe/Moscow')::date = ${day}::date`
+  // The day's window ends at today's summary time and starts at yesterday's, so an order dropped in the
+  // evening goes into tomorrow's summary instead of none.
+  const end = sql`((${day}::date + make_interval(hours => ${SUMMARY_HOUR_MSK}))::timestamp at time zone 'Europe/Moscow')`
+  const today = sql`l.seen_at > ${end} - interval '1 day' and l.seen_at <= ${end}`
   const counted = await d.db.execute<{ n: number }>(
     sql`select count(*)::int as n from core.lead l where l.status = 'scored_out' and ${today}`,
   )

@@ -20,6 +20,8 @@ export type FakeTelegram = {
   pushText(chatId: number, text: string, replyTo?: number): void
   /** A voice message; its file is served by the fake file endpoint. */
   pushVoice(chatId: number, replyTo?: number): void
+  /** getFile answers an error, like Telegram losing a file. */
+  setFileBroken(on: boolean): void
   /** Simulates another program polling the same bot: getUpdates answers 409. */
   setConflict(on: boolean): void
   close(): Promise<void>
@@ -35,6 +37,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   let nextMessage = 100
   let nextCallback = 1
   let conflict = false
+  let fileBroken = false
   const now = () => Math.floor(Date.now() / 1000)
 
   const server = createServer((req, res) => {
@@ -94,6 +97,15 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           })
         }
         case 'getFile':
+          if (fileBroken) {
+            return res.writeHead(400, { 'content-type': 'application/json' }).end(
+              JSON.stringify({
+                ok: false,
+                error_code: 400,
+                description: 'Bad Request: file is too big',
+              }),
+            )
+          }
           return reply({
             file_id: params.file_id,
             file_unique_id: `u-${params.file_id}`,
@@ -198,6 +210,9 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
             : {}),
         },
       })
+    },
+    setFileBroken(on) {
+      fileBroken = on
     },
     setConflict(on) {
       conflict = on

@@ -328,19 +328,30 @@ async function onWant(reviewId: string): Promise<string> {
     return true
   })
   if (!resolved) return TEXTS.alreadyDone
-  const labeled = await recordLabel(d().db, { leadId: l.id, label: 'yes', source: 'summary' })
   await startDecisionWait(decisionId, await d().remindAfterMs())
   const card = await cardOfTask(decisionId, false)
   if (card) {
     const m = await d().notifier.sendLeadCard(card)
     await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, decisionId))
   }
-  if (labeled.surprise) {
-    void askWhy(d(), { kind: 'why_want', entityId: l.id, title: l.title }, new Date()).catch((e) =>
-      console.error('question not sent', e instanceof Error ? e.message : e),
-    )
-  }
+  learnFrom({ leadId: l.id, label: 'yes', source: 'summary' }, 'why_want', l.title)
   return TEXTS.wantCard
+}
+
+/**
+ * The label and the «почему?» after a decision. Not awaited and never thrown: learning must not hold up or
+ * break a bid or a card that already happened.
+ */
+function learnFrom(
+  label: Parameters<typeof recordLabel>[1],
+  why: 'why_skip' | 'why_want',
+  title: string,
+): void {
+  void (async () => {
+    const labeled = await recordLabel(d().db, label)
+    if (labeled.surprise)
+      await askWhy(d(), { kind: why, entityId: label.leadId, title }, new Date())
+  })().catch((e) => console.error('learning skipped', e instanceof Error ? e.message : e))
 }
 
 export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
@@ -405,21 +416,14 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         return true
       })
       if (!resolved) return TEXTS.alreadyDone
-      const labeled = await recordLabel(d().db, {
-        leadId: l.id,
-        label: action === 'bid' ? 'yes' : 'no',
-        source: 'card',
-      })
       await deliverDecision(taskId, action)
-      // Not awaited: the press is answered at once, the question follows as its own message.
-      if (labeled.surprise) {
-        void askWhy(d(), { kind: 'why_skip', entityId: l.id, title: l.title }, new Date()).catch(
-          (e) => console.error('question not sent', e instanceof Error ? e.message : e),
-        )
-      }
-      if (action === 'skip') return TEXTS.skipped
       if (outboxId) await startOutboxDelivery(outboxId, l.id)
-      return TEXTS.bidQueued
+      learnFrom(
+        { leadId: l.id, label: action === 'bid' ? 'yes' : 'no', source: 'card' },
+        'why_skip',
+        l.title,
+      )
+      return action === 'skip' ? TEXTS.skipped : TEXTS.bidQueued
     },
 
     async onReminder(taskId) {

@@ -7,7 +7,8 @@ import { RULES_V1 } from './v1'
 
 export type ActiveRules = { version: number; rules: DirectionRules }
 
-async function insertVersion(
+/** A new active version inside the caller's transaction (one writer per account at a time). */
+export async function insertVersion(
   tx: Tx,
   v: { accountId: string; rules: DirectionRules; createdBy: 'seed' | 'boris'; reason: string },
 ): Promise<number> {

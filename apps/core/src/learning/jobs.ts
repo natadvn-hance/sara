@@ -11,6 +11,13 @@ type Step = { name: string; run(d: LearningDeps, now: Date): Promise<unknown> }
 /** The learning jobs, in order on every tick: weak noes, the daily summary, rule proposals. */
 export const LEARNING_STEPS: Step[] = [
   { name: 'ignored', run: (d, now) => sweepIgnored(d.db, now) },
+  { name: 'summary', run: (d, now) => dailySummary(d, now) },
+  {
+    name: 'proposals',
+    run: async (d, now) => {
+      for (const id of d.accountIds) await maybePropose(d, id, now)
+    },
+  },
 ]
 
 /** Runs the learning jobs once a minute; one failing job never stops the others. */
