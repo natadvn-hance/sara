@@ -524,6 +524,24 @@ export const directionRun = core.table('direction_run', {
   scorerVersion: integer('scorer_version'),
   /** Touched at the start and after every lead: a run nobody touched for long is a dead one. */
   updatedAt: ts('updated_at').notNull().defaultNow(),
+  /** The latest rules change Sara proposed after this run (calibration): summary, why, the lines and the rules. */
+  advice: jsonb('advice'),
   createdAt: ts('created_at').notNull().defaultNow(),
   finishedAt: ts('finished_at'),
 })
+
+/** One lead of a calibration and Boris's mark on it (FR-ACC-4); the score stays hidden until he has marked all. */
+export const calibrationItem = core.table(
+  'calibration_item',
+  {
+    runId: uuid('run_id').notNull(),
+    leadId: text('lead_id').notNull(),
+    position: integer('position').notNull(),
+    /** 'yes' (would take it), 'no', 'unsure'; null: not marked yet. */
+    mark: text('mark'),
+    /** Why Boris decided so, in his words, when he wrote it (never in the journal). */
+    note: text('note'),
+    markedAt: ts('marked_at'),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.leadId] })],
+)
