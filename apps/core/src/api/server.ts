@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
 import { registerAccountRoutes } from '../accounts/routes'
+import { registerDirectionRoutes } from '../direction/routes'
 import { registerHealthRoutes } from '../health/routes'
 import { registerSetupRoutes } from '../setup/routes'
 import type { AppDeps } from './deps'
@@ -19,5 +20,6 @@ export async function buildServer(d: AppDeps): Promise<FastifyInstance> {
   registerSetupRoutes(app, d)
   registerHealthRoutes(app, d)
   registerAccountRoutes(app, d)
+  registerDirectionRoutes(app, d)
   return app
 }

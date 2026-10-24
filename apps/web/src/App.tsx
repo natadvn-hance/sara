@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, go, type SetupState } from './api'
 import { AccountsPage } from './pages/Accounts'
+import { DirectionPage } from './pages/Direction'
 import { HealthPage } from './pages/Health'
 import { LiveScreenPage } from './pages/LiveScreen'
 import { LoginPage } from './pages/Login'
@@ -32,6 +33,8 @@ export function App() {
   if (path.startsWith('/health')) return <HealthPage />
   const login = /^\/accounts\/([^/]+)\/login/.exec(path)
   if (login?.[1]) return <LiveScreenPage accountId={decodeURIComponent(login[1])} />
+  const direction = /^\/accounts\/([^/]+)\/direction\/?$/.exec(path)
+  if (direction?.[1]) return <DirectionPage accountId={decodeURIComponent(direction[1])} />
   if (path.startsWith('/accounts')) return <AccountsPage />
   return <Home />
 }

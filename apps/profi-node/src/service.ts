@@ -186,7 +186,7 @@ export async function startProfiService(
         chatsEveryMs: timing.chatsEveryMs,
         canNavigate,
         onNavigate: (ok) => guard.report(ok),
-        afterOrderPage: (id) => calibration.afterOrderPage(id),
+        afterOrderPage: (id, may) => calibration.afterOrderPage(id, may),
       })
       await a.insurance.feedOnce()
       await a.watch.tick()

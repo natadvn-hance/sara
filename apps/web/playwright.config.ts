@@ -1,8 +1,9 @@
 import { resolve } from 'node:path'
 import { defineConfig } from '@playwright/test'
+import { dbUrl } from './e2e/dbUrl'
 
 const ROOT = resolve(import.meta.dirname, '../..')
-const DB = 'postgres://sara:sara@localhost:54329/sara_web'
+const DB = dbUrl('sara_web')
 
 export default defineConfig({
   testDir: 'e2e',

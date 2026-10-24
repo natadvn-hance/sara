@@ -250,3 +250,19 @@ export const ruleProposal = core.table('rule_proposal', {
   createdAt: ts('created_at').notNull().defaultNow(),
   decidedAt: ts('decided_at'),
 })
+
+/**
+ * What a direction holds besides its scoring rules (FR-ACC-2): its state, speed mode, reply format and case
+ * library. One row per account; every change grows `version` and is journaled.
+ */
+export const directionProfile = core.table('direction_profile', {
+  accountId: text('account_id').primaryKey(),
+  // A row nobody gave a state does not win orders: only a seed or Boris's save makes a direction work.
+  state: text('state').notNull().default('draft'),
+  speed: text('speed').notNull().default('normal'),
+  replyFormat: jsonb('reply_format'),
+  cases: jsonb('cases').notNull().default(sql`'[]'::jsonb`),
+  /** 0: the seeded row nobody has changed; every save adds one. */
+  version: integer('version').notNull().default(0),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
