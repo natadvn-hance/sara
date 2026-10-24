@@ -35,6 +35,8 @@ export const SubmitBidInput = z.object({
   account_id: z.string().min(1),
   order_id: z.string().min(1),
   text: z.string().min(1),
+  /** The «Стоимость услуги» field; null or absent leaves it empty (M2 design 4). */
+  price_rub: z.number().int().positive().nullable().optional(),
   idempotency_key: z.string().min(1),
   permit: z.string().min(1),
 })
@@ -53,6 +55,8 @@ export const PROFI_ERROR_CLASSES = [
   'NOT_FOUND',
   'ORDER_CLOSED',
   'NO_MONEY',
+  /** The site asks to pay some other way than the wallet: the node never confirms such a payment. */
+  'UNSAFE_PAYMENT',
   'RATE_LIMITED',
   'UNCERTAIN',
   'INTERNAL',
@@ -83,6 +87,8 @@ export const GetOrderInput = z.object({
 export const GetOrderOutput = ProfiOrder.extend({
   open: z.boolean(),
   published_at: z.iso.datetime().nullable(),
+  /** This account already bid on the order (from the order page answer); null when not known. */
+  has_bid: z.boolean().nullable(),
 })
 export type GetOrderOutput = z.infer<typeof GetOrderOutput>
 
