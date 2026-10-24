@@ -8,8 +8,9 @@ import type { Parsers } from '../eyes/parsers'
 import { formOnScreen, openForm } from './form'
 import { type OrderScreen, orderScreenFromAnswer } from './screen'
 
-// The only press the node makes on its own: what the live order answer names the opener (24.10.2026). Other words
-// are not pressed, whatever the answer says: a developer looks at the map and adds them.
+// The only presses the node makes on its own (src/bid/form.ts openForm): «Продолжить» with the order's own fee in the
+// tariff block, as on the live page of 24.10.2026, or «Написать клиенту» when the answer names it the opener. Other
+// words are not pressed, whatever the answer says: a developer looks at the map and adds them.
 const SELF_OPENER = 'Написать клиенту'
 const STOP = 'form_calibration'
 const HOUR = 3600_000
@@ -18,8 +19,8 @@ const ORDER_PAGE = /\/n\.php\?(?:.*&)?o=(\d+)/
 /**
  * The node opens the bid form itself to map it (Boris, 24.10.2026: old Sara pressed «Продолжить» too; only the final
  * «Откликнуться» spends). On an order page the minute check already opened, at most perHour times an hour, only for
- * an open order without our bid and only while the tab may move: press «Написать клиенту», map the opened form with
- * the wallet before and after, touch nothing else; the check then leaves the page.
+ * an open order without our bid and only while the tab may move: press «Продолжить N ₽» (or «Написать клиенту»), map
+ * the opened form with the wallet before and after, touch nothing else; the check then leaves the page.
  * Any sign of money gone stops it until a person clears node.node_flag: the wallet lower right after the press, or
  * on the next page the check opens, or unreadable after it, or the press leading off the order page.
  */
@@ -139,11 +140,15 @@ export function startFormCalibration(o: {
       }
       if (before === null || !may() || (await opensLastHour()) >= perHour) return
       const s = await answerOf(orderId)
-      if (!s || !s.open || s.hasBid !== false) return
-      if (s.openerText !== SELF_OPENER || s.submitText === SELF_OPENER) return
+      if (!s || !s.open || s.hasBid !== false || s.feeRub === null) return
+      const words =
+        s.openerText === SELF_OPENER && s.submitText !== SELF_OPENER ? SELF_OPENER : null
       // Open already: the visit's own map has it.
       if (await formOnScreen(page)) return
-      const r = await openForm(page, s.openerText, 8000, { may, september: false })
+      const r = await openForm(page, { words, feeRub: s.feeRub }, 8000, {
+        may,
+        september: false,
+      })
       if (!r.pressed) return
       const pressedAt = new Date()
       const stayed = ORDER_PAGE.exec(page.url())?.[1] === orderId
@@ -158,14 +163,14 @@ export function startFormCalibration(o: {
           body: {
             ...(map ?? { what: 'bid_form' }),
             opened: r.open,
-            openedBy: s.openerText,
+            openedBy: r.by,
             walletBefore: before,
             walletAfter: after,
           },
           receivedAt: new Date(now()).toISOString(),
         })
         .catch(() => {})
-      if (!stayed) return halt(`После «${SELF_OPENER}» вкладка ушла со страницы заказа`)
+      if (!stayed) return halt(`После «${r.by}» вкладка ушла со страницы заказа`)
       if (after === null || after < before)
         return halt(`Кошелёк при открытии формы: ${before} ₽, после ${after ?? '?'} ₽`)
       pending = { walletAfter: after, at: pressedAt }

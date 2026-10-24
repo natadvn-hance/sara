@@ -84,9 +84,10 @@ describe('the node opens the bid form itself to map it (Boris, 24.10.2026)', () 
     expect(site.openerClicks).toBe(1)
     expect(site.bidPosts).toBe(0)
     const [m] = await openedMaps()
+    // The live opener of 24.10.2026: «Продолжить» with the fee beside it, a div in the tariff block.
     expect(m).toMatchObject({
       opened: true,
-      openedBy: 'Написать клиенту',
+      openedBy: 'Продолжить 216 ₽',
       walletBefore: 5000,
       walletAfter: 5000,
     })
@@ -111,14 +112,21 @@ describe('the node opens the bid form itself to map it (Boris, 24.10.2026)', () 
     expect(await openedMaps()).toEqual([])
   }, 90000)
 
-  it('FR-LEAD-8: only «Написать клиенту» is pressed, whatever else the answer names', async () => {
+  it("FR-LEAD-8: only «Продолжить» with the order's own fee, or «Написать клиенту», is pressed", async () => {
     const c = calibration()
+    site.bidSettings.openerAmount = 999
+    await openOne(c, { price: 216 })
+    site.bidSettings.openerAmount = null
+    site.bidSettings.opener = 'words'
     for (const words of ['Откликнуться', 'Предложить услуги', 'Продолжить', '']) {
       site.bidSettings.openerText = words
       await openOne(c)
     }
-    c.stop()
     expect(site.openerClicks).toBe(0)
+    site.bidSettings.openerText = 'Написать клиенту'
+    await openOne(c)
+    c.stop()
+    expect(site.openerClicks).toBe(1)
   }, 90000)
 
   it('FR-LEAD-8: nothing is pressed while the tab may not move, on a stale answer, an open form or two openers', async () => {

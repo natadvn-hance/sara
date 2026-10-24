@@ -394,6 +394,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
   }, 60000)
 
   it('FR-LEAD-8: the form opens by the words the order answer names, whatever they are', async () => {
+    site.bidSettings.opener = 'words'
     site.bidSettings.openerText = 'Предложить услуги'
     const id = site.addOrder({ price: 71 })
     expect(await tools().submitBid(bid(id))).toMatchObject({ spent_rub: 71 })
