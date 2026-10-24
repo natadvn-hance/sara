@@ -83,3 +83,39 @@ export async function droppedLead(
     model: 'haiku',
   })
 }
+
+/** An order held over the day's card cap (FR-NOTIF-3), seen at `seenAt`; scored unless `score` is null. */
+export async function heldLead(
+  db: Db,
+  id: string,
+  o: { seenAt: string; score: number | null; bidPriceRub?: number },
+): Promise<void> {
+  await db.insert(lead).values({
+    id,
+    accountId: 'hance-marketing',
+    title: `Заказ ${id}`,
+    category: 'Маркетинг',
+    city: 'Москва',
+    text: 'Описание',
+    clientName: 'Ирина',
+    budgetText: null,
+    bidPriceRub: o.bidPriceRub ?? 120,
+    seenAt: o.seenAt,
+    status: 'held',
+    correlationId: newEventId(),
+  })
+  if (o.score === null) return
+  await db.insert(leadScore).values({
+    id: newEventId(),
+    leadId: id,
+    version: 1,
+    score: o.score,
+    decision: 'show',
+    stopFactor: null,
+    redFlags: [],
+    axes: [],
+    reason: `причина ${id}`,
+    confidence: 0.9,
+    model: 'haiku',
+  })
+}

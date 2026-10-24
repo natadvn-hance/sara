@@ -52,6 +52,7 @@ export const TEXTS = {
   summaryNone: (n: number) => `Сегодня отсеяла ${orders(n)}, пограничных не было`,
   wantButton: (n: number) => `Взял бы №${n}`,
   wantCard: 'Пишу черновик, пришлю карточку',
+  cardSent: 'Прислала карточку заявки',
   proposal: (
     from: number,
     summary: string,

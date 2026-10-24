@@ -25,18 +25,42 @@ function stat(values: number[]): Stat {
   }
 }
 
-async function gaps(db: DbOrTx, from: string, to: string, toFilter: string): Promise<number[]> {
-  const rows = await db.execute<{ ms: number }>(sql`
-    select extract(epoch from (b.occurred_at - a.occurred_at)) * 1000 as ms
-    from core.event a
-    join core.event b on b.correlation_id = a.correlation_id and b.type = ${to}
-    where a.type = ${from} ${sql.raw(toFilter)}`)
+async function ms(db: DbOrTx, q: ReturnType<typeof sql>): Promise<number[]> {
+  const rows = await db.execute<{ ms: number }>(q)
   return rows.rows.map((r) => Number(r.ms))
 }
 
-/** G1 and G2 measured from the journal: lead found to card, Boris's yes to bid sent. */
+/**
+ * G1 and G2 measured from the journal (FR-ANL-3). Lead to card: from lead.found to the order's first decision
+ * task, leaving out a card Boris brought from the summary hours later. Yes to bid: from the last press of
+ * «Откликнуться» before bid.sent, so a press given back by a pause does not count twice.
+ */
 export async function speedReport(db: DbOrTx): Promise<SpeedReport> {
-  const leadToCard = await gaps(db, 'lead.found', 'task.created', '')
-  const yesToBid = await gaps(db, 'task.resolved', 'bid.sent', `and a.payload->>'action' = 'bid'`)
+  const leadToCard = await ms(
+    db,
+    sql`
+    select extract(epoch from (b.occurred_at - a.occurred_at)) * 1000 as ms
+    from core.event a
+    join lateral (
+      select b.occurred_at, b.payload from core.event b
+      where b.correlation_id = a.correlation_id and b.type = 'task.created'
+        and b.occurred_at >= a.occurred_at
+      order by b.occurred_at, b.id limit 1
+    ) b on true
+    where a.type = 'lead.found' and coalesce(b.payload->>'via', '') <> 'summary'`,
+  )
+  const yesToBid = await ms(
+    db,
+    sql`
+    select extract(epoch from (b.occurred_at - a.occurred_at)) * 1000 as ms
+    from core.event b
+    join lateral (
+      select a.occurred_at from core.event a
+      where a.correlation_id = b.correlation_id and a.type = 'task.resolved'
+        and a.payload->>'action' = 'bid' and a.occurred_at <= b.occurred_at
+      order by a.occurred_at desc, a.id desc limit 1
+    ) a on true
+    where b.type = 'bid.sent'`,
+  )
   return { leadToCard: stat(leadToCard), yesToBid: stat(yesToBid) }
 }

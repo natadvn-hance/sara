@@ -20,6 +20,8 @@ export const EVENT_TYPES = [
   'lead.scored',
   'lead.skipped',
   'lead.labeled',
+  'lead.stale',
+  'lead.held',
   'lead.drafted',
   'draft.edited',
   'bid.requested',

@@ -166,6 +166,7 @@ describe('cards', () => {
       TEXTS.draftSaved,
       TEXTS.draftLate,
       TEXTS.wantCard,
+      TEXTS.cardSent,
     ]
     for (const t of texts) expect(t).not.toContain(DASH)
   })

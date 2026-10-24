@@ -196,9 +196,10 @@ export function createTelegramRuntime(d: {
     lastError: () => lastError,
     botUsername: () => (bot.isInited() ? bot.botInfo.username : null),
     notifier: {
-      async sendLeadCard(c) {
+      async sendLeadCard(c, o) {
         const m = await bot.api.sendMessage(await chat(), leadCardText(c), {
           reply_markup: leadCardKeyboard(c),
+          ...(o?.silent && { disable_notification: true }),
         })
         return { messageId: m.message_id }
       },
