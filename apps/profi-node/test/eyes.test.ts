@@ -316,6 +316,8 @@ describe('eyes', () => {
     )
     const seen = await events('profi.order_seen')
     expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['911', 1]])
+    // The board's publication time travels with the order, so the core can drop a stale one (FR-LEAD-10).
+    expect(seen[0]?.payload.published_at).toBe('2026-10-24T08:00:00.000Z')
     const [stored] = await db.select().from(rawOrder).where(eq(rawOrder.orderId, '911'))
     expect(stored?.body).toMatchObject({ bid_price_rub: 1, bid_base_price_rub: 67, has_bid: false })
   })

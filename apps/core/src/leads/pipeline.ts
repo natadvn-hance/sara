@@ -12,8 +12,11 @@ import { askWhy } from '../learning/questions'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
+import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
+import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
+import { readWallet, refuseSpend } from './money'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
 import { sortOrder } from './sorter'
@@ -22,6 +25,8 @@ export type LeadPipelineDeps = {
   db: Db
   gateway: Gateway
   notifier: Notifier
+  /** The wallet for the money check before a bid (FR-LEAD-9). */
+  profi: Pick<ProfiClient, 'sessionHealth'>
   remindAfterMs: () => Promise<number>
   /** Card sending is retried, for example while the bot is starting (default 5 attempts from 2 s). */
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
@@ -53,6 +58,8 @@ const ev = (
     | 'lead.sorted'
     | 'lead.scored'
     | 'lead.skipped'
+    | 'lead.stale'
+    | 'lead.held'
     | 'task.created'
     | 'task.resolved'
     | 'task.reminded',
@@ -80,9 +87,12 @@ type Sorted = { verdict: 'fit' | 'maybe' | 'reject' | null; reason: string | nul
 async function processOrder(e: EventEnvelope): Promise<void> {
   const order = ProfiOrder.parse(e.payload)
   const correlationId = e.correlation_id
+  // Runs recorded before M2 return a boolean; 'stale' is a new order too old to offer (FR-LEAD-10).
   const isNew = await DBOS.runStep(
-    () =>
+    (): Promise<boolean | 'stale'> =>
       d().db.transaction(async (tx) => {
+        // Decided before any model call: a stale order costs no sorting or scoring.
+        const stale = isStale(order.published_at, new Date())
         const rows = await tx
           .insert(lead)
           .values({
@@ -97,6 +107,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             bidPriceRub: order.bid_price_rub,
             seenAt: order.seen_at,
             correlationId,
+            ...(stale && { status: 'stale' }),
           })
           .onConflictDoNothing({ target: lead.id })
           .returning({ id: lead.id })
@@ -105,11 +116,18 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           tx,
           ev('lead.found', { kind: 'lead', id: order.order_id }, correlationId, 'sara', {}, e.id),
         )
-        return true
+        if (!stale) return true
+        await appendEvent(
+          tx,
+          ev('lead.stale', { kind: 'lead', id: order.order_id }, correlationId, 'sara', {
+            published_at: order.published_at,
+          }),
+        )
+        return 'stale'
       }),
     { name: 'record', ...DB_STEP },
   )
-  if (!isNew) return
+  if (isNew !== true) return
 
   const sorted = await DBOS.runStep(
     async (): Promise<Sorted> => {
@@ -200,15 +218,28 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (scored.decision === 'drop') return
   }
 
+  // Runs recorded before M2 return the id; null is an order held over the day's card cap (FR-NOTIF-3).
   const taskId = await DBOS.runStep(
-    () =>
+    (): Promise<string | null> =>
       d().db.transaction(async (tx) => {
         const id = newEventId()
+        await lockCards(tx)
+        const full =
+          (await cardsToday(tx, new Date())) >= (await getSetting(tx, 'cards.max_per_day'))
         if (sorted.verdict) {
           await appendEvent(
             tx,
             ev('lead.sorted', { kind: 'lead', id: order.order_id }, correlationId, 'sara', sorted),
           )
+        }
+        if (full) {
+          // No decision task, so no reminder: the order waits for the 19:00 summary.
+          await tx.update(lead).set({ status: 'held' }).where(eq(lead.id, order.order_id))
+          await appendEvent(
+            tx,
+            ev('lead.held', { kind: 'lead', id: order.order_id }, correlationId, 'sara'),
+          )
+          return null
         }
         await tx
           .insert(task)
@@ -224,6 +255,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       }),
     { name: 'task', ...DB_STEP },
   )
+  if (taskId === null) return
 
   // The wait starts before the card goes out, so an instant press always finds it.
   const remindAfter = await DBOS.runStep(() => d().remindAfterMs(), { name: 'remindAfter' })
@@ -243,7 +275,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   try {
     await DBOS.runStep(
       async () => {
-        const m = await d().notifier.sendLeadCard(card)
+        const silent = await quietNow(d().db, new Date())
+        const m = await d().notifier.sendLeadCard(card, { silent })
         await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
       },
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
@@ -306,27 +339,29 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
 }
 
 /**
- * «Взял бы» from the daily summary: Boris's yes on an order Sara dropped. It is a label and a surprise («почему?»),
- * and the order comes back as a normal card so he can bid on it.
+ * A button of the daily summary brings its order back as a normal card with a decision task, once: «Взял бы»
+ * on a dropped order (lead_review, want) or «Показать» on one held over the card cap (lead_held, open).
  */
-async function onWant(reviewId: string): Promise<string> {
-  const [t] = await d().db.select().from(task).where(eq(task.id, reviewId))
-  if (!t || t.kind !== 'lead_review') return TEXTS.alreadyDone
+async function bringCard(
+  fromId: string,
+  kind: 'lead_review' | 'lead_held',
+  action: 'want' | 'open',
+): Promise<typeof lead.$inferSelect | null> {
+  const [t] = await d().db.select().from(task).where(eq(task.id, fromId))
+  if (t?.kind !== kind) return null
   const [l] = await d().db.select().from(lead).where(eq(lead.id, t.entityId))
-  if (!l) return TEXTS.alreadyDone
+  if (!l) return null
   const decisionId = newEventId()
   const resolved = await d().db.transaction(async (tx) => {
     const rows = await tx
       .update(task)
-      .set({ state: 'resolved', resolution: 'want', resolvedAt: new Date().toISOString() })
-      .where(and(eq(task.id, reviewId), eq(task.state, 'open')))
+      .set({ state: 'resolved', resolution: action, resolvedAt: new Date().toISOString() })
+      .where(and(eq(task.id, fromId), eq(task.state, 'open')))
       .returning({ id: task.id })
     if (rows.length === 0) return false
     await appendEvent(
       tx,
-      ev('task.resolved', { kind: 'task', id: reviewId }, l.correlationId, 'boris', {
-        action: 'want',
-      }),
+      ev('task.resolved', { kind: 'task', id: fromId }, l.correlationId, 'boris', { action }),
     )
     await tx
       .insert(task)
@@ -334,21 +369,47 @@ async function onWant(reviewId: string): Promise<string> {
     await tx.update(lead).set({ status: 'queued' }).where(eq(lead.id, l.id))
     await appendEvent(
       tx,
+      // Brought from the summary hours after the order: not a lead-to-card time (FR-ANL-3).
       ev('task.created', { kind: 'task', id: decisionId }, l.correlationId, 'sara', {
         lead_id: l.id,
+        via: 'summary',
       }),
     )
     return true
   })
-  if (!resolved) return TEXTS.alreadyDone
+  if (!resolved) return null
   await startDecisionWait(decisionId, await d().remindAfterMs())
   const card = await cardOfTask(decisionId, false)
   if (card) {
     const m = await d().notifier.sendLeadCard(card)
     await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, decisionId))
   }
+  return l
+}
+
+/**
+ * «Взял бы» from the daily summary: Boris's yes on an order Sara dropped. It is a label and a surprise («почему?»),
+ * and the order comes back as a normal card so he can bid on it.
+ */
+async function onWant(reviewId: string): Promise<string> {
+  const l = await bringCard(reviewId, 'lead_review', 'want')
+  if (!l) return TEXTS.alreadyDone
   learnFrom({ leadId: l.id, label: 'yes', source: 'summary' }, 'why_want', l.title)
   return TEXTS.wantCard
+}
+
+/** «Показать» from the daily summary: an order held over the card cap comes as a card; Boris has not decided yet. */
+async function onOpen(heldId: string): Promise<string> {
+  const found = await leadOfTask(heldId)
+  // FR-LEAD-10 at the press, which may come days after the summary. The lead keeps no publication time; seen_at
+  // is never earlier, so this errs toward showing.
+  if (
+    found?.task.kind === 'lead_held' &&
+    found.task.state === 'open' &&
+    isStale(found.lead.seenAt, new Date())
+  )
+    return CARD_FLOW_TEXTS.staleHeld
+  return (await bringCard(heldId, 'lead_held', 'open')) ? TEXTS.wantCard : TEXTS.alreadyDone
 }
 
 /**
@@ -381,53 +442,69 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
 
     async onPress({ taskId, action }) {
       if (action === 'want') return onWant(taskId)
+      if (action === 'open') return onOpen(taskId)
       if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)
       if (!found) return TEXTS.alreadyDone
       const { lead: l } = found
-      // Paused: nothing is decided, the card stays usable for a press after resuming.
-      if (
-        action === 'bid' &&
-        found.task.state === 'open' &&
-        !(await getSetting(d().db, 'outbound.bids'))
-      ) {
-        return TEXTS.bidsPausedPress
+      // Paused or refused for money: nothing is decided, the card stays usable for a press later.
+      let wallet: number | null = null
+      if (action === 'bid' && found.task.state === 'open') {
+        if (!(await getSetting(d().db, 'outbound.bids'))) return TEXTS.bidsPausedPress
+        wallet = await readWallet(d().profi, l.accountId)
       }
       let outboxId: string | null = null
-      const resolved = await d().db.transaction(async (tx) => {
-        const rows = await tx
-          .update(task)
-          .set({ state: 'resolved', resolution: action, resolvedAt: new Date().toISOString() })
-          .where(and(eq(task.id, taskId), eq(task.state, 'open')))
-          .returning({ id: task.id })
-        if (rows.length === 0) return false
-        await appendEvent(
-          tx,
-          ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'boris', { action }),
-        )
-        if (action === 'skip') {
-          await tx.update(lead).set({ status: 'skipped' }).where(eq(lead.id, l.id))
+      let refusal: string | null = null
+      const resolved = await d()
+        .db.transaction(async (tx) => {
+          const rows = await tx
+            .update(task)
+            .set({ state: 'resolved', resolution: action, resolvedAt: new Date().toISOString() })
+            .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+            .returning({ id: task.id })
+          if (rows.length === 0) return false
+          if (action === 'bid') {
+            refusal = await refuseSpend(tx, {
+              feeRub: l.bidPriceRub,
+              balanceRub: wallet,
+              now: new Date(),
+            })
+            // Rolled back: the task stays open and nothing about the bid is written.
+            if (refusal) tx.rollback()
+          }
           await appendEvent(
             tx,
-            ev('lead.skipped', { kind: 'lead', id: l.id }, l.correlationId, 'boris'),
+            ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'boris', { action }),
           )
-        } else {
-          // Boris's decision and the intent to bid commit together: a crash cannot lose one of them.
-          outboxId = (
-            await recordBid(tx, {
-              leadId: l.id,
-              accountId: l.accountId,
-              text: bidText(l.title),
-              correlationId: l.correlationId,
-              title: l.title,
-              priceRub: l.bidPriceRub,
-              taskId,
-            })
-          ).outboxId
-        }
-        return true
-      })
+          if (action === 'skip') {
+            await tx.update(lead).set({ status: 'skipped' }).where(eq(lead.id, l.id))
+            await appendEvent(
+              tx,
+              ev('lead.skipped', { kind: 'lead', id: l.id }, l.correlationId, 'boris'),
+            )
+          } else {
+            // Boris's decision and the intent to bid commit together: a crash cannot lose one of them.
+            outboxId = (
+              await recordBid(tx, {
+                leadId: l.id,
+                accountId: l.accountId,
+                text: bidText(l.title),
+                correlationId: l.correlationId,
+                title: l.title,
+                priceRub: l.bidPriceRub,
+                taskId,
+              })
+            ).outboxId
+          }
+          return true
+        })
+        .catch((e) => {
+          // The rollback of a refused bid; anything else is a real failure.
+          if (refusal) return false
+          throw e
+        })
+      if (refusal) return refusal
       if (!resolved) return TEXTS.alreadyDone
       await deliverDecision(taskId, action)
       if (outboxId) await startOutboxDelivery(outboxId, l.id)
@@ -442,7 +519,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     async onReminder(taskId) {
       const card = await cardOfTask(taskId, true)
       if (!card) return
-      await d().notifier.sendLeadCard(card)
+      await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
       const found = await leadOfTask(taskId)
       if (found) {
         await appendEvent(
@@ -454,7 +531,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
 
     async resendCard(taskId) {
       const card = await cardOfTask(taskId, false)
-      if (card) await d().notifier.sendLeadCard(card)
+      if (card)
+        await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
     },
   }
 }
