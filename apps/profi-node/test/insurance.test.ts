@@ -195,7 +195,7 @@ describe('insurance and the account tab', () => {
     expect(types.filter((t) => t.type === 'profi.order_seen' && t.entity.id === id)).toHaveLength(1)
   }, 60000)
 
-  it('ST-M1-06: an order seen only on the board is opened once for its fee', async () => {
+  it('ST-M1-06: an order seen only on the board is opened once for its fee, old feed links are left alone', async () => {
     await loginStandIn(ab.page, site)
     site.muteRtp(true)
     const opened: string[] = []
@@ -203,7 +203,8 @@ describe('insurance and the account tab', () => {
       ...standInParsers,
       paths: { ...standInParsers.paths, order: (id) => `/backoffice/n.php?o=${id}` },
       fromResponse: () => ({ recognized: false, signals: [] }),
-      fromFeedDom: async () => ({ recognized: true, refs: [] }),
+      // The real feed page also links hundreds of old orders: while the board answers, they are not opened.
+      fromFeedDom: async () => ({ recognized: true, refs: [{ orderId: '94000001', snippet: '' }] }),
       async fromOrderDom(_page, orderId) {
         opened.push(orderId)
         return {

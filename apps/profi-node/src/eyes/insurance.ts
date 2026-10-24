@@ -68,7 +68,9 @@ export function startInsurance(o: {
       for (const id of o.eyes.ordersWantingPage()) await o.eyes.settleOrder(id)
       return
     }
-    const ids = [...new Set([...feed.refs.map((r) => r.orderId), ...o.eyes.ordersWantingPage()])]
+    // The real feed page links hundreds of old orders too: while the board answers, only its orders are opened.
+    const fromPage = o.eyes.boardWorks() ? [] : feed.refs.map((r) => r.orderId)
+    const ids = [...new Set([...fromPage, ...o.eyes.ordersWantingPage()])]
     let opened = 0
     for (const id of ids) {
       if (opened >= 5 || !can()) break

@@ -17,6 +17,8 @@ export type Eyes = {
   knowsOrder(orderId: string): Promise<boolean>
   /** Orders seen on the board whose page has not been read yet, oldest first. */
   ordersWantingPage(): string[]
+  /** The site's board answer was read in the last 10 minutes. */
+  boardWorks(now?: number): boolean
   /** The order's page could not be read: the order goes out with what the board showed. */
   settleOrder(orderId: string): Promise<void>
   presence(): boolean
@@ -41,6 +43,7 @@ export function createEyes(o: {
   // Board orders lack the fee, which only their page shows; bounded so a stuck tab cannot grow it.
   const waiting = new Map<string, OrderSignal>()
   const WAITING_MAX = 100
+  let boardAt = 0
 
   async function knowsOrder(orderId: string): Promise<boolean> {
     const rows = await o.db
@@ -140,11 +143,12 @@ export function createEyes(o: {
     }
   }
 
-  async function onParsed(p: ParseResult, _source: 'rtp' | 'response' | 'dom', body?: unknown) {
+  async function onParsed(p: ParseResult, source: 'rtp' | 'response' | 'dom', body?: unknown) {
     // The feed is read every minute, so its silence is the sign of a changed site (ADR-002).
     if (p.recognized && p.what === 'feed') {
       lastRecognized = Date.now()
       layoutReported = false
+      if (source === 'response') boardAt = lastRecognized
     }
     await onSignals(p.signals, body)
   }
@@ -184,6 +188,7 @@ export function createEyes(o: {
     lastRecognizedAt: () => lastRecognized,
     knowsOrder,
     ordersWantingPage: () => [...waiting.keys()],
+    boardWorks: (now = Date.now()) => now - boardAt < 600000,
     async settleOrder(orderId) {
       const b = waiting.get(orderId)
       if (!b) return
