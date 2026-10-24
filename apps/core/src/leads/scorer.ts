@@ -75,6 +75,8 @@ export async function scoreOrder(
     causationId?: string
     /** Trial runs pass P3 so a live order is never scored behind them. */
     priority?: 'P0' | 'P1' | 'P2' | 'P3'
+    /** Told why a model call gave no answer (for example `limit_reached`), before the score is a miss. */
+    onFailure?: (errorClass: string) => void
   } = {},
 ): Promise<Scored | null> {
   const input = scorerInput(o, rules)
@@ -85,6 +87,7 @@ export async function scoreOrder(
       correlationId: opts.correlationId,
       causationId: opts.causationId,
     })
+    if (!r.ok) opts.onFailure?.(r.errorClass)
     if (!r.ok || !fits(rules, r.output)) return null
     return {
       ...decide(rules, r.output),

@@ -495,3 +495,29 @@ export const trialScore = core.table(
   },
   (t) => [primaryKey({ columns: [t.rulesHash, t.leadId, t.mode, t.roleVersion] })],
 )
+
+/**
+ * A long job over a direction's rules that Boris watches (FR-ACC-5, FR-ACC-4): a recompute on the last leads or a
+ * calibration. Its leads are fixed at the start, its scores are in `trial_score`, so a restart continues it. One
+ * job at a time is waiting or running.
+ */
+export const directionRun = core.table('direction_run', {
+  id: uuid('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  kind: text('kind').notNull(),
+  /** The rules being tried. */
+  rules: jsonb('rules').notNull(),
+  rulesHash: text('rules_hash').notNull(),
+  /** The rules to compare with (the active ones at the start); null when nothing is compared. */
+  baseRules: jsonb('base_rules'),
+  baseHash: text('base_hash'),
+  leadIds: jsonb('lead_ids').notNull(),
+  seed: integer('seed').notNull().default(0),
+  state: text('state').notNull().default('queued'),
+  total: integer('total').notNull(),
+  done: integer('done').notNull().default(0),
+  skipped: integer('skipped').notNull().default(0),
+  stopReason: text('stop_reason'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  finishedAt: ts('finished_at'),
+})

@@ -4,8 +4,9 @@ import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { rulesHash } from '../../src/direction/hash'
 import { seedDirection } from '../../src/direction/store'
-import { trialScore } from '../../src/direction/trial'
+import { ClaudeLimitError, trialScore } from '../../src/direction/trial'
 import { RULES_V1 } from '../../src/direction/v1'
+import { withoutLimitWait } from '../../src/gateway/gateway'
 import { openTestDb, resetDb } from '../helpers/db'
 import { fakeGateway } from '../helpers/gateway'
 import { leadWithScore } from '../helpers/learning'
@@ -67,6 +68,15 @@ describe('trial scores', { timeout: 30000 }, () => {
     expect(await trialRows()).toHaveLength(0)
     const f = await fakeGateway(db, { scorer: scorerAnswer(70) })
     expect((await trialScore({ db, ...f }, '950001', RULES_V1, 'plain'))?.score).toBe(70)
+  })
+
+  it('FR-ACC-5: the Claude limit is an error, not a miss, and is not cached', async () => {
+    const f = await fakeGateway(db, { scorer: scorerAnswer(70) }, { FAKE_CLAUDE_MODE: 'limit' })
+    const d = { db, gateway: withoutLimitWait(f.gateway), rolesDir: f.rolesDir }
+    await expect(trialScore(d, '950001', RULES_V1, 'plain')).rejects.toBeInstanceOf(
+      ClaudeLimitError,
+    )
+    expect(await trialRows()).toHaveLength(0)
   })
 
   it('FR-ACC-5: plain never asks sonnet, escalated does near the threshold', async () => {
