@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createLimitGuard, parseResetAt } from '../../src/gateway/limit'
+import { createLimitGuard, createLimitNotice, parseResetAt } from '../../src/gateway/limit'
 
 // The texts are the CLI's own, from v1's server logs (session and weekly limits, 2026).
 const at = (iso: string) => new Date(iso)
@@ -79,39 +79,63 @@ describe('Claude limit state', () => {
     vi.useRealTimers()
   })
 
-  function setup(o: { notify?: (t: string) => Promise<unknown> } = {}) {
-    const sent: string[] = []
+  function setup() {
+    const events: string[] = []
     let probes = 0
     const guard = createLimitGuard({
-      notify:
-        o.notify ??
-        (async (t) => {
-          sent.push(t)
-        }),
+      onChange: (e) => events.push(e),
       probe: async () => {
         probes++
       },
       probeEveryMs: 10 * MIN,
+      maxWaitMs: 360 * MIN,
     })
-    return { guard, sent, probes: () => probes }
+    return { guard, events, probes: () => probes }
   }
 
-  it('FR-OPS-3: the first limit sends one message to Boris, its end one more', async () => {
-    const { guard, sent } = setup()
-    guard.hit(null)
-    guard.hit(null)
+  it('FR-OPS-3: the first limit answer starts the limit once, the first answer after it ends it once', () => {
+    const { guard, events } = setup()
+    guard.hit(null, Date.now())
+    guard.hit(null, Date.now())
     expect(guard.active()).toBe(true)
-    guard.answered()
-    guard.answered()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(sent).toEqual(['⏸️ Лимит Claude кончился, разбор заявок ждёт', '▶️ Лимит Claude вернулся'])
+    vi.advanceTimersByTime(1000)
+    guard.answered(Date.now())
+    guard.answered(Date.now())
+    expect(events).toEqual(['started', 'ended'])
     expect(guard.active()).toBe(false)
+    guard.stop()
+  })
+
+  it('FR-OPS-3: an answer from a run that started before the limit does not end it', () => {
+    const { guard, events } = setup()
+    const before = Date.now()
+    vi.advanceTimersByTime(1000)
+    guard.hit(null, Date.now())
+    guard.answered(before)
+    expect(guard.active()).toBe(true)
+    vi.advanceTimersByTime(1000)
+    guard.answered(Date.now())
+    expect(events).toEqual(['started', 'ended'])
+    guard.stop()
+  })
+
+  it('FR-OPS-3: a limit answer from a run that started before the limit ended does not start it again', () => {
+    const { guard, events } = setup()
+    guard.hit(null, Date.now())
+    vi.advanceTimersByTime(1000)
+    const during = Date.now()
+    vi.advanceTimersByTime(1000)
+    guard.answered(Date.now())
+    vi.advanceTimersByTime(1000)
+    guard.hit(null, during)
+    expect(guard.active()).toBe(false)
+    expect(events).toEqual(['started', 'ended'])
     guard.stop()
   })
 
   it('FR-OPS-3: without a reset time the probe runs every 10 minutes', async () => {
     const { guard, probes } = setup()
-    guard.hit(null)
+    guard.hit(null, Date.now())
     await vi.advanceTimersByTimeAsync(9 * MIN)
     expect(probes()).toBe(0)
     await vi.advanceTimersByTimeAsync(MIN)
@@ -124,9 +148,9 @@ describe('Claude limit state', () => {
 
   it('FR-OPS-3: a repeated limit answer does not put off the next probe', async () => {
     const { guard, probes } = setup()
-    guard.hit(null)
+    guard.hit(null, Date.now())
     await vi.advanceTimersByTimeAsync(5 * MIN)
-    guard.hit(null)
+    guard.hit(null, Date.now())
     await vi.advanceTimersByTimeAsync(5 * MIN)
     expect(probes()).toBe(1)
     guard.stop()
@@ -134,8 +158,8 @@ describe('Claude limit state', () => {
 
   it('FR-OPS-3: with a reset time the probe runs a minute after it, then every 10 minutes', async () => {
     const { guard, probes } = setup()
-    guard.hit(new Date(T0.getTime() + 120 * MIN))
-    await vi.advanceTimersByTimeAsync(120 * MIN)
+    guard.hit(new Date(T0.getTime() + 50 * MIN), Date.now())
+    await vi.advanceTimersByTimeAsync(50 * MIN)
     expect(probes()).toBe(0)
     await vi.advanceTimersByTimeAsync(MIN)
     expect(probes()).toBe(1)
@@ -144,71 +168,129 @@ describe('Claude limit state', () => {
     guard.stop()
   })
 
+  it('FR-OPS-3: a reset days away is still probed every hour, in case the limit lifts early', async () => {
+    const { guard, probes } = setup()
+    guard.hit(new Date(T0.getTime() + 3 * 24 * 60 * MIN), Date.now())
+    await vi.advanceTimersByTimeAsync(59 * MIN)
+    expect(probes()).toBe(0)
+    await vi.advanceTimersByTimeAsync(MIN)
+    expect(probes()).toBe(1)
+    await vi.advanceTimersByTimeAsync(60 * MIN)
+    expect(probes()).toBe(2)
+    guard.stop()
+  })
+
   it('FR-OPS-3: a waiting call goes when the limit ends', async () => {
     const { guard } = setup()
     expect(await guard.wait(Date.now() + 360 * MIN)).toBe('go')
-    guard.hit(null)
+    guard.hit(null, Date.now())
     const waiting = guard.wait(Date.now() + 360 * MIN)
     await vi.advanceTimersByTimeAsync(30 * MIN)
-    guard.answered()
+    guard.answered(Date.now())
     expect(await waiting).toBe('go')
     guard.stop()
   })
 
   it('FR-OPS-3: a waiting call expires at its deadline while the limit holds', async () => {
     const { guard } = setup()
-    guard.hit(null)
+    guard.hit(null, Date.now())
     let got: string | null = null
-    void guard.wait(Date.now() + 360 * MIN).then((r) => {
+    void guard.wait(Date.now() + 120 * MIN).then((r) => {
       got = r
     })
-    await vi.advanceTimersByTimeAsync(359 * MIN)
+    await vi.advanceTimersByTimeAsync(119 * MIN)
     expect(got).toBeNull()
     await vi.advanceTimersByTimeAsync(MIN)
     expect(got).toBe('expired')
     guard.stop()
   })
 
-  it('FR-OPS-3: a reset known to come after the deadline expires the wait at once', async () => {
+  it('FR-OPS-3: after 6 hours of limit a call waits no more, whatever its own deadline', async () => {
     const { guard } = setup()
-    guard.hit(new Date(T0.getTime() + 3 * 24 * 60 * MIN))
+    guard.hit(null, Date.now())
+    await vi.advanceTimersByTimeAsync(300 * MIN)
+    let got: string | null = null
+    void guard.wait(Date.now() + 360 * MIN).then((r) => {
+      got = r
+    })
+    await vi.advanceTimersByTimeAsync(59 * MIN)
+    expect(got).toBeNull()
+    await vi.advanceTimersByTimeAsync(MIN)
+    expect(got).toBe('expired')
     expect(await guard.wait(Date.now() + 360 * MIN)).toBe('expired')
     guard.stop()
   })
 
-  it('FR-OPS-3: a failing notifier does not break the limit state', async () => {
-    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const { guard } = setup({ notify: () => Promise.reject(new Error('telegram down')) })
-    guard.hit(null)
-    const waiting = guard.wait(Date.now() + 360 * MIN)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(guard.active()).toBe(true)
-    guard.answered()
-    expect(await waiting).toBe('go')
-    quiet.mockRestore()
+  it('FR-OPS-3: a reset known to come after the deadline expires the wait at once', async () => {
+    const { guard } = setup()
+    guard.hit(new Date(T0.getTime() + 3 * 24 * 60 * MIN), Date.now())
+    expect(await guard.wait(Date.now() + 360 * MIN)).toBe('expired')
     guard.stop()
   })
 
-  it('FR-OPS-3: a limit known from before a restart sends no start message and is probed at once', async () => {
-    const { guard, sent, probes } = setup()
+  it('FR-OPS-3: a limit known from before a restart is adopted quietly and probed at once', async () => {
+    const { guard, events, probes } = setup()
     guard.adopt()
     expect(guard.active()).toBe(true)
     await vi.advanceTimersByTimeAsync(0)
     expect(probes()).toBe(1)
-    guard.answered()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(sent).toEqual(['▶️ Лимит Claude вернулся'])
+    guard.answered(Date.now())
+    expect(events).toEqual(['adopted', 'ended'])
     guard.stop()
   })
 
-  it('FR-OPS-3: a stopped limit state lets waiting calls go and probes no more', async () => {
-    const { guard, probes } = setup()
-    guard.hit(null)
-    const waiting = guard.wait(Date.now() + 360 * MIN)
+  it('FR-OPS-3: a stopped limit state keeps waiting calls waiting, tells nothing and probes no more', async () => {
+    const { guard, events, probes } = setup()
+    guard.hit(null, Date.now())
+    let got: string | null = null
+    void guard.wait(Date.now() + 360 * MIN).then((r) => {
+      got = r
+    })
     guard.stop()
-    expect(await waiting).toBe('expired')
-    guard.hit(null)
-    await vi.advanceTimersByTimeAsync(60 * MIN)
+    guard.answered(Date.now() + 1)
+    guard.hit(null, Date.now() + 1)
+    await vi.advanceTimersByTimeAsync(7 * 60 * MIN)
+    // A process about to exit leaves a waiting DBOS step unfinished: it is run again after the restart.
+    expect(got).toBeNull()
+    expect(events).toEqual(['started'])
     expect(probes()).toBe(0)
+  })
+})
+
+describe('Claude limit messages to Boris', () => {
+  it('FR-OPS-3: one message when the first model meets the limit, one when the last is free', async () => {
+    const sent: string[] = []
+    const notice = createLimitNotice(async (t) => {
+      sent.push(t)
+    })
+    notice('started')
+    notice('started')
+    notice('ended')
+    await new Promise((r) => setImmediate(r))
+    expect(sent).toEqual(['⏸️ Лимит Claude кончился, разбор заявок ждёт'])
+    notice('ended')
+    await new Promise((r) => setImmediate(r))
+    expect(sent).toEqual(['⏸️ Лимит Claude кончился, разбор заявок ждёт', '▶️ Лимит Claude вернулся'])
+  })
+
+  it('FR-OPS-3: a limit adopted after a restart sends no start message, its end does', async () => {
+    const sent: string[] = []
+    const notice = createLimitNotice(async (t) => {
+      sent.push(t)
+    })
+    notice('adopted')
+    notice('ended')
+    await new Promise((r) => setImmediate(r))
+    expect(sent).toEqual(['▶️ Лимит Claude вернулся'])
+  })
+
+  it('FR-OPS-3: a failing notifier breaks nothing', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const notice = createLimitNotice(() => Promise.reject(new Error('telegram down')))
+    notice('started')
+    notice('ended')
+    await new Promise((r) => setImmediate(r))
+    expect(quiet).toHaveBeenCalledTimes(2)
+    quiet.mockRestore()
   })
 })

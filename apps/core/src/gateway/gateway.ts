@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { newEventId, ProbeOutput, type RoleMeta } from '@sara/shared'
+import { MODELS, newEventId, ProbeOutput, type RoleMeta } from '@sara/shared'
 import { desc, eq, inArray, or } from 'drizzle-orm'
 import { type ZodType, z } from 'zod'
 import type { Db } from '../db/client'
@@ -9,7 +9,7 @@ import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { SecretStore } from '../secrets/store'
 import { buildClaudeArgs, type CliRun, roleJsonSchema, runClaude } from './claudeCli'
-import { createLimitGuard, parseResetAt } from './limit'
+import { createLimitGuard, createLimitNotice, type LimitGuard, parseResetAt } from './limit'
 import { createSlots } from './queue'
 import { type Redacted, redact, restore } from './redact'
 import { loadRole, type RoleName } from './roles'
@@ -52,12 +52,15 @@ export type Gateway = {
 }
 
 const MINUTE_MS = 60_000
+type Model = RoleMeta['model']
 
 type Outcome =
   | { ok: true; output: unknown }
   | { ok: false; errorClass: GatewayErrorClass; message: string }
 
-const LIMIT_TEXT = /usage limit|rate limit|hit your (?:[\w-]+ )*limit|limit reached/i
+/** The subscription limit only: "Context limit reached" and the like are other failures. */
+const LIMIT_TEXT =
+  /usage limit|rate limit|hit your (?:[\w'-]+ )*limit|(?:session|weekly|spend|\d+-hour) limit reached/i
 const AUTH_TEXT = /failed to authenticate|invalid api key|oauth|not logged in|please run \/login/i
 
 function classify<T>(
@@ -109,31 +112,39 @@ export function createGateway(d: {
 }): Gateway & { stop(): void } {
   const slots = createSlots(d.concurrency ?? 2)
   const maxWaitMs = d.limit?.maxWaitMs ?? 6 * 60 * MINUTE_MS
-  const guard = createLimitGuard({
-    notify: async (text) => d.notifier?.sendText(text),
-    probe: () => call('probe', 'Проверка связи.', ProbeOutput),
-    probeEveryMs: d.limit?.probeEveryMs ?? 10 * MINUTE_MS,
-  })
+  const notice = createLimitNotice(async (text) => d.notifier?.sendText(text))
+  // Each model meets the limit on its own: Boris's own Opus use may spend Opus while haiku still answers. A model's
+  // limit is learnt only from its own answer and ended only by its own probe or call.
+  const guards = Object.fromEntries(
+    MODELS.map((model) => [
+      model,
+      createLimitGuard({
+        onChange: notice,
+        probe: () => call('probe', 'Проверка связи.', ProbeOutput, { model }),
+        probeEveryMs: d.limit?.probeEveryMs ?? 10 * MINUTE_MS,
+        maxWaitMs,
+      }),
+    ]),
+  ) as Record<Model, LimitGuard>
 
-  // A limit that held when the core stopped holds on: the last word of the model decides (read once).
-  let limitRead: Promise<void> | null = null
-  const readLimit = () =>
-    (limitRead ??= (async () => {
-      const [last] = await d.db
-        .select({ errorClass: modelCall.errorClass })
-        .from(modelCall)
-        .where(
-          or(
-            eq(modelCall.ok, true),
-            inArray(modelCall.errorClass, ['limit_reached', 'bad_output']),
-          ),
-        )
-        .orderBy(desc(modelCall.startedAt))
-        .limit(1)
-      if (last?.errorClass === 'limit_reached') guard.adopt()
-    })().catch((e) => {
-      console.error('model_call not read', e instanceof Error ? e.message : e)
-    }))
+  // A limit that held when the core stopped holds on: each model's last word decides. Read at once, so Boris hears of
+  // the end even when no call comes.
+  const limitRead = (async () => {
+    const rows = await d.db
+      .selectDistinctOn([modelCall.model], {
+        model: modelCall.model,
+        errorClass: modelCall.errorClass,
+      })
+      .from(modelCall)
+      .where(
+        or(eq(modelCall.ok, true), inArray(modelCall.errorClass, ['limit_reached', 'bad_output'])),
+      )
+      .orderBy(modelCall.model, desc(modelCall.startedAt))
+    const byModel: Partial<Record<string, LimitGuard>> = guards
+    for (const r of rows) if (r.errorClass === 'limit_reached') byModel[r.model]?.adopt()
+  })().catch((e) => {
+    console.error('model_call not read', e instanceof Error ? e.message : e)
+  })
 
   /** One run of the CLI, or the reason it did not run. */
   async function runOnce(
@@ -143,6 +154,7 @@ export function createGateway(d: {
     schema: ZodType,
     waits: boolean,
   ): Promise<{ result: Outcome; durationMs: number } | 'limit_began'> {
+    const guard = guards[meta.model]
     // Whitespace is never part of a token (one saved before the wizard cleaned it may carry a line break).
     const token = (await d.secrets.get('claude_oauth_token'))?.replace(/\s+/g, '') || null
     if (!token)
@@ -156,6 +168,7 @@ export function createGateway(d: {
       if (waits && guard.active()) return 'limit_began'
       const cwd = join(d.dataDir, 'claude-cwd')
       await mkdir(cwd, { recursive: true })
+      const ranAt = Date.now()
       const run = await runClaude({
         bin: d.claudeBin,
         args: buildClaudeArgs(meta, promptPath, roleJsonSchema(schema)),
@@ -167,8 +180,8 @@ export function createGateway(d: {
       })
       const result = classify(run, schema, hidden.tags)
       if (!result.ok && result.errorClass === 'limit_reached')
-        guard.hit(parseResetAt(`${run.stdout}\n${run.stderr}`, new Date()))
-      else if (result.ok || result.errorClass === 'bad_output') guard.answered()
+        guard.hit(parseResetAt(`${run.stdout}\n${run.stderr}`, new Date()), ranAt)
+      else if (result.ok || result.errorClass === 'bad_output') guard.answered(ranAt)
       return { result, durationMs: run.durationMs }
     } finally {
       slots.release()
@@ -182,6 +195,7 @@ export function createGateway(d: {
     startedAt: string,
     result: Outcome,
     durationMs: number,
+    waitedMs: number,
   ): Promise<RoleCallResult<unknown>> {
     const id = newEventId()
     await d.db.insert(modelCall).values({
@@ -213,6 +227,7 @@ export function createGateway(d: {
         role,
         durationMs,
         ...(result.ok ? {} : { errorClass: result.errorClass }),
+        ...(waitedMs > 0 ? { waitedMs } : {}),
         ...redacted,
       },
     })
@@ -232,37 +247,48 @@ export function createGateway(d: {
     const meta = opts?.model
       ? { ...loaded.meta, model: opts.model, fallbackModel: undefined }
       : loaded.meta
-    await readLimit()
+    await limitRead
+    const guard = guards[meta.model]
     // Always on: what the model sees has no phone, e-mail, link or given name of a client (ADR-016).
     const c: Call = { role, meta, opts, hidden: redact(input, opts?.redact?.names) }
     const waits = meta.priority !== 'P0'
-    const deadline = Date.now() + (opts?.limitWaitMs ?? maxWaitMs)
+    const calledAt = new Date()
+    const deadline = calledAt.getTime() + (opts?.limitWaitMs ?? maxWaitMs)
+    let waitedMs = 0
     let last: RoleCallResult<unknown> | null = null
     for (;;) {
-      const startedAt = new Date().toISOString()
-      if (waits && (await guard.wait(deadline)) === 'expired') {
-        // The limit outlived the wait: the last run's answer stands, or one without a run is recorded.
-        last ??= await record(
-          c,
-          startedAt,
-          {
-            ok: false,
-            errorClass: 'limit_reached',
-            message: 'the Claude limit still holds',
-          },
-          0,
-        )
-        return last as RoleCallResult<T>
+      if (waits && guard.active()) {
+        const before = Date.now()
+        const turn = await guard.wait(deadline)
+        waitedMs += Date.now() - before
+        if (turn === 'expired') {
+          // The limit outlived the wait: the last run's answer stands, or one without a run is recorded.
+          last ??= await record(
+            c,
+            calledAt.toISOString(),
+            { ok: false, errorClass: 'limit_reached', message: 'the Claude limit still holds' },
+            0,
+            waitedMs,
+          )
+          return last as RoleCallResult<T>
+        }
       }
+      // A run is dated when it starts, not when its call began to wait out a limit.
+      const startedAt = new Date().toISOString()
       const run = await runOnce(meta, promptPath, c.hidden, schema, waits)
       if (run === 'limit_began') continue
-      last = await record(c, startedAt, run.result, run.durationMs)
+      last = await record(c, startedAt, run.result, run.durationMs, waitedMs)
       if (!waits || run.result.ok || run.result.errorClass !== 'limit_reached')
         return last as RoleCallResult<T>
     }
   }
 
-  return { call, stop: () => guard.stop() }
+  return {
+    call,
+    stop() {
+      for (const g of Object.values(guards)) g.stop()
+    },
+  }
 }
 
 /** The same gateway for jobs that must not stand still through a limit: P1-P3 meet it with limit_reached at once. */

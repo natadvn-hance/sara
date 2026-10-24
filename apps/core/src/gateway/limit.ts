@@ -72,39 +72,46 @@ export const LIMIT_TEXTS = {
 
 /** The CLI shows the reset to the minute: the probe waits out the rest of that minute. */
 const AFTER_RESET_MS = 60_000
+/** A reset days away is still probed now and then: the limit may lift early. */
+const LONGEST_CHECK_MS = HOUR_MS
+
+export type LimitChange = 'started' | 'adopted' | 'ended'
 
 export type LimitGuard = {
   active(): boolean
-  /** A limit answer from the CLI: turns the limit on with one message to Boris, or updates its reset time. */
-  hit(resetAt: Date | null): void
-  /** The model answered: the limit, if any, is over (one message), and the waiting calls go. */
-  answered(): void
-  /** A limit that held before a restart: on again without a second message, and probed at once. */
+  /** A limit answer from a CLI run that started at `runStartedAt` (epoch ms): turns the limit on or updates its reset. */
+  hit(resetAt: Date | null, runStartedAt: number): void
+  /** The model answered a run that started at `runStartedAt`: the limit, if any, is over and the waiting calls go. */
+  answered(runStartedAt: number): void
+  /** A limit that held before a restart: on again quietly, and probed at once. */
   adopt(): void
-  /** Resolves 'go' when there is no limit or it ends, 'expired' at `deadline` (epoch ms) or when it cannot end in time. */
+  /**
+   * Resolves 'go' when there is no limit or it ends, 'expired' at `deadline` (epoch ms), after the limit has held for
+   * `maxWaitMs`, or at once when its known reset comes too late.
+   */
   wait(deadline: number): Promise<'go' | 'expired'>
+  /** No more probes or changes; a waiting call keeps waiting until the process ends (DBOS runs its step again). */
   stop(): void
 }
 
-/** The Claude limit (FR-OPS-3): who waits, when to probe the subscription again, what Boris hears. */
+/**
+ * The Claude limit of one model (FR-OPS-3): who waits, when to probe the subscription again. Only a run that started
+ * after the limit began can end it, and only one that started after its end can start it again: a slow answer from
+ * before never flips the state.
+ */
 export function createLimitGuard(o: {
-  notify(text: string): Promise<unknown>
+  onChange(change: LimitChange): void
   /** One cheap model call; its outcome comes back through hit() or answered(). */
   probe(): Promise<unknown>
   probeEveryMs: number
+  maxWaitMs: number
 }): LimitGuard {
-  let state: { resetAt: Date | null } | null = null
+  let state: { since: number; resetAt: Date | null } | null = null
+  let endedAt = Number.NEGATIVE_INFINITY
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
-  const waiters = new Set<(r: 'go' | 'expired') => void>()
+  const waiters = new Map<(r: 'go' | 'expired') => void, ReturnType<typeof setTimeout>>()
 
-  const tell = (text: string) =>
-    Promise.resolve()
-      .then(() => o.notify(text))
-      .catch((e) => console.error('limit message not sent', e instanceof Error ? e.message : e))
-  const release = (r: 'go' | 'expired') => {
-    for (const done of [...waiters]) done(r)
-  }
   function schedule(ms: number) {
     if (timer) clearTimeout(timer)
     timer = null
@@ -114,7 +121,7 @@ export function createLimitGuard(o: {
   }
   const nextCheckMs = () => {
     const left = state?.resetAt ? state.resetAt.getTime() + AFTER_RESET_MS - Date.now() : 0
-    return left > 0 ? left : o.probeEveryMs
+    return left > 0 ? Math.min(left, LONGEST_CHECK_MS) : o.probeEveryMs
   }
   async function check() {
     timer = null
@@ -123,15 +130,17 @@ export function createLimitGuard(o: {
     } catch (e) {
       console.error('limit probe failed', e instanceof Error ? e.message : e)
     }
-    if (state && !timer) schedule(o.probeEveryMs)
+    if (state && !timer) schedule(nextCheckMs())
   }
 
   return {
     active: () => state !== null,
-    hit(resetAt) {
+    hit(resetAt, runStartedAt) {
+      if (stopped) return
       if (!state) {
-        state = { resetAt }
-        void tell(LIMIT_TEXTS.started)
+        if (runStartedAt < endedAt) return
+        state = { since: Date.now(), resetAt }
+        o.onChange('started')
         schedule(nextCheckMs())
       } else if (resetAt && resetAt.getTime() !== state.resetAt?.getTime()) {
         state.resetAt = resetAt
@@ -140,41 +149,63 @@ export function createLimitGuard(o: {
         schedule(nextCheckMs())
       }
     },
-    answered() {
-      if (!state) return
+    answered(runStartedAt) {
+      if (stopped || !state || runStartedAt < state.since) return
       state = null
+      endedAt = Date.now()
       if (timer) clearTimeout(timer)
       timer = null
-      void tell(LIMIT_TEXTS.ended)
-      release('go')
+      o.onChange('ended')
+      for (const [done] of [...waiters]) done('go')
     },
     adopt() {
-      if (state) return
-      state = { resetAt: null }
+      if (stopped || state) return
+      state = { since: Date.now(), resetAt: null }
+      o.onChange('adopted')
       schedule(0)
     },
     wait(deadline) {
       if (!state) return Promise.resolve('go')
-      const left = deadline - Date.now()
+      if (stopped) return new Promise(() => {})
+      const until = Math.min(deadline, state.since + o.maxWaitMs)
       const resetAt = state.resetAt?.getTime()
-      if (stopped || left <= 0 || (resetAt && resetAt + AFTER_RESET_MS > deadline))
+      if (until <= Date.now() || (resetAt && resetAt + AFTER_RESET_MS > until))
         return Promise.resolve('expired')
       return new Promise((resolve) => {
         const done = (r: 'go' | 'expired') => {
-          clearTimeout(t)
+          clearTimeout(waiters.get(done))
           waiters.delete(done)
           resolve(r)
         }
-        const t = setTimeout(() => done('expired'), left)
+        const t = setTimeout(() => done('expired'), until - Date.now())
         t.unref?.()
-        waiters.add(done)
+        waiters.set(done, t)
       })
     },
     stop() {
       stopped = true
       if (timer) clearTimeout(timer)
       timer = null
-      release('expired')
+      for (const t of waiters.values()) clearTimeout(t)
+      waiters.clear()
     },
+  }
+}
+
+/** Boris hears once when the first model meets the limit and once when the last one is free again. */
+export function createLimitNotice(
+  notify: (text: string) => Promise<unknown>,
+): (change: LimitChange) => void {
+  let held = 0
+  const tell = (text: string) =>
+    Promise.resolve()
+      .then(() => notify(text))
+      .catch((e) => console.error('limit message not sent', e instanceof Error ? e.message : e))
+  return (change) => {
+    if (change === 'ended') {
+      if (held > 0 && --held === 0) void tell(LIMIT_TEXTS.ended)
+      return
+    }
+    if (held++ === 0 && change === 'started') void tell(LIMIT_TEXTS.started)
   }
 }

@@ -346,16 +346,78 @@ describe('Claude limit in the gateway', () => {
     const pending = gw.call('sorter', 'x', SorterOutput)
     await until(async () => (await calls()).some((c) => roleOf(c) === 'probe'))
     expect(sent).toEqual([LIMIT_TEXTS.started])
+    const freed = Date.now()
     env.FAKE_CLAUDE_MODE = 'ok'
     expect(await pending).toMatchObject({ ok: true, output: SORTED })
     expect(sent).toEqual([LIMIT_TEXTS.started, LIMIT_TEXTS.ended])
-    const rows = await db.execute<{ ok: boolean; error_class: string | null }>(
-      sql`select ok, error_class from core.model_call where role = 'sorter' order by started_at`,
+    const rows = await db.execute<{ ok: boolean; error_class: string | null; started_at: string }>(
+      sql`select ok, error_class, started_at from core.model_call where role = 'sorter' order by started_at`,
     )
-    expect(rows.rows).toEqual([
+    expect(rows.rows.map(({ ok, error_class }) => ({ ok, error_class }))).toEqual([
       { ok: false, error_class: 'limit_reached' },
       { ok: true, error_class: null },
     ])
+    // The second run is dated when it ran, not when the call began to wait; the wait is journaled.
+    expect(new Date(rows.rows[1]?.started_at ?? 0).getTime()).toBeGreaterThanOrEqual(freed)
+    const events = await db.execute<{ payload: { waitedMs?: number } }>(
+      sql`select payload from core.event where type = 'model.called' and payload->>'role' = 'sorter'`,
+    )
+    expect(events.rows[0]?.payload.waitedMs).toBeGreaterThan(0)
+  })
+
+  it('FR-OPS-3: a slow answer from a run that began before the limit does not end it', async () => {
+    const env: Record<string, string> = {
+      FAKE_CLAUDE_MODE: 'ok',
+      FAKE_CLAUDE_DELAY_MS: '800',
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: BY_ROLE,
+    }
+    const sent: string[] = []
+    const gw = await gateway(env, true, { sent, limit: { probeEveryMs: 60_000 } })
+    const slow = gw.call('sorter', 'x', SorterOutput)
+    await new Promise((r) => setTimeout(r, 200))
+    env.FAKE_CLAUDE_MODE = 'limit'
+    env.FAKE_CLAUDE_DELAY_MS = '0'
+    await gw.call('sorter', 'x', SorterOutput, { limitWaitMs: 0 })
+    expect(await slow).toMatchObject({ ok: true })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(sent).toEqual([LIMIT_TEXTS.started])
+    expect(await gw.call('scorer', 'x', ScorerOutput, { limitWaitMs: 0 })).toMatchObject({
+      errorClass: 'limit_reached',
+    })
+    expect((await calls()).map(roleOf)).toEqual(['sorter', 'sorter'])
+  })
+
+  it('FR-OPS-3: a limit on one model holds only that model, and its own probe ends it', async () => {
+    const env: Record<string, string> = {
+      FAKE_CLAUDE_MODE: 'limit_json',
+      FAKE_CLAUDE_LIMIT_TEXT: "You've hit your Sonnet limit",
+      FAKE_CLAUDE_LIMIT_MODELS: 'sonnet',
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: BY_ROLE,
+    }
+    const sent: string[] = []
+    const gw = await gateway(env, true, { sent, limit: { probeEveryMs: 150 } })
+    expect(
+      await gw.call('scorer', 'x', ScorerOutput, { model: 'sonnet', limitWaitMs: 0 }),
+    ).toMatchObject({ errorClass: 'limit_reached' })
+    expect(await gw.call('sorter', 'x', SorterOutput)).toMatchObject({ ok: true })
+    expect(sent).toEqual([LIMIT_TEXTS.started])
+    env.FAKE_CLAUDE_LIMIT_MODELS = 'none'
+    await until(() => sent.length === 2)
+    expect(sent).toEqual([LIMIT_TEXTS.started, LIMIT_TEXTS.ended])
+    const probes = (await calls()).filter((c) => roleOf(c) === 'probe')
+    expect(probes.map((c) => c.args[c.args.indexOf('--model') + 1])).toContain('sonnet')
+    expect(probes.map((c) => c.args[c.args.indexOf('--model') + 1])).not.toContain('haiku')
+  })
+
+  it('FR-OPS-3: a context limit is a CLI failure, not the subscription limit', async () => {
+    const gw = await gateway({
+      FAKE_CLAUDE_MODE: 'limit',
+      FAKE_CLAUDE_LIMIT_TEXT: 'Context limit reached',
+    })
+    expect(await gw.call('probe', 'x', ProbeOutput)).toMatchObject({
+      ok: false,
+      errorClass: 'cli_failed',
+    })
   })
 
   it('FR-OPS-3: while the limit holds a P0 call runs at once', async () => {
@@ -411,7 +473,7 @@ describe('Claude limit in the gateway', () => {
     expect((await calls()).map(roleOf)).toEqual(['probe'])
   })
 
-  it('FR-OPS-3: after a restart during the limit Boris gets no second start message, and the end', async () => {
+  it('FR-OPS-3: after a restart during the limit Boris gets no second start message, and the end at once', async () => {
     const before: string[] = []
     const first = await gateway({ FAKE_CLAUDE_MODE: 'limit' }, true, {
       sent: before,
@@ -427,6 +489,8 @@ describe('Claude limit in the gateway', () => {
       true,
       { sent: after, limit: { probeEveryMs: 60_000 } },
     )
+    // No call is needed: the new gateway reads the journal and probes at once.
+    await until(() => after.length > 0)
     expect(await second.call('sorter', 'x', SorterOutput)).toMatchObject({ ok: true })
     expect(after).toEqual([LIMIT_TEXTS.ended])
     expect((await calls()).map(roleOf)).toEqual(['sorter', 'probe', 'sorter'])

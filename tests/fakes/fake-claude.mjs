@@ -36,11 +36,14 @@ process.stdin.on('end', async () => {
     process.exit(1)
   }
   const limitText = process.env.FAKE_CLAUDE_LIMIT_TEXT ?? 'Claude AI usage limit reached'
-  if (mode === 'limit') {
+  // FAKE_CLAUDE_LIMIT_MODELS=sonnet: the limit modes hold only these models, the others answer as usual.
+  const limitModels = process.env.FAKE_CLAUDE_LIMIT_MODELS?.split(',')
+  const limited = !limitModels || limitModels.includes(argOf('--model') ?? '')
+  if (mode === 'limit' && limited) {
     process.stdout.write(`${limitText}\n`)
     process.exit(1)
   }
-  if (mode === 'limit_json') {
+  if (mode === 'limit_json' && limited) {
     // How CLI 2.1.310 answers a spent subscription limit in print mode: an error result, exit code 1.
     process.stdout.write(
       JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: limitText }),
