@@ -54,23 +54,33 @@ export function startInsurance(o: {
   let chatsPath: string | null = null
   let onFeed = true
 
-  // Eyes 3 (old Sara's way): order numbers from the feed page, then each new order's own page, once.
+  // Eyes 3 (old Sara's way): order numbers from the feed page and the board answer, then each new order's own
+  // page, once: only the page shows the fee for a bid.
   async function readNewOrders() {
     onFeed = true
     if (!o.parsers.fromFeedDom) return
     const feed = await o.parsers.fromFeedDom(o.ab.page)
     await o.eyes.onParsed({ recognized: feed.recognized, what: 'feed', signals: [] }, 'dom')
     chatsPath = (await o.parsers.chatsUrl?.(o.ab.page)) ?? chatsPath
-    if (!o.parsers.fromOrderDom || !o.parsers.paths.order) return
+    const fromOrderDom = o.parsers.fromOrderDom
+    const orderPath = o.parsers.paths.order
+    if (!fromOrderDom || !orderPath) {
+      for (const id of o.eyes.ordersWantingPage()) await o.eyes.settleOrder(id)
+      return
+    }
+    const ids = [...new Set([...feed.refs.map((r) => r.orderId), ...o.eyes.ordersWantingPage()])]
     let opened = 0
-    for (const ref of feed.refs) {
+    for (const id of ids) {
       if (opened >= 5 || !can()) break
-      if (await o.eyes.knowsOrder(ref.orderId)) continue
+      if (await o.eyes.knowsOrder(id)) continue
       await sleep(pause)
-      if (!(await go(o.parsers.paths.order(ref.orderId)))) return
+      if (!(await go(orderPath(id)))) return
       onFeed = false
       opened++
-      await o.eyes.onParsed(await o.parsers.fromOrderDom(o.ab.page, ref.orderId), 'dom')
+      const page = await fromOrderDom(o.ab.page, id)
+      await o.eyes.onParsed(page, 'dom')
+      // An expired or changed page still lets a board order through, without its fee.
+      if (!page.signals.some((s) => s.t === 'order')) await o.eyes.settleOrder(id)
     }
   }
 

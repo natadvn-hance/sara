@@ -3,7 +3,7 @@ import type { NodeDb } from '../db/client'
 import { rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
 import { saveRaw, upsertMessage, upsertOrder } from '../store/raw'
-import type { ParseResult, Parsers, Signal } from './parsers'
+import type { OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 import type { RawRecord } from './recorder'
 
 export type Eyes = {
@@ -15,6 +15,10 @@ export type Eyes = {
   balance(): number | null
   /** The order was already seen on this account (no need to open its page again). */
   knowsOrder(orderId: string): Promise<boolean>
+  /** Orders seen on the board whose page has not been read yet, oldest first. */
+  ordersWantingPage(): string[]
+  /** The order's page could not be read: the order goes out with what the board showed. */
+  settleOrder(orderId: string): Promise<void>
   presence(): boolean
   reset(): void
 }
@@ -34,9 +38,45 @@ export function createEyes(o: {
   let layoutReported = false
   let balance: number | null = null
   let presence = false
+  // Board orders lack the fee, which only their page shows; bounded so a stuck tab cannot grow it.
+  const waiting = new Map<string, OrderSignal>()
+  const WAITING_MAX = 100
+
+  async function knowsOrder(orderId: string): Promise<boolean> {
+    const rows = await o.db
+      .select({ id: rawOrder.orderId })
+      .from(rawOrder)
+      .where(and(eq(rawOrder.orderId, orderId), eq(rawOrder.accountId, o.accountId)))
+      .limit(1)
+    return rows.length > 0
+  }
+
+  /** A page reading completes the board one: the board's text and budget, the page's fee. */
+  function withBoard(s: OrderSignal): OrderSignal {
+    const b = waiting.get(s.order.order_id)
+    if (!b) return s
+    waiting.delete(s.order.order_id)
+    return {
+      t: 'order',
+      order: {
+        ...b.order,
+        budget_text: b.order.budget_text ?? s.order.budget_text,
+        bid_price_rub: s.order.bid_price_rub || b.order.bid_price_rub,
+      },
+      published_at: b.published_at ?? s.published_at,
+    }
+  }
 
   async function onSignals(signals: Signal[], body: unknown): Promise<void> {
-    for (const s of signals) {
+    for (const raw of signals) {
+      let s = raw
+      if (s.t === 'order' && s.needsPage) {
+        const id = s.order.order_id
+        if (!waiting.has(id) && waiting.size < WAITING_MAX && !(await knowsOrder(id)))
+          waiting.set(id, s)
+        continue
+      }
+      if (s.t === 'order') s = withBoard(s)
       if (s.t === 'balance') {
         if (balance !== s.rub) {
           const first = balance === null
@@ -142,13 +182,13 @@ export function createEyes(o: {
       })
     },
     lastRecognizedAt: () => lastRecognized,
-    async knowsOrder(orderId) {
-      const rows = await o.db
-        .select({ id: rawOrder.orderId })
-        .from(rawOrder)
-        .where(and(eq(rawOrder.orderId, orderId), eq(rawOrder.accountId, o.accountId)))
-        .limit(1)
-      return rows.length > 0
+    knowsOrder,
+    ordersWantingPage: () => [...waiting.keys()],
+    async settleOrder(orderId) {
+      const b = waiting.get(orderId)
+      if (!b) return
+      waiting.delete(orderId)
+      await onSignals([{ ...b, needsPage: false }], undefined)
     },
     balance: () => balance,
     presence: () => presence,

@@ -85,6 +85,7 @@ function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
   const title = it.title ?? ''
   return {
     t: 'order',
+    needsPage: true,
     order: {
       order_id: it.id,
       title,
@@ -104,7 +105,16 @@ function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
   }
 }
 
-export function fromBoardAnswer(url: string, body: unknown): ParseResult {
+/** The wallet: the profile answer of the backoffice API carries it as a plain number of rubles. */
+function fromProfileAnswer(body: unknown): ParseResult {
+  const data = (body as { data?: { balance?: unknown; currency?: unknown } } | null)?.data
+  if (typeof data?.balance !== 'number' || data.currency !== '₽')
+    return { recognized: false, signals: [] }
+  return { recognized: true, signals: [{ t: 'balance', rub: Math.floor(data.balance) }] }
+}
+
+export function fromSiteAnswer(url: string, body: unknown): ParseResult {
+  if (/\/backoffice\/api\//.test(url)) return fromProfileAnswer(body)
   const board = (body as { data?: { boSearchBoardItems?: { items?: unknown } } } | null)?.data
     ?.boSearchBoardItems
   if (!/\/graphql/.test(url) || !board || !Array.isArray(board.items))
@@ -119,13 +129,13 @@ export function fromBoardAnswer(url: string, body: unknown): ParseResult {
 export const profiParsers: Parsers = {
   paths: {
     feed: '/backoffice/n.php',
-    chats: '/backoffice/n.php',
+    chats: '/backoffice/r.php',
     order: (id) => `/backoffice/n.php?o=${encodeURIComponent(id)}`,
     chat: (id) => `/backoffice/r.php?id=${encodeURIComponent(id)}`,
   },
   banMarkers: ['Профиль заблокирован', 'Ваш профиль заблокирован'],
   fromRtp: () => ({ recognized: false, signals: [] }),
-  fromResponse: fromBoardAnswer,
+  fromResponse: fromSiteAnswer,
 
   async fromFeedDom(page) {
     // Cards render after load; an empty feed simply times out here.
