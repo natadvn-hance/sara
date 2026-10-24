@@ -1,4 +1,5 @@
 import type { ChatMessage, InterlocutorOutput } from '@sara/shared'
+import type { MindHit, MindSearch } from '../../src/conversation/types'
 import type { ProfiClient } from '../../src/profi/client'
 
 /** A Profi client whose chat is an array the test changes between reads. */
@@ -43,5 +44,44 @@ export function interlocutorAnswer(o: Partial<InterlocutorOutput> = {}): Interlo
     example_ids: [],
     missing: null,
     ...o,
+  }
+}
+
+export const mindHit = (id: string, type: MindHit['type'], o: Partial<MindHit> = {}): MindHit => ({
+  id,
+  type,
+  scope: 'shared',
+  title: id,
+  body: `Текст ${id}`,
+  topic: null,
+  tones: [],
+  stages: [],
+  exampleClient: null,
+  exampleBoris: null,
+  rank: 1,
+  ...o,
+})
+
+/** A small mind in memory: one understanding, one fact, two examples (one not Boris's), a stage procedure. */
+export function fakeMind(): MindSearch {
+  return {
+    version: async () => 'mind-v1',
+    search: async (q) => {
+      if (q.types.includes('understanding')) return [mindHit('u-process', 'understanding')]
+      if (q.types.includes('knowledge'))
+        return [mindHit('k-process-start', 'knowledge', { body: 'Начинаем с созвона на 30 минут' })]
+      if (q.types.includes('example'))
+        return [
+          mindHit('e-1', 'example', {
+            exampleClient: 'Как начнём?',
+            exampleBoris: 'Начнём с короткого созвона',
+          }),
+          mindHit('e-2', 'example', { exampleClient: 'Как начнём?', exampleBoris: null }),
+        ]
+      return []
+    },
+    byIds: async (ids) => ids.map((id) => mindHit(id, id.startsWith('s-') ? 'speech' : 'judgment')),
+    byStage: async () => mindHit('j-stage-talking', 'judgment', { stages: ['talking'] }),
+    bannedPhrases: async () => ['Рад помочь'],
   }
 }

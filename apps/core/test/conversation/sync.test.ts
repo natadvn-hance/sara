@@ -112,6 +112,22 @@ describe('owner rule', () => {
     expect(await countEvents(db, 'conv.boris_wrote')).toBe(1)
   })
 
+  it('FR-CONV-10: after the switch the history of a chat read for the first time stays nobody’s', async () => {
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    const r = await syncChat(
+      { db, profi: stubProfi([bid, ask]) },
+      conv,
+      new Date('2026-10-20T10:00:30Z'),
+      live,
+    )
+    expect(r.added[0]).toMatchObject({
+      author: 'unknown',
+      authorBasis: 'v1_or_boris',
+      approxTime: true,
+    })
+    expect((await applyOwnerRule(db, conv, r.added, live)).owner).toBe('sara')
+  })
+
   it('FR-CONV-10: Sara’s own message does not make the client Boris’s', async () => {
     const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
     const after = await applyOwnerRule(

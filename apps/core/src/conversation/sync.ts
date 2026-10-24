@@ -26,7 +26,7 @@ export type SyncResult = {
 /** On the first reading a message older than this was there before Sara heard of it: its time is the reading's. */
 const FRESH_MS = 10 * 60_000
 
-function storedOf(r: typeof chatMessage.$inferSelect): StoredMessage {
+export function storedOf(r: typeof chatMessage.$inferSelect): StoredMessage {
   return {
     id: r.id,
     accountId: r.accountId,
@@ -72,12 +72,14 @@ export function liveAuthor(
   m: Pick<ChatMessage, 'author' | 'text'>,
   ours: Set<string>,
   v1Writes: boolean,
+  approx = false,
 ): { author: ChatAuthor; basis: AuthorBasis } {
   if (m.author === 'client') return { author: 'client', basis: 'side' }
   if (m.author === 'system') return { author: 'system', basis: 'side' }
   if (m.author === 'unknown') return { author: 'unknown', basis: 'side' }
   if (ours.has(normalizeText(m.text))) return { author: 'sara', basis: 'outbox' }
-  if (!v1Writes) return { author: 'boris', basis: 'after_cutover' }
+  // A message older than the first reading of its chat may be from before the switch, when old Sara still wrote.
+  if (!v1Writes && !approx) return { author: 'boris', basis: 'after_cutover' }
   return { author: 'unknown', basis: 'v1_or_boris' }
 }
 
@@ -104,8 +106,8 @@ export async function syncChat(
     : new Set<string>()
   const added: StoredMessage[] = []
   for (const m of fresh) {
-    const who = liveAuthor(m, ours, o.v1Writes)
-    const old = heardAt.getTime() - new Date(m.sent_at).getTime() > FRESH_MS
+    const approx = first && heardAt.getTime() - new Date(m.sent_at).getTime() > FRESH_MS
+    const who = liveAuthor(m, ours, o.v1Writes, approx)
     const [row] = await d.db
       .insert(chatMessage)
       .values({
@@ -119,7 +121,7 @@ export async function syncChat(
         authorBasis: who.basis,
         text: m.text,
         sentAt: m.sent_at,
-        approxTime: first && old,
+        approxTime: approx,
         read: m.read,
         source: 'node',
         conversationId: conv.id,
