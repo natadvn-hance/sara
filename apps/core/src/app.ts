@@ -77,6 +77,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     db,
     gateway,
     notifier: bot.notifier,
+    profi,
     remindAfterMs:
       o.remindAfterMs ??
       (async () => (await getSetting(db, 'reminder.decision_after_min')) * 60_000),
