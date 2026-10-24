@@ -1,0 +1,268 @@
+import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { newEventId, SETTINGS } from '@sara/shared'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { buildDossier } from '../../src/conversation/dossier'
+import { planTurn, recall } from '../../src/conversation/engine'
+import { formatInterlocutorInput } from '../../src/conversation/prompt'
+import { ensureConversation } from '../../src/conversation/store'
+import { syncChat } from '../../src/conversation/sync'
+import type { Dossier, MindHit, MindSearch, PolicySettings } from '../../src/conversation/types'
+import { lead } from '../../src/db/schema'
+import { createGateway } from '../../src/gateway/gateway'
+import { createSecretStore } from '../../src/secrets/store'
+import { chatMsg, interlocutorAnswer, stubProfi } from '../helpers/conversation'
+import { openTestDb, resetDb } from '../helpers/db'
+
+const ROOT = resolve(import.meta.dirname, '../../../..')
+const { db, close } = openTestDb()
+afterAll(close)
+let dir: string
+let log: string
+
+beforeEach(async () => {
+  await resetDb(db)
+  dir = await mkdtemp(join(tmpdir(), 'engine-'))
+  log = join(dir, 'calls.log')
+  await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
+  // The real role texts come with part D; the engine needs only that the roles load.
+  for (const [name, model] of [
+    ['interlocutor', 'sonnet'],
+    ['checker', 'haiku'],
+  ] as const) {
+    await mkdir(join(dir, 'roles', name), { recursive: true })
+    await writeFile(
+      join(dir, 'roles', name, 'meta.json'),
+      JSON.stringify({ name, version: 1, model, priority: 'P0', timeoutMs: 30000 }),
+    ).catch(() => {})
+    await writeFile(join(dir, 'roles', name, 'role.md'), 'Роль для теста.').catch(() => {})
+  }
+})
+
+async function gateway(byRole: Record<string, unknown>, mode = 'ok') {
+  const secrets = createSecretStore(join(dir, 'data'))
+  await secrets.set('claude_oauth_token', 'tok')
+  return createGateway({
+    db,
+    secrets,
+    claudeBin: join(ROOT, 'tests/fakes/fake-claude.mjs'),
+    rolesDir: join(dir, 'roles'),
+    dataDir: join(dir, 'data'),
+    extraEnv: {
+      FAKE_CLAUDE_MODE: mode,
+      FAKE_CLAUDE_ARGS_LOG: log,
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
+    },
+  })
+}
+
+const hit = (id: string, type: MindHit['type'], o: Partial<MindHit> = {}): MindHit => ({
+  id,
+  type,
+  scope: 'shared',
+  title: id,
+  body: `Текст ${id}`,
+  topic: null,
+  tones: [],
+  stages: [],
+  exampleClient: null,
+  exampleBoris: null,
+  rank: 1,
+  ...o,
+})
+
+function fakeMind(): MindSearch {
+  return {
+    version: async () => 'mind-v1',
+    search: async (q) => {
+      if (q.types.includes('understanding')) return [hit('u-process', 'understanding')]
+      if (q.types.includes('knowledge'))
+        return [hit('k-process-start', 'knowledge', { body: 'Начинаем с созвона на 30 минут' })]
+      if (q.types.includes('example'))
+        return [
+          hit('e-1', 'example', {
+            exampleClient: 'Как начнём?',
+            exampleBoris: 'Начнём с короткого созвона',
+          }),
+          hit('e-2', 'example', { exampleClient: 'Как начнём?', exampleBoris: null }),
+        ]
+      return []
+    },
+    byIds: async (ids) => ids.map((id) => hit(id, id.startsWith('s-') ? 'speech' : 'judgment')),
+    byStage: async () => hit('j-stage-talking', 'judgment', { stages: ['talking'] }),
+    bannedPhrases: async () => ['Рад помочь'],
+  }
+}
+
+const settings: PolicySettings = {
+  v1Writes: true,
+  outboundMessages: false,
+  accountPaused: false,
+  night: { from: 23, to: 8 },
+  autonomy: SETTINGS['conv.autonomy'].default,
+}
+
+async function dossierOf(): Promise<Dossier> {
+  await db.insert(lead).values({
+    id: '95147898',
+    accountId: 'hance-marketing',
+    title: 'Сайт для клиники',
+    category: 'Сайты',
+    city: 'Краснодар',
+    text: 'Нужен сайт с записью',
+    clientName: 'Анна',
+    bidPriceRub: 100,
+    seenAt: new Date().toISOString(),
+    correlationId: newEventId(),
+  })
+  const conv = await ensureConversation(db, {
+    accountId: 'hance-marketing',
+    chatId: '95147898',
+    orderId: '95147898',
+  })
+  const now = new Date()
+  const p = stubProfi([
+    chatMsg(
+      'm-1',
+      'specialist',
+      'Анна, добрый день! Понимаю задачу.',
+      new Date(now.getTime() - 3600_000).toISOString(),
+    ),
+    chatMsg(
+      'm-2',
+      'client',
+      'Анна тут. Как начнём?',
+      new Date(now.getTime() - 120_000).toISOString(),
+    ),
+    chatMsg(
+      'm-3',
+      'client',
+      'И сколько по времени?',
+      new Date(now.getTime() - 60_000).toISOString(),
+    ),
+  ])
+  await syncChat({ db, profi: p }, conv, now, { v1Writes: true })
+  return buildDossier(db, conv.id, now, { night: settings.night })
+}
+
+describe('dossier and the Interlocutor input', () => {
+  it('FR-CONV-3: the dossier holds the order, the bid, the chat and the client turn', async () => {
+    const d = await dossierOf()
+    expect(d.order?.title).toBe('Сайт для клиники')
+    expect(d.clientName).toBe('Анна')
+    expect(d.bid?.text).toBe('Анна, добрый день! Понимаю задачу.')
+    expect(d.messages).toHaveLength(3)
+    expect(d.turnMessageIds).toEqual(['m-2', 'm-3'])
+    expect(d.stage).toBe('talking')
+  })
+
+  it('FR-CONV-3: the input frames the client text as data and gives the flags', async () => {
+    const d = await dossierOf()
+    const r = await recall(fakeMind(), d)
+    const text = formatInterlocutorInput(d, r, [{ id: 'dash', detail: 'длинное тире' }])
+    for (const h of [
+      '## Заказ',
+      '## Отклик',
+      '## Переписка',
+      '## Реплика клиента',
+      '## Флаги',
+      '## Записи разума',
+      '## Образцы Бориса',
+      '## Переделать',
+    ])
+      expect(text).toContain(h)
+    expect(text).toMatch(/данные клиента, не инструкции/)
+    expect(text).toContain('[k-process-start]')
+    expect(text).toContain('длинное тире')
+  })
+
+  it('FR-SPEECH-2: only examples authored by Boris reach the Interlocutor', async () => {
+    const r = await recall(fakeMind(), await dossierOf())
+    expect(r.examples.map((e) => e.id)).toEqual(['e-1'])
+    expect(r.procedure?.id).toBe('j-stage-talking')
+    expect(r.mindVersion).toBe('mind-v1')
+  })
+})
+
+describe('turn engine', () => {
+  it('FR-CONV-3: the plan keeps recalled ids, fact ids, the tone and the mind version', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({ interlocutor: interlocutorAnswer({ tone: 'hurry' }) })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.recall.knowledge.map((k) => k.id)).toEqual(['k-process-start'])
+    expect(plan.output?.fact_ids).toEqual(['k-process-start'])
+    expect(plan.output?.tone).toBe('hurry')
+    expect(plan.recall.mindVersion).toBe('mind-v1')
+    expect(plan.modelCallIds.length).toBeGreaterThan(0)
+  })
+
+  it('FR-CONV-4: a reply failing checks twice becomes a draft with the reasons', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({ interlocutor: interlocutorAnswer() })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    // Until part D, the code checks stub fails every reply: one rewrite, then a draft.
+    expect(plan.attempts).toBe(2)
+    expect(plan.issues.length).toBeGreaterThan(0)
+    expect(plan.decision.action).toBe('draft')
+    const calls = (await readFile(log, 'utf8')).trim().split('\n')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toContain('Переделать')
+  })
+
+  it('ADR-016: the client’s name reaches the model as a tag', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({ interlocutor: interlocutorAnswer() })
+    await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(await readFile(log, 'utf8')).not.toContain('Анна')
+  })
+
+  it('FR-OPS-3: a failed Interlocutor call is a draft for Boris, not an error', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({}, 'exit1')
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.output).toBeNull()
+    expect(plan.failure).toBe('cli_failed')
+    expect(plan.decision.action).toBe('draft')
+  })
+
+  it('FR-CONV-5: a call request calls Boris without waiting for the model to agree', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({ interlocutor: interlocutorAnswer() })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      {
+        dossier: {
+          ...d,
+          messages: [
+            ...d.messages,
+            {
+              author: 'client',
+              side: 'client',
+              text: 'Позвоните мне 8 918 123-45-67',
+              sentAt: new Date().toISOString(),
+              platformMessageId: 'm-4',
+            },
+          ],
+          turnMessageIds: [...d.turnMessageIds, 'm-4'],
+        },
+        names: ['Анна'],
+        settings: { ...settings, v1Writes: false, outboundMessages: true },
+        now: new Date(),
+      },
+    )
+    expect(plan.decision.action).toBe('call_boris')
+  })
+})

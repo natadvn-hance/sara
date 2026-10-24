@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@sara/shared'
+import type { ChatMessage, InterlocutorOutput } from '@sara/shared'
 import type { ProfiClient } from '../../src/profi/client'
 
 /** A Profi client whose chat is an array the test changes between reads. */
@@ -26,4 +26,22 @@ export function chatMsg(
   chatId = '95147898',
 ): ChatMessage {
   return { platform_message_id: id, chat_id: chatId, author, sent_at: at, text, read: true }
+}
+
+/** A full Interlocutor answer: a reply on the process with one fact. */
+export function interlocutorAnswer(o: Partial<InterlocutorOutput> = {}): InterlocutorOutput {
+  return {
+    heard: { said: 'Спросила, как начинаем', behind: 'Хочет понять первый шаг' },
+    question_type: 'u-process',
+    topic: 'process',
+    tone: 'neutral',
+    move: 'reply',
+    urgent: false,
+    why: 'Порядок работы есть в разуме',
+    text: 'Начинаем с короткого созвона, чтобы понять задачу. Удобно завтра?',
+    fact_ids: ['k-process-start'],
+    example_ids: [],
+    missing: null,
+    ...o,
+  }
 }
