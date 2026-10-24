@@ -59,6 +59,12 @@ export const lead = core.table('lead', {
   status: text('status').notNull().default('new'),
   correlationId: uuid('correlation_id').notNull(),
   createdAt: ts('created_at').notNull().defaultNow(),
+  /** The bid text with its greeting (FR-LEAD-6): the Analyst's draft or Boris's edit; null: none yet. */
+  draftText: text('draft_text'),
+  /** The «Стоимость услуги» for the bid form; null leaves the field empty. */
+  draftPriceRub: integer('draft_price_rub'),
+  /** The Analyst's reading of the order and its short разбор (hidden need, risk, condition); null: none. */
+  draftAnalysis: jsonb('draft_analysis'),
 })
 
 export const account = core.table('account', {

@@ -10,11 +10,17 @@ import { loadConfig } from '../../apps/core/src/config'
 import { deal, event, lead, outbox } from '../../apps/core/src/db/schema'
 import { confirmBid, resumeQueuedOutbox } from '../../apps/core/src/leads/outbox'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = '{"verdict":"fit","reason":"Нужен сайт","tags":["сайт"],"confidence":0.9}'
+const ANALYST = {
+  analyst: analystAnswer(
+    'Понимаю, клинике важно быстро начать запись.\n\nКогда хотите открыть запись онлайн?',
+  ),
+}
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram
@@ -34,7 +40,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 8000) {
 const settle = () => new Promise((r) => setTimeout(r, 1000))
 const cards = () => tg.sent.filter((m) => m.reply_markup)
 const lastCardData = (action: 'bid' | 'skip') => {
-  const kb = cards().at(-1)?.reply_markup?.inline_keyboard[0] ?? []
+  const kb = cards().at(-1)?.reply_markup?.inline_keyboard.flat() ?? []
   return kb.find((b) => b.callback_data.endsWith(`:${action}`))?.callback_data ?? ''
 }
 async function eventTypesOf(id: string): Promise<string[]> {
@@ -78,7 +84,11 @@ beforeAll(async () => {
     telegramApiRoot: tg.apiRoot,
   }
   app = await startApp(config, {
-    claudeEnv: () => ({ FAKE_CLAUDE_MODE: claudeMode, FAKE_CLAUDE_OUTPUT: FIT }),
+    claudeEnv: () => ({
+      FAKE_CLAUDE_MODE: claudeMode,
+      FAKE_CLAUDE_OUTPUT: FIT,
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(ANALYST),
+    }),
     retryDelaysMs: [50, 50, 50, 50, 50],
     learningTickMs: 3_600_000,
     remindAfterMs: async () => remindMs,
@@ -117,12 +127,16 @@ describe('walking skeleton', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Подходит: Нужен сайт')
+    await until(async () => (await eventTypesOf(id)).includes('card.sent'))
     expect(await eventTypesOf(id)).toEqual([
       'profi.order_seen',
       'lead.found',
       'model.called',
+      'model.called',
+      'lead.drafted',
       'lead.sorted',
       'task.created',
+      'card.sent',
     ])
   })
 
@@ -133,7 +147,7 @@ describe('walking skeleton', () => {
     tg.pushPress(111, lastCardData('bid'))
     await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
     expect(fake.bids).toHaveLength(1)
-    expect(fake.bids[0]?.text).toMatch(/^Добрый день!/)
+    expect(fake.bids[0]?.text).toMatch(/^Ирина, добрый день!\n\nПонимаю, клинике/)
     expect(fake.bids[0]?.idempotency_key).toBe(`bid:${id}`)
     expect(await count('bid.sent')).toBe(1)
     const [d] = await db.select().from(deal).where(eq(deal.leadId, id))
@@ -165,7 +179,8 @@ describe('walking skeleton', () => {
     await fake.emitOrder({ order_id: orderId() })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Сортировщик не ответил, проверь сам')
-    expect(await count('model.failed')).toBe(1)
+    // The Sorter and the Analyst both failed; the card still came.
+    expect(await count('model.failed')).toBe(2)
   })
 
   it('FR-LEAD-1: two events with the same order number give one lead and one card', async () => {

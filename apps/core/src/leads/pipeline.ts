@@ -1,6 +1,12 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type EventEnvelope, newEventId, ProfiOrder, type TaskAction } from '@sara/shared'
-import { and, desc, eq } from 'drizzle-orm'
+import {
+  AnalystOutput,
+  type EventEnvelope,
+  newEventId,
+  ProfiOrder,
+  type TaskAction,
+} from '@sara/shared'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
 import { activeRules } from '../direction/store'
@@ -8,7 +14,13 @@ import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import { recordLabel } from '../learning/labels'
 import { onProposalPress } from '../learning/proposals'
-import { askWhy } from '../learning/questions'
+import {
+  askForDraft,
+  askWhy,
+  closeDraftRequests,
+  type DraftAnswer,
+  markAnswered,
+} from '../learning/questions'
 import type { LeadCard } from '../notify/cards'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
@@ -16,6 +28,15 @@ import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
+import {
+  BID_TEXT_MAX,
+  bodyOf,
+  type Draft,
+  type DraftMiss,
+  type DraftSource,
+  editOf,
+  writeDraft,
+} from './draft'
 import { readWallet, refuseSpend } from './money'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
@@ -37,6 +58,8 @@ export type LeadPipeline = {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onReminder(taskId: string): Promise<void>
   resendCard(taskId: string): Promise<void>
+  /** Boris's answer to the request after «Изменить»: the new bid text; the reply goes back to him. */
+  onDraftText(a: DraftAnswer): Promise<string>
 }
 
 /** Database steps may hit a passing database error; they are safe to repeat. */
@@ -48,10 +71,6 @@ function d(): LeadPipelineDeps {
   return deps
 }
 
-export function bidText(title: string): string {
-  return `Добрый день! Агентство Hance, готовы помочь с задачей «${title}». Расскажите, пожалуйста, подробнее.`
-}
-
 const ev = (
   type:
     | 'lead.found'
@@ -60,9 +79,12 @@ const ev = (
     | 'lead.skipped'
     | 'lead.stale'
     | 'lead.held'
+    | 'lead.drafted'
+    | 'draft.edited'
     | 'task.created'
     | 'task.resolved'
-    | 'task.reminded',
+    | 'task.reminded'
+    | 'card.sent',
   entity: { kind: string; id: string },
   correlationId: string,
   actor: 'sara' | 'boris',
@@ -82,6 +104,85 @@ const ev = (
 })
 
 type Sorted = { verdict: 'fit' | 'maybe' | 'reject' | null; reason: string | null }
+type LeadRow = typeof lead.$inferSelect
+
+const sourceOf = (l: LeadRow): DraftSource => ({
+  title: l.title,
+  category: l.category,
+  city: l.city,
+  budget_text: l.budgetText,
+  text: l.text,
+  client_name: l.clientName,
+})
+
+/** The Analyst's draft, or why there is none; any failure is «no answer», the card comes anyway. */
+async function draftFor(
+  o: DraftSource,
+  opts: { correlationId: string; causationId?: string },
+): Promise<Draft | DraftMiss> {
+  try {
+    return await writeDraft(d().gateway, o, opts)
+  } catch (err) {
+    console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
+    return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
+  }
+}
+
+/** The draft goes on the lead (one there already, Boris's edit, is kept) and its outcome into the journal. */
+function storeDraft(
+  l: { id: string; correlationId: string },
+  dr: Draft | DraftMiss,
+): Promise<void> {
+  return d().db.transaction(async (tx) => {
+    if (dr.text !== null) {
+      await tx
+        .update(lead)
+        .set({ draftText: dr.text, draftPriceRub: dr.priceRub })
+        .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
+    }
+    // The reading stays even when its text did not fit: it is about the client, not the wording.
+    if (dr.analysis) {
+      await tx
+        .update(lead)
+        .set({ draftAnalysis: dr.analysis })
+        .where(and(eq(lead.id, l.id), isNull(lead.draftAnalysis)))
+    }
+    await appendEvent(
+      tx,
+      ev('lead.drafted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', draftedPayload(dr)),
+    )
+  })
+}
+
+/** The journal keeps how the draft went, never its text (ADR-016). */
+const draftedPayload = (dr: Draft | DraftMiss) =>
+  dr.text !== null
+    ? {
+        drafted: true,
+        analysis: true,
+        chars: dr.text.length,
+        price_rub: dr.priceRub,
+        attempts: dr.attempts,
+        reason: null,
+      }
+    : {
+        drafted: false,
+        analysis: dr.analysis !== null,
+        chars: null,
+        price_rub: null,
+        attempts: dr.attempts,
+        reason: dr.reason,
+      }
+
+const CardAnalysis = AnalystOutput.pick({ hidden_need: true, risk: true, condition: true })
+
+/** The card's two lines of the разбор, from the draft or the lead's stored reading (null: none, or unreadable). */
+function cardAnalysis(a: unknown): LeadCard['analysis'] {
+  const r = CardAnalysis.safeParse(a)
+  return r.success
+    ? { hiddenNeed: r.data.hidden_need, risk: r.data.risk, condition: r.data.condition }
+    : null
+}
 
 /** One order, one durable run (workflow id lead:<order>): record, sort, card, wait for Boris. */
 async function processOrder(e: EventEnvelope): Promise<void> {
@@ -218,6 +319,19 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (scored.decision === 'drop') return
   }
 
+  // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.
+  const draft = (await DBOS.patch('analyst-draft'))
+    ? await DBOS.runStep(() => draftFor(order, { correlationId, causationId: e.id }), {
+        name: 'draft',
+      })
+    : null
+  if (draft) {
+    await DBOS.runStep(() => storeDraft({ id: order.order_id, correlationId }, draft), {
+      name: 'drafted',
+      ...DB_STEP,
+    })
+  }
+
   // Runs recorded before M2 return the id; null is an order held over the day's card cap (FR-NOTIF-3).
   const taskId = await DBOS.runStep(
     (): Promise<string | null> =>
@@ -270,6 +384,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     bidPriceRub: order.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
+    draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
+    analysis: cardAnalysis(draft?.analysis),
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
   try {
@@ -277,7 +393,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       async () => {
         const silent = await quietNow(d().db, new Date())
         const m = await d().notifier.sendLeadCard(card, { silent })
-        await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, taskId))
+        await cardSent(taskId, correlationId, m.messageId, 'order')
       },
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
     )
@@ -335,7 +451,92 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
     bidPriceRub: found.lead.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
     reminder,
+    draft: found.lead.draftText
+      ? { text: found.lead.draftText, priceRub: found.lead.draftPriceRub }
+      : null,
+    analysis: cardAnalysis(found.lead.draftAnalysis),
   }
+}
+
+/**
+ * A card went out: the task keeps the new message (the one Boris sees last) and the journal the moment, which
+ * the speed report reads for the order's own card (via 'order').
+ */
+function cardSent(
+  taskId: string,
+  correlationId: string,
+  messageId: number,
+  via: 'order' | 'summary' | 'edit',
+): Promise<void> {
+  return d().db.transaction(async (tx) => {
+    await tx.update(task).set({ telegramMessageId: messageId }).where(eq(task.id, taskId))
+    await appendEvent(
+      tx,
+      ev('card.sent', { kind: 'task', id: taskId }, correlationId, 'sara', { via }),
+    )
+  })
+}
+
+/** The card of an open task, sent now. */
+async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> {
+  const card = await cardOfTask(taskId, false)
+  const found = card ? await leadOfTask(taskId) : null
+  if (card && found) {
+    const m = await d().notifier.sendLeadCard(card)
+    await cardSent(taskId, found.lead.correlationId, m.messageId, via)
+  }
+}
+
+/** A dropped order Boris wants after all: its draft first (the Scorer's drop wrote none), then its card. */
+async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
+  if (!l.draftText)
+    await storeDraft(l, await draftFor(sourceOf(l), { correlationId: l.correlationId }))
+  await sendCard(taskId, 'summary')
+}
+
+/** «Изменить»: Sara asks for the new text; the card stays as it is until the text comes. */
+async function onEdit(taskId: string): Promise<string> {
+  const found = await leadOfTask(taskId)
+  if (found?.task.kind !== 'lead_decision' || found.task.state !== 'open') return TEXTS.alreadyDone
+  await askForDraft(d(), { taskId, title: found.lead.title }, new Date())
+  return TEXTS.waitingDraft
+}
+
+/**
+ * The new bid text: the same greeting and length rules as the Analyst's, then an updated card. The edit is
+ * journaled (draft.edited, before and after) without the greeting, so no client name reaches the journal.
+ */
+async function onDraftText(a: DraftAnswer): Promise<string> {
+  const found = await leadOfTask(a.question.entityId)
+  if (found?.task.state !== 'open') {
+    // Decided meanwhile: the requests are closed so a later message does not land on them.
+    await d().db.transaction(async (tx) => {
+      await markAnswered(tx, a.question, a)
+      await closeDraftRequests(tx, a.question.entityId, a.at)
+    })
+    return TEXTS.draftLate
+  }
+  const { lead: l, task: t } = found
+  const next = editOf(a.text, l.clientName)
+  // Too long: the request stays open, the next text answers it.
+  if (next.length > BID_TEXT_MAX) return TEXTS.draftTooLong(next.length)
+  const saved = await d().db.transaction(async (tx) => {
+    if (!(await markAnswered(tx, a.question, a))) return false
+    await closeDraftRequests(tx, t.id, a.at)
+    await tx.update(lead).set({ draftText: next }).where(eq(lead.id, l.id))
+    await appendEvent(
+      tx,
+      ev('draft.edited', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
+        before: l.draftText === null ? null : bodyOf(l.draftText),
+        after: bodyOf(next),
+        voice: a.voice,
+      }),
+    )
+    return true
+  })
+  if (!saved) return TEXTS.alreadyDone
+  await sendCard(t.id, 'edit')
+  return TEXTS.draftSaved
 }
 
 /**
@@ -379,10 +580,15 @@ async function bringCard(
   })
   if (!resolved) return null
   await startDecisionWait(decisionId, await d().remindAfterMs())
-  const card = await cardOfTask(decisionId, false)
-  if (card) {
-    const m = await d().notifier.sendLeadCard(card)
-    await d().db.update(task).set({ telegramMessageId: m.messageId }).where(eq(task.id, decisionId))
+  if (action === 'open') {
+    // A held order got its draft before its task: the card goes at once.
+    await sendCard(decisionId, 'summary')
+  } else {
+    // A dropped order has no draft yet: the press is answered now, the card follows its draft (a reminder brings
+    // it back if this fails).
+    void draftThenCard(l, decisionId).catch((err) =>
+      console.error('want card failed', err instanceof Error ? err.message.slice(0, 200) : err),
+    )
   }
   return l
 }
@@ -409,7 +615,7 @@ async function onOpen(heldId: string): Promise<string> {
     isStale(found.lead.seenAt, new Date())
   )
     return CARD_FLOW_TEXTS.staleHeld
-  return (await bringCard(heldId, 'lead_held', 'open')) ? TEXTS.wantCard : TEXTS.alreadyDone
+  return (await bringCard(heldId, 'lead_held', 'open')) ? TEXTS.cardSent : TEXTS.alreadyDone
 }
 
 /**
@@ -443,6 +649,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     async onPress({ taskId, action }) {
       if (action === 'want') return onWant(taskId)
       if (action === 'open') return onOpen(taskId)
+      if (action === 'edit') return onEdit(taskId)
       if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)
@@ -452,8 +659,11 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       let wallet: number | null = null
       if (action === 'bid' && found.task.state === 'open') {
         if (!(await getSetting(d().db, 'outbound.bids'))) return TEXTS.bidsPausedPress
+        // No text to send yet: the card waits for «Изменить», and the wallet need not be read.
+        if (l.draftText === null) return TEXTS.noDraft
         wallet = await readWallet(d().profi, l.accountId)
       }
+      const text = l.draftText
       let outboxId: string | null = null
       let refusal: string | null = null
       const resolved = await d()
@@ -484,15 +694,18 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
               ev('lead.skipped', { kind: 'lead', id: l.id }, l.correlationId, 'boris'),
             )
           } else {
+            // Checked above; should the draft be gone, the whole decision rolls back rather than bid without it.
+            if (text === null) throw new Error('a bid without its text')
             // Boris's decision and the intent to bid commit together: a crash cannot lose one of them.
             outboxId = (
               await recordBid(tx, {
                 leadId: l.id,
                 accountId: l.accountId,
-                text: bidText(l.title),
+                text,
                 correlationId: l.correlationId,
                 title: l.title,
                 priceRub: l.bidPriceRub,
+                servicePriceRub: l.draftPriceRub,
                 taskId,
               })
             ).outboxId
@@ -534,5 +747,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (card)
         await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
     },
+
+    onDraftText,
   }
 }

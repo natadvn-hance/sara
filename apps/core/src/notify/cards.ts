@@ -13,6 +13,10 @@ export type LeadCard = {
   unscored?: boolean
   /** The same card again as a reminder, with the buttons, so Boris can act on it. */
   reminder?: boolean
+  /** The bid text with its greeting and the «Стоимость услуги» (FR-LEAD-6); none: the Analyst did not answer. */
+  draft?: { text: string; priceRub: number | null } | null
+  /** The Analyst's short разбор of the order: what the client really needs, the main risk, the condition. */
+  analysis?: { hiddenNeed: string; risk: string; condition: string } | null
 }
 
 const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
@@ -49,7 +53,8 @@ export const TEXTS = {
   summaryHead: (n: number) => `Сегодня отсеяла ${orders(n)}. На грани:`,
   summaryNone: (n: number) => `Сегодня отсеяла ${orders(n)}, пограничных не было`,
   wantButton: (n: number) => `Взял бы №${n}`,
-  wantCard: 'Прислала карточку заявки',
+  wantCard: 'Пишу черновик, пришлю карточку',
+  cardSent: 'Прислала карточку заявки',
   proposal: (
     from: number,
     summary: string,
@@ -68,6 +73,15 @@ export const TEXTS = {
   applied: (v: number) => `Применила, теперь правила v${v}`,
   kept: (v: number) => `Хорошо, оставляю v${v}`,
   proposalStale: 'Правила уже поменялись, предложение устарело',
+  editButton: 'Изменить',
+  askDraft: (title: string) =>
+    `Пришли новый текст отклика на «${title}» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама.`,
+  waitingDraft: 'Жду новый текст отклика',
+  noDraft: 'Сначала нажми «Изменить» и пришли текст отклика',
+  draftTooLong: (n: number) =>
+    `С приветствием выходит ${n} ${plural(n, ['знак', 'знака', 'знаков'])}, а Профи.ру принимает до 500. Пришли текст короче.`,
+  draftSaved: 'Записала новый текст отклика',
+  draftLate: 'Заявка уже решена, текст не поменяла',
 }
 
 function verdictLine(c: LeadCard): string {
@@ -83,7 +97,22 @@ export function leadCardText(c: LeadCard): string {
   const why = c.score
     ? [`Балл ${c.score.value} (правила v${c.score.version}). ${c.score.reason}`]
     : [verdictLine(c), ...(c.unscored ? ['Без оценки: Оценщик не ответил'] : [])]
-  return [head, ...why, `Отклик ${formatRub(c.bidPriceRub)}`].join('\n')
+  const draft = c.draft
+    ? [
+        'Черновик отклика:',
+        c.draft.text,
+        '',
+        `Стоимость услуги: ${c.draft.priceRub ? formatRub(c.draft.priceRub) : 'не указана'}`,
+      ]
+    : ['Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст.']
+  const analysis = c.analysis
+    ? [
+        `Разбор: ${c.analysis.hiddenNeed}`,
+        `Риск: ${c.analysis.risk}. Условие: ${c.analysis.condition}`,
+        '',
+      ]
+    : []
+  return [head, ...why, `Отклик ${formatRub(c.bidPriceRub)}`, '', ...analysis, ...draft].join('\n')
 }
 
 export function leadCardKeyboard(c: LeadCard) {
@@ -94,6 +123,9 @@ export function leadCardKeyboard(c: LeadCard) {
           text: `Откликнуться за ${formatRub(c.bidPriceRub)}`,
           callback_data: formatCallback(c.taskId, 'bid'),
         },
+      ],
+      [
+        { text: TEXTS.editButton, callback_data: formatCallback(c.taskId, 'edit') },
         { text: 'Пропустить', callback_data: formatCallback(c.taskId, 'skip') },
       ],
     ],

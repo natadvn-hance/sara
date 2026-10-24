@@ -1,0 +1,8 @@
+{
+  "name": "analyst",
+  "version": 1,
+  "model": "sonnet",
+  "fallbackModel": "opus",
+  "priority": "P1",
+  "timeoutMs": 120000
+}

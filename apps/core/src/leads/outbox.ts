@@ -34,7 +34,10 @@ export type BidPayload = {
   text: string
   correlationId: string
   title: string
+  /** What the bid itself costs on Profi.ru. */
   priceRub: number
+  /** The «Стоимость услуги» typed into the form; null or absent (rows from before M2) leaves it empty. */
+  servicePriceRub?: number | null
   taskId?: string
 }
 
@@ -244,6 +247,7 @@ async function deliver(outboxId: string): Promise<void> {
             account_id: p.accountId,
             order_id: p.leadId,
             text: p.text,
+            price_rub: p.servicePriceRub ?? null,
             idempotency_key: row.idempotencyKey,
           })
           return { kind: 'ok', spent: r.spent_rub, balanceAfter: r.balance_after_rub }

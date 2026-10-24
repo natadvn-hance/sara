@@ -36,7 +36,8 @@ describe('speed report', () => {
     // Pressed while paused (given back), pressed again 10 minutes later, sent 20 seconds after that.
     await journal([
       { type: 'lead.found', sec: 0 },
-      { type: 'task.created', sec: 30 },
+      { type: 'task.created', sec: 25 },
+      { type: 'card.sent', sec: 30, payload: { via: 'order' } },
       { type: 'task.resolved', sec: 60, payload: { action: 'bid' } },
       { type: 'bid.failed', sec: 61, payload: { reason: 'paused' } },
       { type: 'task.resolved', sec: 660, payload: { action: 'bid' } },
@@ -53,6 +54,28 @@ describe('speed report', () => {
     await journal([
       { type: 'lead.found', sec: 0 },
       { type: 'task.created', sec: 8 * 3600, payload: { via: 'summary' } },
+      { type: 'card.sent', sec: 8 * 3600 + 1, payload: { via: 'summary' } },
+    ])
+    expect((await speedReport(db)).leadToCard.count).toBe(0)
+  })
+
+  it('FR-ANL-3: lead to card runs to the card really sent, not to its task', async () => {
+    // The task at 40 s, the card left 25 s later (Telegram slow), an edited card after that.
+    await journal([
+      { type: 'lead.found', sec: 0 },
+      { type: 'task.created', sec: 40 },
+      { type: 'card.sent', sec: 65, payload: { via: 'order' } },
+      { type: 'card.sent', sec: 300, payload: { via: 'edit' } },
+    ])
+    const r = await speedReport(db)
+    expect(r.leadToCard.count).toBe(1)
+    expect(r.leadToCard.p50Ms).toBe(65_000)
+  })
+
+  it('FR-ANL-3: an order whose card never went out has no lead-to-card time', async () => {
+    await journal([
+      { type: 'lead.found', sec: 0 },
+      { type: 'task.created', sec: 40 },
     ])
     expect((await speedReport(db)).leadToCard.count).toBe(0)
   })

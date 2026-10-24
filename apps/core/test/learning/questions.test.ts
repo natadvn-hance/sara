@@ -4,7 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { leadLabel, question } from '../../src/db/schema'
 import { seedDirection } from '../../src/direction/store'
 import { recordLabel } from '../../src/learning/labels'
-import { answerQuestion, askWhy } from '../../src/learning/questions'
+import { answerQuestion, askForDraft, askWhy } from '../../src/learning/questions'
 import type { Notifier } from '../../src/notify/notifier'
 import { openTestDb, resetDb } from '../helpers/db'
 import { leadWithScore } from '../helpers/learning'
@@ -71,6 +71,37 @@ describe('questions', () => {
         at(24 * 60),
       ),
     ).toBe(true)
+  })
+
+  it('FR-LEAD-7: a request for a new bid text never takes a place of the 3 daily «почему?»', async () => {
+    await askForDraft({ db, notifier }, { taskId: newEventId(), title: 'Сайт' }, NOW)
+    await askForDraft({ db, notifier }, { taskId: newEventId(), title: 'Сайт' }, NOW)
+    expect(sent).toEqual([
+      'Пришли новый текст отклика на «Сайт» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама.',
+      'Пришли новый текст отклика на «Сайт» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама.',
+    ])
+    const asked = []
+    for (const id of ['910051', '910052', '910053', '910054']) {
+      await leadWithScore(db, id, 80)
+      asked.push(
+        await askWhy({ db, notifier }, { kind: 'why_skip', entityId: id, title: 'Т' }, NOW),
+      )
+    }
+    expect(asked).toEqual([true, true, true, false])
+    expect(await db.select().from(question).where(eq(question.kind, 'edit_draft'))).toHaveLength(2)
+  })
+
+  it('FR-LEAD-7: a request for a new bid text Telegram did not take leaves no question', async () => {
+    const broken: Notifier = {
+      ...notifier,
+      sendText: async () => {
+        throw new Error('telegram down')
+      },
+    }
+    await expect(
+      askForDraft({ db, notifier: broken }, { taskId: newEventId(), title: 'Сайт' }, NOW),
+    ).rejects.toThrow('telegram down')
+    expect(await db.select().from(question)).toHaveLength(0)
   })
 
   it('FR-LEAD-7: two surprises at once after two questions make one more question, not two', async () => {

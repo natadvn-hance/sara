@@ -65,6 +65,9 @@
 | | `seen_at` | timestamptz | Н | когда замечен |
 | | `routed_direction_id` | text | Н | выбранное направление |
 | | `status` | enum `new`, `sorted_out`, `queued`, `decided`, `bid_sent`, `skipped`, `expired` | Н | судьба заявки |
+| | `draft_text` | text | П | текст отклика с приветствием: черновик Аналитика или правка Бориса; null, пока черновика нет (FR-LEAD-6) |
+| | `draft_price_rub` | int | Н | «Стоимость услуги» в отклике; null: поле остаётся пустым |
+| | `draft_analysis` | jsonb | П | разбор Аналитика: шаги чтения заказа (`reading`: явное, неявные слои, чего хочет, кто это, риски, работа для нас) и короткий итог (`hidden_need`, `risk`, `condition`); null: разбора нет |
 | `lead_score` | `lead_id`, `direction_id`, `scoring_version_id`, `gates_passed` (bool), `score` (0-100), `reasons` (jsonb), `confidence`, `model_call_id` | | Н | оценка заявки направлением |
 | `deal` | `id` | uuid | Н | клиент после отклика |
 | | `lead_id`, `account_id`, `direction_id` | | Н | связи |

@@ -1,20 +1,25 @@
 import { newEventId } from '@sara/shared'
-import { and, desc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm'
-import type { Db } from '../db/client'
+import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import type { Db, DbOrTx } from '../db/client'
 import { leadLabel, question } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 
-export type QuestionKind = 'why_skip' | 'why_want' | 'why_decline'
+/** The «почему?» kinds, and edit_draft: Sara's request for a new bid text after «Изменить» (entity: the task). */
+export type QuestionKind = 'why_skip' | 'why_want' | 'why_decline' | 'edit_draft'
 export type QuestionRow = typeof question.$inferSelect
+/** Boris's words that answer an edit_draft request. */
+export type DraftAnswer = { question: QuestionRow; text: string; voice: boolean; at: Date }
+
+const WHY_KINDS: QuestionKind[] = ['why_skip', 'why_want', 'why_decline']
 
 /** At most this many «почему?» a Moscow day, so Sara never floods Boris with questions. */
 export const QUESTIONS_PER_DAY = 3
 /** A message without a reply answers the latest open question this recent. */
 const ANSWER_WINDOW_MS = 30 * 60_000
 
-const textOf = (kind: QuestionKind, title: string) =>
+const textOf = (kind: Exclude<QuestionKind, 'edit_draft'>, title: string) =>
   kind === 'why_skip'
     ? TEXTS.whySkip(title)
     : kind === 'why_want'
@@ -24,7 +29,7 @@ const textOf = (kind: QuestionKind, title: string) =>
 /** Asks Boris why, unless today's questions are used up (then the surprise stays without a reason). */
 export async function askWhy(
   d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
-  q: { kind: QuestionKind; entityId: string; title: string },
+  q: { kind: Exclude<QuestionKind, 'edit_draft'>; entityId: string; title: string },
   now: Date,
 ): Promise<boolean> {
   const id = newEventId()
@@ -35,7 +40,10 @@ export async function askWhy(
       .select({ n: sql<number>`count(*)::int` })
       .from(question)
       .where(
-        sql`(${question.askedAt} at time zone 'Europe/Moscow')::date = (${now.toISOString()}::timestamptz at time zone 'Europe/Moscow')::date`,
+        and(
+          inArray(question.kind, WHY_KINDS),
+          sql`(${question.askedAt} at time zone 'Europe/Moscow')::date = (${now.toISOString()}::timestamptz at time zone 'Europe/Moscow')::date`,
+        ),
       )
     if (n >= QUESTIONS_PER_DAY) return false
     await tx
@@ -44,11 +52,39 @@ export async function askWhy(
     return true
   })
   if (!reserved) return false
+  await send(d, id, textOf(q.kind, q.title), { kind: q.kind, entityId: q.entityId }, now)
+  return true
+}
+
+/**
+ * After «Изменить»: asks for the new bid text. It is Boris's own request, so it never counts toward the day's
+ * «почему?»; a reply to it (or the next message within 30 minutes) becomes the draft, not a reason.
+ */
+export async function askForDraft(
+  d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
+  q: { taskId: string; title: string },
+  now: Date,
+): Promise<void> {
+  const id = newEventId()
+  await d.db
+    .insert(question)
+    .values({ id, kind: 'edit_draft', entityId: q.taskId, askedAt: now.toISOString() })
+  await send(d, id, TEXTS.askDraft(q.title), { kind: 'edit_draft', entityId: q.taskId }, now)
+}
+
+/** Sends a question whose row is already taken; a send that fails removes the row, so it answers nothing. */
+async function send(
+  d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
+  id: string,
+  text: string,
+  q: { kind: QuestionKind; entityId: string },
+  now: Date,
+): Promise<void> {
   let m: { messageId: number }
   try {
-    m = await d.notifier.sendText(textOf(q.kind, q.title))
+    m = await d.notifier.sendText(text)
   } catch (e) {
-    // Not asked: the place goes back to the day.
+    // Not asked: the row goes, so it takes no place of the day and answers nothing.
     await d.db.delete(question).where(eq(question.id, id))
     throw e
   }
@@ -65,7 +101,6 @@ export async function askWhy(
     reason: null,
     payload: { kind: q.kind, entity_id: q.entityId },
   })
-  return true
 }
 
 /**
@@ -77,6 +112,17 @@ export async function answerQuestion(
   db: Db,
   a: { text: string; replyToMessageId: number | null; voice: boolean; at: Date },
 ): Promise<{ question: QuestionRow } | null> {
+  const q = await openQuestion(db, a)
+  if (!q) return null
+  const answered = await db.transaction((tx) => markAnswered(tx, q, a))
+  return answered ? { question: { ...q, answeredAt: a.at.toISOString(), answer: a.text } } : null
+}
+
+/** The open question Boris's words answer: the one he replied to, or the latest sent in the last 30 minutes. */
+export async function openQuestion(
+  db: Db,
+  a: { replyToMessageId: number | null; at: Date },
+): Promise<QuestionRow | null> {
   const open = isNull(question.answeredAt)
   const [q] =
     a.replyToMessageId !== null
@@ -96,33 +142,52 @@ export async function answerQuestion(
           )
           .orderBy(desc(question.askedAt))
           .limit(1)
-  if (!q) return null
-  const answered = await db.transaction(async (tx) => {
-    const rows = await tx
-      .update(question)
-      .set({ answeredAt: a.at.toISOString(), answer: a.text })
-      .where(and(eq(question.id, q.id), open))
-      .returning({ id: question.id })
-    if (rows.length === 0) return false
-    if (q.kind === 'why_skip' || q.kind === 'why_want') {
-      await tx
-        .update(leadLabel)
-        .set({ reason: a.text, voice: a.voice })
-        .where(eq(leadLabel.leadId, q.entityId))
-    }
-    await appendEvent(tx, {
-      type: 'question.answered',
-      v: 1,
-      entity: { kind: 'question', id: q.id },
-      account_id: null,
-      actor: 'boris',
-      occurred_at: a.at.toISOString(),
-      causation_id: null,
-      correlation_id: newEventId(),
-      reason: null,
-      payload: { kind: q.kind, voice: a.voice },
-    })
-    return true
+  return q ?? null
+}
+
+/** Every open edit request of the task is closed: one text answers them all, a later message lands on none. */
+export async function closeDraftRequests(tx: DbOrTx, taskId: string, at: Date): Promise<void> {
+  await tx
+    .update(question)
+    .set({ answeredAt: at.toISOString() })
+    .where(
+      and(
+        eq(question.kind, 'edit_draft'),
+        eq(question.entityId, taskId),
+        isNull(question.answeredAt),
+      ),
+    )
+}
+
+/** Marks the question answered once, inside the caller's transaction; false when it already was. */
+export async function markAnswered(
+  tx: DbOrTx,
+  q: QuestionRow,
+  a: { text: string; voice: boolean; at: Date },
+): Promise<boolean> {
+  const rows = await tx
+    .update(question)
+    .set({ answeredAt: a.at.toISOString(), answer: a.text })
+    .where(and(eq(question.id, q.id), isNull(question.answeredAt)))
+    .returning({ id: question.id })
+  if (rows.length === 0) return false
+  if (q.kind === 'why_skip' || q.kind === 'why_want') {
+    await tx
+      .update(leadLabel)
+      .set({ reason: a.text, voice: a.voice })
+      .where(eq(leadLabel.leadId, q.entityId))
+  }
+  await appendEvent(tx, {
+    type: 'question.answered',
+    v: 1,
+    entity: { kind: 'question', id: q.id },
+    account_id: null,
+    actor: 'boris',
+    occurred_at: a.at.toISOString(),
+    causation_id: null,
+    correlation_id: newEventId(),
+    reason: null,
+    payload: { kind: q.kind, voice: a.voice },
   })
-  return answered ? { question: { ...q, answeredAt: a.at.toISOString(), answer: a.text } } : null
+  return true
 }

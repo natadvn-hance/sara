@@ -11,11 +11,14 @@ import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, outbox, task } from '../../apps/core/src/db/schema'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = '{"verdict":"fit","reason":"Нужен сайт","tags":["сайт"],"confidence":0.9}'
+/** The Analyst's draft, so «Откликнуться» has a text to send. */
+const ANALYST = { analyst: analystAnswer('Понимаю задачу.\n\nКогда запуск?', null) }
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram
@@ -35,7 +38,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 8000) {
 const settle = () => new Promise((r) => setTimeout(r, 1000))
 const cards = () => tg.sent.filter((m) => m.reply_markup)
 const lastCardData = (action: 'bid' | 'skip') => {
-  const kb = cards().at(-1)?.reply_markup?.inline_keyboard[0] ?? []
+  const kb = cards().at(-1)?.reply_markup?.inline_keyboard.flat() ?? []
   return kb.find((b) => b.callback_data.endsWith(`:${action}`))?.callback_data ?? ''
 }
 async function count(type: string): Promise<number> {
@@ -72,7 +75,11 @@ beforeAll(async () => {
       telegramApiRoot: tg.apiRoot,
     },
     {
-      claudeEnv: () => ({ FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT: FIT }),
+      claudeEnv: () => ({
+        FAKE_CLAUDE_MODE: 'ok',
+        FAKE_CLAUDE_OUTPUT: FIT,
+        FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(ANALYST),
+      }),
       retryDelaysMs: [50, 50, 50, 50, 50],
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
@@ -218,10 +225,13 @@ describe('the card flow', () => {
     await until(async () => (await eventTypesOf(held)).includes('lead.held'))
     await settle()
     expect(cards()).toHaveLength(1)
+    // The draft is written before the cap is checked, so «Показать» later brings the card ready.
     expect(await eventTypesOf(held)).toEqual([
       'profi.order_seen',
       'lead.found',
       'model.called',
+      'model.called',
+      'lead.drafted',
       'lead.sorted',
       'lead.held',
     ])
@@ -256,6 +266,7 @@ describe('held orders in the summary', () => {
     expect(tg.answers[0]?.text).toBe('Прислала карточку заявки')
     const card = tg.sent.at(-1)
     expect(card?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
+    expect(card?.text).toContain('Черновик отклика:\nИрина, добрый день!\n\nПонимаю задачу.')
     const [l] = await db.select().from(lead).where(eq(lead.id, held))
     expect(l?.status).toBe('queued')
     const decisions = await db.select().from(task).where(eq(task.entityId, held))

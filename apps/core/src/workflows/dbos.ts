@@ -19,6 +19,8 @@ export async function launchDbos(databaseUrl: string): Promise<void> {
     name: 'sara-core',
     systemDatabaseUrl: systemDatabaseUrl(databaseUrl),
     applicationVersion: WORKFLOW_VERSION,
+    // A new step goes behind DBOS.patch, so a run recorded before it resumes along its old steps.
+    enablePatching: true,
     logLevel: 'warn',
   })
   await DBOS.launch()
