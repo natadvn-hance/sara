@@ -175,6 +175,9 @@ export function analystInput(o: DraftSource, maxBody: number, profileText = ''):
     .join('\n')
 }
 
+/** The least room the model keeps for the text of a bid, whatever the cases would take. */
+const MIN_BODY = 150
+
 const chars = (n: number) => `${n} ${plural(n, ['знак', 'знака', 'знаков'])}`
 
 /**
@@ -189,10 +192,11 @@ export async function writeDraft(
   // The direction's own format and cases (FR-LEAD-6); with none the numbers and the input are what they always were.
   const profile: ReplyProfile = opts.profile ?? { reply_format: null, cases: [] }
   const ceiling = bidCeiling(profile)
-  const reserve = caseReserve(profile)
-  const room = ceiling - reserve
   const greeting = greetingOf(o.client_name)
-  const maxBody = room - greeting.length - 2
+  // The model is told a shorter limit by the room the cases may take, but never under what a bid needs; a text
+  // that fits the ceiling stays whole and the cases that do not fit are the ones left out.
+  const bodyCeiling = ceiling - greeting.length - 2
+  const maxBody = Math.max(Math.min(MIN_BODY, bodyCeiling), bodyCeiling - caseReserve(profile))
   const base = analystInput(o, maxBody, analystProfileText(profile))
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
@@ -211,9 +215,9 @@ export async function writeDraft(
     } else if (BRACKETED.test(body)) {
       reason = 'has_tag'
       input = `${base}\n\nВ прошлом варианте остались метки в квадратных скобках. Напиши текст без них, словами.`
-    } else if (text.length > room) {
+    } else if (text.length > ceiling) {
       reason = 'too_long'
-      input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${room}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
+      input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
     } else {
       // The program puts the links in: the model only named the ids, and only the library's count.
       const placed = placeCases(text, profile, r.output.case_ids ?? [])

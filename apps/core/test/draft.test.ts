@@ -418,15 +418,28 @@ describe('the Analyst reads the direction (FR-LEAD-6)', () => {
     expect(inputs[0]).toContain(`Длина текста: не больше ${479 - reserve} знаков`)
   })
 
-  it('FR-LEAD-6: a text longer than what is left after the cases room is asked once more', async () => {
+  it('FR-LEAD-6: a text that fits the ceiling but not the cases room is kept, and the cases that do not fit are left out', async () => {
     const reserve = 2 + 'Похожая работа: Сайт клиники, https://hance.example/cases/clinic'.length
-    const { gw, inputs } = stubGateway([
-      answer('а'.repeat(479 - reserve + 5)),
-      answer('Коротко. Когда запуск?'),
-    ])
+    const body = 'а'.repeat(479 - reserve + 5)
+    const { gw } = stubGateway([{ ...answer(body), case_ids: ['clinic_site'] }])
+    const d = await writeDraft(gw, await order(), { profile: PROFILE })
+    expect(d).toMatchObject({ attempts: 1, cases: [], text: `Ирина, добрый день!\n\n${body}` })
+  })
+
+  it('FR-LEAD-6: a text longer than the whole ceiling is asked once more, saying so', async () => {
+    const { gw, inputs } = stubGateway([answer('а'.repeat(480)), answer('Коротко. Когда запуск?')])
     const d = await writeDraft(gw, await order(), { profile: PROFILE })
     expect(d.attempts).toBe(2)
     expect(inputs[1]).toContain('Прошлый вариант вышел')
+  })
+
+  it('FR-LEAD-6: the room kept for the cases never leaves the model less than 150 characters', async () => {
+    const tight = { ...PROFILE, reply_format: { ...FORMAT, max_chars: 200, max_cases: 1 } }
+    const { gw, inputs } = stubGateway([answer('б'.repeat(160))])
+    const d = await writeDraft(gw, await order(), { profile: tight })
+    expect(inputs[0]).toContain('Длина текста: не больше 150 знаков')
+    // 19 + 2 + 160 fits the 200 of the format, so the draft stands (the case is left out).
+    expect(d).toMatchObject({ attempts: 1, cases: [] })
   })
 
   it('FR-LEAD-6: the format own max_chars is the ceiling the model is told and the text is held to', async () => {

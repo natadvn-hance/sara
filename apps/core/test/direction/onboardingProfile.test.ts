@@ -186,7 +186,9 @@ describe('steps 6 and 7: cases, speed and money', { timeout: 60000 }, () => {
     const f = await fakeGateway(db, ANSWERS)
     await startOnboarding(db, ACC, 'edit')
     expect(
-      await submitStep({ db, gateway: f.gateway }, ACC, 6, { say: 'один кейс, сайт клиники' }),
+      await submitStep({ db, gateway: f.gateway }, ACC, 6, {
+        say: `один кейс, сайт клиники ${CASE.url}`,
+      }),
     ).toMatchObject({ ok: true })
     const proposal = (await getOnboarding(db, ACC))?.steps['6']?.proposal
     expect(proposal?.data).toEqual({ cases: [CASE] })
@@ -213,7 +215,7 @@ describe('steps 6 and 7: cases, speed and money', { timeout: 60000 }, () => {
     const f = await fakeGateway(db, ANSWERS)
     await startOnboarding(db, ACC, 'edit')
     expect((await getOnboarding(db, ACC))?.profileChanges).toEqual([])
-    await submitStep({ db, gateway: f.gateway }, ACC, 6, { say: 'кейс' })
+    await submitStep({ db, gateway: f.gateway }, ACC, 6, { say: `кейс ${CASE.url}` })
     await confirmStep(db, ACC, 6)
     await confirmSpeed(db, ACC, 'fast')
     expect((await getOnboarding(db, ACC))?.profileChanges).toEqual([
@@ -232,7 +234,7 @@ describe('finishing with the profile', { timeout: 60000 }, () => {
     await skipStep(db, ACC, 3)
     await submitStep({ db, gateway: f.gateway }, ACC, 5, { say: 'формат' })
     await confirmFormat(db, ACC)
-    await submitStep({ db, gateway: f.gateway }, ACC, 6, { say: 'кейс' })
+    await submitStep({ db, gateway: f.gateway }, ACC, 6, { say: `кейс ${CASE.url}` })
     await confirmStep(db, ACC, 6)
     await confirmSpeed(db, ACC, 'fast')
     return f
@@ -296,5 +298,126 @@ describe('finishing with the profile', { timeout: 60000 }, () => {
     await confirmSpeed(db, ACC, 'normal')
     expect(await finishOnboarding(db, ACC, {})).toEqual({ ok: true, version: null })
     expect((await getProfile(db, ACC)).version).toBe(0)
+  })
+})
+
+describe('the review of step 5: names, contacts and links never get through', {
+  timeout: 60000,
+}, () => {
+  const setLead = (id: string, set: Partial<typeof lead.$inferInsert>) =>
+    db.update(lead).set(set).where(eq(lead.id, id))
+  const idOf = (i: number) => `97200${i}`
+  /** Step 5 over leads where lead `i` is named `name`; the first sample belongs to the first lead in the step. */
+  async function confirmWith(name: string, info: unknown, body: string) {
+    await setLead(idOf(0), { clientName: name, clientInfo: info })
+    await stepFive()
+    const first = (await samplesOf()).find((x) => x.lead_id === idOf(0))
+    if (!first) throw new Error('lead 0 is not in the step')
+    return confirmFormat(db, ACC, [{ lead_id: first.lead_id, body }])
+  }
+
+  it('FR-ACC-3: a name in another case ending is refused like the gateway would hide it', async () => {
+    expect(await confirmWith('Мария', null, 'Для Марии это важно, понимаю.')).toEqual({
+      ok: false,
+      error: 'has_name',
+    })
+  })
+
+  it('FR-ACC-3: a hyphenated name is refused by its parts and never breaks the step', async () => {
+    expect(await confirmWith('Анна-Мария', null, 'Понимаю вас, Анна.')).toEqual({
+      ok: false,
+      error: 'has_name',
+    })
+  })
+
+  it('FR-ACC-3: the name from the order page counts too', async () => {
+    expect(await confirmWith('Клиент', { name: 'Ксения' }, 'Ксения, понимаю вас.')).toEqual({
+      ok: false,
+      error: 'has_name',
+    })
+  })
+
+  it('FR-ACC-3: a phone, a link or a tag in a sample is refused, so client contacts stay out of the examples', async () => {
+    for (const body of [
+      'Позвоните мне, +7 916 123-45-67.',
+      'Смотрите https://client.example/page',
+      'Как в [ссылка 1], понимаю.',
+    ])
+      expect(await confirmWith('Олег', null, body)).toEqual({ ok: false, error: 'has_contact' })
+  })
+
+  it('FR-ACC-3: an order text that names the client reaches the model with the name hidden', async () => {
+    await db
+      .update(lead)
+      .set({ clientName: 'Ольга', text: 'Здравствуйте, меня зовут Ольга, нужен лендинг' })
+      .where(eq(lead.id, idOf(0)))
+    const { f } = await stepFive()
+    const call = (await f.calls()).find((c) => c.role === 'onboarding-format')
+    expect(call?.stdin).toContain('нужен лендинг')
+    expect(call?.stdin).not.toContain('Ольга')
+  })
+
+  it('FR-ACC-3: a sample with a tag the model left in is asked again and then a miss', async () => {
+    const tagged = { ...FORMAT_ANSWER, samples: ['Как в [ссылка 1], понимаю.', 'б', 'в'] }
+    const f = await fakeGateway(db, { ...ANSWERS, 'onboarding-format': tagged })
+    await startOnboarding(db, ACC, 'edit')
+    expect(await submitStep({ db, gateway: f.gateway }, ACC, 5, { say: 'формат' })).toMatchObject({
+      ok: false,
+      reason: 'invalid',
+    })
+  })
+
+  it('FR-ACC-3: a sample is held to the format together with its greeting', async () => {
+    const near = { ...FORMAT_ANSWER, samples: ['ж'.repeat(390), 'б', 'в'] }
+    const f = await fakeGateway(db, { ...ANSWERS, 'onboarding-format': near })
+    await startOnboarding(db, ACC, 'edit')
+    expect(await submitStep({ db, gateway: f.gateway }, ACC, 5, { say: 'формат' })).toMatchObject({
+      ok: false,
+      reason: 'invalid',
+    })
+    await stepFive()
+    const first = (await samplesOf())[0]
+    const r = await confirmFormat(db, ACC, [
+      { lead_id: first?.lead_id ?? '', body: 'ж'.repeat(385) },
+    ])
+    expect(r).toEqual({ ok: false, error: 'too_long' })
+  })
+
+  it('FR-ACC-3: what Boris edited stays in the step when he comes back to it', async () => {
+    await stepFive()
+    const first = (await samplesOf())[0]
+    await confirmFormat(db, ACC, [
+      { lead_id: first?.lead_id ?? '', body: 'Моя правка. Что главное?' },
+    ])
+    expect((await samplesOf())[0]?.body).toBe('Моя правка. Что главное?')
+  })
+
+  it('FR-ACC-3: step 6 only takes links Boris gave, and says so when one was invented', async () => {
+    const f = await fakeGateway(db, ANSWERS)
+    await startOnboarding(db, ACC, 'edit')
+    expect(
+      await submitStep({ db, gateway: f.gateway }, ACC, 6, { say: 'кейс про клинику без ссылки' }),
+    ).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(
+      await submitStep({ db, gateway: f.gateway }, ACC, 6, {
+        say: `кейс про клинику ${CASE.url}`,
+      }),
+    ).toMatchObject({ ok: true })
+  })
+
+  it('FR-ACC-3: the sample orders left out are those sorted out or stale', async () => {
+    await db
+      .update(lead)
+      .set({ status: 'sorted_out' })
+      .where(eq(lead.id, idOf(0)))
+    await db
+      .update(lead)
+      .set({ status: 'stale' })
+      .where(eq(lead.id, idOf(1)))
+    const { f } = await stepFive()
+    const stdin = (await f.calls()).find((c) => c.role === 'onboarding-format')?.stdin ?? ''
+    expect(stdin).toContain('Заказ про сайт 2')
+    expect(stdin).not.toContain('Заказ про сайт 0')
+    expect(stdin).not.toContain('Заказ про сайт 1')
   })
 })

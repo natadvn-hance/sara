@@ -1,4 +1,6 @@
 import {
+  CASES_MAX,
+  DirectionCase,
   DirectionProfileData,
   OnbCases,
   OnbFormat,
@@ -10,6 +12,7 @@ import { z } from 'zod'
 import type { Db } from '../db/client'
 import { calibrationItem, directionRun, lead } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
+import { hasTag, redact } from '../gateway/redact'
 import { namesToHide } from '../leads/clientName'
 import { bodyOf, greetingOf } from '../leads/draft'
 import { sorterInput } from '../leads/sorter'
@@ -21,6 +24,8 @@ type LeadRow = typeof lead.$inferSelect
 /** How many real orders the sample bids are written on (FR-ACC-3, step 5). */
 const SAMPLE_ORDERS = 3
 const DASHES = /[\u2013\u2014]/g
+/** The blank line between a greeting and the text. */
+export const GAP = 2
 
 // ---------------------------------------------------------------------------------------------------------------
 // What steps 5, 6 and 7 confirm, and what the profile becomes from it.
@@ -103,20 +108,17 @@ export async function pickSampleLeads(db: Db, accountId: string): Promise<LeadRo
     .limit(SAMPLE_ORDERS)
   if (wanted.length > 0)
     take(
-      await db
-        .select()
-        .from(lead)
-        .where(
-          inArray(
-            lead.id,
-            wanted.map((w) => w.id),
-          ),
-        ),
+      (
+        await leadsByIds(
+          db,
+          wanted.map((w) => w.id),
+        )
+      ).filter((l) => l.status !== 'stale'),
     )
   if (out.length < SAMPLE_ORDERS) {
     const shown = await db.execute<{ id: string }>(sql`
       select l.id from core.lead l
-      where l.account_id = ${accountId} and l.status <> 'stale'
+      where l.account_id = ${accountId} and l.status not in ('stale', 'sorted_out')
         and (select s.decision from core.lead_score s where s.lead_id = l.id and not s.backtest
              order by s.created_at desc limit 1) = 'show'
       order by l.seen_at desc limit ${SAMPLE_ORDERS}`)
@@ -139,12 +141,23 @@ export async function pickSampleLeads(db: Db, accountId: string): Promise<LeadRo
       await db
         .select()
         .from(lead)
-        .where(sql`${lead.accountId} = ${accountId} and ${lead.status} <> 'stale'`)
+        .where(
+          sql`${lead.accountId} = ${accountId} and ${lead.status} not in ('stale', 'sorted_out')`,
+        )
         .orderBy(desc(lead.seenAt))
         .limit(SAMPLE_ORDERS),
     )
   return out
 }
+
+/** Every name the lead's client goes by, from the board and from the order page: what must not reach a model. */
+export const clientNames = (leads: Pick<LeadRow, 'clientName' | 'clientInfo'>[]): string[] =>
+  namesToHide(
+    ...leads.flatMap((l) => [
+      l.clientName,
+      (l.clientInfo as { name?: string | null } | null)?.name,
+    ]),
+  )
 
 /** The orders by id, in the order of the ids (a correction of step 5 is made on the same orders). */
 export async function leadsByIds(db: Db, ids: string[]): Promise<LeadRow[]> {
@@ -163,10 +176,14 @@ async function ask<T extends { understood: string }>(
   schema: z.ZodType<T>,
   base: string,
   check: (out: T) => string | null,
+  hide?: { names: string[]; restore: boolean },
 ): Promise<StepProposalResult<Omit<T, 'understood'>>> {
   let text = base
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const r = await gw.call(role, text, schema, { limitWaitMs: 0 })
+    const r = await gw.call(role, text, schema, {
+      limitWaitMs: 0,
+      ...(hide ? { redact: hide } : {}),
+    })
     let wrong: string
     if (!r.ok) {
       if (r.errorClass === 'limit_reached') return { ok: false, reason: 'limit' }
@@ -215,12 +232,27 @@ export async function proposeFormat(
     ...orders,
     words(i),
   ].join('\n')
-  const r = await ask(gw, 'onboarding-format', OnbFormat, base, (o) => {
-    if (o.samples.length !== leads.length)
-      return `Образцов должно быть ровно ${leads.length}, по одному на каждый заказ.`
-    const long = o.samples.find((s) => s.length > o.reply_format.max_chars)
-    return long ? `Образец длиннее потолка max_chars ${o.reply_format.max_chars}.` : null
-  })
+  const r = await ask(
+    gw,
+    'onboarding-format',
+    OnbFormat,
+    base,
+    (o) => {
+      if (o.samples.length !== leads.length)
+        return `Образцов должно быть ровно ${leads.length}, по одному на каждый заказ.`
+      // The tags stay as the model wrote them: a sample that holds one carries a client's data or name.
+      if (hasTag(o.understood) || o.samples.some(hasTag))
+        return 'В ответе остались метки в квадратных скобках. Напиши словами, без меток, образцы без имён и контактов.'
+      const long = o.samples.findIndex(
+        (s, n) =>
+          greetingOf(leads[n]?.clientName ?? '').length + GAP + s.length > o.reply_format.max_chars,
+      )
+      return long >= 0
+        ? `Образец ${long + 1} вместе с приветствием длиннее потолка max_chars ${o.reply_format.max_chars}.`
+        : null
+    },
+    { names: clientNames(leads), restore: false },
+  )
   if (!r.ok) return r
   const samples = r.data.samples.map((body, n) => {
     const l = leads[n]
@@ -238,28 +270,36 @@ export async function proposeFormat(
 }
 
 /**
- * A sample as Boris wrote it, ready to be an example of the format: no greeting, no dashes, and none of the client
- * names it was written for (a name may stand in a case ending, up to three letters more).
+ * A sample as Boris wrote it, ready to be an example of the format: no greeting, no dashes, and none of the clients'
+ * names or contacts of the orders it was written for. The names are found the way the gateway hides them (case
+ * endings, е and ё, parts of a double name), so what is kept here is what a model would never have got.
  */
 export function cleanExample(
   text: string,
   names: string[],
-): { ok: true; text: string } | { ok: false; error: 'empty' | 'has_name' } {
+): { ok: true; text: string } | { ok: false; error: 'empty' | 'has_name' | 'has_contact' } {
   const body = bodyOf(text.trim().replace(DASHES, '-'))
   if (!body) return { ok: false, error: 'empty' }
-  for (const name of names)
-    if (
-      new RegExp(
-        `(?<!\\p{L})${name.replace(/[\\^$.*+?()[\]{}|-]/g, '\\$&')}\\p{L}{0,3}(?!\\p{L})`,
-        'iu',
-      ).test(body)
-    )
-      return { ok: false, error: 'has_name' }
+  const hidden = redact(body, names)
+  if (hidden.counts.name > 0) return { ok: false, error: 'has_name' }
+  if (hasTag(body) || hidden.counts.phone + hidden.counts.email + hidden.counts.link > 0)
+    return { ok: false, error: 'has_contact' }
   return { ok: true, text: body }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Step 6: cases.
+
+/**
+ * What the model is asked for in step 6. The links reach it as tags and come back restored, so the schema it sees
+ * takes any text there; the program checks them (https, a real link, one Boris gave) afterwards.
+ */
+const CasesAnswer = z.object({
+  understood: OnbCases.shape.understood,
+  cases: z.array(DirectionCase.extend({ url: z.string().min(1) })).max(CASES_MAX),
+})
+
+const bare = (url: string) => url.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
 
 export async function proposeCases(
   gw: Gateway,
@@ -275,5 +315,32 @@ export async function proposeCases(
     ...(i.current.length > 0 ? ['', 'Действующие кейсы:', JSON.stringify(i.current)] : []),
     words(i),
   ].join('\n')
-  return ask(gw, 'onboarding-cases', OnbCases, base, () => null)
+  // A link counts when Boris wrote it (now, or earlier in the library), not when the model made it up.
+  const given = [i.say, i.fix ?? '', ...i.current.map((c) => c.url)].join('\n').toLowerCase()
+  const r = await ask(gw, 'onboarding-cases', CasesAnswer, base, (o) => {
+    const parsed = OnbCases.safeParse({
+      ...o,
+      cases: o.cases.map((c) => ({ ...c, title: c.title.replace(DASHES, '-') })),
+    })
+    if (!parsed.success)
+      return 'Каждая ссылка должна начинаться с https:// и быть настоящей, id уникальны, тегов два-четыре.'
+    const foreign = o.cases.find((c) => !given.includes(bare(c.url).toLowerCase()))
+    return foreign
+      ? `Ссылку ${foreign.url} Борис не называл. Бери только его ссылки, ничего не придумывай.`
+      : null
+  })
+  if (!r.ok) return r
+  return {
+    ok: true,
+    understood: r.understood,
+    data: {
+      cases: r.data.cases.map((c) => ({
+        ...c,
+        title: c.title.replace(DASHES, '-'),
+        summary: c.summary.replace(DASHES, '-'),
+        show_when: c.show_when.replace(DASHES, '-'),
+        never_when: c.never_when?.replace(DASHES, '-') ?? null,
+      })),
+    },
+  }
 }

@@ -58,6 +58,8 @@ export const DIRECTION_ERRORS = {
   needsCalibration: 'Сначала проверь правила на заявках.',
   noLeads: 'Пока нет заявок, на которых можно написать образцы. Дождись первых и вернись к шагу.',
   hasName: 'В образце осталось имя клиента. Убери его: имена клиентов не попадают в образцы.',
+  hasContact:
+    'В образце остались телефон, почта или ссылка клиента. Убери их: контакты клиентов не попадают в образцы.',
   emptySample: 'В образце не осталось текста, кроме приветствия.',
   tooLong: 'Образец длиннее разрешённого формата. Сократи его.',
   unknownLead: 'Такого образца в этом шаге нет.',
@@ -178,6 +180,7 @@ export function registerDirectionRoutes(app: FastifyInstance, d: AppDeps): void 
           unknown_lead: [422, DIRECTION_ERRORS.unknownLead],
           empty: [422, DIRECTION_ERRORS.emptySample],
           has_name: [422, DIRECTION_ERRORS.hasName],
+          has_contact: [422, DIRECTION_ERRORS.hasContact],
           too_long: [422, DIRECTION_ERRORS.tooLong],
           invalid: [422, DIRECTION_ERRORS.badFormat],
         } as const

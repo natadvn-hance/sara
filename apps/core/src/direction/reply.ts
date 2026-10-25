@@ -3,7 +3,8 @@ import { BID_CHARS_MAX, type DirectionCase, type ReplyFormat } from '@sara/share
 /** What a direction tells the Analyst about its bids (FR-LEAD-6): the format and the case library. */
 export type ReplyProfile = { reply_format: ReplyFormat | null; cases: DirectionCase[] }
 
-const caseLine = (c: DirectionCase) => `Похожая работа: ${c.title}, ${c.url}`
+const caseLine = (c: DirectionCase) =>
+  `Похожая работа: ${c.title.replace(/[\u2013\u2014]/g, '-')}, ${c.url}`
 /** The blank line between the text and the cases. */
 const GAP = 2
 
@@ -31,7 +32,7 @@ export function analystProfileText(p: ReplyProfile): string {
     for (const [i, part] of f.parts.entries()) lines.push(`${i + 1}. ${part.title}: ${part.hint}`)
     if (f.tone.length > 0) lines.push(`Тон: ${f.tone.join('; ')}`)
     if (f.examples.length > 0) {
-      lines.push('Образцы отзывов, которые Борис одобрил (только тело, без приветствия):')
+      lines.push('Образцы откликов, которые Борис одобрил (только тело, без приветствия):')
       for (const e of f.examples) lines.push(`- ${e}`)
     }
   }

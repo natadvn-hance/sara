@@ -72,5 +72,13 @@ export async function contradictions(
       text: 'В отклик разрешены кейсы, а библиотека кейсов пуста.',
       fix: { label: 'Без кейсов', patch: { reply_format: { ...p.reply_format, max_cases: 0 } } },
     })
+  if (p.cases.length > 0 && (!p.reply_format || p.reply_format.max_cases === 0))
+    out.push({
+      id: 'cases_hidden',
+      text: p.reply_format
+        ? 'В библиотеке есть кейсы, а в отклик разрешено 0 кейсов: ни один не покажется.'
+        : 'В библиотеке есть кейсы, а формат отклика не задан: кейсы не покажутся. Задай формат на шаге 5.',
+      fix: null,
+    })
   return out
 }

@@ -75,4 +75,14 @@ describe('speed and money contradictions', { timeout: 30000 }, () => {
       ),
     ).toEqual([])
   })
+
+  it('FR-ACC-3: cases in the library that no bid can carry (no format, or none allowed) are named', async () => {
+    expect(await ids(profile({ reply_format: null, cases: [CASE] }))).toEqual(['cases_hidden'])
+    expect(
+      await ids(
+        profile({ reply_format: { ...DEFAULT_REPLY_FORMAT, max_cases: 0 }, cases: [CASE] }),
+      ),
+    ).toEqual(['cases_hidden'])
+    expect(await ids(profile({ reply_format: null, cases: [] }))).toEqual([])
+  })
 })

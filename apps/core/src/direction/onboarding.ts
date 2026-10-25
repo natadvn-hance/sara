@@ -17,7 +17,6 @@ import { directionOnboarding, directionOverride, lead } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import type { RoleName } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
-import { namesToHide } from '../leads/clientName'
 import { rulesText } from '../leads/scorer'
 import { type CalibrationSummary, calibrationPassed, latestCalibration } from './calibration'
 import { type Contradiction, contradictions } from './contradictions'
@@ -26,8 +25,10 @@ import { getProfile, type Profile, saveProfileIn } from './profile'
 import {
   assembleProfile,
   cleanExample,
+  clientNames,
   type FormatConfirmed,
   FormatData,
+  GAP,
   leadsByIds,
   pickSampleLeads,
   proposeCases,
@@ -507,7 +508,14 @@ export type ConfirmFormatResult =
   | { ok: true; view: OnboardingView }
   | {
       ok: false
-      error: 'no_proposal' | 'unknown_lead' | 'empty' | 'has_name' | 'too_long' | 'invalid'
+      error:
+        | 'no_proposal'
+        | 'unknown_lead'
+        | 'empty'
+        | 'has_name'
+        | 'has_contact'
+        | 'too_long'
+        | 'invalid'
     }
 
 /**
@@ -532,7 +540,7 @@ export async function confirmFormat(
     if ([...by.keys()].some((id) => !samples.some((x) => x.lead_id === id)))
       return { ok: false, error: 'unknown_lead' }
     const clients = await tx
-      .select({ name: lead.clientName })
+      .select()
       .from(lead)
       .where(
         inArray(
@@ -540,7 +548,7 @@ export async function confirmFormat(
           samples.map((x) => x.lead_id),
         ),
       )
-    const names = namesToHide(...clients.map((c) => c.name))
+    const names = clientNames(clients)
     const examples: string[] = []
     for (const x of samples) {
       const c = cleanExample(by.get(x.lead_id) ?? x.body, names)
@@ -549,10 +557,25 @@ export async function confirmFormat(
     }
     const format = ReplyFormat.safeParse({ ...proposal.data.reply_format, examples })
     if (!format.success) return { ok: false, error: 'invalid' }
-    if (examples.some((e) => e.length > format.data.max_chars))
+    // The sample is shown with its greeting, so the greeting counts against the format's length.
+    if (
+      examples.some(
+        (e, n) => (samples[n]?.greeting.length ?? 0) + GAP + e.length > format.data.max_chars,
+      )
+    )
       return { ok: false, error: 'too_long' }
     const confirmed: FormatConfirmed = { reply_format: format.data }
-    draft.steps['5'] = { ...st, confirmed, skipped: false }
+    // What Boris edited is what the step shows from now on, not the model's first text.
+    const shown = {
+      ...proposal.data,
+      samples: samples.map((x, n) => ({ ...x, body: examples[n] ?? x.body })),
+    }
+    draft.steps['5'] = {
+      ...st,
+      proposal: st.proposal ? { ...st.proposal, data: shown } : st.proposal,
+      confirmed,
+      skipped: false,
+    }
     await write(tx, accountId, draft)
     await appendEvent(tx, journal('direction.step_confirmed', accountId, { step: 5 }))
     return { ok: true, view: await viewOf(tx, { ...row, draft }) }

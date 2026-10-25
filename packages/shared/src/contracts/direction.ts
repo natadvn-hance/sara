@@ -69,7 +69,7 @@ export const ReplyFormat = z
         z.object({ id: z.string().regex(/^[a-z_]+$/), title: z.string().min(1), hint: z.string() }),
       )
       .min(1),
-    max_chars: z.number().int().min(1).max(BID_CHARS_MAX),
+    max_chars: z.number().int().min(150).max(BID_CHARS_MAX),
     tone: z.array(z.string().min(1)),
     /** Bids Boris approved as samples (the body only: no greeting, no client name). */
     examples: z.array(z.string().min(1).max(BID_CHARS_MAX)).max(3),
