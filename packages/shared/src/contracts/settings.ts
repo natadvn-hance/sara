@@ -95,7 +95,10 @@ export const SETTINGS = {
   /** M5: the school's jobs and lesson batches; off until the deploy turns it on, as pipeline.*. */
   'school.on': { schema: z.boolean(), default: false },
   /** NFR-COST-2: Moscow hours of the night school. */
-  'school.night': { schema: hours, default: { from: 1, to: 7 } },
+  'school.night': {
+    schema: hours.refine((h) => h.from !== h.to, { message: 'ночь не может быть сутками' }),
+    default: { from: 1, to: 7 },
+  },
   /** NFR-COST-2: units a night (haiku 1, sonnet 4, opus 20). */
   'school.night_units': { schema: z.number().int().positive(), default: 400 },
   /** NFR-COST-2: more units on the weekly exam night, for its own jobs only. */

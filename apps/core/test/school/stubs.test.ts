@@ -15,7 +15,7 @@ const ROLES = resolve(import.meta.dirname, '../../../../roles')
 const db = {} as never
 
 describe('M5 stubs at their paths', () => {
-  it('stub bodies answer as the interface map says until their parts are built', async () => {
+  it('FR-TRAIN-6: stub bodies answer as the interface map says until their parts are built', async () => {
     expect(await takeNotice(db, new Date(), 'batch')).toBe(true)
     expect(await deferredNotices(db, '2026-10-25')).toEqual([])
     expect(() => renderRecord({} as never, null, '2026-10-25')).toThrow(/render is not built/)
@@ -37,7 +37,7 @@ describe('M5 stubs at their paths', () => {
     expect(topicStreaks([]).size).toBe(0)
   })
 
-  it('every M5 role has its meta and text', async () => {
+  it('FR-TRAIN-7: every M5 role has its meta and text', async () => {
     for (const name of [
       'trainer-client',
       'trainer-coach',

@@ -38,7 +38,7 @@ describe('report:school', () => {
       causation_id: null,
       correlation_id: newEventId(),
       reason: null,
-      payload: { job: 'generator', reason: 'budget: 398 used + 40 wanted > 400' },
+      payload: { job: 'generator', reason: 'бюджет: потрачено 398, нужно 40, можно 400' },
     })
     await db
       .insert(lesson)
@@ -47,7 +47,7 @@ describe('report:school', () => {
     expect(r).toMatch(/teacher: 20/)
     expect(r).toMatch(/lesson-maker: 2/)
     expect(r).not.toMatch(/sorter/)
-    expect(r).toMatch(/generator: budget: 398 used \+ 40 wanted > 400/)
+    expect(r).toMatch(/generator: бюджет: потрачено 398, нужно 40, можно 400/)
     expect(r).toMatch(/edit: да 1/)
     expect(r).toMatch(/Тренировки: пока нет/)
   })

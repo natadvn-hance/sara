@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { CONV_STAGES, TONES, TOPICS } from './conversation'
-import { MIND_TYPES } from './mind'
+import { MIND_ID_PREFIX, MIND_TYPES } from './mind'
 import type { MODELS } from './roles'
 
 /** The trainer's modes (FR-TRAIN-3); the weekly blind test (FR-SPEECH-4) lives beside them. */
@@ -48,11 +48,15 @@ export const TrainerClientOutput = z.object({
 export type TrainerClientOutput = z.infer<typeof TrainerClientOutput>
 
 /** The trainer's coach: why Sara answered so, and the lesson the talk ends in, if any (FR-TRAIN-4). */
-export const CoachOutput = z.object({
-  answer: z.string().min(1).max(800),
-  insight: z.string().min(1).max(240).nullable(),
-  kind: z.enum(INSIGHT_KINDS).nullable(),
-})
+export const CoachOutput = z
+  .object({
+    answer: z.string().min(1).max(800),
+    insight: z.string().min(1).max(240).nullable(),
+    kind: z.enum(INSIGHT_KINDS).nullable(),
+  })
+  .refine((o) => (o.insight === null) === (o.kind === null), {
+    message: 'insight and kind come together',
+  })
 export type CoachOutput = z.infer<typeof CoachOutput>
 
 /** The lesson maker: one insight from Boris's edit, or a knowledge record from his interview answer (FR-TRAIN-6). */
@@ -74,21 +78,25 @@ export const LessonMakerOutput = z.object({
 export type LessonMakerOutput = z.infer<typeof LessonMakerOutput>
 
 /** One draft of the night teacher (FR-TRAIN-7): the code builds the file from these fields, never the model. */
-export const TeacherProposal = z.object({
-  action: z.enum(['create', 'update', 'outdate']),
-  record_id: z.string().regex(MIND_RECORD_ID),
-  type: z.enum(MIND_TYPES),
-  scope: z.string().min(1).max(60),
-  title: z.string().min(1).max(120),
-  topic: z.enum(TOPICS).optional(),
-  tones: z.array(z.enum(TONES)).optional(),
-  stages: z.array(z.enum(CONV_STAGES)).optional(),
-  section: z.string().min(1).max(60).nullable(),
-  sections: z.record(z.string().min(1).max(60), z.string().max(4000)),
-  sources: z.array(z.string().min(1).max(120)).min(1).max(20),
-  lesson_ids: z.array(z.string().min(1)).max(20),
-  why: z.string().min(1).max(300),
-})
+export const TeacherProposal = z
+  .object({
+    action: z.enum(['create', 'update', 'outdate']),
+    record_id: z.string().regex(MIND_RECORD_ID),
+    type: z.enum(MIND_TYPES),
+    scope: z.string().min(1).max(60),
+    title: z.string().min(1).max(120),
+    topic: z.enum(TOPICS).optional(),
+    tones: z.array(z.enum(TONES)).optional(),
+    stages: z.array(z.enum(CONV_STAGES)).optional(),
+    section: z.string().min(1).max(60).nullable(),
+    sections: z.record(z.string().min(1).max(60), z.string().max(4000)),
+    sources: z.array(z.string().min(1).max(120)).min(1).max(20),
+    lesson_ids: z.array(z.string().min(1)).max(20),
+    why: z.string().min(1).max(300),
+  })
+  .refine((p) => p.record_id.startsWith(MIND_ID_PREFIX[p.type]), {
+    message: 'the record id starts with the letter of its type',
+  })
 export type TeacherProposal = z.infer<typeof TeacherProposal>
 
 export const TeacherOutput = z.object({
