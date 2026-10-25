@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { newEventId, SETTINGS } from '@sara/shared'
@@ -26,18 +26,6 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'engine-'))
   log = join(dir, 'calls.log')
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
-  // The real role texts come with part D; the engine needs only that the roles load.
-  for (const [name, model] of [
-    ['interlocutor', 'sonnet'],
-    ['checker', 'haiku'],
-  ] as const) {
-    await mkdir(join(dir, 'roles', name), { recursive: true })
-    await writeFile(
-      join(dir, 'roles', name, 'meta.json'),
-      JSON.stringify({ name, version: 1, model, priority: 'P0', timeoutMs: 30000 }),
-    ).catch(() => {})
-    await writeFile(join(dir, 'roles', name, 'role.md'), 'Роль для теста.').catch(() => {})
-  }
 })
 
 async function gateway(byRole: Record<string, unknown>, mode = 'ok') {
@@ -274,18 +262,42 @@ describe('turn engine', () => {
 
   it('FR-CONV-4: a reply failing checks twice becomes a draft with the reasons', async () => {
     const d = await dossierOf()
-    const gw = await gateway({ interlocutor: interlocutorAnswer() })
+    // A robotic phrase of the portrait: the fake model says it again on the rewrite, so both tries fail the code checks.
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Рад помочь! Начинаем с созвона на 30 минут. Удобно?',
+      }),
+      checker: { unsupported: [], contradicts_boris: null, robotic: [], promises: [] },
+    })
     const plan = await planTurn(
       { gateway: gw, mind: fakeMind() },
       { dossier: d, names: ['Анна'], settings, now: new Date() },
     )
-    // Until part D, the code checks stub fails every reply: one rewrite, then a draft.
     expect(plan.attempts).toBe(2)
-    expect(plan.issues.length).toBeGreaterThan(0)
+    expect(plan.issues.map((x) => x.id)).toContain('robotic.phrase')
     expect(plan.decision.action).toBe('draft')
+    expect(plan.decision.reason).toContain('Рад помочь')
     const calls = (await readFile(log, 'utf8')).trim().split('\n')
-    expect(calls).toHaveLength(2)
-    expect(calls[1]).toContain('Переделать')
+    const asked = calls.filter((c) => c.includes('roles/interlocutor/'))
+    expect(asked).toHaveLength(2)
+    expect(asked[0]).not.toContain('Переделать')
+    expect(asked[1]).toContain('Переделать')
+    expect(asked[1]).toContain('Рад помочь')
+  })
+
+  it('FR-CONV-4: a reply that passes the checks is not rewritten', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({ text: 'Начинаем с созвона на 30 минут. Удобно?' }),
+      checker: { unsupported: [], contradicts_boris: null, robotic: [], promises: [] },
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.attempts).toBe(1)
+    expect(plan.issues).toEqual([])
+    expect(plan.checkerRan).toBe(true)
   })
 
   it('ADR-016: the client’s name reaches the model as a tag', async () => {
