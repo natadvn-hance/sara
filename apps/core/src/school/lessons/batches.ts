@@ -6,7 +6,7 @@ import { appendEvent } from '../../journal/journal'
 import { askOwnQuestion } from '../../learning/questions'
 import { TEXTS } from '../../notify/cards'
 import { getSetting } from '../../settings/store'
-import { onInterviewPress } from '../interview'
+import { onInterviewPress, reportInterview } from '../interview'
 import { releaseNotice, takeNotice } from '../notices'
 import { SCHOOL_TEXTS } from '../texts'
 import type { LessonRow, RevertResult, SchoolDeps } from '../types'
@@ -398,16 +398,27 @@ export async function writePending(d: Deps): Promise<void> {
       console.error('lesson batch not written', errText(e))
     }
   }
-  const single = await d.db.execute<{ lesson_id: string; source_ref: string; ids: string[] }>(sql`
-    select l.id as lesson_id, l.source_ref, array_agg(p.id) as ids from core.lesson l
+  const single = await d.db.execute<{
+    lesson_id: string
+    source: string
+    source_ref: string
+    ids: string[]
+  }>(sql`
+    select l.id as lesson_id, l.source, l.source_ref, array_agg(p.id) as ids from core.lesson l
     join core.mind_proposal p on p.lesson_id = l.id and p.state = 'new'
     where l.state = 'yes' and l.batch_id is null
-    group by l.id, l.source_ref`)
+    group by l.id, l.source, l.source_ref`)
   for (const r of single.rows) {
     try {
       const w = await d.writer.apply(r.ids, { lessonIds: [r.lesson_id], batchId: null })
-      if (w.ok || w.reason === 'nothing')
-        await reportBulk(d, r.source_ref, w.ok ? r.ids.length - w.refused.length : 0)
+      if (!w.ok && w.reason !== 'nothing') continue
+      if (r.source === 'interview')
+        await reportInterview(
+          d,
+          r.lesson_id,
+          w.refused[0]?.reason ?? (w.ok ? null : 'нечего записывать'),
+        )
+      else await reportBulk(d, r.source_ref, w.ok ? r.ids.length - w.refused.length : 0)
     } catch (e) {
       console.error('lesson not written', errText(e))
     }

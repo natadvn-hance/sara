@@ -10,9 +10,9 @@ import { getSetting } from '../settings/store'
 import { makeInsight } from './lessons/maker'
 import { knowledgeChange } from './lessons/records'
 import { createLesson, decideLesson } from './lessons/store'
-import { takeNotice } from './notices'
+import { releaseNotice, takeNotice } from './notices'
 import { SCHOOL_TEXTS } from './texts'
-import type { LessonRow, SchoolDeps } from './types'
+import type { LessonRow, MindChange, SchoolDeps } from './types'
 
 const MSK_MS = 3 * 60 * 60_000
 const DAY_MS = 24 * 60 * 60_000
@@ -20,6 +20,8 @@ const DAY_MS = 24 * 60 * 60_000
 const WORK_DAYS = 14
 /** «Не знаю, пропустить» keeps a question away this long. */
 const SKIP_DAYS = 7
+/** Boris's answers older than this are not taken up by the tick any more. */
+const ANSWER_DAYS = 2
 const SOURCE_RANK = { work: 0, teacher: 1, sim: 2 } as const
 
 export type InterviewQuestion = {
@@ -35,6 +37,7 @@ const keyOf = (text: string) =>
   createHash('sha1').update(normalizeText(text)).digest('hex').slice(0, 16)
 const sourceOf = (turnId: string): InterviewQuestion['source'] =>
   turnId.startsWith('teacher:') ? 'teacher' : turnId.startsWith('sim:') ? 'sim' : 'work'
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /**
  * What Sara would ask Boris (FR-MIND-4, M5 design 5.9): the open gaps grouped by their words, gaps from work first
@@ -96,13 +99,15 @@ export type Understood = {
 /**
  * Boris's answer to an interview question becomes a knowledge record waiting for his «Правильно понимаю?» (FR-MIND-4):
  * one call of the lesson maker on sonnet, a lesson decided in place. A number in the record must be one he said
- * (the writer's guard checks it again).
+ * (the writer's guard checks it again). `ref` names the answer (his message's question), so one answer makes one
+ * lesson.
  */
 export async function answerInterview(
   d: Pick<SchoolDeps, 'db' | 'gateway'>,
   gapKey: string,
   answer: string,
   now: Date,
+  ref: string = newEventId(),
 ): Promise<{ ok: true; understood: Understood } | { ok: false; reason: string }> {
   const q = (await interviewQueue(d.db, now, 1000)).find((x) => x.gapKey === gapKey)
   if (!q) return { ok: false, reason: SCHOOL_TEXTS.interviewClosed }
@@ -119,7 +124,7 @@ export async function answerInterview(
   if (!r?.fact) return { ok: false, reason: SCHOOL_TEXTS.interviewNotUnderstood }
   const l = await createLesson(d.db, {
     source: 'interview',
-    sourceRef: `${gapKey}:${newEventId()}`,
+    sourceRef: `${gapKey}:${ref}`,
     scope: 'shared',
     topic: r.topic,
     tone: r.tone,
@@ -155,23 +160,33 @@ export async function answerInterview(
     reason: null,
     payload: { gap: gapKey, n: l.n },
   })
+  return { ok: true, understood: await understoodOf(d.db, l.id) }
+}
+
+/** What the lesson's knowledge record says, as it will be written (its tags kept). */
+async function understoodOf(db: Db, lessonId: string): Promise<Understood> {
+  const [p] = await db
+    .select({ change: mindProposal.change })
+    .from(mindProposal)
+    .where(eq(mindProposal.lessonId, lessonId))
+  const c = p?.change as MindChange | undefined
   return {
-    ok: true,
-    understood: {
-      lessonId: l.id,
-      title: r.fact.title,
-      fact: r.fact.fact,
-      when: r.fact.when,
-      notSay: r.fact.not_say,
-    },
+    lessonId,
+    title: c?.fields.title ?? '',
+    fact: c?.sections['Факт'] ?? '',
+    when: c?.sections['Когда говорить'] ?? '',
+    notSay: c?.sections['Чего не говорить'] ?? '',
   }
 }
 
-const gapKeyOf = (l: LessonRow) => l.sourceRef.split(':')[0] ?? ''
+const gapKeyOf = (l: Pick<LessonRow, 'sourceRef'>) => l.sourceRef.split(':')[0] ?? ''
 
-/** «Да, записать»: the record goes into the mind and every gap of its words is closed (FR-MIND-4). */
+/**
+ * «Да, записать»: the record is decided and every gap of its words is closed (FR-MIND-4). The school's tick writes it
+ * into the mind (`writePending`) and puts the result on the card: a write never runs inside Boris's press.
+ */
 export async function confirmInterview(
-  d: Pick<SchoolDeps, 'db' | 'writer'>,
+  d: Pick<SchoolDeps, 'db'>,
   lessonId: string,
 ): Promise<string> {
   const row = await decideLesson(d.db, lessonId, { decision: 'yes' })
@@ -180,17 +195,28 @@ export async function confirmInterview(
   const open = await d.db.select().from(mindGap).where(isNull(mindGap.lessonId))
   const ids = open.filter((g) => keyOf(g.text) === key).map((g) => g.id)
   if (ids.length > 0) await d.db.update(mindGap).set({ lessonId }).where(inArray(mindGap.id, ids))
-  const proposals = await d.db
-    .select({ id: mindProposal.id })
-    .from(mindProposal)
-    .where(and(eq(mindProposal.lessonId, lessonId), eq(mindProposal.state, 'new')))
-  const r = await d.writer.apply(
-    proposals.map((p) => p.id),
-    { lessonIds: [lessonId], batchId: null },
-  )
-  if (r.ok) return SCHOOL_TEXTS.interviewWritten
-  // Not written now: the lesson stays «да» and writePending takes it later.
-  return r.refused[0] ? SCHOOL_TEXTS.refused(1, r.refused[0].reason) : SCHOOL_TEXTS.writeWaits
+  return SCHOOL_TEXTS.interviewWriting
+}
+
+/** The tick wrote an interview record (or the guard refused it): the card says so under what Sara understood. */
+export async function reportInterview(
+  d: Pick<SchoolDeps, 'db' | 'notifier'>,
+  lessonId: string,
+  refused: string | null,
+): Promise<void> {
+  const [t] = await d.db
+    .select({ messageId: task.telegramMessageId })
+    .from(task)
+    .where(and(eq(task.kind, 'interview_check'), eq(task.entityId, lessonId)))
+  if (!t?.messageId) return
+  const result = refused ? SCHOOL_TEXTS.interviewRefused(refused) : SCHOOL_TEXTS.interviewWritten
+  await d.notifier
+    .editText(
+      t.messageId,
+      `${SCHOOL_TEXTS.interviewUnderstood(await understoodOf(d.db, lessonId))}\n\n${result}`,
+      [],
+    )
+    .catch((e) => console.error('interview card not edited', errText(e)))
 }
 
 /** «Не знаю, пропустить»: the question waits a week; the record Sara understood is dropped. */
@@ -204,7 +230,10 @@ export async function skipInterview(db: Db, lessonId: string, now: Date): Promis
   return SCHOOL_TEXTS.interviewSkipped
 }
 
-/** The card «Я поняла так … Правильно понимаю?» with its task (kind interview_check). */
+/**
+ * The card «Я поняла так … Правильно понимаю?» with its task (kind interview_check). A card Telegram refused leaves
+ * no lesson behind, so the next tick makes it again.
+ */
 async function sendUnderstood(d: Pick<SchoolDeps, 'db' | 'notifier'>, u: Understood) {
   const taskId = newEventId()
   await d.db
@@ -214,39 +243,85 @@ async function sendUnderstood(d: Pick<SchoolDeps, 'db' | 'notifier'>, u: Underst
     text,
     callbackData: formatCallback(taskId, action),
   })
-  const { messageId } = await d.notifier.sendButtons(SCHOOL_TEXTS.interviewUnderstood(u), [
-    [b(SCHOOL_TEXTS.writeButton, 'apply'), b(SCHOOL_TEXTS.fixButton, 'edit')],
-    [b(SCHOOL_TEXTS.dontKnowButton, 'skip')],
-  ])
+  let messageId: number
+  try {
+    messageId = (
+      await d.notifier.sendButtons(SCHOOL_TEXTS.interviewUnderstood(u), [
+        [b(SCHOOL_TEXTS.writeButton, 'apply'), b(SCHOOL_TEXTS.fixButton, 'edit')],
+        [b(SCHOOL_TEXTS.dontKnowButton, 'skip')],
+      ])
+    ).messageId
+  } catch (e) {
+    await d.db.transaction(async (tx) => {
+      await tx.delete(task).where(eq(task.id, taskId))
+      await tx.delete(mindProposal).where(eq(mindProposal.lessonId, u.lessonId))
+      await tx.delete(lesson).where(eq(lesson.id, u.lessonId))
+    })
+    throw e
+  }
   await d.db.update(task).set({ telegramMessageId: messageId }).where(eq(task.id, taskId))
 }
 
 /**
- * Boris's words to the day's question or to «Что поправить?» (inbox hook): the record Sara understood comes back
- * as a card to confirm. A correction replaces the record Sara understood before.
+ * Boris's words to the day's question or to «Что поправить?» (inbox hook). The message handler only thanks him: the
+ * model call and the card come on the school's tick (`interviewAnswersStep`), so his next press is never kept waiting.
  */
-export async function onSchoolAnswer(
+export async function onSchoolAnswer(_d: unknown, _a: DraftAnswer): Promise<string> {
+  return SCHOOL_TEXTS.interviewThinking
+}
+
+/**
+ * The answers Boris gave since the last tick become cards «Я поняла так»: one lesson per answer (its source names the
+ * question), a correction replaces the record Sara understood before. An answer Sara could not understand is told
+ * once and not tried again.
+ */
+export async function interviewAnswersStep(
   d: Pick<SchoolDeps, 'db' | 'gateway' | 'notifier'>,
-  a: DraftAnswer,
-): Promise<string> {
-  let gapKey = a.question.entityId
-  let text = a.text
-  if (a.question.kind === 'interview_fix') {
-    const [old] = await d.db.select().from(lesson).where(eq(lesson.id, a.question.entityId))
-    if (!old) return TEXTS.notAnAnswer
-    gapKey = gapKeyOf(old as LessonRow)
-    text = `${old.after ?? ''}\nПоправка: ${a.text}`
-    await decideLesson(d.db, old.id, { decision: 'skip', reason: 'поправил' })
+  now: Date,
+): Promise<void> {
+  const rows = await d.db.execute<{
+    id: string
+    kind: string
+    entity_id: string
+    answer: string
+    answered_at: string
+  }>(sql`
+    select q.id, q.kind, q.entity_id, q.answer, q.answered_at from core.question q
+    where q.kind in ('interview', 'interview_fix') and q.answered_at is not null and q.answer is not null
+      and q.answered_at > ${new Date(now.getTime() - ANSWER_DAYS * DAY_MS).toISOString()}
+      and not exists (select 1 from core.lesson l
+        where l.source = 'interview' and split_part(l.source_ref, ':', 2) = q.id::text)
+      and not exists (select 1 from core.job_run j where j.name = 'interview_failed:' || q.id::text)
+    order by q.answered_at`)
+  for (const q of rows.rows) {
+    try {
+      let gapKey = q.entity_id
+      let text = q.answer
+      if (q.kind === 'interview_fix') {
+        const [old] = await d.db.select().from(lesson).where(eq(lesson.id, q.entity_id))
+        gapKey = old ? gapKeyOf(old) : ''
+        text = `${old?.after ?? ''}\nПоправка: ${q.answer}`
+        if (old) await decideLesson(d.db, old.id, { decision: 'skip', reason: 'поправил' })
+      }
+      const r = await answerInterview(d, gapKey, text, new Date(q.answered_at), q.id)
+      if (!r.ok) {
+        await d.db
+          .insert(jobRun)
+          .values({ name: `interview_failed:${q.id}`, day: mskDay(now.getTime()) })
+          .onConflictDoNothing()
+        await d.notifier.sendText(r.reason)
+        continue
+      }
+      await sendUnderstood(d, r.understood)
+    } catch (e) {
+      console.error('interview answer not taken', errText(e))
+    }
   }
-  const r = await answerInterview(d, gapKey, text, a.at)
-  if (!r.ok) return r.reason
-  await sendUnderstood(d, r.understood)
-  return SCHOOL_TEXTS.interviewThanks
 }
 
 /** A press on the «Правильно понимаю?» card. */
 export async function onInterviewPress(
-  d: Pick<SchoolDeps, 'db' | 'writer' | 'notifier'>,
+  d: Pick<SchoolDeps, 'db' | 'notifier'>,
   t: { id: string; entityId: string },
   action: TaskAction,
   now: Date,
@@ -283,11 +358,16 @@ export async function interviewStep(d: Pick<SchoolDeps, 'db' | 'notifier'>, now:
   if (asked) return
   const [q] = await interviewQueue(d.db, now, 1)
   if (!q) return
-  if (!(await takeNotice(d.db, now, 'interview'))) return
-  await d.db.insert(jobRun).values({ name: 'interview_asked', day }).onConflictDoNothing()
+  const notice = await takeNotice(d.db, now, 'interview')
+  if (!notice) return
+  // A question Telegram refused gives the day's place back and goes on the next tick.
   await askOwnQuestion(
     d,
     { kind: 'interview', entityId: q.gapKey, text: SCHOOL_TEXTS.interviewAsk(q.question) },
     now,
-  )
+  ).catch(async (e) => {
+    await releaseNotice(d.db, notice)
+    throw e
+  })
+  await d.db.insert(jobRun).values({ name: 'interview_asked', day }).onConflictDoNothing()
 }
