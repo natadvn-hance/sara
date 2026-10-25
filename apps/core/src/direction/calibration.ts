@@ -217,7 +217,10 @@ export async function calibrationProcess(
   run: RunRow,
   leadId: string,
 ): Promise<'ok' | 'miss'> {
-  return (await trialScore(d, leadId, run.rules as DirectionRules, 'escalated')) ? 'ok' : 'miss'
+  const version = run.scorerVersion ?? undefined
+  return (await trialScore(d, leadId, run.rules as DirectionRules, 'escalated', version))
+    ? 'ok'
+    : 'miss'
 }
 
 export type Miss = {
@@ -288,6 +291,8 @@ export async function calibrationResult(db: DbOrTx, runId: string): Promise<Cali
           and(
             eq(trialTable.rulesHash, run.rulesHash),
             eq(trialTable.mode, 'escalated'),
+            // Only the scores of the prompt version this run used.
+            ...(run.scorerVersion === null ? [] : [eq(trialTable.roleVersion, run.scorerVersion)]),
             inArray(trialTable.leadId, ids),
           ),
         )
