@@ -124,11 +124,96 @@ export const CASE_AD_PHRASES = [
 ]
 
 /**
- * A reply that tells of a past project (case.unknown when no case of the turn stands behind it): «мы делали для»,
- * «у нас был похожий проект», «один из наших клиентов». Present tense work talk («делаем лендинги») is not one.
+ * Past verbs of project work, folded: the stems that take «л», «ла», «ло», «ли» («сделал», «делали»), and the verbs with
+ * a root of their own («вели», «помогли», «пришли»). `PAST_ANY` is every gender and number, `PAST_PLURAL` the plural
+ * only: a bare plural («Сделали похожее для клиники») is a team speaking of its work, a bare «сделал» is some man.
  */
-export const CASE_CLAIM =
-  /(?<!\p{L})(?:делали\s+(?:для|на|под|такое|такой|такую|такие|похож\p{L}+|подобн\p{L}+|проект\p{L}*|сайт\p{L}*|лендинг\p{L}*)|работали\s+(?:с|над|для)|(?:у|для)\s+(?:одного|другого)\s+(?:из\s+)?(?:наших\s+)?клиент\p{L}*|(?:один|одна)\s+из\s+наших\s+клиент\p{L}*|наш(?:им|его|ему|их|ими)?\s+клиент\p{L}*|у\s+нас\s+(?:был|была|было|были)\s+(?:\p{L}+\s+)?(?:проект\p{L}*|клиент\p{L}*|случай|кейс\p{L}*|опыт|история)|похож\p{L}+\s+(?:проект\p{L}*|истори\p{L}+|случай)|недавно\s+(?:делали|запускали|вели)|запускали\s+(?:для|проект)|вели\s+(?:для|проект)|(?:для|у)\s+(?:трех|двух|четырех|пяти|нескольких)\s+(?:\p{L}+\s+)?(?:клиент\p{L}*|компани\p{L}+|студи\p{L}+|клиник\p{L}+))/u
+const PAST_STEMS = [
+  'сдела',
+  'дела',
+  'запусти',
+  'запуска',
+  'настро[иь]',
+  'настраива',
+  'постро[иь]',
+  'строи',
+  'собра',
+  'созда',
+  'создава',
+  'разработа',
+  'разрабатыва',
+  'внедри',
+  'подключи',
+  'реализова',
+  'работа',
+  'занима',
+  'начина',
+  'продвига',
+  'подня',
+  'выстро[иь]',
+  'оптимизирова',
+  'масштабирова',
+  'увеличи',
+  'снизи',
+  'сократи',
+  'раскрути',
+].join('|')
+const PAST_ROOTS = 'вел|вывел|провел|перевел|довел|привел'
+const AFTER = '(?!\\p{L})'
+const PAST_ANY = `(?:(?:${PAST_STEMS})(?:л|ла|ло|ли)(?:сь|ся)?|(?:${PAST_ROOTS})(?:а|о|и)?|помог(?:ла|ло|ли)?|пришел|пришла|пришло|пришли|вырос(?:ла|ло|ли)?)${AFTER}`
+const PAST_PLURAL = `(?:(?:${PAST_STEMS})ли(?:сь)?|(?:${PAST_ROOTS})и|помогли|пришли|выросли)${AFTER}`
+/** Words before a bare verb at the start of a sentence: «Недавно помогли», «Раньше тоже делали». */
+const TIME_WORD =
+  '(?:недавно|раньше|ранее|уже|еще|тоже|также|потом|затем|как-то|однажды|давно|весной|летом|осенью|зимой|в\\s+прошлом\\s+году|в\\s+этом\\s+году|не\\s+так\\s+давно)'
+const LEAD = '(?:(?:и|а|но|да|ну|вот|кстати|тогда)\\s+)?'
+/** What a client of ours is called when a story starts with «был у нас». */
+const OUR_NOUN =
+  '(?:проект|клиент|заказчик|кейс|случа|опыт|истори|клиник|студи|магазин|салон|школ|ресторан|кафе|агентств|сет[иь]|производств|автосервис|стоматолог|фирм|бизнес|компани|организаци|заказ|сайт|лендинг)\\p{L}*'
+const BE = '(?:был|была|было|были)'
+
+/**
+ * Where a reply starts a story of a project of ours (case.unknown when no case of this turn stands behind it). Each
+ * pattern is read on one statement of the folded reply, never on a question to the client or on a negated clause.
+ * «did»: our team's past work in its own words («мы делали», «Сделали похожее для клиники», «Недавно помогли
+ * автосервису»). «intro»: another client or project brought in («один клиент из Краснодара», «была у нас клиника»,
+ * «у клиента с похожим бюджетом», «наш клиент начинал»). Present work talk («делаем лендинги») and a remark about
+ * clients in general («для большинства наших клиентов первый шаг это аудит») match neither.
+ */
+export const CASE_CLAIM_DID: RegExp[] = [
+  // «Мы делали», «мы тоже запускали», «мы с Борисом вели».
+  new RegExp(`(?<!\\p{L})мы(?:\\s+\\p{L}+){0,2}?\\s+${PAST_PLURAL}`, 'u'),
+  // A bare plural at the start of a statement.
+  new RegExp(`^\\s*${LEAD}(?:${TIME_WORD}\\s+){0,2}${PAST_PLURAL}`, 'u'),
+]
+export const CASE_CLAIM_INTRO: RegExp[] = [
+  // «Один клиент из Краснодара», «один из наших клиентов», «одна из наших заказчиц».
+  /(?<!\p{L})(?:один|одна|одно)\s+(?:из\s+)?(?:наш\p{L}*\s+)?(?:клиент\p{L}*|заказчик\p{L}*)/u,
+  // «У одного из наших клиентов», «у другого клиента», «у нашего клиента».
+  /(?<!\p{L})у\s+(?:одного|другого|нашего|нашей|похожего|такого)\s+(?:из\s+)?(?:наш\p{L}*\s+)?(?:клиент\p{L}*|заказчик\p{L}*)/u,
+  // «У клиента с похожим бюджетом», «клиент из такой же ниши».
+  /(?<!\p{L})клиент\p{L}*\s+(?:с|из|в)\s+(?:похож|такой|такого|подобн)\p{L}*/u,
+  // «У нас был похожий проект», «Была у нас клиника».
+  new RegExp(
+    `(?<!\\p{L})у\\s+нас\\s+(?:\\p{L}+\\s+){0,2}?${BE}\\s+(?:\\p{L}+\\s+){0,2}?${OUR_NOUN}`,
+    'u',
+  ),
+  new RegExp(`(?<!\\p{L})${BE}\\s+у\\s+нас\\s+(?:\\p{L}+\\s+){0,2}?${OUR_NOUN}`, 'u'),
+  // «Похожий проект», «похожая история» as something that happened.
+  new RegExp(
+    `(?<!\\p{L})похож\\p{L}+\\s+(?:проект\\p{L}*|истори\\p{L}+|случай)(?:\\s+\\p{L}+){0,3}\\s+${BE}`,
+    'u',
+  ),
+  // «Для трёх клиентов», «у нескольких клиник».
+  /(?<!\p{L})(?:для|у)\s+(?:трех|двух|четырех|пяти|нескольких)\s+(?:\p{L}+\s+)?(?:клиент\p{L}*|компани\p{L}+|студи\p{L}+|клиник\p{L}+)/u,
+]
+/** «Наш клиент начинал»: our client and a past verb in one statement is a story, our client alone is a remark. */
+export const CASE_OUR_CLIENT = /(?<!\p{L})наш(?:а|им|его|ему|их|ими|и)?\s+клиент\p{L}*/u
+export const CASE_PAST_ANY = new RegExp(`(?<!\\p{L})${PAST_ANY}`, 'u')
+/** Words of a sentence that brings in another story, not the next sentence of the chosen case: «ещё делали», «для трёх». */
+export const CASE_NEW_STORY =
+  /(?<!\p{L})(?:еще|также|друг(?:ой|ому|им|ие|их|ая|ую)|тр[её]х|двух|четыр[её]х|пяти|нескольк\p{L}+)(?!\p{L})/u
+/** A negation within a few words before a claim: «не делали», «у нас не было», «никогда не запускали». */
+export const CASE_NEGATION = /(?<!\p{L})(?:не|нет|ни|никогда)(?!\p{L})/u
 
 /** A link or a bare domain written in a reply (case.link): the model writes none, the code adds a case's link. */
 export const CASE_LINK =
