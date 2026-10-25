@@ -137,6 +137,50 @@ describe('mind loader', () => {
     ])
   })
 
+  it('FR-MIND-1: a direction copy of a shared id is an error, the shared record stays', async () => {
+    const root = await tempMind()
+    await putRecord(
+      root,
+      'mind/shared/judgment/autonomy.md',
+      { id: 'j-autonomy', type: 'judgment' },
+      'Общая самостоятельность: цену называет Борис.',
+    )
+    await putRecord(
+      root,
+      'mind/directions/hance-marketing/judgment/autonomy.md',
+      { id: 'j-autonomy', type: 'judgment', scope: 'hance-marketing' },
+      'Своя самостоятельность: цену называет Сара.',
+    )
+    await putRecord(
+      root,
+      'mind/directions/hance-marketing/knowledge/k-twin.md',
+      { id: 'k-twin', type: 'knowledge', scope: 'hance-marketing' },
+      'Первая.',
+    )
+    await putRecord(
+      root,
+      'mind/directions/hance-design/knowledge/k-twin.md',
+      { id: 'k-twin', type: 'knowledge', scope: 'hance-design' },
+      'Вторая.',
+    )
+    const m = await loadMind(root)
+    expect(m.records.map((r) => [r.front.id, r.path])).toEqual([
+      ['k-twin', 'mind/directions/hance-design/knowledge/k-twin.md'],
+      ['j-autonomy', 'mind/shared/judgment/autonomy.md'],
+    ])
+    expect(m.records[1]?.body).toMatch(/Борис/)
+    expect(m.errors).toEqual([
+      {
+        path: 'mind/directions/hance-marketing/judgment/autonomy.md',
+        message: expect.stringContaining('j-autonomy уже есть в mind/shared/judgment/autonomy.md'),
+      },
+      {
+        path: 'mind/directions/hance-marketing/knowledge/k-twin.md',
+        message: expect.stringContaining('k-twin уже есть в mind/directions/hance-design/'),
+      },
+    ])
+  })
+
   it('FR-MIND-1: no folder is an empty mind', async () => {
     const root = await tempMind()
     expect(await loadMind(join(root, 'missing'))).toEqual({

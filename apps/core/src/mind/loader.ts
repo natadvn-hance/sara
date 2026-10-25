@@ -116,24 +116,36 @@ export async function loadMind(root: string): Promise<LoadedMind> {
   const paths = files.map((f) => relative(root, f).split(sep).join('/')).sort()
 
   const hash = createHash('sha256')
-  const records: MindRecord[] = []
-  const errors: LoadedMind['errors'] = []
-  const seen = new Map<string, string>()
+  const parsed: ({ path: string } & ({ record: MindRecord } | { error: string }))[] = []
   for (const path of paths) {
     const text = await readFile(join(root, path), 'utf8')
     hash.update(`${path}\n${text}\n`)
-    const r = parseRecord(path, text)
-    if ('error' in r) {
-      errors.push({ path, message: r.error })
+    parsed.push({ path, ...parseRecord(path, text) })
+  }
+
+  // One id, one record: byIds has no scope, so a direction copy of a shared id would reach every account. The shared
+  // copy wins; between directions the first path does. The others are errors.
+  const winners = new Map<string, MindRecord>()
+  for (const p of parsed) {
+    if (!('record' in p)) continue
+    const have = winners.get(p.record.front.id)
+    if (!have || (have.front.scope !== 'shared' && p.record.front.scope === 'shared'))
+      winners.set(p.record.front.id, p.record)
+  }
+  const records: MindRecord[] = []
+  const errors: LoadedMind['errors'] = []
+  for (const p of parsed) {
+    if ('error' in p) {
+      errors.push({ path: p.path, message: p.error })
       continue
     }
-    const first = seen.get(r.record.front.id)
-    if (first) {
-      errors.push({ path, message: `поле id: ${r.record.front.id} уже есть в ${first}` })
-      continue
-    }
-    seen.set(r.record.front.id, path)
-    records.push(r.record)
+    const winner = winners.get(p.record.front.id)
+    if (winner === p.record) records.push(p.record)
+    else
+      errors.push({
+        path: p.path,
+        message: `поле id: ${p.record.front.id} уже есть в ${winner?.path}`,
+      })
   }
   const head = await gitHead(root)
   const mindVersion = head ?? (paths.length === 0 ? 'empty' : hash.digest('hex').slice(0, 12))
