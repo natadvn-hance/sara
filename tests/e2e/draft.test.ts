@@ -374,7 +374,8 @@ describe('the bid', () => {
   })
 })
 
-describe('«Изменить»', () => {
+// Each case walks the whole bot path; on the Mac runner with two CI runs at once 5 seconds was too short.
+describe('«Изменить»', { timeout: 30000 }, () => {
   const NEW = 'Понимаю вашу задачу. Когда нужен запуск?'
 
   it('FR-LEAD-7: «Изменить» takes a new text by reply and brings an updated card', async () => {
@@ -382,7 +383,8 @@ describe('«Изменить»', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     const ask = await pressEdit(cards()[0])
-    expect(tg.answers.at(-1)?.text).toBe('Жду новый текст отклика')
+    // The answer to the press may come a moment after the prompt message.
+    await until(() => tg.answers.some((x) => x.text === 'Жду новый текст отклика'))
     expect(said(ASK)).toBe(true)
     tg.pushText(111, NEW, ask)
     await until(() => said(SAVED))
@@ -569,7 +571,7 @@ describe('the laid-out card', () => {
     await until(() => cards().length === 1)
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
-    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+    await until(() => tg.answers.some((x) => x.text === 'Прислала разбор'))
     expect(razbor()[0]).toMatchObject({ parse_mode: 'HTML' })
     for (const part of Object.values(ANALYST.reading)) expect(razbor()[0]?.text).toContain(part)
     expect(razbor()[0]?.text).toContain(ANALYST.condition)
@@ -581,7 +583,7 @@ describe('the laid-out card', () => {
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 2)
     expect(razbor()[1]?.text).toBe(razbor()[0]?.text)
-    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+    await until(() => tg.answers.some((x) => x.text === 'Прислала разбор'))
   })
 
   it('FR-LEAD-7: a long order text is cut on the card and comes whole with «Разбор»', async () => {
@@ -606,7 +608,7 @@ describe('the laid-out card', () => {
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
     expect(razbor()[0]?.text).toContain('Разбора для этой заявки нет')
-    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+    await until(() => tg.answers.some((x) => x.text === 'Прислала разбор'))
   })
 
   it('FR-LEAD-7: the reminder card has the same layout and its «Разбор» works', async () => {

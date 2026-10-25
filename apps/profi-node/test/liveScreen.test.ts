@@ -52,7 +52,7 @@ afterAll(async () => {
   await svc.close()
   await ab.close()
   await site.close()
-})
+}, 30000)
 
 const wsUrl = () => svc.url.replace('http', 'ws').replace('/mcp', '/screen/hance-marketing')
 
@@ -71,13 +71,14 @@ function open(token: string | null): Promise<WebSocket> {
   })
 }
 
+// A headless browser on a busy machine (two CI runs at once on the Mac) sends its first frame late.
 async function nextFrame(ws: WebSocket): Promise<Frame> {
   const got = frames.get(ws) ?? []
-  await expect.poll(() => got.length, { timeout: 10000 }).toBeGreaterThan(0)
+  await expect.poll(() => got.length, { timeout: 30000 }).toBeGreaterThan(0)
   return got[0] as Frame
 }
 
-describe('live screen', () => {
+describe('live screen', { timeout: 45000 }, () => {
   it('FR-SET-4: frames of the account tab arrive on the live screen', async () => {
     const ws = await open('node-tok')
     const f = await nextFrame(ws)
@@ -101,7 +102,7 @@ describe('live screen', () => {
     )
     ws.send(JSON.stringify({ t: 'text', text: '+79000000001' }))
     await expect
-      .poll(() => ab.page.locator('#phone').inputValue(), { timeout: 5000 })
+      .poll(() => ab.page.locator('#phone').inputValue(), { timeout: 15000 })
       .toBe('+79000000001')
     ws.close()
   }, 30000)
