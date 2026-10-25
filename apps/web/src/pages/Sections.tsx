@@ -5,7 +5,7 @@ import { api, go, type SetupState } from '../api'
 import { insideTelegram } from '../app/telegram'
 import { Group, Link, Row } from '../components/list'
 import { Page } from '../components/page'
-import { Empty, Loading } from '../components/states'
+import { Empty } from '../components/states'
 
 /** A section whose screen comes in a later part of M7: its place in the menu already works. */
 export function SectionPage({ title, hint }: { title: string; hint: string }) {
@@ -27,7 +27,6 @@ export function TodayPage() {
   useEffect(() => {
     if (setup.data?.next === 'password') go('/setup')
   }, [setup.data])
-  if (setup.isPending) return <Loading />
   return (
     <Page title="Сегодня">
       {setup.data && setup.data.next !== 'done' ? (

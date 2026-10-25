@@ -11,6 +11,8 @@
     "test/**/*.ts",
     "vitest.config.ts",
     "e2e/**/*.ts",
+    "e2e-perf/**/*.ts",
+    "playwright.perf.config.ts",
     "vite.config.ts",
     "playwright.config.ts"
   ]

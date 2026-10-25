@@ -64,6 +64,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sara/web build
+      - run: pnpm budget
 
   secrets:
     runs-on: ubuntu-latest

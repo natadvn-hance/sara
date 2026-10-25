@@ -70,7 +70,15 @@ test('FR-UI-3: the shell fits 360 px in both themes', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 })
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme })
-    for (const path of ['/', '/leads', '/clients', '/settings', '/accounts', '/health', '/journal']) {
+    for (const path of [
+      '/',
+      '/leads',
+      '/clients',
+      '/settings',
+      '/accounts',
+      '/health',
+      '/journal',
+    ]) {
       await page.goto(path)
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
       expect(await overflowOf(page), `${colorScheme} ${path}`).toBeLessThanOrEqual(0)

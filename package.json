@@ -15,6 +15,7 @@
     "fake:order": "curl -s -X POST http://127.0.0.1:7070/fake/orders",
     "probe:claude": "pnpm --filter @sara/core probe:claude",
     "trace": "tsx scripts/trace.ts",
+    "budget": "tsx scripts/bundle-budget.ts apps/web/dist",
     "mind:check": "tsx scripts/mind-check.ts",
     "dev": "tsx scripts/dev.ts",
     "smoke:claude-container": "bash scripts/smoke-claude-container.sh",
