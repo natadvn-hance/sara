@@ -58,6 +58,17 @@ describe('the reminder ladder', () => {
     expect(nextReminder({ ...base, sent: 9 })).toBeNull()
   })
 
+  it('FR-CONV-12: a client who went to think gets the first reminder after 48 hours, the second keeps its time', () => {
+    expect(nextReminder({ ...base, sent: 0, firstAfterMs: 2 * DAY })).toMatchObject({
+      at: at(2 * DAY),
+      step: 1,
+    })
+    const first = new Date(lastMs + 2 * DAY).toISOString()
+    expect(nextReminder({ ...base, sent: 1, lastSentAt: first })?.at).toEqual(at(3 * DAY))
+    // Without the sign it is 24 hours as before.
+    expect(nextReminder({ ...base, sent: 0 })?.at).toEqual(at(DAY))
+  })
+
   it('FR-CONV-12: the last reminder is friendly, the others check in', () => {
     const go = { ...base, continued: true }
     expect(nextReminder({ ...base, sent: 0 })?.tone).toBe('check_in')

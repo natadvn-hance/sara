@@ -825,6 +825,50 @@ describe('the durable process of a reminder', () => {
   })
 })
 
+describe('a client who went to think', () => {
+  const answered = (clientText: string): SeedMessage[] => [
+    ...quiet(30 * HOUR),
+    { id: 'm-2', side: 'client', text: clientText, at: ago(28 * HOUR) },
+    { id: 'm-3', side: 'specialist', text: 'Хорошо, на связи.', at: ago(25 * HOUR) },
+  ]
+  const planned = async (conv: { id: string }) => {
+    const wf = remindWorkflowId(conv.id, 'm-3')
+    await until(async () =>
+      ((await DBOS.listWorkflowSteps(wf)) ?? []).some((s) => s.name === 'plan-0'),
+    )
+    const step = ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === 'plan-0')
+    return Date.parse(String((step?.output as { at?: string } | undefined)?.at))
+  }
+
+  it('FR-CONV-12: after «я подумаю» the first reminder is 48 hours after our message, not 24', async () => {
+    await live()
+    for (const words of [
+      'Спасибо, я подумаю',
+      'Посоветуюсь с коллегами',
+      'Вернусь к вам на неделе',
+    ]) {
+      await again()
+      await live()
+      const conv = await scene(answered(words))
+      await startReminder(conv.id, 'm-3')
+      // 25 hours after our message: without the sign the reminder would be due long ago.
+      const anchorAt = Date.now() - 25 * HOUR
+      expect(Math.abs((await planned(conv)) - (anchorAt + 48 * HOUR)), words).toBeLessThan(5000)
+      await sleep(300)
+      expect(await rows(), words).toHaveLength(0)
+      await cancelAll()
+    }
+  })
+
+  it('FR-CONV-12: after an ordinary «спасибо» the first reminder keeps its 24 hours', async () => {
+    await live()
+    const conv = await scene(answered('Спасибо'))
+    await startReminder(conv.id, 'm-3')
+    await until(done(1))
+    expect((await rows())[0]?.outcome).toBe('sent')
+  })
+})
+
 describe('the time of a reminder', () => {
   it('FR-CONV-12: a text that took hours to get does not go at night, it waits for 9:00 Moscow', async () => {
     await live()
