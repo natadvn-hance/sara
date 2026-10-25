@@ -176,6 +176,12 @@ export async function ladderTexts(db: Db, conversationId: string): Promise<Set<s
 export const isLadderMessage = (m: Pick<StoredMessage, 'author' | 'text'>, texts: Set<string>) =>
   m.author === 'sara' && texts.has(normalizeText(m.text))
 
+/** The account is paused, logged out or banned: nothing is written to its clients. */
+async function accountHolds(db: Db, accountId: string): Promise<boolean> {
+  const [a] = await db.select().from(account).where(eq(account.id, accountId))
+  return a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false
+}
+
 /**
  * Whether a reminder may go now: the last word before it is spoken, at the wake-up and again right before sending
  * (FR-CONV-12, FR-CONV-6). Nothing goes for a conversation that is closed, Boris's or booked, to a client who wrote
@@ -234,9 +240,7 @@ export async function checkGround(
     .limit(1)
   if (running) return SKIP('идёт ход разговора')
   if (!o.dormant && !v1Writes) {
-    const [a] = await db.select().from(account).where(eq(account.id, conv.accountId))
-    if (a && (a.paused || a.loginState === 'dead' || a.loginState === 'banned'))
-      return SKIP('аккаунт на паузе')
+    if (await accountHolds(db, conv.accountId)) return SKIP('аккаунт на паузе')
     if (!(await getSetting(db, 'outbound.messages'))) return SKIP('пауза «Пишет клиентам»')
   }
   // «Прочитал» is the stored mark of our last message, which only the client's read event sets (design 5.11).
@@ -407,7 +411,29 @@ export async function sendStep(
     .select({ id: outbox.id })
     .from(outbox)
     .where(eq(outbox.idempotencyKey, `msg:${rowId}`))
-  if (queued) return deliver(d, rowId, conv, queued.id, p)
+  if (queued) {
+    // A repeat after a crash: the message is queued, the chat is not asked again (the service still refuses a chat
+    // that moved on). But the switches may have changed since: the queue says yes again only when sending is allowed.
+    const again = (await accountHolds(d.db, conv.accountId))
+      ? null
+      : await d.db.transaction((tx) =>
+          queueMessage(tx, {
+            key: rowId,
+            accountId: conv.accountId,
+            chatId: conv.chatId,
+            text,
+            author: 'sara',
+            expectLast: null,
+          }),
+        )
+    if (again) return deliver(d, rowId, conv, again, p)
+    await finishRow(d.db, rowId, {
+      outcome: 'skipped',
+      decision: 'nothing',
+      decisionReason: 'сейчас не отправляю: пауза, пауза аккаунта или режим тени',
+    })
+    return { outcome: 'skipped', end: false }
+  }
   const g = await checkGround(d, conversationId, anchor, { dormant: false })
   if (!g.go) {
     await finishRow(d.db, rowId, {
