@@ -18,24 +18,6 @@ export function caseName(title: string): string {
   return (title.split(/[:;,]|\s\p{Pd}\s/u)[0] ?? title).trim()
 }
 
-/** The words of a name that count when a text is searched for it (a hyphenated brand stays one word). */
-const nameWords = (name: string) => fold(name).match(/[\p{L}\p{N}][\p{L}\p{N}-]*/gu) ?? []
-/** A word without its ending, so «сети стоматологий» finds «Сеть стоматологий». */
-const stem = (w: string) => (w.length >= 4 ? w.slice(0, Math.max(3, w.length - 2)) : w)
-
-/**
- * Whether a text tells a case by its name: every word of four letters or more of the name stands in the text with any
- * ending. A name of short words only is looked for as it is.
- */
-export function namesCase(text: string, title: string): boolean {
-  const words = nameWords(caseName(title))
-  if (words.length === 0) return false
-  const long = words.filter((w) => w.length >= 4)
-  const need = long.length > 0 ? long : words
-  const have = fold(text).match(/[\p{L}\p{N}][\p{L}\p{N}-]*/gu) ?? []
-  return need.every((w) => have.some((h) => h.startsWith(stem(w))))
-}
-
 /**
  * Abbreviations and trade words of the portfolio that stand in a case's title but name no company: «Компания под NDA»,
  * «B2B-компания», «аудиобрендинг для HoReCa». Folded; a hyphenated word with one of them («B2B-компания») is no brand.
@@ -85,33 +67,112 @@ const NOT_A_BRAND = new Set([
   'digital',
 ])
 
+/** English words that say what a company is, after its name: «Sotnikova Agency», «Akopov Team», «Wayforce Gym». */
+const GENERIC_TAIL = new Set([
+  'company',
+  'team',
+  'agency',
+  'group',
+  'gym',
+  'club',
+  'studio',
+  'shop',
+  'store',
+  'school',
+  'lab',
+  'labs',
+])
+
 /**
- * The words of a case's name that are a name and not a description: a word with a Latin letter or a digit, a hyphenated
- * word, or a capitalized word that is not the first, but never an abbreviation (NOT_A_BRAND). «Сеть стоматологий» has
- * none (it says what the client is), so a company under NDA may be told by it; the code cannot know a name the record
- * does not show.
+ * A name of a case that a text can tell it by: one word (or one quoted phrase, or a whole Latin name) of its title.
+ * `capital` is set for a Cyrillic word that is a name only because it is capitalized after the first word («Стальной
+ * Каркас», «МИО»): then the text must write it with a capital too, or «стальной каркас» of an order would name the case.
  */
-function brandWords(title: string): string[] {
-  return caseName(title)
-    .split(/\s+/)
-    .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
-    .filter(
-      (w, k) =>
-        w.length > 1 &&
-        !fold(w)
-          .split('-')
-          .some((part) => NOT_A_BRAND.has(part)) &&
-        (/[A-Za-z0-9]/.test(w) || w.includes('-') || (k > 0 && /^\p{Lu}/u.test(w))),
-    )
+type Brand = { tokens: string[]; capital: boolean }
+
+const TOKEN = /[\p{L}\p{N}]+(?:[./'’-][\p{L}\p{N}]+)*/gu
+const tokensOf = (s: string): string[] => s.replace(/ё/g, 'е').replace(/Ё/g, 'Е').match(TOKEN) ?? []
+const trimWord = (w: string) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+const isLatin = (w: string) => /[A-Za-z0-9]/.test(w)
+/** A word without its ending, so «Грибатории» finds «Грибатория». */
+const stem = (w: string) => (w.length >= 4 ? w.slice(0, Math.max(3, w.length - 2)) : w)
+
+/** Whether a word of a title part is a brand word; `k` is its place in the part and `n` the number of words in it. */
+function isBrandWord(w: string, k: number, n: number): boolean {
+  if (w.length < 2) return false
+  const low = fold(w)
+  if (low.split('-').some((part) => NOT_A_BRAND.has(part)) || NOT_A_BRAND.has(low)) return false
+  if (GENERIC_TAIL.has(low) || /^(?:19|20)\d{2}$/.test(w)) return false
+  // «Потолок-Арт», «Окна-Мастер»: every part capitalized. «Боулинг-клуб», «Онлайн-курс» say what the client is.
+  if (w.includes('-') && /\p{L}-\p{L}/u.test(w))
+    return w.split('-').every((part) => /^[\p{Lu}\d]/u.test(part))
+  if (isLatin(w)) return true
+  // A single word is the name itself; after the first word only a capitalized one is.
+  return n === 1 || (k > 0 && /^\p{Lu}/u.test(w))
 }
 
-/** Whether a text names the company of a case by one of its brand words (Latin ones in any letter case). */
-function namesCompany(text: string, title: string): string | null {
-  for (const w of brandWords(title)) {
-    const latin = /[A-Za-z]/.test(w)
-    if (latin ? fold(text).includes(fold(w)) : text.includes(w)) return w
+/**
+ * The brand names in the title of a case, from the part of it before the first colon, comma or dash, cut at « / »
+ * («Akopov Team / LevTrain» has two): the Latin, hyphenated, numbered or capitalized words that are a name and not a
+ * description, and a quoted name. «Сеть стоматологий», «Компания под NDA», «Боулинг-клуб» have none: they say what the
+ * client is, the code cannot know the name behind them, and such a case is told by its id only.
+ */
+export function brandNames(title: string): Brand[] {
+  const brands: Brand[] = []
+  for (const part of caseName(title).split(/\s+\/\s+/)) {
+    const quoted = [...part.matchAll(/[«"“]([^»"”]+)[»"”]/gu)].map((m) => m[1] ?? '')
+    for (const q of quoted)
+      if (tokensOf(q).length > 0) brands.push({ tokens: tokensOf(q), capital: !isLatin(q) })
+    const words = part
+      .replace(/[«"“][^»"”]+[»"”]/gu, ' ')
+      .split(/\s+/)
+      .map(trimWord)
+      .filter(Boolean)
+    let found = 0
+    const size = words.length + quoted.length
+    words.forEach((w, k) => {
+      if (!isBrandWord(w, k, size)) return
+      found++
+      const cyrillicAfterFirst = !isLatin(w) && !w.includes('-') && words.length > 1
+      brands.push({ tokens: [w], capital: cyrillicAfterFirst })
+    })
+    // A Latin name made only of abbreviations and trade words, «A/B Company», is told as a whole.
+    if (quoted.length === 0 && found === 0 && words.length >= 2 && words.every(isLatin))
+      brands.push({ tokens: words, capital: false })
   }
-  return null
+  return brands
+}
+
+/** Whether one word of a text is the word of a brand (Latin as written in any letter case, Cyrillic with any ending). */
+function sameWord(t: string, b: string, capital: boolean): boolean {
+  if (isLatin(b)) return fold(t) === fold(b)
+  if (capital && !/^\p{Lu}/u.test(t)) return false
+  return fold(t).startsWith(fold(stem(b.replace(/ё/g, 'е'))))
+}
+
+/** Whether a text tells a brand name: its words stand in the text one after another. */
+function namesBrand(text: string, brand: Brand): boolean {
+  const have = tokensOf(text)
+  const want = brand.tokens
+  for (let k = 0; k + want.length <= have.length; k++)
+    if (want.every((w, j) => sameWord(have[k + j] ?? '', tokensOf(w)[0] ?? w, brand.capital)))
+      return true
+  return false
+}
+
+/**
+ * Whether a text tells a case by its name: one of the brand names of its title stands in the text. A title that says
+ * what the client is («Музыкальная школа МИО» has only «МИО», «Компания из сферы строительства» has no name) is not
+ * matched by its descriptive words, or an order for a music school would name the case; such a case is told by its id.
+ */
+export function namesCase(text: string, title: string): boolean {
+  return brandNames(title).some((b) => namesBrand(text, b))
+}
+
+/** The brand name of a case that a text tells, as written in the title, or null. */
+function namesCompany(text: string, title: string): string | null {
+  const hit = brandNames(title).find((b) => namesBrand(text, b))
+  return hit ? hit.tokens.join(' ') : null
 }
 
 export function caseIssues(

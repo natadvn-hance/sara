@@ -1,5 +1,6 @@
 import { type CaseChoice, CHECK_IDS } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
+import { namesCase } from '../../src/conversation/check/caseChecks'
 import {
   checkReplyText,
   extractNumbers,
@@ -519,6 +520,11 @@ describe('cases in a reply', () => {
     summary: 'Разработали стратегию маркетинга для школы танцев.',
     showRules: ['Компанию можно называть.'],
   })
+  const WINDOWS = caseHit({
+    id: 'k-case-05',
+    title: 'Окна-Мастер: сайт и заявки, Москва',
+    summary: 'Сделали сайт и заявки для оконной компании.',
+  })
   const ASKED = { moment: 'asked', case_id: null, why: 'Клиент спросил о примерах' } as const
   const choose = (hit: CaseHit, moment: CaseChoice['moment'] = 'asked'): CaseChoice => ({
     moment,
@@ -574,10 +580,10 @@ describe('cases in a reply', () => {
         choice: choose(CEILINGS, null),
       }),
     ).toEqual(['case.no_moment'])
-    // Two cases of the library in one text.
+    // Two cases of the library in one text (told by their brand names; a descriptive title names no case).
     expect(
-      withCases('Делали для Потолок-Арт и для школы танцев.', {
-        offered: [CEILINGS, DANCE],
+      withCases('Делали для Потолок-Арт и для Окна-Мастер.', {
+        offered: [CEILINGS, WINDOWS],
         choice: choose(CEILINGS),
       }),
     ).toEqual(['case.many'])
@@ -680,6 +686,133 @@ describe('cases in a reply', () => {
     expect(
       withCases('Делали для SkyRoom, B2B.', { offered: [SKY], choice: choose(SKY) }),
     ).toContain('case.closed')
+  })
+
+  // The titles of the 28 real cases of Hance (sara-mind, cases 01-28): what names a case in a text and what does not.
+  const TITLES: [string, string[], string[]][] = [
+    [
+      'Музыкальная школа МИО',
+      ['Делали для школы МИО.', 'Как у МИО, там вели соцсети.'],
+      ['У вас заказ для музыкальной школы?', 'Для музыкальной школы это нормально.'],
+    ],
+    ['Грибатория', ['Делали для Грибатории.'], ['Про грибы я не знаю.']],
+    ['Unchain', ['Для Unchain делали сайт.'], ['Цепочка заявок.']],
+    [
+      'Компания по производству мебели Arleon',
+      ['Делали для Arleon.'],
+      ['Компании по производству мебели часто начинают с каталога.'],
+    ],
+    [
+      'A/B Company: аудиобрендинг для HoReCa',
+      ['Делали для A/B Company.'],
+      ['Запускали A/B тесты.', 'Аудиобрендинг для HoReCa делают так.'],
+    ],
+    ['Sotnikova Agency', ['Делали для Sotnikova.'], ['Агентство это про людей.']],
+    ['SkillCode', ['Опыт в SkillCode.'], ['Skill без кода.']],
+    [
+      'Ресторан «Как Дома», Горловка',
+      ['Делали для «Как Дома».', 'Как Дома делали сайт.'],
+      ['Делаем всё как дома.', 'Ресторан в Горловке понятный кейс.'],
+    ],
+    ['Viv Profit', ['Делали для Viv Profit.'], ['Прибыль растёт.']],
+    ['Levkorz', ['Делали для Levkorz.'], ['Корзина заказов.']],
+    [
+      'SkyRoom: подвесные потолки, Москва и МО',
+      ['Делали для SkyRoom.'],
+      ['Подвесные потолки в Москве, да.'],
+    ],
+    [
+      'Компания из сферы строительства',
+      [],
+      ['Для компании из сферы строительства это типично.', 'Строительная компания, понятно.'],
+    ],
+    ['Парсинг базы для отдела продаж', [], ['Парсинг базы для отдела продаж нужен?']],
+    ['Разработка стратегии продаж', [], ['Разработка стратегии продаж идёт первой.']],
+    [
+      'Частный проект / компания не зафиксирована',
+      [],
+      ['Частный проект, понятно.', 'Компания не зафиксирована в заказе.'],
+    ],
+    [
+      'Стальной Каркас',
+      ['Делали для «Стальной Каркас».', 'Как у Стальной Каркас.'],
+      ['Стальной каркас здания считает конструктор.', 'Нужен стальной каркас, да.'],
+    ],
+    ['Онлайн-курс для детей', [], ['Онлайн-курс для детей часто начинают с лендинга.']],
+    ['Компания под NDA', [], ['Для компании под NDA название не называем.']],
+    ['NEXUM', ['Делали для NEXUM.'], ['Нексус не знаю.']],
+    ['Wayforce Gym', ['Делали для Wayforce.'], ['Для gym-проектов хватает лендинга.']],
+    [
+      'Боулинг-клуб 7.10',
+      ['Делали для боулинг-клуба 7.10.', 'Клуб 7.10, стратегия.'],
+      ['Для боулинг-клуба это нормально.', 'Боулинг-клуб это про вечер.'],
+    ],
+    ['B2B-компания под NDA', [], ['Для B2B-компании под NDA так и делаем.']],
+    [
+      'Максималист: 1С:Франчайзи',
+      ['Делали для Максималист.'],
+      ['Франчайзи это отдельный разговор.'],
+    ],
+    [
+      'Akopov Team / LevTrain',
+      ['Делали для LevTrain.', 'Делали для Akopov.', 'Akopov Team и LevTrain.'],
+      ['Команда это про людей.'],
+    ],
+    [
+      'Оптовая торговля стройматериалами, Санкт-Петербург: NDA',
+      [],
+      ['Оптовая торговля стройматериалами в Санкт-Петербурге, да.'],
+    ],
+    ['StroiCRM', ['Делали для StroiCRM.'], ['Подключим CRM.']],
+    [
+      'Банкротство физических лиц, Ростов-на-Дону: NDA',
+      [],
+      ['Банкротство физических лиц, Ростов-на-Дону, знакомая тема.'],
+    ],
+    [
+      'Аутсорсинг бухгалтерии, Воронеж: NDA',
+      [],
+      ['Аутсорсинг бухгалтерии в Воронеже, знакомая тема.'],
+    ],
+  ]
+
+  it('FR-CONV-4: only a brand word of the title names a case, a descriptive title is told by its id', () => {
+    for (const [title, names, notNames] of TITLES) {
+      for (const text of names) expect(namesCase(text, title), `${title} | ${text}`).toBe(true)
+      for (const text of notNames) expect(namesCase(text, title), `${title} | ${text}`).toBe(false)
+    }
+  })
+
+  it('FR-CONV-4: a descriptive title in a text is no repeat and no second case', () => {
+    const SCHOOL = caseHit({
+      id: 'k-case-07',
+      title: 'Музыкальная школа МИО',
+      summary: 'Сделали брендинг.',
+    })
+    const told = [{ id: SCHOOL.id, title: SCHOOL.title }]
+    // The order is about a music school: that is not the case told again.
+    expect(
+      withCases('Для музыкальной школы начнём с сайта.', { told, choice: choose(CEILINGS) }),
+    ).not.toContain('case.repeat')
+    // The id again and the brand name in the text still are.
+    expect(withCases('Делали для МИО.', { told })).toContain('case.repeat')
+    expect(withCases('Делали для Потолок-Арт.', { told, choice: choose(SCHOOL) })).toContain(
+      'case.repeat',
+    )
+    // A school of dance is the client's trade, not a second case of the library.
+    expect(
+      withCases('Делали для Потолок-Арт, а ваша школа танцев это другой масштаб.', {
+        offered: [CEILINGS, DANCE],
+        choice: choose(CEILINGS),
+      }),
+    ).toEqual([])
+    // Two branded cases in one text are two cases.
+    expect(
+      withCases('Делали для Потолок-Арт и для Окна-Мастер.', {
+        offered: [CEILINGS, WINDOWS],
+        choice: choose(CEILINGS),
+      }),
+    ).toEqual(['case.many'])
   })
 
   it('FR-CONV-4: «взгляните на наш кейс» is robotic', () => {
