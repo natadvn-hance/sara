@@ -25,13 +25,29 @@ function target(root: string, file: string): string {
     .join('/')
 }
 
+/**
+ * A case is a knowledge record tagged «кейс» (any letter case, as apps/core/src/mind/cases.ts reads it). It must say
+ * what may be shown to a client: the section «Как показывать клиенту» with at least one «- » item.
+ */
+function caseProblem(front: MindFrontmatter, body: string): string | null {
+  const isCase =
+    front.type === 'knowledge' && (front.tags ?? []).some((t) => t.trim().toLowerCase() === 'кейс')
+  if (!isCase) return null
+  const section = /^## Как показывать клиенту[ \t]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body)
+  if (!section) return 'у кейса нет раздела «Как показывать клиенту»'
+  if (!/^- \S/m.test(section[1] ?? ''))
+    return 'в разделе «Как показывать клиенту» нет пунктов (строк, начинающихся с «- »)'
+  return null
+}
+
 export async function checkMind(root: string): Promise<MindProblem[]> {
   const files: string[] = []
   await markdownFiles(root, files)
   const problems: MindProblem[] = []
   const records: { file: string; front: MindFrontmatter }[] = []
   for (const file of files.sort()) {
-    const m = /^---\n([\s\S]*?)\n---\n/.exec(await readFile(file, 'utf8'))
+    const text = await readFile(file, 'utf8')
+    const m = /^---\n([\s\S]*?)\n---\n/.exec(text)
     if (!m) {
       problems.push({ file, field: 'frontmatter', message: 'нет полей сверху между строками ---' })
       continue
@@ -66,6 +82,8 @@ export async function checkMind(root: string): Promise<MindProblem[]> {
         message: `номер записи типа ${r.data.type} начинается с ${prefix}`,
       })
     }
+    const problem = caseProblem(r.data, text.slice(m[0].length))
+    if (problem) problems.push({ file, field: 'section', message: problem })
     records.push({ file, front: r.data })
   }
 

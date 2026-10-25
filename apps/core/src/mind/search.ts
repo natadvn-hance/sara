@@ -3,6 +3,7 @@ import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import type { MindHit, MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { mindIndex } from '../db/schema'
+import { CASE_LEXEME, toCaseHit } from './cases'
 import { lastIndexedVersion } from './indexer'
 import { markdownSections } from './loader'
 
@@ -60,6 +61,10 @@ type RankedQuery = {
   types: MindType[]
   field?: 'body' | 'example_client'
   limit: number
+  /** Cases are never facts: the fact search leaves them out, the case search takes only them. */
+  cases: 'only' | 'none'
+  /** Record ids that must not come back. */
+  exclude?: string[]
 }
 
 /**
@@ -85,6 +90,15 @@ async function ranked(db: Db, q: RankedQuery): Promise<MindHit[]> {
           sql`, `,
         )})`
       : sql`true`
+  const marked = sql`${mindIndex.tsv} @@ ${CASE_LEXEME}::tsquery`
+  const cases = q.cases === 'only' ? marked : sql`not (${marked})`
+  const exclude =
+    q.exclude && q.exclude.length > 0
+      ? sql`${mindIndex.recordId} not in (${sql.join(
+          q.exclude.map((id) => sql`${id}`),
+          sql`, `,
+        )})`
+      : sql`true`
   const rows = await db.execute<Row & { rank: number }>(sql`
     with q as materialized (select ${query} as query)
     select ${mindIndex.recordId} as id, ${mindIndex.type} as type, ${mindIndex.scope} as scope,
@@ -95,6 +109,8 @@ async function ranked(db: Db, q: RankedQuery): Promise<MindHit[]> {
     from ${source}
     where (${mindIndex.scope} = 'shared' or ${mindIndex.scope} = ${q.scope})
       and ${types}
+      and ${cases}
+      and ${exclude}
       and ${vector} @@ q.query
     order by rank desc, ${mindIndex.recordId}
     limit ${q.limit}`)
@@ -123,7 +139,20 @@ export function createMindSearch(db: Db): MindSearch {
         types: q.types,
         field: q.field,
         limit: q.limit,
+        cases: 'none',
       })
+    },
+
+    async cases(q) {
+      const hits = await ranked(db, {
+        words: queryWords(q.text),
+        scope: q.scope,
+        types: ['knowledge'],
+        limit: q.limit,
+        cases: 'only',
+        exclude: q.exclude,
+      })
+      return hits.map(toCaseHit)
     },
 
     async byIds(ids) {

@@ -3,6 +3,7 @@ import { desc, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { event, mindIndex } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { CASE_LEXEME, isCaseRecord } from './cases'
 import { loadMind, type MindRecord } from './loader'
 
 const moscowToday = (): string =>
@@ -41,7 +42,8 @@ function toRow(r: MindRecord, mindVersion: string) {
     exampleBoris: example ? r.sections.Борис || null : null,
     version: f.version,
     mindVersion,
-    tsv: sql`setweight(to_tsvector('russian', ${head}), 'A') || setweight(to_tsvector('russian', ${r.body}), 'B')`,
+    // A case also carries the marker lexeme, so the fact search can leave it out and the case search can find it.
+    tsv: sql`setweight(to_tsvector('russian', ${head}), 'A') || setweight(to_tsvector('russian', ${r.body}), 'B') || ${isCaseRecord(f) ? CASE_LEXEME : ''}::tsvector`,
   }
 }
 
