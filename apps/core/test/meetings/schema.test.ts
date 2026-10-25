@@ -62,7 +62,12 @@ describe('meeting tables', () => {
       .set({ outcome: 'won', amountRub: 120000, outcomeAt: new Date().toISOString() })
       .where(eq(deal.id, id))
     const [row] = await db.select().from(deal).where(eq(deal.id, id))
-    expect(row).toMatchObject({ leadId: null, orderId: '90000001', outcome: 'won', amountRub: 120000 })
+    expect(row).toMatchObject({
+      leadId: null,
+      orderId: '90000001',
+      outcome: 'won',
+      amountRub: 120000,
+    })
   })
 
   it('FR-MEET-2: a deal has at most one active meeting', async () => {
@@ -105,7 +110,11 @@ describe('meeting tables', () => {
 
   it('FR-MEET-4: a deal made by a bid has its order number', async () => {
     await seedLead()
-    const id = await createDeal(db, { leadId: '95147898', accountId: 'hance-marketing', correlationId })
+    const id = await createDeal(db, {
+      leadId: '95147898',
+      accountId: 'hance-marketing',
+      correlationId,
+    })
     const [row] = await db.select().from(deal).where(eq(deal.id, id))
     expect(row).toMatchObject({ leadId: '95147898', orderId: '95147898', origin: 'sara' })
   })
@@ -117,7 +126,12 @@ describe('meeting tables', () => {
         db.insert(meetingTurn).values({ roundKey: 'conv-turn:a:1|1', result: { handled: false } }),
       ),
     ).toMatch(/duplicate key/)
-    const v = { orderId: '90000003', accountId: 'hance-marketing', seenAt: new Date().toISOString(), feeRub: 120 }
+    const v = {
+      orderId: '90000003',
+      accountId: 'hance-marketing',
+      seenAt: new Date().toISOString(),
+      feeRub: 120,
+    }
     await db.insert(v1Bid).values(v)
     expect(await dbErrorMessage(db.insert(v1Bid).values(v))).toMatch(/duplicate key/)
   })
