@@ -58,28 +58,30 @@ const DORMANT_WAIT_S = 30 * 24 * 3600
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 
 /** The text of a reminder: the model's, written again until the time is up, then the ready text of old Sara. */
-async function obtainText(k: number, rowId: string, p: Planned, read: boolean): Promise<string> {
+async function obtainText(
+  k: number,
+  conversationId: string,
+  rowId: string,
+  p: Planned,
+  read: boolean,
+): Promise<string> {
   const deadline = (await DBOS.now()) + (d().fallbackAfterMs ?? FALLBACK_AFTER_MS)
   for (let a = 0; ; a++) {
     const left = deadline - (await DBOS.now())
     if (left <= 0) break
-    const w = await DBOS.runStep(
-      () => writeStep(d(), rowId, conversationIdOf(rowId), p, read, left),
-      { name: `write-${k}-${a}` },
-    )
+    const w = await DBOS.runStep(() => writeStep(d(), rowId, conversationId, p, read, left), {
+      name: `write-${k}-${a}`,
+    })
     if (w.text) return w.text
     const wait = Math.min(d().retryEveryMs ?? RETRY_EVERY_MS, deadline - (await DBOS.now()))
     if (wait > 0) await DBOS.sleep(wait)
   }
-  const f = await DBOS.runStep(() => fallbackStep(d(), rowId, conversationIdOf(rowId), p), {
+  const f = await DBOS.runStep(() => fallbackStep(d(), rowId, conversationId, p), {
     name: `fallback-${k}`,
     ...DB_STEP,
   })
   return f.text
 }
-
-/** `conv-remind:<conversation>:<message>:<step>` → the conversation (a uuid has no colons). */
-const conversationIdOf = (rowId: string) => rowId.split(':')[1] ?? ''
 
 async function runRemind(conversationId: string, anchor: string): Promise<void> {
   const wf = remindWorkflowId(conversationId, anchor)
@@ -120,7 +122,7 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
       continued = true
       continue
     }
-    const text = await obtainText(k, rowId, next, g.read)
+    const text = await obtainText(k, conversationId, rowId, next, g.read)
     const result = await DBOS.runStep(
       () => sendStep(d(), rowId, conversationId, anchor, next, text),
       { name: `send-${k}`, ...DB_STEP },

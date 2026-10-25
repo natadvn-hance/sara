@@ -117,6 +117,6 @@ describe('the ready texts of old Sara', () => {
 
   it('NFR-UX-1: the ready texts have no long or medium dash', () => {
     for (const tone of ['check_in', 'friendly'] as const)
-      expect(reminderFallback('Анна', tone)).not.toMatch(/[–—]/)
+      expect(reminderFallback('Анна', tone)).not.toMatch(/[\u2013\u2014]/)
   })
 })
