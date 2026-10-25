@@ -39,7 +39,7 @@ import {
   priceOf,
   writeDraft,
 } from './draft'
-import { MONEY_TEXTS, readWallet, refuseSpend } from './money'
+import { readWallet, refuseSpend } from './money'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
 import { sortOrder } from './sorter'
@@ -672,12 +672,27 @@ async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> 
 }
 
 /**
+ * «Откликнуться» on a card whose fee is not known (its page was not read): the page is read now and the card comes
+ * again with the fee, or the order ends as closed or already bid on. Still unknown: Boris bids by hand.
+ */
+async function feeThenCard(l: LeadRow, taskId: string): Promise<void> {
+  const read = await readPage(l.accountId, l.id)
+  if (read.ok && (read.page.bid_price_rub > 0 || pageVerdict(read) !== 'go'))
+    return draftThenCard(l, taskId, read)
+  await d().notifier.sendText(TEXTS.feeUnknown(l.title))
+}
+
+/**
  * A dropped order Boris wants after all: its page first (the Scorer's drop never opened it, and hours have passed),
  * then its draft, then its card. An order closed meanwhile, or already bid on, ends its decision task with a word
  * to Boris instead of a card.
  */
-async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
-  const read = await readPage(l.accountId, l.id)
+async function draftThenCard(
+  l: LeadRow,
+  taskId: string,
+  read: PageRead | null = null,
+): Promise<void> {
+  read ??= await readPage(l.accountId, l.id)
   const full = fuller(
     { bid_price_rub: l.bidPriceRub, client_name: l.clientName, text: l.text },
     read,
@@ -770,7 +785,7 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   const said = priceOf(a.text, { bare: forPrice })
   // The price was asked for: words without one are not taken for a new text.
   if (forPrice && said.priceRub === null) return TEXTS.priceNotFound
-  const next = said.text === null || forPrice ? null : editOf(said.text, l.clientName)
+  const next = said.text === null ? null : editOf(said.text, l.clientName)
   // Too long: the request stays open, the next text answers it.
   if (next !== null && next.length > BID_TEXT_MAX) return TEXTS.draftTooLong(next.length)
   const saved = await d().db.transaction(async (tx) => {
@@ -934,13 +949,21 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         if (!(await getSetting(d().db, 'outbound.bids'))) return TEXTS.bidsPausedPress
         // No text to send yet: the card waits for «Изменить», and the wallet need not be read.
         if (l.draftText === null) return TEXTS.noDraft
+        // The fee is the most the node may pay, so an unknown one never goes: the page is read now (#89 could not).
+        if (l.bidPriceRub <= 0) {
+          void feeThenCard(l, taskId).catch((err) =>
+            console.error(
+              'fee read failed',
+              err instanceof Error ? err.message.slice(0, 200) : err,
+            ),
+          )
+          return TEXTS.feeChecking
+        }
         // Profi.ru takes no bid without «Стоимость услуги» (#79: required on every live answer): Sara asks for it.
         if (l.draftPriceRub === null) {
           await askForDraft(d(), { taskId, title: l.title }, new Date(), 'price')
           return TEXTS.waitingPrice
         }
-        // The fee is the most the node may pay: an unknown one never goes, so the wallet need not be read.
-        if (l.bidPriceRub <= 0) return MONEY_TEXTS.unknownFee
         wallet = await readWallet(d().profi, l.accountId)
       }
       let outboxId: string | null = null

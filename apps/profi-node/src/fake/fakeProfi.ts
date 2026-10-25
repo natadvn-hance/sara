@@ -134,7 +134,12 @@ export async function createFakeProfi(o: {
         if (Date.now() > Date.parse(i.not_after))
           throw new ProfiToolError('RATE_LIMITED', 'the deadline of the press has passed')
         if (onSite.has(i.order_id))
-          return { found_on_page: true, spent_rub: 0, balance_after_rub: balance }
+          return {
+            found_on_page: true,
+            spent_rub: 0,
+            balance_after_rub: balance,
+            already_there: true,
+          }
         if (fee > i.max_fee_rub)
           throw new ProfiToolError('PRICE_CHANGED', `the bid costs ${fee}, above ${i.max_fee_rub}`)
         balance -= fee

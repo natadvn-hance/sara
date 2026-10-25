@@ -51,6 +51,8 @@ export const SubmitBidOutput = z.object({
   found_on_page: z.boolean(),
   spent_rub: z.number().int().nonnegative(),
   balance_after_rub: z.number().int().nullable(),
+  /** The page had this account's bid before this call pressed anything (Boris bid by hand): nothing was spent. */
+  already_there: z.boolean().optional(),
 })
 export type SubmitBidInput = z.infer<typeof SubmitBidInput>
 export type SubmitBidOutput = z.infer<typeof SubmitBidOutput>

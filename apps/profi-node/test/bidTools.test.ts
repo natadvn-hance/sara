@@ -434,6 +434,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
       found_on_page: true,
       spent_rub: 0,
       balance_after_rub: 5000,
+      already_there: true,
     })
     expect(site.bids).toEqual([])
     expect(site.openerClicks).toBe(0)

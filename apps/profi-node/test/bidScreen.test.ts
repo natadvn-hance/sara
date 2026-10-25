@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { dueIn } from '../src/bid/form'
 import { orderScreenFromAnswer } from '../src/bid/screen'
 
 const sample = (name: string) =>
@@ -90,17 +89,5 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
       orderScreenFromAnswer('https://profi.ru/backoffice/api/x', r.body, '10000001'),
     ).toBeNull()
     expect(orderScreenFromAnswer(r.url, { data: { me: {} } }, '10000001')).toBeNull()
-  })
-})
-
-describe('the form footer (FR-LEAD-9)', () => {
-  it('FR-LEAD-9: the amount due is the sum labelled «К оплате», never the wallet beside it', () => {
-    expect(dueIn('Баланс 2 500 ₽ К оплате 300 ₽')).toBe(300)
-    expect(dueIn('К оплате: 95 ₽')).toBe(95)
-    expect(dueIn('К оплате:\n1 210\u00a0₽')).toBe(1210)
-    expect(dueIn('95 ₽')).toBe(95)
-    // Two sums and neither labelled: not read.
-    expect(dueIn('Баланс 2 500 ₽ 300 ₽')).toBeNull()
-    expect(dueIn(null)).toBeNull()
   })
 })

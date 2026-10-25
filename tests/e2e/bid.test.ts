@@ -60,8 +60,7 @@ async function count(type: string): Promise<number> {
   return r[0]?.n ?? 0
 }
 /** An order and its card; the press on «Откликнуться» is left to the test. */
-async function cardFor(more: Parameters<FakeProfi['emitOrder']>[0] = {}) {
-  const id = orderId()
+async function cardFor(more: Parameters<FakeProfi['emitOrder']>[0] = {}, id = orderId()) {
   const before = cards().length
   await fake.emitOrder({ order_id: id, ...more })
   await until(() => cards().length === before + 1)
@@ -261,15 +260,43 @@ describe('the node refuses (B1)', () => {
 })
 
 describe('the fee Boris pressed (B2)', () => {
-  it('FR-LEAD-9: an unknown fee is refused before anything is queued, and the button names no price', async () => {
-    await cardFor({ bid_price_rub: 0 })
+  it('FR-LEAD-9: an unknown fee is read from the page at the press, and the card comes again with it', async () => {
+    // The page could not be read when the order came: the card knows no fee.
+    const id = orderId()
+    fake.setOrderPage(id, { fail: 'RATE_LIMITED' })
+    await cardFor({ bid_price_rub: 0 }, id)
     expect(button('bid')?.text).toBe('Откликнуться')
+    fake.setOrderPage(id, { bid_price_rub: 230 })
     press()
     await until(() => tg.answers.length === 1)
-    expect(tg.answers[0]?.text).toBe(
-      'Не знаю цену отклика на эту заявку, отклик не отправила. Откликнись вручную на Профи.ру, если заявка нужна.',
-    )
+    expect(tg.answers[0]?.text).toBe(TEXTS.feeChecking)
+    await until(() => cards().length === 2)
+    expect(button('bid')?.text).toBe(`Откликнуться за ${formatRub(230)}`)
     expect(await db.select().from(outbox)).toHaveLength(0)
+    expect((await leadOf(id))?.bidPriceRub).toBe(230)
+  })
+
+  it('FR-LEAD-9: a fee still unknown at the press sends nothing and says to bid by hand', async () => {
+    const id = orderId()
+    fake.setOrderPage(id, { fail: 'RATE_LIMITED' })
+    await cardFor({ bid_price_rub: 0 }, id)
+    press()
+    await until(() => said(TEXTS.feeUnknown(TITLE)))
+    expect(await db.select().from(outbox)).toHaveLength(0)
+    expect(fake.bids).toHaveLength(0)
+    expect((await taskOf(id))?.state).toBe('open')
+  })
+
+  it('FR-LEAD-9: a form asking more while the page shows the same fee ends without a card that cannot go', async () => {
+    const id = await cardFor()
+    fake.refuseNext('PRICE_CHANGED')
+    press()
+    await until(() => said(TEXTS.bidDearer(TITLE, 210, null)))
+    await settle()
+    expect(cards()).toHaveLength(1)
+    const [o] = await db.select().from(outbox)
+    expect(o).toMatchObject({ state: 'failed', errorClass: 'PRICE_CHANGED' })
+    expect((await taskOf(id))?.state).toBe('resolved')
   })
 
   it('FR-LEAD-9: a bid dearer than the card comes back with the new fee, and the next press pays it', async () => {

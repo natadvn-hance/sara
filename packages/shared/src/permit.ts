@@ -8,8 +8,9 @@ export type PermitFields = {
   not_after: string
 }
 
+// The tool's name first: a permit for one tool is never good for another.
 const signed = (f: PermitFields) =>
-  [f.idempotency_key, f.order_id, String(f.max_fee_rub), f.not_after].join('\n')
+  ['submit_bid', f.idempotency_key, f.order_id, String(f.max_fee_rub), f.not_after].join('\n')
 
 export function signPermit(secret: string, f: PermitFields): string {
   return createHmac('sha256', secret).update(signed(f)).digest('hex')

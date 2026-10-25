@@ -115,7 +115,8 @@ const RUNNING = ['PENDING', 'ENQUEUED']
 
 /**
  * On start: delivers bids recorded before a crash that never got their delivery started. A row whose run DBOS
- * resumes itself is left to it; a row without a run that waited over an hour goes back to Boris.
+ * resumes itself is left to it. A row that never had a run, old or new, and waited over an hour goes back to Boris;
+ * one whose run ended (it may have pressed) gets a run again, and the node answers from its own record.
  */
 export async function resumeQueuedOutbox(db: Db): Promise<number> {
   const rows = await db
@@ -133,7 +134,7 @@ export async function resumeQueuedOutbox(db: Db): Promise<number> {
     const legacy = await DBOS.getWorkflowStatus(legacyWorkflowIdOf(p.leadId))
     if (legacy && RUNNING.includes(legacy.status)) continue
     const own = await DBOS.getWorkflowStatus(workflowIdOf(r.id))
-    if (!own && r.stale) {
+    if (!own && !legacy && r.stale) {
       await giveBack(r.id, p, 'stale')
       await tell(TEXTS.bidStale(p.title), p)
       if (p.taskId)
@@ -266,11 +267,14 @@ async function tell(text: string, p: BidPayload): Promise<void> {
   }
 }
 
-/** The fee the order page asks now, put on the lead so the card Boris gets back shows it; null when unknown. */
+/**
+ * The fee the order page asks now, read from the page itself (not the node's store), put on the lead so the card
+ * Boris gets back shows it; null when unknown.
+ */
 async function freshFee(p: BidPayload): Promise<number | null> {
   try {
     const o = await d().profi.getOrder(p.accountId, p.leadId)
-    if (o.bid_price_rub <= 0) return null
+    if (o.from_page !== true || o.bid_price_rub <= 0) return null
     await d().db.update(lead).set({ bidPriceRub: o.bid_price_rub }).where(eq(lead.id, p.leadId))
     return o.bid_price_rub
   } catch {
@@ -278,10 +282,11 @@ async function freshFee(p: BidPayload): Promise<number | null> {
   }
 }
 
-/** The order page says this account bid on it; any failure to read it is «not seen». */
+/** The order page, read now, says this account bid on it; any failure to read it is «not seen». */
 async function bidOnOrder(p: BidPayload): Promise<boolean> {
   try {
-    return (await d().profi.getOrder(p.accountId, p.leadId)).has_bid === true
+    const o = await d().profi.getOrder(p.accountId, p.leadId)
+    return o.from_page === true && o.has_bid === true
   } catch {
     return false
   }
@@ -306,13 +311,19 @@ async function attempt(
   n: number,
   mayBeOnSite: boolean,
 ): Promise<Attempt> {
+  const [before] = await d()
+    .db.select({ attempts: outbox.attempts })
+    .from(outbox)
+    .where(eq(outbox.id, row.id))
+  // This step ran before (the core stopped in the middle of it): that call may have pressed.
+  const ranBefore = (before?.attempts ?? 0) > n
   await d()
     .db.update(outbox)
     .set({ attempts: n + 1 })
     .where(eq(outbox.id, row.id))
   // The pause is read again right before the node is called: Boris may have set it while the bid waited.
   if (!(await getSetting(d().db, 'outbound.bids')))
-    return mayBeOnSite ? { kind: 'uncertain' } : { kind: 'paused' }
+    return mayBeOnSite || ranBefore ? { kind: 'uncertain' } : { kind: 'paused' }
   try {
     const r = await d().profi.submitBid({
       account_id: p.accountId,
@@ -323,8 +334,8 @@ async function attempt(
       max_fee_rub: p.priceRub,
       idempotency_key: row.idempotencyKey,
     })
-    // The page had this account's bid before this key pressed anything: Boris bid by hand.
-    const alreadyThere = r.found_on_page && r.spent_rub === 0
+    // The node saw this account's bid before this key pressed anything: Boris bid by hand.
+    const alreadyThere = r.already_there === true
     return { kind: 'ok', spent: r.spent_rub, balanceAfter: r.balance_after_rub, alreadyThere }
   } catch (e) {
     if (e instanceof ProfiError && e.errorClass === 'RATE_LIMITED') return { kind: 'busy' }
@@ -336,20 +347,28 @@ async function attempt(
 
 /**
  * Steps of a bid that was not pressed: the order goes back to Boris with the reason. A dearer bid first reads the
- * new fee, so the card he gets shows it. A closed order only says so: no card, the row stays failed.
+ * new fee from the order page, so the card he gets shows it. A closed order, or a form asking more while the page
+ * shows no higher fee (a press again would end the same), only says so: no card, the row stays failed.
  */
 async function backToBoris(outboxId: string, p: BidPayload, reason: string): Promise<void> {
-  if (reason === 'ORDER_CLOSED') {
+  const fee =
+    reason === 'PRICE_CHANGED' ? await DBOS.runStep(() => freshFee(p), { name: 'freshFee' }) : null
+  if (
+    reason === 'ORDER_CLOSED' ||
+    (reason === 'PRICE_CHANGED' && !(fee !== null && fee > p.priceRub))
+  ) {
     await DBOS.runStep(() => markNotSent(outboxId, p, 'failed', reason), {
       name: 'markFailed',
       ...DB_STEP,
     })
-    await DBOS.runStep(() => tell(TEXTS.bidRefused(p.title, reason), p), { name: 'tellRefused' })
+    const text =
+      reason === 'ORDER_CLOSED'
+        ? TEXTS.bidRefused(p.title, reason)
+        : TEXTS.bidDearer(p.title, p.priceRub, null)
+    await DBOS.runStep(() => tell(text, p), { name: 'tellRefused' })
     return
   }
   await DBOS.runStep(() => giveBack(outboxId, p, reason), { name: 'giveBack', ...DB_STEP })
-  const fee =
-    reason === 'PRICE_CHANGED' ? await DBOS.runStep(() => freshFee(p), { name: 'freshFee' }) : null
   const text =
     reason === 'paused'
       ? TEXTS.bidsPaused
@@ -434,7 +453,11 @@ async function deliver(outboxId: string): Promise<void> {
     } else break
   }
 
-  const final = result
+  // A refusal after an unsure call: that earlier call may still have pressed before its deadline, so it is unsure.
+  const final: Attempt =
+    unsure > 0 && (result.kind === 'refused' || result.kind === 'busy')
+      ? { kind: 'uncertain' }
+      : result
   if (final.kind === 'ok') {
     if (final.alreadyThere) {
       const first = await DBOS.runStep(() => markAlreadyThere(outboxId, p), {

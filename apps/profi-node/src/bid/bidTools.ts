@@ -198,7 +198,12 @@ export function createBidTools(o: {
     const wallet = await walletOnPage(r, page)
     if (s.hasBid === true) {
       await markOrderBid(o.db, i.account_id, id)
-      return { found_on_page: true, spent_rub: 0, balance_after_rub: wallet ?? r.eyes.balance() }
+      return {
+        found_on_page: true,
+        spent_rub: 0,
+        balance_after_rub: wallet ?? r.eyes.balance(),
+        already_there: true,
+      }
     }
     if (s.hasBid === null)
       throw fail('LAYOUT_CHANGED', 'Ответ страницы не говорит, был ли отклик, отклик не нажат')

@@ -595,7 +595,7 @@ describe('what Sara says when a bid does not go (B1)', () => {
 
   it('FR-LEAD-9: a dearer bid says the new fee when it is known', () => {
     expect(TEXTS.bidDearer('Сайт', 210, 250)).toContain(`теперь стоит 250${NBSP}₽`)
-    expect(TEXTS.bidDearer('Сайт', 210, null)).toContain('посмотри заявку на Профи.ру')
+    expect(TEXTS.bidDearer('Сайт', 210, null)).toContain('Посмотри заявку на Профи.ру')
     for (const t of [
       TEXTS.bidDearer('Сайт', 210, 250),
       TEXTS.bidDearer('Сайт', 210, null),
@@ -603,6 +603,8 @@ describe('what Sara says when a bid does not go (B1)', () => {
       TEXTS.bidFoundLater('Сайт', 210),
       TEXTS.bidStale('Сайт'),
       TEXTS.askPrice('Сайт'),
+      TEXTS.feeUnknown('Сайт'),
+      TEXTS.feeChecking,
     ])
       expect(t).not.toContain(DASH)
   })
