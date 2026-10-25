@@ -138,13 +138,23 @@ describe('the router in the lead pipeline (FR-LEAD-4)', () => {
     const before = cards()
     await fake.emitOrder({ order_id: id, bid_price_rub: 0 })
     await until(() => cards() === before + 1)
+    // The card is out, but the run still records its last steps: take its history only once it has finished.
+    const wf = `lead:${id}`
+    const sys = new pg.Client({ connectionString: systemDatabaseUrl(testDatabaseUrl()) })
+    await sys.connect()
+    await until(
+      async () =>
+        (
+          await sys.query<{ status: string }>(
+            'select status from dbos.workflow_status where workflow_uuid = $1',
+            [wf],
+          )
+        ).rows[0]?.status === 'SUCCESS',
+    )
     const cardsBefore = tg.sent.filter((m) => m.reply_markup).length
 
     // The history this run would have if the code before the router had recorded it: no marker, no route step.
-    const sys = new pg.Client({ connectionString: systemDatabaseUrl(testDatabaseUrl()) })
-    await sys.connect()
     try {
-      const wf = `lead:${id}`
       const steps = (
         await sys.query<{ function_id: number; function_name: string }>(
           'select function_id, function_name from dbos.operation_outputs where workflow_uuid = $1 order by function_id',
