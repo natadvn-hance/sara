@@ -1,7 +1,7 @@
 import { type Actor, newEventId, type TaskAction } from '@sara/shared'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { chatMessage, convTurn, lead, question, task } from '../db/schema'
+import { chatMessage, convTurn, question, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { redact } from '../gateway/redact'
 import { appendEvent } from '../journal/journal'
@@ -9,6 +9,7 @@ import type { QuestionRow } from '../learning/questions'
 import { proposeMind } from '../mind/proposals'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
+import { clientNames } from './dossier'
 import { getConversation, updateConversation } from './store'
 
 export type CommandDeps = {
@@ -149,6 +150,10 @@ async function latestTurn(db: Db, conversationId: string) {
 /** Boris's own answer becomes a proposal of a speech example, never a mind record by itself (FR-MIND-3). */
 async function proposeBorisWords(db: Db, turnId: string, conversationId: string, text: string) {
   const conv = await getConversation(db, conversationId)
+  if (!conv) return
+  // A name that is not known cannot be hidden: Boris's words are then kept beside the draft and go nowhere else.
+  const names = await clientNames(db, conv)
+  if (names.length === 0) return
   const [t] = await db.select().from(convTurn).where(eq(convTurn.id, turnId))
   const ids = (t?.messageIds as string[]) ?? []
   const client = ids.length
@@ -162,8 +167,7 @@ async function proposeBorisWords(db: Db, turnId: string, conversationId: string,
         .map((m) => m.text)
         .join('\n')
     : ''
-  const [l] = conv?.orderId ? await db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
-  const hide = (s: string) => redact(s, [l?.clientName]).text
+  const hide = (s: string) => redact(s, names).text
   const id = `e-b-${turnId
     .replace(/[^a-z0-9]/gi, '')
     .slice(-24)

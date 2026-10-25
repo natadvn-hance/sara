@@ -1,5 +1,5 @@
 import { type ClientInfo, CONV_STAGES, type ConvStage } from '@sara/shared'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, deal, lead } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
@@ -25,6 +25,59 @@ export function turnMessageIds(
     .slice(from)
     .filter((m) => m.side === 'client')
     .map((m) => m.platformMessageId)
+}
+
+/** Words that open a message before a comma and are not a name. */
+const NOT_NAMES = new Set([
+  'здравствуйте',
+  'здравствуй',
+  'привет',
+  'приветствую',
+  'добрый',
+  'доброе',
+  'доброго',
+  'добрая',
+  'спасибо',
+  'благодарю',
+  'хорошо',
+  'отлично',
+  'конечно',
+  'да',
+  'нет',
+  'итак',
+  'извините',
+  'простите',
+  'понимаю',
+  'понял',
+  'поняла',
+])
+
+/**
+ * The names of the client to hide from the model (ADR-016): the lead's or the order page's (the dossier has the one
+ * it found), and the name old Sara greeted the client with. She opened every chat «<Имя>, добрый день!» or
+ * «<Имя>, здравствуйте», so a chat she began, with no lead in the core, has its name in the first words of our
+ * side's earliest message: a capitalized word before the first comma.
+ */
+export async function clientNames(
+  db: Db,
+  conv: ConversationRow,
+  dossier?: Pick<Dossier, 'clientName'>,
+): Promise<string[]> {
+  const known = dossier
+    ? dossier.clientName
+    : conv.orderId
+      ? (await db.select({ name: lead.clientName }).from(lead).where(eq(lead.id, conv.orderId)))[0]
+          ?.name
+      : null
+  const [first] = await db
+    .select({ text: chatMessage.text })
+    .from(chatMessage)
+    .where(and(eq(chatMessage.conversationId, conv.id), eq(chatMessage.side, 'specialist')))
+    .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+    .limit(1)
+  const greeted = /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
+  const names = [known, greeted && !NOT_NAMES.has(greeted.toLowerCase()) ? greeted : null]
+  return [...new Map(names.flatMap((n) => (n ? [[n.toLowerCase(), n] as const] : []))).values()]
 }
 
 function stageOf(

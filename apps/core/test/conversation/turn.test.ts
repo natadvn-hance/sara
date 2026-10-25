@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { type EventEnvelope, newEventId } from '@sara/shared'
@@ -31,6 +31,7 @@ const ACC = 'hance-marketing'
 const CHAT = '95147898'
 const { db, close } = openTestDb()
 const profi = stubProfi([])
+let cliLog = ''
 let cards: string[]
 let outcomes: { turnId: string; conversationId: string; outcome: string; at: string }[] = []
 let forwards: string[]
@@ -45,6 +46,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'turn-'))
+  cliLog = join(dir, 'calls.log')
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
   for (const [name, model] of [
     ['interlocutor', 'sonnet'],
@@ -66,6 +68,7 @@ beforeAll(async () => {
     rolesDir: join(dir, 'roles'),
     dataDir: join(dir, 'data'),
     extraEnv: {
+      FAKE_CLAUDE_ARGS_LOG: cliLog,
       FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({ interlocutor: interlocutorAnswer() }),
     },
   })
@@ -344,6 +347,15 @@ describe('the turn workflow', () => {
     const rows = await turnsDone(2)
     expect(rows.map((r) => r.anchorMessageId).sort()).toEqual(['m-2', 'm-3'])
   }, 40000)
+
+  it('ADR-016: the name of a chat old Sara began reaches the model as a tag, taken from her greeting', async () => {
+    // No lead and no order page: the only place the name is written is the greeting of our first message.
+    await clientWrites('m-2', 'Анна на связи, как начнём?')
+    await turnsDone(1)
+    const log = await readFile(cliLog, 'utf8')
+    expect(log).toContain('[имя 1]')
+    expect(log).not.toContain('Анна')
+  }, 30000)
 
   it('FR-CONV-11: a client Boris took is forwarded to him without the model', async () => {
     await clientWrites('m-0', 'Привет')
