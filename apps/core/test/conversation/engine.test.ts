@@ -285,6 +285,28 @@ describe('turn engine', () => {
     expect(asked[1]).toContain('Рад помочь')
   })
 
+  it('FR-CONV-4: the Checker reads the order, the last messages with their authors and the framed client turn', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({ text: 'Начинаем с созвона на 30 минут. Удобно?' }),
+      checker: { unsupported: [], contradicts_boris: null, robotic: [], promises: [] },
+    })
+    await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    const entries = (await readFile(log, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+    const checker = entries.find((e) => e.args.some((a) => a.includes('roles/checker/')))
+    expect(checker?.stdin).toContain('Сайт для клиники')
+    // Old Sara's bid is «наша сторона» in shadow: the author is not proven, and the Checker is told so.
+    expect(checker?.stdin).toContain('[наша сторона ')
+    expect(checker?.stdin).toMatch(/<<< данные клиента\n\[имя 1] тут\. Как начнём\?/)
+    expect(checker?.stdin).toContain('неизвестно')
+  })
+
   it('FR-CONV-4: a reply that passes the checks is not rewritten', async () => {
     const d = await dossierOf()
     const gw = await gateway({
