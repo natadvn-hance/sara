@@ -549,3 +549,51 @@ export async function finishOnboarding(
     return done(version)
   })
 }
+
+/**
+ * Puts a change of the rules (a calibration's advice or threshold hint) into the open draft, as the confirmed data
+ * of the steps whose sections it touches; an onboarding is started when none is open. No version is made. False:
+ * the draft could not take it (closed meanwhile, or no longer reads).
+ */
+export async function applyRulesToDraft(
+  db: Db,
+  accountId: string,
+  to: DirectionRules,
+  understood: string,
+): Promise<boolean> {
+  await startOnboarding(db, accountId, 'edit')
+  return db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const row = await openRow(tx, accountId)
+    const draft = row ? draftOf(row) : null
+    if (!row || !draft) return false
+    const active = (await activeRules(tx, accountId)).rules
+    const current = assembleRules(row.mode === 'edit' ? active : null, draft) ?? active
+    const sections = new Set(rulesDiff(current, to).sections)
+    const set = (step: '1' | '2' | '3', data: unknown) => {
+      const old = draft.steps[step] ?? emptyStep()
+      draft.steps[step] = {
+        ...old,
+        proposal: { understood, data },
+        attempts: [...old.attempts, { fix: null, understood }],
+        confirmed: data,
+        skipped: false,
+      }
+    }
+    if (sections.has('about')) {
+      const was = confirmedOf(AboutSchema, draft.steps['1'])
+      set('1', {
+        about: to.about,
+        services: was?.services ?? [],
+        clients: was?.clients ?? [],
+        budgets: was?.budgets ?? [],
+      })
+    }
+    if (sections.has('stop_factors') || sections.has('red_flags'))
+      set('2', { stop_factors: to.stop_factors, red_flags: to.red_flags })
+    if (sections.has('axes') || sections.has('threshold') || sections.has('notes'))
+      set('3', { axes: to.axes, threshold: to.threshold, notes: to.notes })
+    await write(tx, accountId, draft)
+    return true
+  })
+}
