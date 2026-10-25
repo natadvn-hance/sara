@@ -307,6 +307,25 @@ describe('turn engine', () => {
     expect(checker?.stdin).toContain('неизвестно')
   })
 
+  it('FR-CONV-4: a text the model writes with call_boris is dropped, never shown unchecked', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        move: 'call_boris',
+        text: 'Я бот, цена 90 000.',
+        fact_ids: [],
+      }),
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.output?.text).toBeNull()
+    expect(plan.issues).toEqual([])
+    expect(plan.attempts).toBe(1)
+    expect(plan.decision.would).toBe('call_boris')
+  })
+
   it('FR-CONV-4: a reply that passes the checks is not rewritten', async () => {
     const d = await dossierOf()
     const gw = await gateway({

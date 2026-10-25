@@ -385,6 +385,77 @@ describe('the code checks of a reply', () => {
     expect(ids({ move: 'reply', text: '  \n ' })).toEqual(['empty'])
   })
 
+  it('FR-CONV-4: a text written with a move that is not a reply is not checked, it is never sent', () => {
+    const text = `Отличный вопрос ${LONG} лендинг за 90 000. Я бот.`
+    expect(checkReplyText(input({ move: 'call_boris', text, factIds: [] }))).toEqual([])
+    expect(checkReplyText(input({ move: 'none', text, factIds: [] }))).toEqual([])
+    expect(checkReplyText(input({ move: 'reply', text, factIds: [] })).length).toBeGreaterThan(0)
+  })
+
+  it('FR-CONV-4: «топ-10» and «x2» are numbers that need a source, «3D» and «B2B» are names', () => {
+    for (const text of [
+      'Выведем в топ-10 за месяц.',
+      'Рост x7 за год.',
+      'Рост х7 за год.',
+      'Рост 7x за год.',
+      'Рост 7× за год.',
+    ])
+      expect(ids({ text }), text).toEqual(['facts.numbers'])
+    for (const text of ['Делаем 3D и B2B сайты.', 'Работаем с 1С.'])
+      expect(ids({ text }), text).toEqual([])
+    // The client wrote it, or the record holds it: it is allowed.
+    expect(ids({ text: 'Выведем в топ-10.', clientTurnText: 'Хочу в топ-10' })).toEqual([])
+    expect(
+      ids({
+        text: 'Рост x7 бывает.',
+        knowledgeTexts: { 'k-price-landing': 'Кейс: рост х7 за полгода.' },
+      }),
+    ).toEqual([])
+  })
+
+  it('FR-CONV-4: only a markdown heading, bold or code is markup, a hashtag is not', () => {
+    for (const text of ['# Итог', 'Тема:\n## Итог\nТекст', 'Это **важно**.', 'Поле `title`.'])
+      expect(ids({ text }), text).toEqual(['robotic.markup'])
+    for (const text of ['Хештег #кофейня подойдёт.', 'Подпишем #кофейня и #чай.', 'Знак # в конце #'])
+      expect(ids({ text }), text).toEqual([])
+  })
+
+  it('FR-CONV-4: a name before the greeting may end with an exclamation mark, a plain opener is no name', () => {
+    for (const t of [
+      'Анна! Здравствуйте',
+      'Анна Петровна, здравствуйте!',
+      'Анна. Добрый день',
+      'Здравствуйте, Анна',
+    ])
+      expect(startsWithGreeting(t), t).toBe(true)
+    for (const t of [
+      'Понимаю, добрый день у вас был',
+      'Конечно, добрый день бывает разный',
+      'Спасибо, здравствуйте не нужно',
+      'Хорошо! Добрый день',
+    ])
+      expect(startsWithGreeting(t), t).toBe(false)
+  })
+
+  it('FR-CONV-4: two UTC days can be one Moscow day and the day is compared as a date, not as a string', () => {
+    // 21:00 UTC is midnight in Moscow: 20:59 and 21:00 are two Moscow days.
+    expect(isNewMoscowDay('2026-10-24T20:59:00.000Z', new Date('2026-10-24T21:00:00.000Z'))).toBe(
+      true,
+    )
+    expect(isNewMoscowDay('2026-10-24T21:00:00.000Z', new Date('2026-10-25T20:59:00.000Z'))).toBe(
+      false,
+    )
+    // A year and a month change: 31 December to 1 January, 30 September to 1 October.
+    expect(isNewMoscowDay('2026-12-31T10:00:00.000Z', new Date('2027-01-01T10:00:00.000Z'))).toBe(
+      true,
+    )
+    expect(isNewMoscowDay('2026-09-30T10:00:00.000Z', new Date('2026-10-01T10:00:00.000Z'))).toBe(
+      true,
+    )
+    // A broken date counts as a new day.
+    expect(isNewMoscowDay('not a date', new Date('2026-10-25T10:00:00.000Z'))).toBe(true)
+  })
+
   it('FR-CONV-4: every problem of a reply is found, not only the first', () => {
     const issues = checkReplyText(
       input({ newDay: true, factIds: [], text: `Отличный вопрос ${LONG} лендинг за 90 000.` }),
