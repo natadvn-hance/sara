@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import type { TaskAction } from '@sara/shared'
+import { sql } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
 import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
@@ -181,6 +182,13 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       db,
       mindDir: config.mindDir,
       secrets,
+      scopes: ['shared', ...config.accounts.map((a) => a.id)],
+      clientNames: async () =>
+        (
+          await db.execute<{ name: string }>(
+            sql`select distinct client_name as name from core.lead where client_name <> '' limit 2000`,
+          )
+        ).rows.map((r) => r.name),
       reindex: async () => {
         await ensureMindIndex(db, config.mindDir)
       },

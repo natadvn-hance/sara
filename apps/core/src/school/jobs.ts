@@ -2,12 +2,26 @@ import { getSetting } from '../settings/store'
 import { batchesStep, revertPending, writePending } from './lessons/batches'
 import { historyCards, importMind } from './lessons/history'
 import { runNight } from './night'
+import { syncNoticeStep } from './syncNotice'
 import type { NightJob, SchoolDeps } from './types'
 
 type Step = { name: string; run(d: SchoolDeps, now: Date): Promise<unknown> }
 
 /** The night school's jobs (M5 design 5.12); the parts add theirs. */
-export const NIGHT_JOBS: NightJob[] = []
+export const NIGHT_JOBS: NightJob[] = [
+  {
+    // The exchange of the mind with GitHub (ADR-025): no model, so no budget, limit or school.on.
+    name: 'mindSync',
+    atMsk: { hour: 5, minute: 30 },
+    models: [],
+    free: true,
+    estimate: async () => 0,
+    async run(d) {
+      await d.writer.sync()
+      return 'done'
+    },
+  },
+]
 
 /** A step that does nothing while the school is off. */
 const whenOn =
@@ -27,6 +41,7 @@ export const SCHOOL_STEPS: Step[] = [
   { name: 'batches', run: (d, now) => batchesStep(d, now) },
   { name: 'historyCards', run: whenOn((d, now) => historyCards(d, now)) },
   { name: 'importMind', run: whenOn((d) => importMind(d)) },
+  { name: 'syncNotice', run: (d, now) => syncNoticeStep(d, now) },
 ]
 
 /** Runs the school's jobs once a minute; one failing job never stops the others (as learning/jobs.ts). */

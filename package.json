@@ -33,7 +33,8 @@
     "report:shadow": "pnpm --filter @sara/core report:shadow",
     "direction:show": "pnpm --filter @sara/core direction show",
     "direction:rollback": "pnpm --filter @sara/core direction rollback",
-    "report:school": "pnpm --filter @sara/core report:school"
+    "report:school": "pnpm --filter @sara/core report:school",
+    "mind:sync": "pnpm --filter @sara/core mind:sync"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
