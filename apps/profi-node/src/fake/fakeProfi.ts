@@ -40,8 +40,8 @@ export type FakeProfi = {
   failAcks(n: number): void
   setCoreEventsUrl(url: string): void
   setHealth(h: Partial<SessionHealthOutput>): void
-  /** What a bid costs on the fake site now (210 ₽ at first); get_order reads it too. */
-  setFee(rub: number): void
+  /** What a bid costs on the fake site now for every order (null: each order's own); get_order reads it too. */
+  setFee(rub: number | null): void
   /** The next `times` calls of submit_bid fail with this class before anything is pressed. */
   refuseNext(errorClass: ProfiErrorClass, times?: number): void
   /** The order already has this account's bid, made by hand: submit_bid finds it and spends nothing. */
@@ -80,7 +80,8 @@ export async function createFakeProfi(o: {
   let balance = 5000
   let dropAcks = 0
   let coreEventsUrl = o.coreEventsUrl
-  let fee = 210
+  // The fee of the fake site for every order; null: each order's own, as emitted (210 when it has none).
+  let fee: number | null = null
   let refusal: { errorClass: ProfiErrorClass; times: number } | null = null
   let hook: ((i: SubmitBidInput) => Promise<void> | void) | null = null
   let healthDelay = 0
@@ -108,7 +109,7 @@ export async function createFakeProfi(o: {
         ...order,
         published_at: order.published_at ?? null,
         open: true,
-        bid_price_rub: fee,
+        ...(fee !== null && { bid_price_rub: fee }),
         has_bid: onSite.has(i.order_id),
         from_page: true,
         ...page,
@@ -140,10 +141,11 @@ export async function createFakeProfi(o: {
             balance_after_rub: balance,
             already_there: true,
           }
-        if (fee > i.max_fee_rub)
-          throw new ProfiToolError('PRICE_CHANGED', `the bid costs ${fee}, above ${i.max_fee_rub}`)
-        balance -= fee
-        out = { found_on_page: true, spent_rub: fee, balance_after_rub: balance }
+        const due = fee ?? (emitted.get(i.order_id)?.bid_price_rub || 210)
+        if (due > i.max_fee_rub)
+          throw new ProfiToolError('PRICE_CHANGED', `the bid costs ${due}, above ${i.max_fee_rub}`)
+        balance -= due
+        out = { found_on_page: true, spent_rub: due, balance_after_rub: balance }
         bids.push(i)
         onSite.add(i.order_id)
         results.set(i.idempotency_key, out)

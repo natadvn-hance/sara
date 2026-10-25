@@ -130,7 +130,7 @@ beforeEach(async () => {
   tg.sent.length = 0
   tg.answers.length = 0
   fake.bids.length = 0
-  fake.setFee(210)
+  fake.setFee(null)
   fake.refuseNext('INTERNAL', 0)
   fake.failAcks(0)
   fake.onSubmit(null)
