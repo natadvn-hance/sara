@@ -117,6 +117,8 @@ export const TEXTS = {
     why_want: (title: string | null) => (title ? `почему взял бы «${title}»` : 'почему взял бы'),
     why_decline: (_title: string | null) => 'почему не надо поправку правил',
     why_lesson: (title: string | null) => (title ? `почему нет: ${title}` : 'почему нет по уроку'),
+    interview: (_title: string | null) => 'ответ на мой вопрос о Hance',
+    interview_fix: (_title: string | null) => 'поправку к записи знания',
   },
   notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
   voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',

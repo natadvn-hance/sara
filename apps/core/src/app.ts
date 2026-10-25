@@ -20,6 +20,7 @@ import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
+import type { DraftAnswer } from './learning/questions'
 import { ensureMindIndex } from './mind/indexer'
 import { createMindSearch } from './mind/search'
 import { createMindWriter } from './mind/writer'
@@ -27,6 +28,7 @@ import { type BotControl, createBotControl } from './notify/botControl'
 import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
+import { onSchoolAnswer } from './school/interview'
 import { startSchoolJobs } from './school/jobs'
 import { isSchoolTask, onSchoolPress } from './school/lessons/batches'
 import { registerSchoolRoutes } from './school/routes'
@@ -71,6 +73,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
 
   let pipeline: LeadPipeline | null = null
   let schoolPress: ((p: { taskId: string; action: TaskAction }) => Promise<string>) | null = null
+  let schoolAnswer: ((a: DraftAnswer) => Promise<string>) | null = null
   const transcriber = createTranscriber({
     ffmpegBin: config.ffmpegBin,
     whisperBin: config.whisperBin,
@@ -92,6 +95,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
           transcriber,
           onDraftText: (a) =>
             pipeline ? pipeline.onDraftText(a) : Promise.resolve('Сара ещё запускается'),
+          onSchoolAnswer: (a) =>
+            schoolAnswer ? schoolAnswer(a) : Promise.resolve('Сара ещё запускается'),
         },
         m,
       ),
@@ -199,6 +204,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   }
   registerSchoolRoutes(app, school)
   schoolPress = (p) => onSchoolPress(school, p, new Date())
+  schoolAnswer = (a) => onSchoolAnswer(school, a)
   const url = await app.listen({ port: config.port, host: config.host })
 
   const token = await secrets.get('telegram_bot_token')

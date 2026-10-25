@@ -18,6 +18,9 @@ export type QuestionKind =
   | 'edit_price'
   // M5: «почему нет?» after «нет» on a lesson (entity: the lesson)
   | 'why_lesson'
+  // M5: the day's interview question (entity: the gap's key) and «что поправить?» on a record (entity: the lesson).
+  | 'interview'
+  | 'interview_fix'
 export type QuestionRow = typeof question.$inferSelect
 /** Boris's words that answer an edit_draft or edit_price request. */
 export type DraftAnswer = { question: QuestionRow; text: string; voice: boolean; at: Date }
@@ -94,7 +97,7 @@ export async function askForDraft(
  */
 export async function askOwnQuestion(
   d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
-  q: { kind: 'why_lesson'; entityId: string; text: string },
+  q: { kind: 'why_lesson' | 'interview' | 'interview_fix'; entityId: string; text: string },
   now: Date,
 ): Promise<void> {
   const id = newEventId()
@@ -216,7 +219,7 @@ export async function titleOf(db: Db, q: QuestionRow): Promise<string | null> {
     const i = ((b?.ids as string[] | undefined) ?? []).indexOf(q.entityId) + 1
     return i > 0 ? `урок ${i}` : null
   }
-  if (q.kind === 'why_decline') return null
+  if (q.kind === 'why_decline' || q.kind.startsWith('interview')) return null
   const leadId = (DRAFT_KINDS as string[]).includes(q.kind)
     ? (await db.select({ id: task.entityId }).from(task).where(eq(task.id, q.entityId)))[0]?.id
     : q.entityId

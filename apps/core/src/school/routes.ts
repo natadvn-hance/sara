@@ -2,6 +2,7 @@ import { desc } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { requireSession } from '../auth/session'
 import { mindCommit } from '../db/schema'
+import { answerInterview, confirmInterview, interviewQueue, skipInterview } from './interview'
 import type { SchoolDeps } from './types'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -38,6 +39,32 @@ export function registerSchoolRoutes(app: FastifyInstance, d: SchoolDeps): void 
         pushedAt: c.pushedAt,
       }))
     })
+
+    /** The interview's questions, first the ones from work (FR-MIND-4). */
+    scoped.get('/api/interview', async () => interviewQueue(d.db, new Date()))
+
+    /** Boris's answer: what Sara understood comes back for «Правильно понимаю?». */
+    scoped.post<{ Params: { gapKey: string }; Body: { text?: string } }>(
+      '/api/interview/:gapKey/answer',
+      async (req, reply) => {
+        const text = req.body?.text?.trim()
+        if (!text) return reply.code(400).send({ error: 'Нужен ответ' })
+        const r = await answerInterview(d, req.params.gapKey, text, new Date())
+        return r.ok ? r.understood : reply.code(409).send({ error: r.reason })
+      },
+    )
+
+    /** «Да, записать» or «Не знаю, пропустить» on what Sara understood. */
+    scoped.post<{ Params: { id: string }; Body: { decision?: string } }>(
+      '/api/interview/lessons/:id',
+      async (req, reply) => {
+        const decision = req.body?.decision
+        if (decision === 'yes') return { text: await confirmInterview(d, req.params.id) }
+        if (decision === 'skip')
+          return { text: await skipInterview(d.db, req.params.id, new Date()) }
+        return reply.code(400).send({ error: 'Нужно yes или skip' })
+      },
+    )
 
     /** One button brings the previous mind version back (FR-MIND-3). */
     scoped.post<{ Params: { id: string } }>('/api/mind/commits/:id/revert', async (req, reply) => {

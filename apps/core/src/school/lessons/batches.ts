@@ -6,6 +6,7 @@ import { appendEvent } from '../../journal/journal'
 import { askOwnQuestion } from '../../learning/questions'
 import { TEXTS } from '../../notify/cards'
 import { getSetting } from '../../settings/store'
+import { onInterviewPress } from '../interview'
 import { releaseNotice, takeNotice } from '../notices'
 import { SCHOOL_TEXTS } from '../texts'
 import type { LessonRow, RevertResult, SchoolDeps } from '../types'
@@ -28,7 +29,13 @@ const OLDEST_MS = 3 * DAY_MS
 const BODY_MAX = 3200
 
 /** Task kinds the school answers when Boris presses a button (the rest go to the lead pipeline). */
-export const SCHOOL_TASK_KINDS = ['lesson', 'lesson_batch', 'mind_commit', 'history_bulk'] as const
+export const SCHOOL_TASK_KINDS = [
+  'lesson',
+  'lesson_batch',
+  'mind_commit',
+  'history_bulk',
+  'interview_check',
+] as const
 /** «Отменить» pressed: the revert waits for the tick, never inside the press. */
 const REVERT = 'revert'
 
@@ -539,6 +546,7 @@ export async function onSchoolPress(
     return SCHOOL_TEXTS.decided
   }
   if (t.kind === 'history_bulk') return onHistoryPress(d, t, p.action, now)
+  if (t.kind === 'interview_check') return onInterviewPress(d, t, p.action, now)
   if (t.kind === 'mind_commit' && p.action === 'drop') {
     if (!(await resolveTask(d.db, t.id, REVERT))) return TEXTS.alreadyDone
     return SCHOOL_TEXTS.reverting

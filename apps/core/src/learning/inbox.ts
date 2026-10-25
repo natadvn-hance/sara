@@ -24,7 +24,13 @@ export type BorisMessage = {
  * A message that could be either (no reply, both kinds waiting) is stored nowhere: Sara asks which, naming the leads.
  */
 export async function handleBorisMessage(
-  d: { db: Db; transcriber: Transcriber; onDraftText?(a: DraftAnswer): Promise<string> },
+  d: {
+    db: Db
+    transcriber: Transcriber
+    onDraftText?(a: DraftAnswer): Promise<string>
+    /** M5: an answer to the interview question or to «что поправить?» goes to the school. */
+    onSchoolAnswer?(a: DraftAnswer): Promise<string>
+  },
   m: BorisMessage,
 ): Promise<string> {
   let text = m.text?.trim() ?? ''
@@ -51,6 +57,11 @@ export async function handleBorisMessage(
   }
   if ((DRAFT_KINDS as string[]).includes(q.kind))
     return d.onDraftText ? d.onDraftText({ question: q, ...a }) : TEXTS.notAnAnswer
+  if (q.kind === 'interview' || q.kind === 'interview_fix') {
+    if (!d.onSchoolAnswer) return TEXTS.notAnAnswer
+    const answered = await d.db.transaction((tx) => markAnswered(tx, q, a))
+    return answered ? d.onSchoolAnswer({ question: q, ...a }) : TEXTS.notAnAnswer
+  }
   const answered = await d.db.transaction((tx) => markAnswered(tx, q, a))
   return answered ? TEXTS.noted(text, await titleOf(d.db, q)) : TEXTS.notAnAnswer
 }

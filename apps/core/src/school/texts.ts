@@ -83,6 +83,29 @@ export const SCHOOL_TEXTS = {
       : `📚 Нашла ${n} ${plural(n, ['сценарий', 'сценария', 'сценариев'])} экзамена в истории чатов Профи.ру. Принять их?`,
   syncFailed: '⚙️ Разум не ушёл в GitHub этой ночью. Записи целы на сервере, разработка посмотрит.',
   allYesButton: 'Да, все',
+  interviewQuestion: (gap: string) => `Клиенты спрашивают: «${cut(gap, 200)}». Как им отвечать?`,
+  interviewAsk: (q: string) =>
+    `❓ Вопрос о Hance, на который я не знаю ответа:\n${q}\nОтветь на это сообщение текстом или голосом.`,
+  interviewUnderstood: (u: { title: string; fact: string; when: string; notSay: string }) =>
+    [
+      `Я поняла так: ${u.title}`,
+      `Факт: ${u.fact}`,
+      u.when ? `Когда говорить: ${u.when}` : null,
+      u.notSay ? `Чего не говорить: ${u.notSay}` : null,
+      'Правильно понимаю?',
+    ]
+      .filter((x): x is string => !!x)
+      .join('\n'),
+  writeButton: 'Да, записать',
+  fixButton: 'Поправить',
+  dontKnowButton: 'Не знаю, пропустить',
+  interviewThanks: 'Спасибо, проверь, правильно ли я поняла',
+  interviewWritten: 'Записала в разум',
+  interviewSkipped: 'Хорошо, спрошу через неделю',
+  interviewFixAsk: 'Что поправить? Ответь на это сообщение.',
+  interviewFixAsked: 'Жду поправку',
+  interviewClosed: 'На этот вопрос уже есть ответ',
+  interviewNotUnderstood: 'Не поняла ответ, скажи, пожалуйста, иначе',
   byFiveButton: 'Посмотреть по 5',
   notNowButton: 'Не сейчас',
   historyLater: 'Хорошо, спрошу через неделю',

@@ -85,12 +85,13 @@ export function guardRecord(i: GuardInput): string | null {
   }
   // What a reader of the record sees: its title, tags and section texts; never the headings or the field names.
   const said = [f.data.title, ...(f.data.tags ?? []), ...sections.map(([, t]) => t)].join('\n')
-  if (type === 'knowledge' && i.lesson?.source === 'teacher') {
-    const his = new Set(
-      i.sourceLessons
-        .filter((l) => BORIS_LESSONS.has(l.source))
-        .flatMap((l) => numbersIn(l.after ?? '')),
-    )
+  if (type === 'knowledge' && (i.lesson.source === 'teacher' || i.lesson.source === 'interview')) {
+    // The teacher's numbers must come from Boris's lessons; an interview record's, from his own answer.
+    const words =
+      i.lesson.source === 'interview'
+        ? [i.lesson]
+        : i.sourceLessons.filter((l) => BORIS_LESSONS.has(l.source))
+    const his = new Set(words.flatMap((l) => numbersIn(l.after ?? '')))
     const foreign = numbersIn(said).find((n) => !his.has(n))
     if (foreign) return `число ${foreign} Борис не называл`
   }

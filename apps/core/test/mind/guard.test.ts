@@ -90,6 +90,24 @@ describe('the mind guard', () => {
     expect(check(said, { lesson: teacher, sourceLessons: [lessonRow()] })).toBeNull()
   })
 
+  it('FR-MIND-4: a number in an interview record is only one Boris said', () => {
+    const c: MindChange = {
+      ...knowledgeChange({
+        scope: 'shared',
+        topic: 'price',
+        fact: { title: 'Цена сайта', fact: 'Сайт от 120 000', when: '', not_say: '' },
+        source: 'interview:abc',
+        names: [],
+      }),
+      recordId: 'k-i-9',
+    }
+    const answer = lessonRow({ source: 'interview', kind: 'fact', after: 'сайт от 80 000' })
+    expect(check(c, { lesson: answer })).toMatch(/120000/)
+    expect(
+      check({ ...c, sections: { ...c.sections, Факт: 'Сайт от 80 000' } }, { lesson: answer }),
+    ).toBeNull()
+  })
+
   it('FR-MIND-3: a record id «../x» or a foreign scope never becomes a path', () => {
     expect(check(example({ recordId: '../x' }))).toMatch(/номер записи/)
     expect(check(example({ recordId: 'k-x' }))).toMatch(/не той буквы/)

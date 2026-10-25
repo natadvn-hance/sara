@@ -1,4 +1,5 @@
 import { getSetting } from '../settings/store'
+import { interviewStep } from './interview'
 import { batchesStep, revertPending, writePending } from './lessons/batches'
 import { historyCards, importMind } from './lessons/history'
 import { runNight } from './night'
@@ -45,6 +46,7 @@ export const SCHOOL_STEPS: Step[] = [
   { name: 'historyCards', run: whenOn((d, now) => historyCards(d, now)) },
   { name: 'importMind', run: whenOn((d) => importMind(d)) },
   { name: 'syncNotice', run: (d, now) => syncNoticeStep(d, now) },
+  { name: 'interview', run: (d, now) => interviewStep(d, now) },
 ]
 
 /** Runs the school's jobs once a minute; one failing job never stops the others (as learning/jobs.ts). */
