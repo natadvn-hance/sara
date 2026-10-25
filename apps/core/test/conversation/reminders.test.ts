@@ -72,10 +72,17 @@ let sendFails: ProfiError | null
 let fake: FakeGateway
 let buttons: { text: string; rows: { text: string; callbackData: string }[][] }[]
 let booked: boolean
+/** How many of the next messages to Boris fail (Telegram is down), and the deal's stage at each try. */
+let notifyFails: number
+let dealStages: string[]
+/** How many of the next questions «is it booked» fail. */
+let bookedFails: number
 let deps: RemindDeps
 
 const notifier = {
   sendButtons: async (text: string, rows: { text: string; callbackData: string }[][]) => {
+    dealStages.push((await db.select().from(deal))[0]?.stage ?? '')
+    if (notifyFails-- > 0) throw new Error('telegram is down')
     buttons.push({ text, rows })
     return { messageId: 500 + buttons.length }
   },
@@ -181,6 +188,9 @@ beforeEach(async () => {
   sendFails = null
   buttons = []
   booked = false
+  notifyFails = 0
+  dealStages = []
+  bookedFails = 0
   profi.chat.length = 0
   profi.readChat = async () => {
     onRead(++reads)
@@ -204,7 +214,10 @@ beforeEach(async () => {
     gateway: null as unknown as RemindDeps['gateway'],
     mind: fakeMind(),
     notifier,
-    isBooked: async () => booked,
+    isBooked: async () => {
+      if (bookedFails-- > 0) throw new Error('the meetings are not readable')
+      return booked
+    },
     minGapMs: 0,
     fallbackAfterMs: 1500,
     retryEveryMs: 300,
@@ -459,6 +472,85 @@ describe('a reminder after the switch', () => {
     await until(done(1))
     expect((await rows())[0]?.outcome).toBe('skipped')
     expect(sends).toHaveLength(0)
+  })
+})
+
+describe('the dormant day', () => {
+  /** The ladder that reaches the dormant day at once: our message 8 days ago, short waits for the retries. */
+  const dormantScene = async () => {
+    await live()
+    deps.dormantRetryEveryMs = 200
+    deps.dormantStepRetryMs = 150
+    return scene(quiet(8 * DAY), { deal: true })
+  }
+  const taskCount = async () => (await db.select().from(task)).length
+  const stage = async () => (await db.select().from(deal))[0]?.stage
+
+  it('FR-CONV-12: Telegram down for a while does not lose the task, and the deal moves only with the task', async () => {
+    const conv = await dormantScene()
+    // Longer than the retries of one DBOS step would bear: the step fails, the process tries it again later.
+    notifyFails = 7
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await taskCount()) === 1)
+    await until(async () => (await stage()) === 'dormant')
+    // Every try before the task went found the deal where it was.
+    expect(dealStages.slice(0, 7)).toEqual(Array(7).fill('bid_sent'))
+    expect(buttons).toHaveLength(1)
+    const wf = remindWorkflowId(conv.id, 'm-1')
+    await sleep(300)
+    expect(await statusOf(wf)).toBe('PENDING')
+    expect((await rows()).filter((r) => r.id.endsWith(':dormant'))[0]?.outcome).toBe('dormant')
+  })
+
+  it('FR-CONV-12: a meeting service that fails for a moment only delays the task', async () => {
+    const conv = await dormantScene()
+    bookedFails = 4
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await taskCount()) === 1)
+    expect(await stage()).toBe('dormant')
+  })
+
+  it('FR-CONV-12: an unreadable chat does not stop the task, it goes to Boris and not to the client', async () => {
+    const conv = await dormantScene()
+    profi.readChat = async () => {
+      throw new Error('the chat page is not open')
+    }
+    await startReminder(conv.id, 'm-1')
+    await until(done(3))
+    expect(await taskCount()).toBe(1)
+    expect(await outcomes()).toEqual(['1=skipped', '2=skipped', 'dormant=dormant'])
+    expect(sends).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: a turn that runs at the dormant wake delays the task, which comes when the turn is over', async () => {
+    const conv = await dormantScene()
+    const turnId = `conv-turn:${conv.id}:x`
+    await db.insert(convTurn).values({
+      id: turnId,
+      conversationId: conv.id,
+      anchorMessageId: 'm-1',
+      state: 'waiting',
+    })
+    await startReminder(conv.id, 'm-1')
+    await sleep(900)
+    expect(await taskCount()).toBe(0)
+    expect(await stage()).toBe('bid_sent')
+    await db.update(convTurn).set({ state: 'finished' }).where(eq(convTurn.id, turnId))
+    await until(async () => (await taskCount()) === 1)
+    expect(await stage()).toBe('dormant')
+  })
+
+  it('FR-CONV-12: after a day of tries without success the dormant step is skipped and the deal stays', async () => {
+    const conv = await dormantScene()
+    deps.dormantTries = 3
+    bookedFails = 100
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
+    expect(await taskCount()).toBe(0)
+    expect(await stage()).toBe('bid_sent')
+    const dormant = (await rows()).find((r) => r.id.endsWith(':dormant'))
+    expect(dormant?.outcome).toBe('skipped')
+    expect(dormant?.decisionReason).toMatch(/встреч/)
   })
 })
 
