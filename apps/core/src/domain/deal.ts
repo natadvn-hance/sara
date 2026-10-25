@@ -45,7 +45,9 @@ export async function createDeal(
   i: { leadId: string; accountId: string; correlationId: string },
 ): Promise<string> {
   const id = newEventId()
-  await db.insert(deal).values({ id, leadId: i.leadId, accountId: i.accountId, stage: 'bid_sent' })
+  await db
+    .insert(deal)
+    .values({ id, leadId: i.leadId, orderId: i.leadId, accountId: i.accountId, stage: 'bid_sent' })
   await journal.appendEvent(db, {
     type: 'deal.stage_changed',
     v: 1,

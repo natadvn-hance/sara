@@ -84,19 +84,33 @@ export const account = core.table('account', {
   updatedAt: ts('updated_at').notNull().defaultNow(),
 })
 
-export const deal = core.table('deal', {
-  id: uuid('id').primaryKey(),
-  leadId: text('lead_id')
-    .notNull()
-    .unique()
-    .references(() => lead.id),
-  accountId: text('account_id').notNull(),
-  stage: text('stage').notNull(),
-  owner: text('owner').notNull().default('sara'),
-  turn: text('turn').notNull().default('client'),
-  createdAt: ts('created_at').notNull().defaultNow(),
-  updatedAt: ts('updated_at').notNull().defaultNow(),
-})
+export const deal = core.table(
+  'deal',
+  {
+    id: uuid('id').primaryKey(),
+    /** The lead when the new Sara saw the order; null for a client of old Sara the core never saw (M6). */
+    leadId: text('lead_id')
+      .unique()
+      .references(() => lead.id),
+    /** The Profi.ru order number; equal to lead_id when there is a lead. */
+    orderId: text('order_id'),
+    /** `sara`: the new Sara bid; `v1`: old Sara's client, the deal made when a meeting appeared (M6). */
+    origin: text('origin').notNull().default('sara'),
+    accountId: text('account_id').notNull(),
+    stage: text('stage').notNull(),
+    owner: text('owner').notNull().default('sara'),
+    turn: text('turn').notNull().default('client'),
+    /** M6 outcome: won, lost, thinking; null until Boris says. */
+    outcome: text('outcome'),
+    amountRub: integer('amount_rub'),
+    /** Boris's words why the client refused; never copied into the journal. */
+    outcomeReason: text('outcome_reason'),
+    outcomeAt: ts('outcome_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('deal_account_order').on(t.accountId, t.orderId)],
+)
 
 export const task = core.table('task', {
   id: uuid('id').primaryKey(),
@@ -544,4 +558,79 @@ export const calibrationItem = core.table(
     markedAt: ts('marked_at'),
   },
   (t) => [primaryKey({ columns: [t.runId, t.leadId] })],
+
+/** A meeting with a client: offered by the call procedure, marked by Boris, or a call now (M6, design 5.8). */
+export const meeting = core.table(
+  'meeting',
+  {
+    id: uuid('id').primaryKey(),
+    dealId: uuid('deal_id')
+      .notNull()
+      .references(() => deal.id),
+    /** M4's conversation; the foreign key comes with the M6 wiring PR. */
+    conversationId: uuid('conversation_id'),
+    accountId: text('account_id').notNull(),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    /** Empty while only offered. */
+    startsAt: ts('starts_at'),
+    durationMin: integer('duration_min').notNull(),
+    channel: text('channel'),
+    channelNote: text('channel_note'),
+    /** The offered start times, `[{starts_at}]`. */
+    offered: jsonb('offered'),
+    /** The offer really reached the client; only then it shows in the dossier. */
+    offerSentAt: ts('offer_sent_at'),
+    confirmingAt: ts('confirming_at'),
+    /** «📅 Встреча назначена» sent, and its message to edit. */
+    announcedAt: ts('announced_at'),
+    announceMessageId: bigint('announce_message_id', { mode: 'number' }),
+    /** The round of the turn that made the offer or the booking. */
+    roundKey: text('round_key'),
+    movedFrom: uuid('moved_from'),
+    clockVersion: integer('clock_version').notNull().default(0),
+    phone: text('phone'),
+    phonePurgeAt: ts('phone_purge_at'),
+    brief: jsonb('brief'),
+    alsoAsked: text('also_asked'),
+    bookedAt: ts('booked_at'),
+    morningSentAt: ts('morning_sent_at'),
+    beforeSentAt: ts('before_sent_at'),
+    outcomeAskedAt: ts('outcome_asked_at'),
+    outcomeAt: ts('outcome_at'),
+    outcomeNudges: integer('outcome_nudges').notNull().default(0),
+    amountNudges: integer('amount_nudges').notNull().default(0),
+    thinkingNudges: integer('thinking_nudges').notNull().default(0),
+    cancelledBy: text('cancelled_by'),
+    createdBy: text('created_by').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('meeting_one_active')
+      .on(t.dealId)
+      .where(sql`${t.state} in ('offered', 'confirming', 'booked')`),
+    index('meeting_state_starts').on(t.state, t.startsAt),
+  ],
+)
+
+/** The call procedure's decision for one round of an M4 turn, so a rerun of the same round decides the same. */
+export const meetingTurn = core.table('meeting_turn', {
+  roundKey: text('round_key').primaryKey(),
+  meetingId: uuid('meeting_id'),
+  result: jsonb('result').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+})
+
+/** Old Sara's bids from her database snapshot: the day she saw the order and the bid price she saw (approximate). */
+export const v1Bid = core.table(
+  'v1_bid',
+  {
+    orderId: text('order_id').notNull(),
+    accountId: text('account_id').notNull(),
+    seenAt: ts('seen_at').notNull(),
+    feeRub: integer('fee_rub'),
+    importedAt: ts('imported_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orderId, t.accountId] })],
 )
