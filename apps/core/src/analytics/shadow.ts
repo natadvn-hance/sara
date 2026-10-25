@@ -8,16 +8,47 @@ export type SeenStat = {
   under60sShare: number
 }
 
+/**
+ * Client messages. `count` is all of them; the speed (p90, p95, under 60 s) counts only the messages the event stream
+ * named, timed from that notice: a message only the chat sweep found (every 10 minutes) is `sweepFound`, its real delay
+ * is not known, and it is never counted as fast.
+ */
+export type MessageStat = SeenStat & { sweepFound: number }
+
 export type ShadowReport = {
   orders: SeenStat
-  messages: SeenStat
+  messages: MessageStat
   authorUnclear: number
+  /** Messages with a known author out of all the node read as client or unclear; null when there were none. */
+  authorKnownShare: number | null
   sessionDeaths: number
   connectionLosses: number
   layoutChanged: number
   lostEvents: number
   /** Orders published more than OLD_ORDER_HOURS before Sara first saw them: back up the board, not new. */
   oldOrders: number
+}
+
+/**
+ * The window of a report from the command line: `--hours N` back from now (48 by default), or `--from` and `--to`
+ * as exact moments (ISO, `--to` defaults to now), for a shadow that began at a known time.
+ */
+export function shadowWindow(args: string[], now: Date): { from: string; to: string } {
+  const arg = (name: string) => {
+    const i = args.indexOf(name)
+    return i >= 0 ? args[i + 1] : undefined
+  }
+  const moment = (name: string, v: string) => {
+    const t = Date.parse(v)
+    if (Number.isNaN(t))
+      throw new Error(`${name} wants a date like 2026-10-24T07:00:00Z, got «${v}»`)
+    return new Date(t).toISOString()
+  }
+  const to = arg('--to') === undefined ? now.toISOString() : moment('--to', arg('--to') ?? '')
+  const fromArg = arg('--from')
+  if (fromArg !== undefined) return { from: moment('--from', fromArg), to }
+  const hours = arg('--hours') === undefined ? 48 : Number(arg('--hours'))
+  return { from: new Date(Date.parse(to) - hours * 3600_000).toISOString(), to }
 }
 
 /** An order first seen this long after its publication is an old or reposted one, not a new order (FR-LEAD-1). */
@@ -68,8 +99,10 @@ export async function shadowReport(db: DbOrTx, from: string, to: string): Promis
     where e.type = 'profi.order_seen' and e.recorded_at >= ${from} and e.recorded_at < ${to}
       and o.body->>'published_at' is not null
       and o.seen_at - (o.body->>'published_at')::timestamptz > make_interval(hours => ${OLD_ORDER_HOURS})`)
-  const messages = await db.execute<{ ms: number }>(sql`
-    select extract(epoch from (e.recorded_at - (e.payload->>'sent_at')::timestamptz)) * 1000 as ms
+  // An event without seen_via is an older node's: timed like a stream one, as before.
+  const messages = await db.execute<{ ms: number; sweep: boolean }>(sql`
+    select extract(epoch from (e.recorded_at - (e.payload->>'sent_at')::timestamptz)) * 1000 as ms,
+      coalesce(e.payload->>'seen_via', 'stream') = 'sweep' as sweep
     from core.event e
     where e.type = 'profi.client_message' and e.recorded_at >= ${from} and e.recorded_at < ${to}`)
   const lost = await db.execute<{ n: number }>(sql`
@@ -82,10 +115,24 @@ export async function shadowReport(db: DbOrTx, from: string, to: string): Promis
            where e.type in ('profi.client_message', 'profi.author_unclear')
              and e.payload->>'platform_message_id' = m.platform_message_id))
     as n`)
+  const timed = messages.rows.filter((r) => !r.sweep).map((r) => Number(r.ms))
+  const messageStat = stat(timed)
+  const authorUnclear = await count(db, 'profi.author_unclear', from, to)
+  const read = messages.rows.length + authorUnclear
   return {
     orders: stat(orders.rows.map((r) => Number(r.ms))),
-    messages: stat(messages.rows.map((r) => Number(r.ms))),
-    authorUnclear: await count(db, 'profi.author_unclear', from, to),
+    messages: {
+      ...messageStat,
+      count: messages.rows.length,
+      // Over all the messages: one only the sweep found is not a fast one.
+      under60sShare:
+        messages.rows.length === 0
+          ? 0
+          : timed.filter((v) => v < 60_000).length / messages.rows.length,
+      sweepFound: messages.rows.length - timed.length,
+    },
+    authorUnclear,
+    authorKnownShare: read === 0 ? null : messages.rows.length / read,
     sessionDeaths: await count(db, 'profi.session_dead', from, to),
     connectionLosses: await count(db, 'profi.connection_lost', from, to),
     layoutChanged: await count(db, 'profi.layout_changed', from, to),
@@ -113,9 +160,17 @@ export function formatShadowReport(r: ShadowReport, from: string, to: string): s
     `Тень новой Сары с ${msk(from)} по ${msk(to)}`,
     `${ok(r.orders.count > 0 && r.orders.under60sShare >= 0.9)} Заявки: ${r.orders.count}, быстрее минуты ${share(r.orders.under60sShare)} (цель 90%), 90% быстрее ${sec(r.orders.p90SeenMs)}`,
     `Старые и поднятые заказы: ${r.oldOrders} (опубликованы больше чем за ${OLD_ORDER_HOURS} часов до того, как Сара их увидела; в скорость не входят)`,
-    `${ok(r.messages.count > 0 && r.messages.under60sShare >= 0.95)} Сообщения клиентов: ${r.messages.count}, быстрее минуты ${share(r.messages.under60sShare)} (цель 95%)`,
+    r.messages.count === 0
+      ? '⏳ Сообщения клиентов: за период не было, этот пункт не проверен'
+      : `${ok(r.messages.under60sShare >= 0.95)} Сообщения клиентов: ${r.messages.count}, быстрее минуты ${share(r.messages.under60sShare)} (цель 95%)${
+          r.messages.sweepFound > 0
+            ? `; найдено только обходом чатов: ${r.messages.sweepFound} (обход раз в 10 минут, такие не считаются быстрыми)`
+            : ''
+        }`,
     `${ok(r.lostEvents === 0)} Потеряно: ${r.lostEvents}`,
-    `${ok(r.authorUnclear === 0)} Автор неясен: ${r.authorUnclear}`,
+    r.authorKnownShare === null
+      ? '⏳ Автор определён: нет сообщений'
+      : `${ok(r.authorUnclear === 0)} Автор определён: ${share(r.authorKnownShare)} (цель 100%), неясен: ${r.authorUnclear}`,
     `Разлогинов: ${r.sessionDeaths}, пропаданий связи: ${r.connectionLosses}, «сайт поменялся»: ${r.layoutChanged}`,
   ].join('\n')
 }

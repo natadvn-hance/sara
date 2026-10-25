@@ -604,6 +604,93 @@ describe('eyes', () => {
     expect(all.sort()).toEqual(['profi.client_message', 'profi.specialist_message'])
   })
 
+  it('FR-CONV-1: a message of a chat the stream named is noticed «stream», a chat read without it «sweep»', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const m = (chat: string, id: string, author: 'client' | 'specialist') => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: chat,
+        order_id: chat,
+        author,
+        sent_at: new Date().toISOString(),
+        text: 'x',
+        read: true,
+      },
+    })
+    // Both chats already known (an earlier reading kept their history).
+    for (const c of ['c-stream', 'c-sweep'])
+      await e.onChatRead(c, {
+        recognized: true,
+        what: 'chat',
+        signals: [m(c, `${c}-1`, 'specialist')],
+      })
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: 'c-stream', messageId: 'c-stream-2' }],
+      },
+      'rtp',
+    )
+    await e.onChatRead('c-stream', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('c-stream', 'c-stream-1', 'specialist'), m('c-stream', 'c-stream-2', 'client')],
+    })
+    await e.onChatRead('c-sweep', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('c-sweep', 'c-sweep-1', 'specialist'), m('c-sweep', 'c-sweep-2', 'client')],
+    })
+    const seen = await events('profi.client_message')
+    expect(seen.map((x) => [x.payload.chat_id, x.payload.seen_via])).toEqual([
+      ['c-stream', 'stream'],
+      ['c-sweep', 'sweep'],
+    ])
+  })
+
+  it('FR-CONV-1: a chat named by the stream without a message number dates its new message from the stream, not from the reading', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const m = (id: string, author: 'client' | 'specialist') => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: 'c-late',
+        order_id: 'c-late',
+        author,
+        sent_at: new Date().toISOString(),
+        text: 'x',
+        read: true,
+      },
+    })
+    await e.onChatRead('c-late', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('1', 'specialist')],
+    })
+    const named = Date.now()
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: 'c-late', messageId: null }],
+      },
+      'rtp',
+    )
+    // The minute check reads the chat a while later: the message was news when the stream named the chat.
+    await new Promise((r) => setTimeout(r, 120))
+    await e.onChatRead('c-late', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('1', 'specialist'), m('2', 'client')],
+    })
+    const [seen] = await events('profi.client_message')
+    const sentAt = Date.parse(String(seen?.payload.sent_at))
+    expect(sentAt).toBeGreaterThanOrEqual(named - 5)
+    expect(Date.now() - sentAt).toBeGreaterThanOrEqual(100)
+  })
+
   it('FR-CONV-1: the chats Sara knows are those with news in the last 3 days, newest first, 3 at most', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600 * 1000).toISOString()

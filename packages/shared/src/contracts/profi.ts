@@ -188,6 +188,12 @@ const MessageRef = z
     platform_message_id: z.string().min(1),
     sent_at: z.iso.datetime(),
     author: MessageAuthor,
+    /**
+     * How the node noticed the message: the event stream named its chat («stream», sent_at is the moment of that
+     * notice), or only a chat sweep found it («sweep», sent_at is the moment it was read: how late it is, is not
+     * known). Absent: an older node.
+     */
+    seen_via: z.enum(['stream', 'sweep']).optional(),
   })
   .strict()
 

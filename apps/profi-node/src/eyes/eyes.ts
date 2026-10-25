@@ -91,6 +91,7 @@ export function createEyes(o: {
     signals: Signal[],
     body: unknown,
     quiet: Set<string> = new Set(),
+    via?: 'stream' | 'sweep',
   ): Promise<void> {
     for (const raw of signals) {
       let s = raw
@@ -170,6 +171,8 @@ export function createEyes(o: {
               platform_message_id: m.platform_message_id,
               sent_at: m.sent_at,
               author: m.author,
+              // How a client's message was noticed; our own side's messages are not timed.
+              ...(via && m.author !== 'specialist' && { seen_via: via }),
             },
           })
         })
@@ -279,7 +282,8 @@ export function createEyes(o: {
       let prev = Math.max(0, ...[...stored.values()].filter(Number.isFinite))
       for (const x of msgs.slice(lastStored + 1)) {
         const id = x.message.platform_message_id
-        const named = touch && id === touch.messageId
+        // The stream named this message, or, when the notice names none, the news in the chat: that moment.
+        const named = touch && (touch.messageId === null || id === touch.messageId)
         const seen = Date.parse(named ? touch.at : x.message.sent_at)
         // A broken time stays as it was: that one message fails on its own, the rest of the reading goes on.
         if (!Number.isFinite(seen)) continue
@@ -293,7 +297,8 @@ export function createEyes(o: {
           ? { ...x, message: { ...x.message, sent_at: new Date(at).toISOString() } }
           : x
       })
-      await onSignals(signals, undefined, quiet)
+      // A chat the stream never named was found by a sweep.
+      await onSignals(signals, undefined, quiet, touch ? 'stream' : 'sweep')
     },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,
     board: () => board,

@@ -499,9 +499,14 @@ describe('insurance and the account tab', () => {
     ab.page.off('framenavigated', onNav)
     expect(visited).toContain('/chats/c-touched')
     const seen = (await db.select().from(outboxNode))
-      .map((r) => r.payload as { type: string; entity: { id: string } })
+      .map(
+        (r) =>
+          r.payload as { type: string; entity: { id: string }; payload: { seen_via?: string } },
+      )
       .filter((t) => t.type === 'profi.client_message')
     expect(seen.map((t) => t.entity.id)).toEqual(['c-touched'])
+    // The stream named the chat, the minute check read it.
+    expect(seen.map((t) => t.payload.seen_via)).toEqual(['stream'])
   }, 60000)
 
   it('FR-CONV-1: when the chats list shows no chats, the 10-minute check rereads the chats Sara knows', async () => {
@@ -533,9 +538,14 @@ describe('insurance and the account tab', () => {
     await ins.chatsOnce()
     ins.stop()
     const seen = (await db.select().from(outboxNode))
-      .map((r) => r.payload as { type: string; entity: { id: string } })
+      .map(
+        (r) =>
+          r.payload as { type: string; entity: { id: string }; payload: { seen_via?: string } },
+      )
       .filter((t) => t.type === 'profi.client_message')
     expect(seen.map((t) => t.entity.id)).toEqual(['c-known', 'c-known'])
+    // The second one the stream never named: only the 10-minute check found it.
+    expect(seen.map((t) => t.payload.seen_via)).toEqual(['stream', 'sweep'])
   }, 60000)
 
   it('ST-M1-04: a chat page leaves its bubbles in node.raw_event: numbers, classes and times, never the text', async () => {

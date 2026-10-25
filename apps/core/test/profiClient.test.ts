@@ -1,5 +1,6 @@
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
-import type { EventEnvelope } from '@sara/shared'
+import { type EventEnvelope, newEventId } from '@sara/shared'
+import { sql } from 'drizzle-orm'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createProfiClient, ProfiError } from '../src/profi/client'
@@ -189,5 +190,41 @@ describe('profi client and event intake', () => {
     await expect(client.getOrder('hance-marketing', '603')).rejects.toMatchObject({
       errorClass: 'LAYOUT_CHANGED',
     })
+  })
+
+  it('FR-CONV-1: a client message says how it was noticed, and the journal keeps that', async () => {
+    const payload = {
+      chat_id: '95300009',
+      order_id: '95300009',
+      platform_message_id: '13',
+      sent_at: new Date().toISOString(),
+      author: 'client',
+      seen_via: 'sweep',
+    }
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/profi/events',
+      headers: { 'x-sara-node-token': 'node-tok' },
+      payload: {
+        id: newEventId(),
+        type: 'profi.client_message',
+        v: 1,
+        entity: { kind: 'chat', id: '95300009' },
+        account_id: 'hance-marketing',
+        actor: 'profi',
+        occurred_at: payload.sent_at,
+        causation_id: null,
+        correlation_id: newEventId(),
+        reason: null,
+        payload,
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const [row] = (
+      await db.execute<{ payload: Record<string, unknown> }>(
+        sql`select payload from core.event where type = 'profi.client_message'`,
+      )
+    ).rows
+    expect(row?.payload).toMatchObject({ platform_message_id: '13', seen_via: 'sweep' })
   })
 })

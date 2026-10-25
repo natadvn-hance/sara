@@ -41,6 +41,17 @@ describe('C2 for M1', () => {
     expect(p.safeParse({ ...ref, text: 'привет' }).success).toBe(false)
   })
 
+  it('FR-CONV-1: a message event may say how it was noticed, by the event stream or by the chat sweep', () => {
+    const p = PROFI_EVENT_PAYLOADS['profi.client_message']
+    expect(p.safeParse({ ...ref, seen_via: 'stream' }).success).toBe(true)
+    expect(p.safeParse({ ...ref, seen_via: 'sweep' }).success).toBe(true)
+    expect(p.safeParse(ref).success).toBe(true)
+    expect(p.safeParse({ ...ref, seen_via: 'guess' }).success).toBe(false)
+    expect(
+      PROFI_EVENT_PAYLOADS['profi.author_unclear'].safeParse({ ...ref, seen_via: 'sweep' }).success,
+    ).toBe(true)
+  })
+
   it('C2: every Profi event payload type is a known journal event type', () => {
     for (const t of Object.keys(PROFI_EVENT_PAYLOADS)) expect(EVENT_TYPES).toContain(t)
   })

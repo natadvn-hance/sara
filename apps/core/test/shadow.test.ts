@@ -2,7 +2,7 @@ import { newEventId } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { migrateNode } from '../../profi-node/src/db/migrate'
-import { formatShadowReport, shadowReport } from '../src/analytics/shadow'
+import { formatShadowReport, shadowReport, shadowWindow } from '../src/analytics/shadow'
 import { appendEventIfNew } from '../src/journal/journal'
 import { openTestDb, resetDb, testDatabaseUrl } from './helpers/db'
 
@@ -20,7 +20,7 @@ const at = (min: number, sec = 0) =>
   new Date(Date.parse('2026-10-25T10:00:00.000Z') + min * 60_000 + sec * 1000).toISOString()
 
 async function journal(
-  type: 'profi.order_seen' | 'profi.client_message' | 'profi.session_dead',
+  type: 'profi.order_seen' | 'profi.client_message' | 'profi.author_unclear' | 'profi.session_dead',
   entityId: string,
   recordedAt: string,
   payload: Record<string, unknown>,
@@ -41,8 +41,12 @@ async function journal(
   })
   // recorded_at is set by the journal on insert; the test pins it to the moment the core got the event.
   await db.execute(sql`alter table core.event disable trigger event_append_only`)
+  const messageId =
+    typeof payload.platform_message_id === 'string' ? payload.platform_message_id : null
   await db.execute(
-    sql`update core.event set recorded_at = ${recordedAt} where entity_id = ${entityId} and type = ${type}`,
+    messageId
+      ? sql`update core.event set recorded_at = ${recordedAt} where entity_id = ${entityId} and type = ${type} and payload->>'platform_message_id' = ${messageId}`
+      : sql`update core.event set recorded_at = ${recordedAt} where entity_id = ${entityId} and type = ${type}`,
   )
   await db.execute(sql`alter table core.event enable trigger event_append_only`)
 }
@@ -99,5 +103,87 @@ describe('shadow report', () => {
     expect(r.orders).toMatchObject({ count: 1, under60sShare: 1 })
     expect(r.oldOrders).toBe(1)
     expect(formatShadowReport(r, from, to)).toContain('Старые и поднятые заказы: 1')
+  })
+
+  const message = async (
+    id: string,
+    sentAt: string,
+    recordedAt: string,
+    over: Record<string, unknown> = {},
+  ) => {
+    await rawMessage(id, sentAt)
+    await journal('profi.client_message', 'c1', recordedAt, {
+      platform_message_id: id,
+      sent_at: sentAt,
+      ...over,
+    })
+  }
+
+  it('FR-CONV-1: a message the stream named is timed from the stream, one only the chat sweep found is not a fast one', async () => {
+    await message('m1', at(0), at(0, 20), { seen_via: 'stream' })
+    await message('m2', at(1), at(2, 30), { seen_via: 'stream' })
+    // The sweep reads a chat every 10 minutes: when the message was sent is not known, so it is not counted as fast.
+    await message('m3', at(3), at(3, 5), { seen_via: 'sweep' })
+    // An event of an older node says nothing about how it was noticed: timed as a stream message.
+    await message('m4', at(4), at(4, 10))
+    const r = await shadowReport(db, from, to)
+    expect(r.messages).toMatchObject({ count: 4, sweepFound: 1, under60sShare: 0.5 })
+    expect(r.messages.p90SeenMs).toBe(90_000)
+    expect(r.lostEvents).toBe(0)
+  })
+
+  it('FR-CONV-1: the report words the sweep-found messages and says plainly when no message came', async () => {
+    expect(formatShadowReport(await shadowReport(db, from, to), from, to)).toContain(
+      'Сообщения клиентов: за период не было',
+    )
+    await message('m1', at(0), at(0, 10), { seen_via: 'stream' })
+    await message('m2', at(1), at(1, 5), { seen_via: 'sweep' })
+    const text = formatShadowReport(await shadowReport(db, from, to), from, to)
+    expect(text).toContain('Сообщения клиентов: 2, быстрее минуты 50% (цель 95%)')
+    expect(text).toContain('найдено только обходом чатов: 1')
+    expect(text).not.toContain(String.fromCharCode(0x2014))
+  })
+
+  it('FR-CONV-2: the report says what share of the messages had a known author', async () => {
+    expect((await shadowReport(db, from, to)).authorKnownShare).toBeNull()
+    expect(formatShadowReport(await shadowReport(db, from, to), from, to)).toContain(
+      'Автор определён: нет сообщений',
+    )
+    await message('m1', at(0), at(0, 10), { seen_via: 'stream' })
+    await message('m2', at(1), at(1, 10), { seen_via: 'stream' })
+    await message('m3', at(2), at(2, 10), { seen_via: 'stream' })
+    await rawMessage('m4', at(3))
+    await journal('profi.author_unclear', 'c1', at(3, 10), {
+      platform_message_id: 'm4',
+      sent_at: at(3),
+      seen_via: 'stream',
+    })
+    const r = await shadowReport(db, from, to)
+    expect(r.authorKnownShare).toBe(0.75)
+    expect(r.authorUnclear).toBe(1)
+    expect(formatShadowReport(r, from, to)).toContain('Автор определён: 75% (цель 100%), неясен: 1')
+  })
+
+  it('FR-CONV-2: every message with an author is known, 100%', async () => {
+    await message('m1', at(0), at(0, 10), { seen_via: 'stream' })
+    const r = await shadowReport(db, from, to)
+    expect(r.authorKnownShare).toBe(1)
+    expect(formatShadowReport(r, from, to)).toContain(
+      'Автор определён: 100% (цель 100%), неясен: 0',
+    )
+  })
+
+  it('ST-M1-11: the window is 48 hours back from now, or the hours asked for, or the exact moments given', () => {
+    const now = new Date('2026-10-26T07:00:00.000Z')
+    expect(shadowWindow([], now)).toEqual({
+      from: '2026-10-24T07:00:00.000Z',
+      to: '2026-10-26T07:00:00.000Z',
+    })
+    expect(shadowWindow(['--hours', '24'], now).from).toBe('2026-10-25T07:00:00.000Z')
+    // The shadow began on 24.10.2026 about 07:00 UTC: its report is cut there, whenever it is made.
+    expect(
+      shadowWindow(['--from', '2026-10-24T07:00:00Z', '--to', '2026-10-26T07:00:00Z'], new Date()),
+    ).toEqual({ from: '2026-10-24T07:00:00.000Z', to: '2026-10-26T07:00:00.000Z' })
+    expect(() => shadowWindow(['--from', 'вчера'], now)).toThrow(/--from/)
   })
 })
