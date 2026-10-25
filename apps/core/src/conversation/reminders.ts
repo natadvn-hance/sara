@@ -11,6 +11,7 @@ import {
   ladderTexts,
   type Planned,
   planNext,
+  quietUntil,
   type RemindDeps,
   sendStep,
   writeStep,
@@ -123,6 +124,13 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
       continue
     }
     const text = await obtainText(k, conversationId, rowId, next, g.read)
+    // The text may have taken hours: a reminder never goes in the quiet hours, it waits for the morning.
+    const hold = await DBOS.runStep(async () => quietUntil(d(), new Date()), {
+      name: `quiet-${k}`,
+      ...DB_STEP,
+    })
+    const rest = hold.until ? Date.parse(hold.until) - (await DBOS.now()) : 0
+    if (rest > 0) await DBOS.sleep(rest)
     const result = await DBOS.runStep(
       () => sendStep(d(), rowId, conversationId, anchor, next, text),
       { name: `send-${k}`, ...DB_STEP },

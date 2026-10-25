@@ -19,6 +19,7 @@ import {
 import { type TextStep, writeReminder } from './reminderText'
 import { getConversation } from './store'
 import { CONV_TEXTS } from './texts'
+import { moscowHoursEnd } from './time'
 import type { ConversationRow, MindSearch, StoredMessage } from './types'
 
 /** What the reminder process needs, set once at startup (the way the turn gets its dependencies). */
@@ -287,6 +288,16 @@ export async function groundStep(
     decisionReason: g.why,
   })
   return g
+}
+
+/**
+ * Whether it is the quiet hours of reminders now (`conv.reminder_quiet`) and when they end. The planned time was
+ * outside them, but getting the text can take hours (a limit wait, a rewrite, the ready text), so a reminder due at
+ * 22:30 could be sent at 01:30: the time is looked at again right before the send.
+ */
+export async function quietUntil(d: RemindDeps, now: Date): Promise<{ until: string | null }> {
+  const end = moscowHoursEnd(now, await getSetting(d.db, 'conv.reminder_quiet'))
+  return { until: end ? end.toISOString() : null }
 }
 
 /** The model's try at the text, in one step so a replay does not ask it again. Never throws: no text is the answer. */
