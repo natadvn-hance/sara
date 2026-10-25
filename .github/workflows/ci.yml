@@ -44,11 +44,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Each runner keeps its own pnpm and package store: two jobs at once in one store break each other's writes.
       - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.tool_cache }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
+        env:
+          npm_config_store_dir: ${{ runner.tool_cache }}/pnpm-store
       - run: pnpm check
       - run: pnpm check:ports
       - if: github.event_name == 'pull_request'
@@ -84,11 +89,16 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      # Each runner keeps its own pnpm and package store: two jobs at once in one store break each other's writes.
       - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.tool_cache }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
+        env:
+          npm_config_store_dir: ${{ runner.tool_cache }}/pnpm-store
       # A macOS runner has no service containers: the job starts its own Postgres and removes it at the end.
       # Each runner on the Mac has its own container and port, apart from each other and the dev sessions.
       - name: Start Postgres
