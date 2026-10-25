@@ -59,8 +59,12 @@ async function stepFive() {
   return { f, r }
 }
 type Sample = { lead_id: string; greeting: string; body: string }
-const samplesOf = async () =>
-  ((await getOnboarding(db, ACC))?.steps['5']?.proposal?.data as { samples: Sample[] }).samples
+const samplesOf = async () => {
+  const data = (await getOnboarding(db, ACC))?.steps['5']?.proposal?.data as
+    | { samples: Sample[] }
+    | undefined
+  return data?.samples ?? []
+}
 
 describe('step 5: the format and three sample bids', { timeout: 60000 }, () => {
   it('FR-ACC-3: step 5 gives three sample bids on real leads, with the greeting from the program', async () => {

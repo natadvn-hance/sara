@@ -20,7 +20,7 @@ type LeadRow = typeof lead.$inferSelect
 
 /** How many real orders the sample bids are written on (FR-ACC-3, step 5). */
 const SAMPLE_ORDERS = 3
-const DASHES = /[–—]/g
+const DASHES = /[\u2013\u2014]/g
 
 // ---------------------------------------------------------------------------------------------------------------
 // What steps 5, 6 and 7 confirm, and what the profile becomes from it.
