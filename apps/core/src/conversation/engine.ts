@@ -3,7 +3,7 @@ import { detectCallRequest } from './callDetector'
 import { runCheckerRole } from './check/checkerRole'
 import { checkReplyText } from './check/codeChecks'
 import { decide } from './policy'
-import { formatInterlocutorInput } from './prompt'
+import { formatCheckerDossier, formatInterlocutorInput } from './prompt'
 import type {
   CheckIssue,
   Dossier,
@@ -126,7 +126,7 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     })
     if (output.move === 'reply' && output.text) {
       const checker = await runCheckerRole(deps.gateway, {
-        dossierText: said,
+        dossierText: formatCheckerDossier(d),
         facts: output.fact_ids
           .map((id) => byId.get(id))
           .filter((h): h is MindHit => h !== undefined),

@@ -16,19 +16,19 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 /** The M4 roles: their meta (design 5.14, plan D2 and D3) and the schema each answers with. */
 const M4_ROLES = {
   interlocutor: {
-    meta: { model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
+    meta: { version: 1, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
     schema: InterlocutorOutput,
   },
   checker: {
-    meta: { model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
+    meta: { version: 2, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
     schema: CheckerOutput,
   },
   reminder: {
-    meta: { model: 'sonnet', priority: 'P1', timeoutMs: 120000 },
+    meta: { version: 1, model: 'sonnet', priority: 'P1', timeoutMs: 120000 },
     schema: ReminderOutput,
   },
   examiner: {
-    meta: { model: 'sonnet', fallbackModel: 'opus', priority: 'P3', timeoutMs: 120000 },
+    meta: { version: 1, model: 'sonnet', fallbackModel: 'opus', priority: 'P3', timeoutMs: 120000 },
     schema: ExaminerOutput,
   },
 } as const
@@ -44,7 +44,7 @@ describe('the M4 roles', () => {
   it('NFR-UX-1: role texts have no long dash and every role loads', async () => {
     for (const name of NAMES) {
       const { meta, promptPath } = await loadRole(ROLES, name)
-      expect(meta, name).toEqual({ name, version: 1, ...M4_ROLES[name].meta })
+      expect(meta, name).toEqual({ name, ...M4_ROLES[name].meta })
       expect(await readFile(promptPath, 'utf8'), name).not.toMatch(/[\u2013\u2014]/)
     }
   })
