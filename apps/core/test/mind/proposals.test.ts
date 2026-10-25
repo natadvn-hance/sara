@@ -53,4 +53,36 @@ describe('mind proposals export', () => {
     await expect(stat(join(clone, 'escape.md'))).rejects.toThrow()
     expect((await db.select().from(mindProposal))[0]?.state).toBe('new')
   })
+
+  it('FR-MIND-3: a proposal path into the confirmed mind, .git or elsewhere is refused, nothing is written', async () => {
+    const refused = [
+      'mind/shared/knowledge/k-x.md',
+      'mind/directions/hance-marketing/knowledge/k-x.md',
+      '.git/hooks/pre-commit',
+      '.git/config',
+      'mind/proposals/../shared/knowledge/k-x.md',
+      'mind/proposals/../../.git/config',
+      'README.md',
+      '/tmp/absolute.md',
+    ]
+    for (const path of refused) {
+      await resetDb(db)
+      await proposeMind(db, { path, content: 'x', kind: 'other', source: 'test' })
+      await proposeMind(db, { path: EXAMPLE, content: 'ok', kind: 'example', source: 'test' })
+      const clone = await tempMind()
+      await expect(exportProposals(db, clone), path).rejects.toThrow(/Путь предложения/)
+      await expect(stat(join(clone, 'mind')), path).rejects.toThrow()
+      expect((await db.select().from(mindProposal)).map((r) => r.state)).toEqual(['new', 'new'])
+    }
+  })
+
+  it('FR-MIND-3: proposals and exam scenarios are the paths an export writes', async () => {
+    const scenario = 'exam/scenarios/x-h-1.json'
+    await proposeMind(db, { path: EXAMPLE, content: 'a', kind: 'example', source: 'test' })
+    await proposeMind(db, { path: scenario, content: '{}', kind: 'scenario', source: 'test' })
+    const clone = await tempMind()
+    expect(await exportProposals(db, clone)).toBe(2)
+    expect(await readFile(join(clone, scenario), 'utf8')).toBe('{}')
+    expect(await readFile(join(clone, EXAMPLE), 'utf8')).toBe('a')
+  })
 })

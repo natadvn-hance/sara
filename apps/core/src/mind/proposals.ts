@@ -40,9 +40,24 @@ export async function proposeMind(
   })
 }
 
+/** Where an export may write inside a clone: the proposals tree and the exam scenarios, never the confirmed mind. */
+const EXPORT_TREES = ['mind/proposals/', 'exam/']
+
+/** The path of a proposal inside the clone, or why it is not allowed. */
+function exportPath(root: string, path: string): string {
+  const rel = relative(root, resolve(root, path)).split(sep).join('/')
+  if (isAbsolute(path) || !EXPORT_TREES.some((t) => rel.startsWith(t)))
+    throw new Error(
+      `Путь предложения не принимается, писать можно только в mind/proposals/ и exam/: ${path}`,
+    )
+  return resolve(root, rel)
+}
+
 /**
  * Writes the new proposals as files under `toDir` (a developer's sara-mind clone) and marks them exported, so the next
- * export skips them. A path that would leave `toDir` stops the export before anything is written.
+ * export skips them. Only `mind/proposals/` and `exam/` are written: a path into `mind/shared/`, `mind/directions/`,
+ * `.git/` or out of the clone stops the export before anything is written (the confirmed mind changes only by
+ * `mind accept`).
  */
 export async function exportProposals(db: Db, toDir: string): Promise<number> {
   const root = resolve(toDir)
@@ -51,14 +66,10 @@ export async function exportProposals(db: Db, toDir: string): Promise<number> {
     .from(mindProposal)
     .where(eq(mindProposal.state, 'new'))
     .orderBy(asc(mindProposal.createdAt), asc(mindProposal.id))
-  for (const r of rows) {
-    const rel = relative(root, resolve(root, r.path))
-    if (isAbsolute(r.path) || rel === '' || rel === '..' || rel.startsWith(`..${sep}`))
-      throw new Error(`Путь предложения выходит из папки клона: ${r.path}`)
-  }
+  const files = rows.map((r) => exportPath(root, r.path))
   let written = 0
-  for (const r of rows) {
-    const file = resolve(root, r.path)
+  for (const [i, r] of rows.entries()) {
+    const file = files[i] as string
     await mkdir(dirname(file), { recursive: true })
     await writeFile(file, r.content)
     const done = await db
