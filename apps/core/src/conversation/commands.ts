@@ -24,7 +24,7 @@ export type CommandDeps = {
     o?: SendOptions,
   ): Promise<string>
   /** Boris's answer on the task of a client quiet for 7 days reaches the reminder process (FR-CONV-12). */
-  decideDormant?(reminderTurnId: string, decision: 'remind' | 'close'): Promise<void>
+  decideDormant?(reminderTurnId: string, decision: 'remind' | 'close'): Promise<boolean>
 }
 
 export const COMMAND_TEXTS = {
@@ -50,6 +50,8 @@ export const COMMAND_TEXTS = {
   stale: 'Черновик устарел: клиент успел дописать. Текст не ушёл, посмотри новые сообщения.',
   remindOn:
     'Хорошо, напомню ему ещё: через 10 суток, потом через 30. Если он ответит раньше, остановлюсь.',
+  remindEnded:
+    'Напоминания этому клиенту уже закончились: он ответил, или я перестала ждать твой ответ. Новых не будет, а написать ему можно самому.',
 }
 
 type CardTask = typeof task.$inferSelect
@@ -285,7 +287,9 @@ async function cardTaskOf(db: Db, taskId: string): Promise<CardTask | null> {
 
 /** A press on the task of a client quiet for 7 days: close the conversation, or remind him further (FR-CONV-12). */
 async function onDormantPress(d: CommandDeps, t: CardTask, action: TaskAction): Promise<string> {
-  if (t.state !== 'open') return COMMAND_TEXTS.done
+  const ended = ['expired', 'answered', 'ended'].includes(t.resolution ?? '')
+  if (t.state !== 'open')
+    return action === 'remind' && ended ? COMMAND_TEXTS.remindEnded : COMMAND_TEXTS.done
   const [row] = await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId))
   if (!row) return COMMAND_TEXTS.done
   if (action === 'close') {
@@ -295,7 +299,11 @@ async function onDormantPress(d: CommandDeps, t: CardTask, action: TaskAction): 
   }
   if (action === 'remind') {
     if (!(await closeCard(d.db, t.id, 'remind'))) return COMMAND_TEXTS.done
-    await d.decideDormant?.(row.id, 'remind')
+    // The promise is made only if the process still waits for it.
+    if ((await d.decideDormant?.(row.id, 'remind')) === false) {
+      await d.db.update(task).set({ resolution: 'ended' }).where(eq(task.id, t.id))
+      return COMMAND_TEXTS.remindEnded
+    }
     return COMMAND_TEXTS.remindOn
   }
   return COMMAND_TEXTS.notUnderstood

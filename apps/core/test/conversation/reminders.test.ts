@@ -415,12 +415,54 @@ describe('a reminder after the switch', () => {
     expect(sends).toHaveLength(2)
   })
 
-  it('FR-CONV-12: an answer of Boris for a process that is gone is harmless, and the task answers «уже сделано»', async () => {
+  it('FR-CONV-12: an answer of Boris for a process that is gone is harmless, and he is told plainly', async () => {
     await live()
-    await decideDormant('conv-remind:no-such-conversation:m-1:dormant', 'remind')
+    expect(await decideDormant('conv-remind:no-such-conversation:m-1:dormant', 'remind')).toBe(
+      false,
+    )
     const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) }, decideDormant }
     expect(await onConvPress(press, { taskId: newEventId(), action: 'remind' })).toBe(
       'Это уже сделано.',
+    )
+    // A task whose process is over: the press does not promise a reminder.
+    const conv = await scene(quiet(8 * DAY))
+    const rowId = `conv-remind:${conv.id}:m-1:dormant`
+    await db.insert(convTurn).values({
+      id: rowId,
+      conversationId: conv.id,
+      kind: 'reminder',
+      anchorMessageId: 'm-1',
+    })
+    const taskId = newEventId()
+    await db.insert(task).values({
+      id: taskId,
+      kind: 'conv_dormant',
+      entityKind: 'conv_turn',
+      entityId: rowId,
+      telegramMessageId: 9,
+    })
+    const text = await onConvPress(press, { taskId, action: 'remind' })
+    expect(text).toMatch(/уже закончились/)
+    expect(text).not.toMatch(/напомню/)
+    expect((await db.select().from(task))[0]).toMatchObject({
+      state: 'resolved',
+      resolution: 'ended',
+    })
+    // The same press again, and a press on a task that expired, say the same.
+    expect(await onConvPress(press, { taskId, action: 'remind' })).toMatch(/уже закончились/)
+  })
+
+  it('FR-CONV-12: Boris not answering the dormant task closes it when the process stops waiting', async () => {
+    await live()
+    deps.dormantWaitS = 1
+    const conv = await scene(quiet(8 * DAY))
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
+    const [t] = await db.select().from(task)
+    expect(t).toMatchObject({ kind: 'conv_dormant', state: 'resolved', resolution: 'expired' })
+    const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) }, decideDormant }
+    expect(await onConvPress(press, { taskId: t?.id ?? '', action: 'remind' })).toMatch(
+      /уже закончились/,
     )
   })
 

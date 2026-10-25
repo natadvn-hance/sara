@@ -163,6 +163,14 @@ describe('the draft card', () => {
     expect(sent[10]?.text).toMatch(/просит созвон/)
   })
 
+  it('FR-NOTIF-3: the dormant tasks of reminders do not use the cards of the day', async () => {
+    for (let i = 0; i < 10; i++)
+      await turn(`r-${i}`, { kind: 'reminder', cardMessageId: 800 + i, outcome: 'dormant' })
+    await turn('t-1')
+    expect(await sendTurnCard({ db, notifier }, 't-1')).not.toBeNull()
+    expect(sent).toHaveLength(1)
+  })
+
   it('NFR-UX-1: conversation texts have no long dash', async () => {
     await turn('t-1', { text: 'Да \u2014 начнём' })
     await sendTurnCard({ db, notifier }, 't-1')

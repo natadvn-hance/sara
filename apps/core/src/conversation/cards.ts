@@ -101,6 +101,8 @@ export async function sendTurnCard(
       .from(convTurn)
       .where(
         and(
+          // The cards of answers to clients only: the task of a quiet client (a reminder's row) is no draft card.
+          eq(convTurn.kind, 'reply'),
           isNotNull(convTurn.cardMessageId),
           ne(convTurn.decision, 'call_boris'),
           gte(convTurn.createdAt, moscowDayStart(now)),

@@ -201,6 +201,26 @@ describe('what the chat as read says about reminders', () => {
     expect((await db.select().from(deal))[0]?.stage).toBe('talking')
   })
 
+  it('FR-CONV-12: a closed conversation, or a client of Boris, closes the task «Напоминать дальше»', async () => {
+    const conv = await seedChat(db, CHAT, [ours('m-1', 8 * 24 * HOUR)])
+    await db.insert(task).values({
+      id: newEventId(),
+      kind: 'conv_dormant',
+      entityKind: 'conv_turn',
+      entityId: `conv-remind:${conv.id}:m-1:dormant`,
+      telegramMessageId: 7,
+    })
+    await db
+      .update(conversation)
+      .set({ owner: 'boris', ownerReason: 'take' })
+      .where(eq(conversation.id, conv.id))
+    await sync(conv)
+    expect((await db.select().from(task))[0]).toMatchObject({
+      state: 'resolved',
+      resolution: 'answered',
+    })
+  })
+
   it('FR-CONV-12: a new beginning closes the old dormant task, but not the one of the process that goes on', async () => {
     const conv = await seedChat(db, CHAT, [ours('m-1', 3 * HOUR)])
     await sync(conv)
