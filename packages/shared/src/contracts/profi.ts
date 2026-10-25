@@ -39,13 +39,20 @@ export const SubmitBidInput = z.object({
   text: z.string().min(1),
   /** The «Стоимость услуги» field; null or absent leaves it empty (M2 design 4). */
   price_rub: z.number().int().positive().nullable().optional(),
+  /** The most the bid may cost: the fee on the card Boris pressed. The node presses nothing when the site asks more. */
+  max_fee_rub: z.number().int().nonnegative(),
+  /** The node never presses after this moment: the core has stopped waiting for the answer by then. */
+  not_after: z.iso.datetime(),
   idempotency_key: z.string().min(1),
+  /** The core's signature over the key, the order, max_fee_rub and not_after. */
   permit: z.string().min(1),
 })
 export const SubmitBidOutput = z.object({
   found_on_page: z.boolean(),
   spent_rub: z.number().int().nonnegative(),
   balance_after_rub: z.number().int().nullable(),
+  /** The page had this account's bid before this call pressed anything (Boris bid by hand): nothing was spent. */
+  already_there: z.boolean().optional(),
 })
 export type SubmitBidInput = z.infer<typeof SubmitBidInput>
 export type SubmitBidOutput = z.infer<typeof SubmitBidOutput>
@@ -59,6 +66,8 @@ export const PROFI_ERROR_CLASSES = [
   'NO_MONEY',
   /** The site asks to pay some other way than the wallet: the node never confirms such a payment. */
   'UNSAFE_PAYMENT',
+  /** The bid costs more than the core allowed (max_fee_rub): nothing was pressed. */
+  'PRICE_CHANGED',
   'RATE_LIMITED',
   'UNCERTAIN',
   'INTERNAL',

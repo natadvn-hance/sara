@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type BidRuntime, createBidTools } from '../src/bid/bidTools'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { rawEvent, rawOrder } from '../src/db/schema'
+import { bidAttempt, rawEvent, rawOrder } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { type Insurance, startInsurance } from '../src/eyes/insurance'
 import { type Parsers, standInParsers } from '../src/eyes/parsers'
@@ -108,18 +108,21 @@ const tools = (
     ]),
   })
 
+/** A bid input signed like the core signs it; a given permit is kept as it is. */
 const bid = (orderId: string, more: Partial<SubmitBidInput> = {}): SubmitBidInput => {
-  const key = more.idempotency_key ?? `k-${orderId}-${Math.random()}`
-  return {
+  const unsigned = {
     account_id: ACCOUNT,
     order_id: orderId,
     text: 'Ирина, добрый день! Сделаем сайт с онлайн-записью. Какие услуги клиники в приоритете?',
     price_rub: 15000,
-    idempotency_key: key,
-    permit: signPermit(SECRET, key),
+    max_fee_rub: 1000,
+    not_after: new Date(Date.now() + 5 * 60_000).toISOString(),
+    idempotency_key: `k-${orderId}-${Math.random()}`,
     ...more,
   }
+  return { ...unsigned, permit: more.permit ?? signPermit(SECRET, unsigned) }
 }
+const pressesWritten = async () => (await db.select().from(bidAttempt)).length
 
 async function failure(p: Promise<unknown>): Promise<string> {
   try {
@@ -431,6 +434,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
       found_on_page: true,
       spent_rub: 0,
       balance_after_rub: 5000,
+      already_there: true,
     })
     expect(site.bids).toEqual([])
     expect(site.openerClicks).toBe(0)
@@ -610,6 +614,78 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     expect(await tools().submitBid(bid(id))).toMatchObject({ spent_rub: 71 })
     expect(site.openerClicks).toBe(1)
   }, 60000)
+
+  it('FR-LEAD-9: a fee above the most the core allowed is PRICE_CHANGED, with nothing pressed', async () => {
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id, { max_fee_rub: 70 })))).toBe('PRICE_CHANGED')
+    expect(site.openerClicks).toBe(0)
+    expect(site.bidPosts).toBe(0)
+    expect(await pressesWritten()).toBe(0)
+  }, 60000)
+
+  it("FR-LEAD-9: «Продолжить» beside a fee other than the order's presses nothing", async () => {
+    site.bidSettings.openerAmount = 70
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id, { max_fee_rub: 71 })))).toBe('LAYOUT_CHANGED')
+    expect(site.openerClicks).toBe(0)
+    expect(await pressesWritten()).toBe(0)
+  }, 60000)
+
+  it('FR-LEAD-9: a permit signed for another fee or deadline is refused', async () => {
+    const id = site.addOrder({ price: 71 })
+    const signed = bid(id, { max_fee_rub: 70 })
+    expect(await failure(tools().submitBid({ ...signed, max_fee_rub: 1000 }))).toBe('INTERNAL')
+    const later = new Date(Date.now() + 60 * 60_000).toISOString()
+    expect(await failure(tools().submitBid({ ...signed, not_after: later }))).toBe('INTERNAL')
+    expect(orderVisits(id)).toBe(0)
+  }, 60000)
+
+  it('NFR-REL-4: after its deadline a call presses nothing and opens no page', async () => {
+    const id = site.addOrder({ price: 71 })
+    const past = new Date(Date.now() - 1000).toISOString()
+    expect(await failure(tools().submitBid(bid(id, { not_after: past })))).toBe('RATE_LIMITED')
+    expect(orderVisits(id)).toBe(0)
+  }, 60000)
+
+  it('NFR-REL-4: a call the core gave up on presses nothing, its written press goes', async () => {
+    const id = site.addOrder({ price: 71 })
+    // The core hangs up right after the opener was pressed.
+    const signal = {
+      get aborted() {
+        return site.openerClicks > 0
+      },
+    } as AbortSignal
+    expect(await failure(tools().submitBid(bid(id), signal))).toBe('RATE_LIMITED')
+    expect(site.openerClicks).toBe(1)
+    expect(site.bidPosts).toBe(0)
+    expect(await pressesWritten()).toBe(0)
+    const aborted = AbortSignal.abort()
+    expect(await failure(tools().submitBid(bid(site.addOrder()), aborted))).toBe('RATE_LIMITED')
+  }, 60000)
+
+  it('FR-LEAD-8: the press is written before the opener; a stop after a wallet drop stays UNCERTAIN', async () => {
+    site.bidSettings.openerCharges = 10
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id, { text: 'а'.repeat(600) })
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    expect(await pressesWritten()).toBe(1)
+    // The retry only looks: no second opener, no send.
+    expect(await failure(tools().submitBid(input))).toBe('UNCERTAIN')
+    expect(site.openerClicks).toBe(1)
+    expect(site.bidPosts).toBe(0)
+  }, 90000)
+
+  it('FR-LEAD-8: a stop after the opener with the wallet unchanged clears the written press', async () => {
+    const id = site.addOrder({ price: 71 })
+    const key = `k-${id}`
+    expect(
+      await failure(tools().submitBid(bid(id, { idempotency_key: key, text: 'а'.repeat(600) }))),
+    ).toBe('INTERNAL')
+    expect(await pressesWritten()).toBe(0)
+    expect(await tools().submitBid(bid(id, { idempotency_key: key }))).toMatchObject({
+      spent_rub: 71,
+    })
+  }, 90000)
 
   it('FR-LEAD-8: a form open from the start is filled without pressing its opener', async () => {
     site.bidSettings.behindOpener = false

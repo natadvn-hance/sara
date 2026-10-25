@@ -129,6 +129,8 @@ describe('read tools', () => {
         account_id: 'hance-marketing',
         order_id: '1',
         text: 'x',
+        max_fee_rub: 210,
+        not_after: '2026-10-25T12:00:00.000Z',
         idempotency_key: 'bid:1',
         permit: 'p',
       }),

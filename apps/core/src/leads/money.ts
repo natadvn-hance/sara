@@ -8,7 +8,7 @@ import { getSetting } from '../settings/store'
 export const MONEY_TEXTS = {
   noWallet: 'Не вижу баланс кошелька на Профи.ру, отклик не отправила. Нажми ещё раз через минуту.',
   unknownFee:
-    'Не знаю цену отклика на эту заявку, а потолок или бюджет дня включены. Отклик не отправила.',
+    'Не знаю цену отклика на эту заявку, отклик не отправила. Откликнись вручную на Профи.ру, если заявка нужна.',
   overCeiling: (fee: number, max: number) =>
     `Отклик стоит ${formatRub(fee)}, это выше потолка ${formatRub(max)} за отклик. Отклик не отправила.`,
   lowWallet: (available: number, fee: number, queued: boolean) =>
@@ -84,11 +84,12 @@ export async function refuseSpend(
   c: { feeRub: number; balanceRub: number | null; now: Date },
 ): Promise<string | null> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('sara:money'))`)
+  // The node sends 0 when the order page could not be read. The fee is also the most the node may pay
+  // (max_fee_rub), so an unknown one never goes, whatever the limits.
+  if (c.feeRub <= 0) return MONEY_TEXTS.unknownFee
   if (c.balanceRub === null) return MONEY_TEXTS.noWallet
   const max = await getSetting(tx, 'money.max_fee_rub')
   const budget = await getSetting(tx, 'money.daily_budget_rub')
-  // The node sends 0 when the order page could not be read: the real fee is charged on the site.
-  if (c.feeRub <= 0 && (max !== null || budget !== null)) return MONEY_TEXTS.unknownFee
   if (max !== null && c.feeRub > max) return MONEY_TEXTS.overCeiling(c.feeRub, max)
   const day = await dayOf(tx, c.now)
   const available = c.balanceRub - day.queuedRub

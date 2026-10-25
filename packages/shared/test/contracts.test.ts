@@ -4,6 +4,7 @@ import {
   formatCallback,
   MindFrontmatter,
   newEventId,
+  PROFI_ERROR_CLASSES,
   PROFI_TOOLS,
   parseCallback,
   SETTINGS,
@@ -85,10 +86,29 @@ describe('contracts', () => {
         account_id: 'a',
         order_id: '1',
         text: 't',
+        max_fee_rub: 210,
+        not_after: '2026-10-25T12:00:00.000Z',
         idempotency_key: 'bid:1',
         permit: 'p',
       }).success,
     ).toBe(true)
+  })
+
+  it('C2: submit_bid input requires the most the bid may cost and the deadline of the press', () => {
+    const input = PROFI_TOOLS['profi.submit_bid'].input
+    const bid = {
+      account_id: 'a',
+      order_id: '1',
+      text: 't',
+      idempotency_key: 'bid:1',
+      permit: 'p',
+    }
+    expect(input.safeParse({ ...bid, not_after: '2026-10-25T12:00:00.000Z' }).success).toBe(false)
+    expect(input.safeParse({ ...bid, max_fee_rub: 210 }).success).toBe(false)
+    expect(
+      input.safeParse({ ...bid, max_fee_rub: -1, not_after: '2026-10-25T12:00:00.000Z' }).success,
+    ).toBe(false)
+    expect(PROFI_ERROR_CLASSES).toContain('PRICE_CHANGED')
   })
 
   it('C3: sorter output limits reason length and verdict values', () => {

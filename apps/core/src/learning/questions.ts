@@ -1,25 +1,32 @@
 import { newEventId } from '@sara/shared'
-import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { lead, leadLabel, question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 
-/** The «почему?» kinds, and edit_draft: Sara's request for a new bid text after «Изменить» (entity: the task). */
-export type QuestionKind = 'why_skip' | 'why_want' | 'why_decline' | 'edit_draft'
+/**
+ * The «почему?» kinds, edit_draft: Sara's request for a new bid text after «Изменить», and edit_price: her request
+ * for the «Стоимость услуги» after «Откликнуться» without one (entity: the task for both).
+ */
+export type QuestionKind = 'why_skip' | 'why_want' | 'why_decline' | 'edit_draft' | 'edit_price'
 export type QuestionRow = typeof question.$inferSelect
-/** Boris's words that answer an edit_draft request. */
+/** Boris's words that answer an edit_draft or edit_price request. */
 export type DraftAnswer = { question: QuestionRow; text: string; voice: boolean; at: Date }
 
 const WHY_KINDS: QuestionKind[] = ['why_skip', 'why_want', 'why_decline']
+/** Sara's requests for the bid itself: an answer to one becomes the bid's text or price. */
+export const DRAFT_KINDS: QuestionKind[] = ['edit_draft', 'edit_price']
 
 /** At most this many «почему?» a Moscow day, so Sara never floods Boris with questions. */
 export const QUESTIONS_PER_DAY = 3
 /** A message without a reply may answer an open question this recent. */
 const ANSWER_WINDOW_MS = 30 * 60_000
 
-const textOf = (kind: Exclude<QuestionKind, 'edit_draft'>, title: string) =>
+type WhyKind = Exclude<QuestionKind, 'edit_draft' | 'edit_price'>
+
+const textOf = (kind: WhyKind, title: string) =>
   kind === 'why_skip'
     ? TEXTS.whySkip(title)
     : kind === 'why_want'
@@ -29,7 +36,7 @@ const textOf = (kind: Exclude<QuestionKind, 'edit_draft'>, title: string) =>
 /** Asks Boris why, unless today's questions are used up (then the surprise stays without a reason). */
 export async function askWhy(
   d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
-  q: { kind: Exclude<QuestionKind, 'edit_draft'>; entityId: string; title: string },
+  q: { kind: WhyKind; entityId: string; title: string },
   now: Date,
 ): Promise<boolean> {
   const id = newEventId()
@@ -57,19 +64,21 @@ export async function askWhy(
 }
 
 /**
- * After «Изменить»: asks for the new bid text. It is Boris's own request, so it never counts toward the day's
- * «почему?»; a reply to it becomes the draft, and so does a plain message when it is the only request waiting.
+ * After «Изменить»: asks for the new bid text; after «Откликнуться» without the «Стоимость услуги»: for the price
+ * (`price`). It is Boris's own request, so it never counts toward the day's «почему?»; a reply to it becomes the
+ * draft, and so does a plain message when it is the only request waiting.
  */
 export async function askForDraft(
   d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
   q: { taskId: string; title: string },
   now: Date,
+  what: 'text' | 'price' = 'text',
 ): Promise<void> {
   const id = newEventId()
-  await d.db
-    .insert(question)
-    .values({ id, kind: 'edit_draft', entityId: q.taskId, askedAt: now.toISOString() })
-  await send(d, id, TEXTS.askDraft(q.title), { kind: 'edit_draft', entityId: q.taskId }, now)
+  const kind = what === 'price' ? 'edit_price' : 'edit_draft'
+  await d.db.insert(question).values({ id, kind, entityId: q.taskId, askedAt: now.toISOString() })
+  const text = what === 'price' ? TEXTS.askPrice(q.title) : TEXTS.askDraft(q.title)
+  await send(d, id, text, { kind, entityId: q.taskId }, now)
 }
 
 /** Sends a question whose row is already taken; a send that fails removes the row, so it answers nothing. */
@@ -142,7 +151,7 @@ export async function openQuestion(
   }
   // A request for a lead already decided has nothing left to take: it does not stand in the way.
   const stillWanted = or(
-    ne(question.kind, 'edit_draft'),
+    notInArray(question.kind, DRAFT_KINDS),
     sql`exists (select 1 from ${task} where ${task.id}::text = ${question.entityId} and ${task.state} = 'open')`,
   )
   const recent = await db
@@ -157,8 +166,8 @@ export async function openQuestion(
       ),
     )
     .orderBy(desc(question.askedAt))
-  const edits = recent.filter((q) => q.kind === 'edit_draft')
-  const whys = recent.filter((q) => q.kind !== 'edit_draft')
+  const edits = recent.filter((q) => (DRAFT_KINDS as string[]).includes(q.kind))
+  const whys = recent.filter((q) => !(DRAFT_KINDS as string[]).includes(q.kind))
   if (edits.length === 0) return whys[0] ?? null
   if (whys.length === 0 && new Set(edits.map((q) => q.entityId)).size === 1) return edits[0] ?? null
   return { ambiguous: recent.reverse() }
@@ -167,23 +176,22 @@ export async function openQuestion(
 /** What a question is about, for a note to Boris: the lead's title (null for the proposal's «почему?»). */
 export async function titleOf(db: Db, q: QuestionRow): Promise<string | null> {
   if (q.kind === 'why_decline') return null
-  const leadId =
-    q.kind === 'edit_draft'
-      ? (await db.select({ id: task.entityId }).from(task).where(eq(task.id, q.entityId)))[0]?.id
-      : q.entityId
+  const leadId = (DRAFT_KINDS as string[]).includes(q.kind)
+    ? (await db.select({ id: task.entityId }).from(task).where(eq(task.id, q.entityId)))[0]?.id
+    : q.entityId
   if (!leadId) return null
   const [l] = await db.select({ title: lead.title }).from(lead).where(eq(lead.id, leadId))
   return l?.title ?? null
 }
 
-/** Every open edit request of the task is closed: one text answers them all, a later message lands on none. */
+/** Every open edit request of the task is closed: one answer takes them all, a later message lands on none. */
 export async function closeDraftRequests(tx: DbOrTx, taskId: string, at: Date): Promise<void> {
   await tx
     .update(question)
     .set({ answeredAt: at.toISOString() })
     .where(
       and(
-        eq(question.kind, 'edit_draft'),
+        inArray(question.kind, DRAFT_KINDS),
         eq(question.entityId, taskId),
         isNull(question.answeredAt),
       ),

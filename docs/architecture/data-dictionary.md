@@ -27,7 +27,7 @@
 | `raw_order` | `order_id`, `account_id`, `seen_at`, `body` | П | 30 дней |
 | `raw_message` | `platform_message_id`, `chat_id`, `account_id`, `author_side` (`client`, `specialist`), `sent_at`, `text` | П | 2 года для закрытых, как в ядре |
 | `outbox_node` | `event_id`, `payload`, `attempts`, `next_try_at`, `confirmed_at` | П | до подтверждения + 7 дней |
-| `bid_attempt` | `idempotency_key`, `account_id`, `order_id`, `due_rub`, `pressed_at`, `result` (jsonb): нажатие «Откликнуться», записанное до нажатия, и подтверждённый ответ | Н | 30 дней |
+| `bid_attempt` | `idempotency_key`, `account_id`, `order_id`, `due_rub`, `pressed_at`, `result` (jsonb): нажатие, записанное до кнопки, которая открывает форму, и подтверждённый ответ. Остановка до «Откликнуться» стирает запись, если кошелёк на странице не изменился | Н | 30 дней |
 | `node_flag` | `account_id`, `name`, `reason`, `set_at`: остановка, которую узел поставил себе сам (например `form_calibration`: кошелёк уменьшился после открытия формы) | Н | пока человек не снимет |
 | `browser_profile` | папка профиля на диске, вне базы | С | пока аккаунт активен |
 
@@ -61,14 +61,14 @@
 | | `text` | text | П | описание заказа |
 | | `client_name` | text | П | имя клиента, как на площадке |
 | | `budget_text` | text | Н | бюджет словами |
-| | `bid_price_rub` | int | Н | цена отклика сейчас; 0: неизвестна (доска её не показывает, страницу заказа ещё не читали или не смогли прочитать) |
+| | `bid_price_rub` | int | Н | цена отклика сейчас; 0: неизвестна (доска её не показывает, страницу заказа ещё не читали или не смогли прочитать). С неизвестной ценой отклик через Сару не уходит; отклик дороже карточки обновляет её ценой со страницы |
 | | `place` | int | Н | место отклика, если известно |
 | | `is_open` | bool | Н | заказ открыт |
 | | `seen_at` | timestamptz | Н | когда замечен |
 | | `routed_direction_id` | text | Н | выбранное направление |
 | | `status` | enum `new`, `sorted_out`, `scored_out`, `stale`, `closed`, `bid_already`, `held`, `queued`, `decided`, `bid_sent`, `skipped`, `expired` | Н | судьба заявки. `closed`: страница заказа показала, что он закрыт; `bid_already`: на него уже есть отклик с нашего аккаунта (оба без карточки) |
 | | `draft_text` | text | П | текст отклика с приветствием: черновик Аналитика или правка Бориса; null, пока черновика нет (FR-LEAD-6) |
-| | `draft_price_rub` | int | Н | «Стоимость услуги» в отклике; null: поле остаётся пустым |
+| | `draft_price_rub` | int | Н | «Стоимость услуги» в отклике; null: её нет, и «Откликнуться» сначала спрашивает её у Бориса (поле обязательно на площадке). Борис задаёт её строкой «цена 5000» после «Изменить» или ответом на вопрос; правка пишется в журнал `draft.priced` |
 | | `draft_analysis` | jsonb | П | разбор Аналитика: шаги чтения заказа (`reading`: явное, неявные слои, чего хочет, кто это, риски, работа для нас) и короткий итог (`hidden_need`, `risk`, `condition`); null: разбора нет |
 | | `client_info` | jsonb | П | что страница заказа говорит о клиенте (контракт `ClientInfo`): на Профи.ру с какой даты, номер подтверждён, отзывы других специалистов и их теги; читается `profi.get_order`, когда заявка прошла Оценщика; null: страницу не читали или клиент не показан |
 | `lead_score` | `lead_id`, `direction_id`, `scoring_version_id`, `gates_passed` (bool), `score` (0-100), `reasons` (jsonb), `confidence`, `model_call_id` | | Н | оценка заявки направлением |
@@ -99,7 +99,7 @@
 |---|---|---|---|
 | `event` | конверт C1 | Н, в `payload` бывает П | журнал, только добавление; ссылки на П по номерам, а не копией текста |
 | `task` | `id`, `kind`, `entity_kind`, `entity_id`, `priority`, `due_at`, `state` (`open`, `resolved`, `expired`), `resolution`, `telegram_message_id` | Н | что ждёт Бориса |
-| `outbox` | `id`, `kind` (`bid`, `message`), `idempotency_key` (уникален), `payload`, `permit`, `attempts`, `state`, `confirmed_at`, `error_class` | П | действия наружу |
+| `outbox` | `id`, `kind` (`bid`, `message`), `idempotency_key` (уникален), `payload`, `permit`, `attempts`, `state` (`queued`, `confirmed`, `uncertain`, `failed`), `confirmed_at`, `error_class` | П | действия наружу. Отклик, который служба не нажала, строку удаляет (заявка снова у Бориса, следующее нажатие это новая строка со своим процессом `outbox:<id>`); `failed` остаётся у закрытого заказа (`ORDER_CLOSED`) и у отклика, который уже был на странице (`ALREADY_ON_PAGE`). `uncertain` позже сверяется с `get_order` и становится `confirmed`, если отклик нашёлся |
 | `commitment` | `id`, `deal_id`, `what`, `due_at`, `workflow_id`, `state` | Н | обещания с таймером |
 | `meeting` | `id`, `deal_id`, `starts_at`, `duration_min`, `channel`, `brief`, `outcome`, `amount_rub` | Н | встречи |
 | `availability` | `id`, `weekday`, `from_time`, `to_time`, `slot_min`, `max_per_day`, `exceptions` (jsonb) | Н | свободное время Бориса |

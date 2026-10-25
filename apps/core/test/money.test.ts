@@ -156,11 +156,10 @@ describe('spend check', () => {
     )
   })
 
-  it('FR-LEAD-9: an unknown fee is refused while a ceiling or a budget is set', async () => {
+  it('FR-LEAD-9: an unknown fee is always refused: the node would pay whatever the page asks', async () => {
     const unknown =
-      'Не знаю цену отклика на эту заявку, а потолок или бюджет дня включены. Отклик не отправила.'
-    // Without limits the day's cap still holds and the site checks the wallet itself.
-    expect(await check(0)).toBeNull()
+      'Не знаю цену отклика на эту заявку, отклик не отправила. Откликнись вручную на Профи.ру, если заявка нужна.'
+    expect(await check(0)).toBe(unknown)
     await setSetting(db, 'money.max_fee_rub', 300, 'boris')
     expect(await check(0)).toBe(unknown)
     await setSetting(db, 'money.max_fee_rub', null, 'boris')

@@ -29,11 +29,20 @@ export type ProfiClient = {
   sessionHealth(accountId: string): Promise<SessionHealthOutput>
   /** The order as its page shows it now: open, the fee, the client (FR-LEAD-5). */
   getOrder(accountId: string, orderId: string): Promise<GetOrderOutput>
-  submitBid(i: Omit<SubmitBidInput, 'permit'>): Promise<SubmitBidOutput>
+  /** The deadline (not_after) and the permit are the client's own: it knows how long it waits. */
+  submitBid(i: Omit<SubmitBidInput, 'permit' | 'not_after'>): Promise<SubmitBidOutput>
   readChat(accountId: string, chatId: string): Promise<ReadChatOutput>
   listChats(accountId: string): Promise<ListChatsOutput>
   sendMessage(i: Omit<SendMessageInput, 'permit'>): Promise<SendMessageOutput>
 }
+
+/**
+ * How long a tool that works in the account tab is waited for: the tab may first finish the feed check and the chat
+ * walk (#79). The SDK's own minute gave up while the bid still waited in the node's queue.
+ */
+const TAB_TIMEOUT_MS = 4 * 60_000
+/** The node presses nothing in the last half minute of the wait: its answer could no longer arrive in time. */
+const PRESS_MARGIN_MS = 30_000
 
 function toolError(content: unknown): ProfiError {
   const first = Array.isArray(content) ? content[0] : undefined
@@ -57,7 +66,10 @@ export function createProfiClient(o: {
    * minute check and other orders, so it can take far longer than the 60 s the protocol allows by default.
    */
   getOrderTimeoutMs?: number
+  /** How long submit_bid is waited for (default 4 minutes); tests wait less. */
+  tabTimeoutMs?: number
 }): ProfiClient {
+  const tabMs = o.tabTimeoutMs ?? TAB_TIMEOUT_MS
   async function call<T>(
     name: ProfiToolName,
     args: Record<string, unknown>,
@@ -76,11 +88,16 @@ export function createProfiClient(o: {
     } catch (e) {
       throw new ProfiError('UNCERTAIN', e instanceof Error ? e.message : String(e))
     } finally {
+      // Closing hangs up the request: the node hears it and presses nothing any more.
       await client.close().catch(() => {})
     }
     if (result.isError) throw toolError(result.content)
     const parsed = out.safeParse(result.structuredContent)
-    if (!parsed.success) throw new ProfiError('INTERNAL', 'tool answer breaks the contract')
+    if (!parsed.success) {
+      // A bid answer that breaks the contract still came after the node acted: it may be on the site.
+      const cls = name === 'profi.submit_bid' ? 'UNCERTAIN' : 'INTERNAL'
+      throw new ProfiError(cls, 'tool answer breaks the contract')
+    }
     return parsed.data
   }
 
@@ -94,12 +111,20 @@ export function createProfiClient(o: {
         GetOrderOutput,
         o.getOrderTimeoutMs ?? 90_000,
       ),
-    submitBid: (i) =>
-      call(
+    submitBid: (i) => {
+      const unsigned = {
+        ...i,
+        not_after: new Date(
+          Date.now() + tabMs - Math.min(PRESS_MARGIN_MS, tabMs / 4),
+        ).toISOString(),
+      }
+      return call(
         'profi.submit_bid',
-        { ...i, permit: signPermit(o.permitSecret, i.idempotency_key) },
+        { ...unsigned, permit: signPermit(o.permitSecret, unsigned) },
         SubmitBidOutput,
-      ),
+        tabMs,
+      )
+    },
     readChat: (accountId, chatId) =>
       call('profi.read_chat', { account_id: accountId, chat_id: chatId }, ReadChatOutput),
     listChats: (accountId) => call('profi.list_chats', { account_id: accountId }, ListChatsOutput),

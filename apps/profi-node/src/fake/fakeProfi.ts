@@ -61,6 +61,16 @@ export type FakeProfi = {
   failNextSendAck(): void
   setCoreEventsUrl(url: string): void
   setHealth(h: Partial<SessionHealthOutput>): void
+  /** What a bid costs on the fake site now for every order (null: each order's own); get_order reads it too. */
+  setFee(rub: number | null): void
+  /** The next `times` calls of submit_bid fail with this class before anything is pressed. */
+  refuseNext(errorClass: ProfiErrorClass, times?: number): void
+  /** The order already has this account's bid, made by hand: submit_bid finds it and spends nothing. */
+  markBid(orderId: string): void
+  /** Called at the start of every submit_bid, before the fake decides anything. */
+  onSubmit(hook: ((i: SubmitBidInput) => Promise<void> | void) | null): void
+  /** session_health answers only after this many milliseconds. */
+  delayHealth(ms: number): void
   close(): Promise<void>
 }
 
@@ -103,6 +113,13 @@ export async function createFakeProfi(o: {
   let dropAcks = 0
   let dropSendAcks = 0
   let coreEventsUrl = o.coreEventsUrl
+  // The fee of the fake site for every order; null: each order's own, as emitted (210 when it has none).
+  let fee: number | null = null
+  let refusal: { errorClass: ProfiErrorClass; times: number } | null = null
+  let hook: ((i: SubmitBidInput) => Promise<void> | void) | null = null
+  let healthDelay = 0
+  // Orders with this account's bid on the fake site.
+  const onSite = new Set<string>()
 
   /** Appends to the chat in page order; a message without its own time comes after the chat's last one. */
   function append(
@@ -143,6 +160,7 @@ export async function createFakeProfi(o: {
 
   const impl = {
     async sessionHealth() {
+      if (healthDelay > 0) await sleep(healthDelay)
       return health
     },
     // The fake keeps no feed: list_feed answers empty, as a fresh account would.
@@ -161,7 +179,8 @@ export async function createFakeProfi(o: {
         ...order,
         published_at: order.published_at ?? null,
         open: true,
-        has_bid: false,
+        ...(fee !== null && { bid_price_rub: fee }),
+        has_bid: onSite.has(i.order_id),
         from_page: true,
         ...page,
       }
@@ -185,14 +204,32 @@ export async function createFakeProfi(o: {
       return { messages: chat.messages.map((m) => ({ ...m })) }
     },
     async submitBid(i: SubmitBidInput) {
-      if (!verifyPermit(o.permitSecret, i.idempotency_key, i.permit)) {
-        throw new ProfiToolError('INTERNAL', 'permit does not match idempotency_key')
+      if (!verifyPermit(o.permitSecret, i)) {
+        throw new ProfiToolError('INTERNAL', 'permit does not match the bid')
       }
+      await hook?.(i)
       let out = results.get(i.idempotency_key)
       if (!out) {
-        balance -= 210
-        out = { found_on_page: true, spent_rub: 210, balance_after_rub: balance }
+        if (refusal && refusal.times > 0) {
+          refusal.times--
+          throw new ProfiToolError(refusal.errorClass, `the fake refuses: ${refusal.errorClass}`)
+        }
+        if (Date.now() > Date.parse(i.not_after))
+          throw new ProfiToolError('RATE_LIMITED', 'the deadline of the press has passed')
+        if (onSite.has(i.order_id))
+          return {
+            found_on_page: true,
+            spent_rub: 0,
+            balance_after_rub: balance,
+            already_there: true,
+          }
+        const due = fee ?? (emitted.get(i.order_id)?.bid_price_rub || 210)
+        if (due > i.max_fee_rub)
+          throw new ProfiToolError('PRICE_CHANGED', `the bid costs ${due}, above ${i.max_fee_rub}`)
+        balance -= due
+        out = { found_on_page: true, spent_rub: due, balance_after_rub: balance }
         bids.push(i)
+        onSite.add(i.order_id)
         results.set(i.idempotency_key, out)
       }
       // A lost answer: the bid is on the site, the caller never hears back.
@@ -351,6 +388,21 @@ export async function createFakeProfi(o: {
     },
     setHealth(h) {
       health = { ...health, ...h }
+    },
+    setFee(rub) {
+      fee = rub
+    },
+    refuseNext(errorClass, times = 1) {
+      refusal = { errorClass, times }
+    },
+    markBid(orderId) {
+      onSite.add(orderId)
+    },
+    onSubmit(h) {
+      hook = h
+    },
+    delayHealth(ms) {
+      healthDelay = ms
     },
     close: server.close,
   }

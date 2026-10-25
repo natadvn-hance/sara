@@ -36,6 +36,7 @@ import {
   type DraftMiss,
   type DraftSource,
   editOf,
+  priceOf,
   writeDraft,
 } from './draft'
 import { readWallet, refuseSpend } from './money'
@@ -83,6 +84,7 @@ const ev = (
     | 'lead.held'
     | 'lead.drafted'
     | 'draft.edited'
+    | 'draft.priced'
     | 'task.created'
     | 'task.resolved'
     | 'task.reminded'
@@ -677,12 +679,27 @@ async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> 
 }
 
 /**
+ * «Откликнуться» on a card whose fee is not known (its page was not read): the page is read now and the card comes
+ * again with the fee, or the order ends as closed or already bid on. Still unknown: Boris bids by hand.
+ */
+async function feeThenCard(l: LeadRow, taskId: string): Promise<void> {
+  const read = await readPage(l.accountId, l.id)
+  if (read.ok && (read.page.bid_price_rub > 0 || pageVerdict(read) !== 'go'))
+    return draftThenCard(l, taskId, read)
+  await d().notifier.sendText(TEXTS.feeUnknown(l.title))
+}
+
+/**
  * A dropped order Boris wants after all: its page first (the Scorer's drop never opened it, and hours have passed),
  * then its draft, then its card. An order closed meanwhile, or already bid on, ends its decision task with a word
  * to Boris instead of a card.
  */
-async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
-  const read = await readPage(l.accountId, l.id)
+async function draftThenCard(
+  l: LeadRow,
+  taskId: string,
+  read: PageRead | null = null,
+): Promise<void> {
+  read ??= await readPage(l.accountId, l.id)
   const full = fuller(
     { bid_price_rub: l.bidPriceRub, client_name: l.clientName, text: l.text },
     read,
@@ -755,8 +772,10 @@ async function onEdit(taskId: string): Promise<string> {
 }
 
 /**
- * The new bid text: the same greeting and length rules as the Analyst's, then an updated card. The edit is
- * journaled (draft.edited, before and after) without the greeting, so no client name reaches the journal.
+ * The new bid text and or the «Стоимость услуги» (a line of its own, K2): the same greeting and length rules as the
+ * Analyst's, then an updated card. The edit is journaled (draft.edited, before and after) without the greeting, so
+ * no client name reaches the journal; the price as draft.priced. An answer to the price question without a price
+ * changes nothing and the question stays open.
  */
 async function onDraftText(a: DraftAnswer): Promise<string> {
   const found = await leadOfTask(a.question.entityId)
@@ -769,26 +788,44 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
     return TEXTS.draftLate
   }
   const { lead: l, task: t } = found
-  const next = editOf(a.text, l.clientName)
+  const forPrice = a.question.kind === 'edit_price'
+  const said = priceOf(a.text, { bare: forPrice })
+  // The price was asked for: words without one are not taken for a new text.
+  if (forPrice && said.priceRub === null) return TEXTS.priceNotFound
+  const next = said.text === null ? null : editOf(said.text, l.clientName)
   // Too long: the request stays open, the next text answers it.
-  if (next.length > BID_TEXT_MAX) return TEXTS.draftTooLong(next.length)
+  if (next !== null && next.length > BID_TEXT_MAX) return TEXTS.draftTooLong(next.length)
   const saved = await d().db.transaction(async (tx) => {
     if (!(await markAnswered(tx, a.question, a))) return false
     await closeDraftRequests(tx, t.id, a.at)
-    await tx.update(lead).set({ draftText: next }).where(eq(lead.id, l.id))
-    await appendEvent(
-      tx,
-      ev('draft.edited', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
-        before: l.draftText === null ? null : bodyOf(l.draftText),
-        after: bodyOf(next),
-        voice: a.voice,
-      }),
-    )
+    if (next !== null) {
+      await tx.update(lead).set({ draftText: next }).where(eq(lead.id, l.id))
+      await appendEvent(
+        tx,
+        ev('draft.edited', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
+          before: l.draftText === null ? null : bodyOf(l.draftText),
+          after: bodyOf(next),
+          voice: a.voice,
+        }),
+      )
+    }
+    if (said.priceRub !== null) {
+      await tx.update(lead).set({ draftPriceRub: said.priceRub }).where(eq(lead.id, l.id))
+      await appendEvent(
+        tx,
+        ev('draft.priced', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
+          before: l.draftPriceRub,
+          after: said.priceRub,
+          voice: a.voice,
+        }),
+      )
+    }
     return true
   })
   if (!saved) return TEXTS.alreadyDone
   await sendCard(t.id, 'edit')
-  return TEXTS.draftSaved(l.title)
+  if (next === null) return TEXTS.priceSaved(l.title)
+  return said.priceRub === null ? TEXTS.draftSaved(l.title) : TEXTS.draftAndPriceSaved(l.title)
 }
 
 /**
@@ -919,9 +956,23 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         if (!(await getSetting(d().db, 'outbound.bids'))) return TEXTS.bidsPausedPress
         // No text to send yet: the card waits for «Изменить», and the wallet need not be read.
         if (l.draftText === null) return TEXTS.noDraft
+        // The fee is the most the node may pay, so an unknown one never goes: the page is read now (#89 could not).
+        if (l.bidPriceRub <= 0) {
+          void feeThenCard(l, taskId).catch((err) =>
+            console.error(
+              'fee read failed',
+              err instanceof Error ? err.message.slice(0, 200) : err,
+            ),
+          )
+          return TEXTS.feeChecking
+        }
+        // Profi.ru takes no bid without «Стоимость услуги» (#79: required on every live answer): Sara asks for it.
+        if (l.draftPriceRub === null) {
+          await askForDraft(d(), { taskId, title: l.title }, new Date(), 'price')
+          return TEXTS.waitingPrice
+        }
         wallet = await readWallet(d().profi, l.accountId)
       }
-      const text = l.draftText
       let outboxId: string | null = null
       let refusal: string | null = null
       const resolved = await d()
@@ -932,12 +983,23 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
             .where(and(eq(task.id, taskId), eq(task.state, 'open')))
             .returning({ id: task.id })
           if (rows.length === 0) return false
+          // The bid goes as the lead is now, read under its lock: an edit during the wallet wait is not lost.
+          const [now] =
+            action === 'bid'
+              ? await tx.select().from(lead).where(eq(lead.id, l.id)).for('update')
+              : [l]
+          if (!now) return false
           if (action === 'bid') {
-            refusal = await refuseSpend(tx, {
-              feeRub: l.bidPriceRub,
-              balanceRub: wallet,
-              now: new Date(),
-            })
+            refusal =
+              now.draftText === null
+                ? TEXTS.noDraft
+                : now.draftPriceRub === null
+                  ? TEXTS.noPrice
+                  : await refuseSpend(tx, {
+                      feeRub: now.bidPriceRub,
+                      balanceRub: wallet,
+                      now: new Date(),
+                    })
             // Rolled back: the task stays open and nothing about the bid is written.
             if (refusal) tx.rollback()
           }
@@ -953,17 +1015,17 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
             )
           } else {
             // Checked above; should the draft be gone, the whole decision rolls back rather than bid without it.
-            if (text === null) throw new Error('a bid without its text')
+            if (now.draftText === null) throw new Error('a bid without its text')
             // Boris's decision and the intent to bid commit together: a crash cannot lose one of them.
             outboxId = (
               await recordBid(tx, {
                 leadId: l.id,
                 accountId: l.accountId,
-                text,
+                text: now.draftText,
                 correlationId: l.correlationId,
                 title: l.title,
-                priceRub: l.bidPriceRub,
-                servicePriceRub: l.draftPriceRub,
+                priceRub: now.bidPriceRub,
+                servicePriceRub: now.draftPriceRub,
                 taskId,
               })
             ).outboxId
@@ -978,7 +1040,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (refusal) return refusal
       if (!resolved) return TEXTS.alreadyDone
       await deliverDecision(taskId, action)
-      if (outboxId) await startOutboxDelivery(outboxId, l.id)
+      if (outboxId) await startOutboxDelivery(outboxId)
       learnFrom(
         { leadId: l.id, label: action === 'bid' ? 'yes' : 'no', source: 'card' },
         'why_skip',

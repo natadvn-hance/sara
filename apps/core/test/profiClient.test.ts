@@ -47,6 +47,7 @@ const bid = {
   account_id: 'hance-marketing',
   order_id: '1',
   text: 'Добрый день!',
+  max_fee_rub: 210,
   idempotency_key: 'bid:1',
 }
 
@@ -104,6 +105,53 @@ describe('profi client and event intake', () => {
     expect(err.errorClass).toBe('UNCERTAIN')
     expect(await client.submitBid(bid)).toMatchObject({ found_on_page: true })
     expect(fake.bids).toHaveLength(1)
+  })
+
+  it('C2: the permit covers the order, the most the bid may cost and a deadline minutes ahead', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    const before = Date.now()
+    await client.submitBid(bid)
+    const sent = fake.bids[0]
+    expect(sent).toMatchObject({ order_id: '1', max_fee_rub: 210 })
+    // The SDK's own minute would give up while the bid waits for the tab: the call waits minutes.
+    const ahead = Date.parse(sent?.not_after ?? '') - before
+    expect(ahead).toBeGreaterThan(3 * 60_000)
+    expect(ahead).toBeLessThanOrEqual(5 * 60_000)
+  })
+
+  it('FR-LEAD-9: a bid dearer than max_fee_rub is refused as PRICE_CHANGED', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    await expect(client.submitBid({ ...bid, max_fee_rub: 200 })).rejects.toMatchObject({
+      errorClass: 'PRICE_CHANGED',
+    })
+    expect(fake.bids).toHaveLength(0)
+  })
+
+  it('NFR-REL-4: a node that does not answer within the timeout is UNCERTAIN, and its deadline is before it', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit', tabTimeoutMs: 400 })
+    let deadline = 0
+    fake.onSubmit(async (i) => {
+      deadline = Date.parse(i.not_after)
+      await new Promise((r) => setTimeout(r, 1500))
+    })
+    const started = Date.now()
+    const err = await client.submitBid(bid).catch((e) => e)
+    fake.onSubmit(null)
+    expect(err).toMatchObject({ errorClass: 'UNCERTAIN' })
+    expect(Date.now() - started).toBeLessThan(1400)
+    expect(deadline).toBeLessThan(started + 400)
+  })
+
+  it('C2: get_order reads the order and whether this account bid', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    await fake.emitOrder({ order_id: '1' })
+    expect(await client.getOrder('hance-marketing', '1')).toMatchObject({
+      order_id: '1',
+      has_bid: false,
+      bid_price_rub: 210,
+    })
+    await client.submitBid(bid)
+    expect((await client.getOrder('hance-marketing', '1')).has_bid).toBe(true)
   })
 
   it('C2: session health is read through the contract', async () => {
