@@ -46,6 +46,6 @@ Live finding: the board answer (`boSearchBoardItems`) holds ~17 of 346 orders by
 
 ## Things to know after merge
 - Node and core must deploy together in practice: an old core + new node still works (fee 0, sorted by board data, no page read); a new core + old node: `get_order` gives the stored order (fee 0, no client_info), the card says «цена неизвестна».
-- `get_order` is a tab visit per lead that passed the Scorer: a burst of leads queues in the node's one tab (each visit ≈ 5-15 s); the core waits 90 s, then goes on with the board data (fee unknown). Watch `lead.page_read` with `ok:false`, runbook RB-17.
+- `get_order` is a tab visit per lead that passed the Scorer: a burst of leads queues in the node's one tab (each visit ≈ 5-15 s); the core waits 90 s, then goes on with the board data (fee unknown). Watch `lead.page_read` with `ok:false`, runbook RB-18.
 - Open risk: the real `getKlientInfo` request/answer shape is unseen here. Check after deploy: `select count(*) from core.event where type='lead.page_read' and (payload->>'client_info')::bool` should grow; if `client_info:false` on every ok read, the shape guess is wrong (look at `node.raw_event` bodies with `data.reviews`).
 - node.raw_event keeps `getKlientInfo` bodies with client contacts (the recorder redacts keys like `phone`, but not every contact field). Worth a look separately (ADR-022).
