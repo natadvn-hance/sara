@@ -538,7 +538,9 @@ const convTurnWorkflow = DBOS.registerWorkflow(runTurn, { name: 'convTurn' })
 
 /** The anchor of the client turn not yet covered: its first message after our side's last and the handled mark. */
 async function pendingAnchor(conv: ConversationRow): Promise<string | null> {
-  return turnMessageIds(await storedMessages(d().db, conv.id), conv.handledThrough)[0] ?? null
+  // The caller's row may be older than a handoff that has just marked its work: the mark is read fresh.
+  const fresh = (await getConversation(d().db, conv.id)) ?? conv
+  return turnMessageIds(await storedMessages(d().db, conv.id), fresh.handledThrough)[0] ?? null
 }
 
 /** The client wrote: the turn of that client turn starts, or the running one wakes (a repeat start is a no-op). */

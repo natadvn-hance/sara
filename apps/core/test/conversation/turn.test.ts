@@ -320,6 +320,31 @@ describe('the turn workflow', () => {
     expect(cards).toHaveLength(2)
   }, 30000)
 
+  it('FR-CONV-7: a client message heard with a conversation row read before the handoff still starts the next turn', async () => {
+    await clientWrites('m-2', 'Как начнём?')
+    await turnsDone(1)
+    // The event of m-3 read its row while turn 1 was still running, so the row's mark is still empty.
+    profi.chat.push(chatMsg('m-3', 'client', 'Ещё вопрос', new Date().toISOString()))
+    await createConversationEvents({
+      db,
+      profi,
+      notifier: { sendText: async () => ({ messageId: 1 }) },
+      onTurnNeeded: (c) => startTurnFor({ ...c, handledThrough: null }),
+      onTyping: (c) => pokeTurn(c),
+      onSpecialist: async () => {},
+    })(
+      ev('profi.client_message', {
+        chat_id: CHAT,
+        order_id: CHAT,
+        platform_message_id: 'm-3',
+        sent_at: new Date().toISOString(),
+        author: 'client',
+      }),
+    )
+    const rows = await turnsDone(2)
+    expect(rows.map((r) => r.anchorMessageId).sort()).toEqual(['m-2', 'm-3'])
+  }, 40000)
+
   it('FR-CONV-11: a client Boris took is forwarded to him without the model', async () => {
     await clientWrites('m-0', 'Привет')
     await turnsDone(1)
