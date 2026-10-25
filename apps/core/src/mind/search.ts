@@ -7,8 +7,32 @@ import { CASE_LEXEME, toCaseHit } from './cases'
 import { lastIndexedVersion } from './indexer'
 import { markdownSections } from './loader'
 
-/** A long order text gives at most this many words to the query, the last ones. */
+/**
+ * A long text gives at most this many words to the query. The fact search keeps the last ones (the newest words of a
+ * conversation); the case search keeps the first ones, so a caller puts the client's own words first and a long order
+ * text after them can never push them out.
+ */
 const MAX_WORDS = 32
+
+/**
+ * The words a client asks for a case with, in every form: «есть ли примеры работ», «кейсы», «портфолио». They say that
+ * the client wants a case, not which one, and they stand in every case record («Как показывать клиенту», «Роль и
+ * масштаб: комплексная работа»), so the case search leaves them out of the query.
+ */
+const ASKING_WORD =
+  /^(?:пример(?:а|ы|у|е|ом|ов|ам|ами|ах)?|кейс(?:а|ы|у|е|ом|ов|ам|ами|ах)?|портфолио|работ(?:а|ы|у|е|ой|ою|ам|ами|ах)?|есть|ли)$/u
+
+/**
+ * The lowest `ts_rank_cd` a case needs to be offered (before it, three cases came back for any question, however far).
+ * The weights of the case vector are 1.0 for the title and tags, 0.4 for the gist, 0.2 for the sections of the work,
+ * and a repeated word adds up. Probes over the 28 real records: a word of the title or tags ranks 1.0 or more
+ * («потолками» finds SkyRoom at 1.0, «школы» Музыкальную школу МИО at 1.6, «бухгалтерия на аутсорсинге» 3.4), a word
+ * of the gist 0.4 («продвижение» gives Грибатория and SkillCode 0.4); the far cases are a word met once in a section
+ * of the work, 0.2 («лендинг» gives LevTrain 0.2, a dental ad question gives Боулинг-клуб 0.2). So 0.35 keeps a case
+ * with a word in its title, tags or gist, or with two words of its work, and drops a case that only touches a word
+ * once in what it did.
+ */
+export const CASE_MIN_RANK = 0.35
 
 const COLUMNS = {
   id: mindIndex.recordId,
@@ -50,10 +74,15 @@ const toHit = (r: Row, rank: number): MindHit => ({
   rank,
 })
 
-function queryWords(text: string): string[] {
+function queryWords(text: string, keep: 'first' | 'last' = 'last'): string[] {
   const words = (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3)
-  return [...new Set(words)].slice(-MAX_WORDS)
+  const distinct = [...new Set(words)]
+  return keep === 'first' ? distinct.slice(0, MAX_WORDS) : distinct.slice(-MAX_WORDS)
 }
+
+/** The words of a case query: the client's words first (the first ones kept), without the words that only ask for a case. */
+const caseQueryWords = (text: string): string[] =>
+  queryWords(text, 'first').filter((w) => !ASKING_WORD.test(w))
 
 type RankedQuery = {
   words: string[]
@@ -65,6 +94,8 @@ type RankedQuery = {
   cases: 'only' | 'none'
   /** Record ids that must not come back. */
   exclude?: string[]
+  /** Hits ranked below this are left out (none when absent). */
+  minRank?: number
 }
 
 /**
@@ -99,9 +130,10 @@ async function ranked(db: Db, q: RankedQuery): Promise<MindHit[]> {
           sql`, `,
         )})`
       : sql`true`
+  const floor = q.minRank === undefined ? sql`true` : sql`hit.rank >= ${q.minRank}`
   const rows = await db.execute<Row & { rank: number }>(sql`
     with q as materialized (select ${query} as query)
-    select ${mindIndex.recordId} as id, ${mindIndex.type} as type, ${mindIndex.scope} as scope,
+    select * from (select ${mindIndex.recordId} as id, ${mindIndex.type} as type, ${mindIndex.scope} as scope,
       ${mindIndex.title} as title, ${mindIndex.body} as body, ${mindIndex.topic} as topic,
       ${mindIndex.tones} as tones, ${mindIndex.stages} as stages,
       ${mindIndex.exampleClient} as "exampleClient", ${mindIndex.exampleBoris} as "exampleBoris",
@@ -111,8 +143,9 @@ async function ranked(db: Db, q: RankedQuery): Promise<MindHit[]> {
       and ${types}
       and ${cases}
       and ${exclude}
-      and ${vector} @@ q.query
-    order by rank desc, ${mindIndex.recordId}
+      and ${vector} @@ q.query) hit
+    where ${floor}
+    order by hit.rank desc, hit.id
     limit ${q.limit}`)
   return rows.rows.map((r) => toHit(r, Number(r.rank)))
 }
@@ -145,12 +178,13 @@ export function createMindSearch(db: Db): MindSearch {
 
     async cases(q) {
       const hits = await ranked(db, {
-        words: queryWords(q.text),
+        words: caseQueryWords(q.text),
         scope: q.scope,
         types: ['knowledge'],
         limit: q.limit,
         cases: 'only',
         exclude: q.exclude,
+        minRank: CASE_MIN_RANK,
       })
       return hits.map(toCaseHit)
     },

@@ -24,6 +24,34 @@ export function isCaseRecord(front: Pick<MindFrontmatter, 'type' | 'tags'>): boo
   )
 }
 
+/**
+ * What the case search reads in a case record (FR-MIND-2): the title and tags, the gist (the first paragraph), and the
+ * sections that say what was done, where, in what role and with what result. The rules of showing, the state of the
+ * description and the materials are about how to tell the case, not about the work, so they stay out of the index:
+ * «Как показывать клиенту» and «Состояние описания» are full of the words a client asks with («примеры», «работ»).
+ */
+export const CASE_SEARCH_SECTIONS = ['Что делали', 'Где', 'Роль и масштаб', 'Результат']
+
+/** The stock text of an empty field in a case record: it says nothing about the work and is not indexed. */
+const EMPTY_FIELD = /^пока не зафиксировано/i
+
+/** The three texts of a case the index weighs: the head (title, tags), the gist, the sections of the work. */
+export function caseSearchText(
+  title: string,
+  tags: string[],
+  body: string,
+): { head: string; summary: string; details: string } {
+  const sections = markdownSections(body)
+  const details = CASE_SEARCH_SECTIONS.map((name) => sections[name] ?? '')
+    .filter((text) => text.length > 0 && !EMPTY_FIELD.test(text))
+    .join('\n')
+  return {
+    head: [title, ...tags.filter((t) => t.trim().toLowerCase() !== CASE_TAG)].join(' '),
+    summary: firstParagraph(body),
+    details,
+  }
+}
+
 /** The first paragraph of a body, before any section: the gist of the case. */
 export function firstParagraph(body: string): string {
   const intro = body.split(/^## /m)[0] ?? ''

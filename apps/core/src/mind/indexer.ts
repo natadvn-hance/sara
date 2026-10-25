@@ -3,7 +3,7 @@ import { desc, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { event, mindIndex } from '../db/schema'
 import { appendEvent } from '../journal/journal'
-import { CASE_LEXEME, isCaseRecord } from './cases'
+import { CASE_LEXEME, caseSearchText, isCaseRecord } from './cases'
 import { loadMind, type MindRecord } from './loader'
 
 const moscowToday = (): string =>
@@ -42,9 +42,20 @@ function toRow(r: MindRecord, mindVersion: string) {
     exampleBoris: example ? r.sections.Борис || null : null,
     version: f.version,
     mindVersion,
-    // A case also carries the marker lexeme, so the fact search can leave it out and the case search can find it.
-    tsv: sql`setweight(to_tsvector('russian', ${head}), 'A') || setweight(to_tsvector('russian', ${r.body}), 'B') || ${isCaseRecord(f) ? CASE_LEXEME : ''}::tsvector`,
+    tsv: isCaseRecord(f)
+      ? caseVector(r)
+      : sql`setweight(to_tsvector('russian', ${head}), 'A') || setweight(to_tsvector('russian', ${r.body}), 'B')`,
   }
+}
+
+/**
+ * The vector of a case: only its title, tags, gist and the sections of the work (title and tags first, then the gist,
+ * then the sections), not the rules of showing or the state of the description. It also carries the marker lexeme, so
+ * the fact search can leave the case out and the case search can find it.
+ */
+function caseVector(r: MindRecord) {
+  const { head, summary, details } = caseSearchText(r.title, r.front.tags ?? [], r.body)
+  return sql`setweight(to_tsvector('russian', ${head}), 'A') || setweight(to_tsvector('russian', ${summary}), 'B') || setweight(to_tsvector('russian', ${details}), 'C') || ${CASE_LEXEME}::tsvector`
 }
 
 /** The mind version the index was last built for, from the journal; null before the first build. */

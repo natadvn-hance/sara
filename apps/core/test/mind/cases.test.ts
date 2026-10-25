@@ -1,8 +1,9 @@
+import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { CaseHit } from '../../src/conversation/types'
 import { readShowRules } from '../../src/mind/cases'
 import { ensureMindIndex } from '../../src/mind/indexer'
-import { createMindSearch } from '../../src/mind/search'
+import { CASE_MIN_RANK, createMindSearch } from '../../src/mind/search'
 import { openTestDb, resetDb } from '../helpers/db'
 import { putRecord, tempMind } from '../helpers/mind'
 
@@ -26,21 +27,33 @@ type Case = {
   result?: string | null
   /** The items of «Как показывать клиенту»; null leaves the section out. */
   rules?: string[] | null
+  /** The texts of the other sections; the defaults are the same for every case. */
+  work?: string
+  where?: string
+  role?: string
+  period?: string
+  state?: string
+  materials?: string
   front?: Record<string, unknown>
 }
 
 /** An invented case in the format of the sara-mind case records. */
 function caseText(c: Case): string {
-  const parts = [`# ${c.title}`, c.summary, '## Что делали\nСобрали сайт и настроили рекламу.']
-  parts.push('## Где\nTilda, Яндекс Директ')
-  parts.push('## Роль и масштаб\nПод ключ. Команда: 2 человека.')
+  const parts = [
+    `# ${c.title}`,
+    c.summary,
+    `## Что делали\n${c.work ?? 'Собрали сайт и настроили рекламу.'}`,
+  ]
+  parts.push(`## Где\n${c.where ?? 'Tilda, Яндекс Директ'}`)
+  parts.push(`## Роль и масштаб\n${c.role ?? 'Под ключ. Команда: 2 человека.'}`)
   if (c.result !== null) parts.push(`## Результат\n${c.result ?? 'Сто заявок за месяц.'}`)
-  parts.push('## Срок\n20 рабочих дней')
+  parts.push(`## Срок\n${c.period ?? '20 рабочих дней'}`)
+  if (c.materials) parts.push(`## Материалы\n${c.materials}`)
   if (c.rules !== null)
     parts.push(
       `## Как показывать клиенту\n${(c.rules ?? ['Компанию и ссылку можно называть.']).map((r) => `- ${r}`).join('\n')}`,
     )
-  parts.push('## Состояние описания\nФакты подтверждены Борисом.')
+  parts.push(`## Состояние описания\n${c.state ?? 'Факты подтверждены Борисом.'}`)
   return parts.join('\n\n')
 }
 
@@ -172,8 +185,13 @@ describe('mind case search', () => {
 
     const cases = (await mind.cases?.({ text: question, scope: DIR, limit: 20 })) ?? []
     expect(cases.map((h) => h.id)).toEqual(['k-case-05'])
-    // «сайт» and «реклама» are in the work of every case.
-    const all = (await mind.cases?.({ text: 'сайт реклама', scope: DIR, limit: 20 })) ?? []
+    // A word of the title of every case; «сайт» and «реклама» are in the work of every case but only once, below the floor.
+    const all =
+      (await mind.cases?.({
+        text: 'потолки стоматологии воронка стратегия магазин',
+        scope: DIR,
+        limit: 20,
+      })) ?? []
     expect(all.map((h) => h.id).sort()).toEqual([
       'k-case-01',
       'k-case-02',
@@ -319,6 +337,143 @@ describe('mind case search', () => {
       limit: 10,
     })
     expect(other?.map((h) => h.id)).not.toContain('k-case-90')
+  })
+})
+
+describe('mind case search: what is read and what is asked', () => {
+  /** A micro-case written the way the real ones are: its rules and its state talk about examples of work. */
+  const MICRO: Case = {
+    id: 'k-case-13',
+    title: 'Парсинг базы для отдела продаж',
+    tags: ['кейс', 'парсинг'],
+    summary: 'Собрали базу контактов компаний для отдела продаж.',
+    work: 'Выгрузка из открытых источников и очистка.',
+    where: 'Python',
+    role: 'Комплексная работа с данными, один исполнитель.',
+    result: 'Пока не зафиксировано',
+    rules: [
+      'Компанию и ссылку можно называть.',
+      'Микро-кейс: только как дополнительный пример работ, не как главный.',
+      'Приоритетный кейс для портфолио.',
+    ],
+    state: 'Черновик: нужно дополнить примеры работ и результаты, есть ли отзыв.',
+  }
+
+  it('FR-MIND-2: «А у вас есть примеры работ с натяжными потолками?» finds the ceilings case first and no micro-case', async () => {
+    const root = await tempMind()
+    for (const c of [MICRO, CEILINGS, STRATEGY]) await putCase(root, c)
+    await ensureMindIndex(db, root)
+    const hits =
+      (await mind.cases?.({
+        text: 'А у вас есть примеры работ с натяжными потолками?',
+        scope: DIR,
+        limit: 3,
+      })) ?? []
+    expect(hits.map((h) => h.id)).toEqual(['k-case-01'])
+  })
+
+  it('FR-MIND-2: the words that only ask for a case find no case, in any form', async () => {
+    const root = await tempMind()
+    for (const c of [MICRO, CEILINGS]) await putCase(root, c)
+    await ensureMindIndex(db, root)
+    for (const text of [
+      'Есть ли у вас примеры работ?',
+      'Покажите кейсы',
+      'А портфолио у вас есть?',
+      'Пришлите пример вашей работы или кейс',
+      'работы, работ, работами, примерами, кейсами, портфолио',
+    ]) {
+      expect(await mind.cases?.({ text, scope: DIR, limit: 3 }), text).toEqual([])
+    }
+    // The asking words do not hide the rest of the question.
+    const hits =
+      (await mind.cases?.({ text: 'Покажите кейсы по парсингу баз', scope: DIR, limit: 3 })) ?? []
+    expect(hits.map((h) => h.id)).toEqual(['k-case-13'])
+  })
+
+  it('FR-MIND-2: the index reads the title, tags, gist and the sections of the work, not the rules, the state or the materials', async () => {
+    const root = await tempMind()
+    await putCase(root, {
+      id: 'k-case-20',
+      title: 'Мастерская Ветров',
+      tags: ['кейс', 'гончарка'],
+      summary: 'Запустили витрину керамики.\n\nВторой абзац про ковёр.',
+      work: 'Снимали рилсы.',
+      where: 'Телеграм',
+      role: 'Наставничество.',
+      result: 'Выручка выросла.',
+      period: 'Квартал.',
+      materials: 'Папка с эскизами.',
+      rules: ['Компанию можно называть.', 'Секретный хэштег.'],
+      state: 'Черновик, нужны уточнения.',
+    })
+    await ensureMindIndex(db, root)
+    // The words of the index itself, whatever the rank floor of the search.
+    const found = async (word: string) =>
+      (
+        await db.execute<{ id: string }>(
+          sql`select record_id as id from core.mind_index where tsv @@ plainto_tsquery('russian', ${word})`,
+        )
+      ).rows.map((r) => r.id)
+    // Read: title, tag, first paragraph, «Что делали», «Где», «Роль и масштаб», «Результат».
+    for (const word of [
+      'мастерская',
+      'гончарка',
+      'витрину',
+      'рилсы',
+      'телеграм',
+      'наставничество',
+      'выручка',
+    ])
+      expect(await found(word), word).toEqual(['k-case-20'])
+    // Not read: the second paragraph, «Срок», «Материалы», «Как показывать клиенту», «Состояние описания», the tag «кейс».
+    for (const word of [
+      'ковёр',
+      'квартал',
+      'эскизами',
+      'хэштег',
+      'секретный',
+      'уточнения',
+      'черновик',
+      'кейс',
+    ])
+      expect(await found(word), word).toEqual([])
+  })
+
+  it('FR-MIND-2: a stock «not recorded yet» in a field is not a word of the case', async () => {
+    const root = await tempMind()
+    await putCase(root, { ...MICRO, result: 'Пока не зафиксировано' })
+    await ensureMindIndex(db, root)
+    expect(await mind.cases?.({ text: 'зафиксировано пока', scope: DIR, limit: 3 })).toEqual([])
+  })
+
+  it('FR-MIND-2: the client words come first, a long order text after them cannot push them out', async () => {
+    const root = await tempMind()
+    await putCase(root, CEILINGS)
+    await ensureMindIndex(db, root)
+    const filler = Array.from({ length: 80 }, (_, i) => `слово${i}`).join(' ')
+    const first = await mind.cases?.({ text: `натяжные потолки ${filler}`, scope: DIR, limit: 3 })
+    expect(first?.map((h) => h.id)).toEqual(['k-case-01'])
+    // The cap is on the first 32 distinct words: a word after them is not asked.
+    const last = await mind.cases?.({ text: `${filler} потолки`, scope: DIR, limit: 3 })
+    expect(last).toEqual([])
+  })
+
+  it('FR-MIND-2: a question far from every case gets no case, a word met once in a gist is below the floor', async () => {
+    const root = await tempMind()
+    // «реклам» is met once in the work of each case; nothing in the mind is about dentists.
+    for (const c of [LOGISTICS, STRATEGY]) await putCase(root, c)
+    await ensureMindIndex(db, root)
+    const far = await mind.cases?.({
+      text: 'Нужна реклама для стоматологии',
+      scope: DIR,
+      limit: 3,
+    })
+    expect(far).toEqual([])
+    // Every hit is at or above the floor; a word of the title is far above it.
+    const near = (await mind.cases?.({ text: 'стратегия маркетинга', scope: DIR, limit: 3 })) ?? []
+    expect(near.map((h) => h.id)).toEqual(['k-case-04'])
+    for (const h of near) expect(h.rank).toBeGreaterThanOrEqual(CASE_MIN_RANK)
   })
 })
 
