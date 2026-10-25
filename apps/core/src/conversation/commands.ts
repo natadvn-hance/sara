@@ -319,7 +319,7 @@ export function parseCardReply(text: string): CardCommand | null {
 /** A reply to a conversation card: null when it is not a reply to one (the message is someone else's business). */
 export async function onConvReply(
   d: CommandDeps,
-  m: { replyToMessageId: number | null; text: string; at: Date },
+  m: { replyToMessageId: number | null; text: string; voice?: boolean; at: Date },
 ): Promise<string | null> {
   if (m.replyToMessageId === null) return null
   const [t] = await d.db
@@ -329,7 +329,22 @@ export async function onConvReply(
   const [turn] = t ? await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId)) : []
   if (!t || !turn) return null
   const c = parseCardReply(m.text)
-  if (!c) return COMMAND_TEXTS.notUnderstood
+  if (!c) {
+    // «Изменить» waits for his version: his words on the card are it, even without a command word.
+    const [edit] = await d.db
+      .select()
+      .from(question)
+      .where(
+        and(
+          eq(question.kind, 'conv_edit'),
+          eq(question.entityId, turn.id),
+          isNull(question.answeredAt),
+        ),
+      )
+    if (edit)
+      return onConvEdit(d, { question: edit, text: m.text, voice: m.voice ?? false, at: m.at })
+    return COMMAND_TEXTS.notUnderstood
+  }
   switch (c.cmd) {
     case 'take':
       await take(d.db, turn.conversationId)

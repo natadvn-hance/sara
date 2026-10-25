@@ -15,6 +15,7 @@ import {
 import { ensureConversation, getConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
 import { convTurn, deal, lead, mindProposal, question, task } from '../../src/db/schema'
+import { handleBorisMessage } from '../../src/learning/inbox'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -157,6 +158,50 @@ describe('Boris’s commands', () => {
     const [t] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
     expect(t?.borisText).toBe('Мой вариант')
     expect(await countEvents(db, 'conv.draft_edited')).toBe(1)
+  })
+
+  describe('Boris’s version after «Изменить»', () => {
+    const inbox = () => ({
+      db,
+      transcriber: { transcribe: async () => null },
+      onCardReply: (m: { replyToMessageId: number | null; text: string; at: Date }) =>
+        onConvReply(deps(), m),
+      onConvEdit: (a: Parameters<typeof onConvEdit>[1]) => onConvEdit(deps(), a),
+    })
+    const borisSays = (text: string, replyToMessageId: number | null) =>
+      handleBorisMessage(inbox(), { text, voicePath: null, replyToMessageId, at: new Date() })
+
+    it('FR-CONV-11: a message that is not a reply is never taken as his version of the reply', async () => {
+      await onConvPress(deps(), { taskId: cardTask, action: 'edit' })
+      const answer = await borisSays('Спасибо, посмотрю вечером', null)
+      expect(answer).toMatch(/Пока я понимаю только ответы/)
+      const [q] = await db.select().from(question)
+      expect(q?.answeredAt).toBeNull()
+      const [t] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+      expect(t?.borisText).toBeNull()
+      expect(await db.select().from(mindProposal)).toHaveLength(0)
+    })
+
+    it('FR-CONV-11: a reply to the question is his version', async () => {
+      await onConvPress(deps(), { taskId: cardTask, action: 'edit' })
+      const [q] = await db.select().from(question)
+      expect(await borisSays('Анна, давайте завтра в 11', q?.telegramMessageId ?? null)).toMatch(
+        /Сохранила/,
+      )
+      const [t] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+      expect(t?.borisText).toBe('Анна, давайте завтра в 11')
+    })
+
+    it('FR-CONV-11: a reply to the card that is no command is his version while «Изменить» waits', async () => {
+      await onConvPress(deps(), { taskId: cardTask, action: 'edit' })
+      expect(await borisSays('Анна, давайте завтра в 11', cardMessage)).toMatch(/Сохранила/)
+      const [t] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+      expect(t?.borisText).toBe('Анна, давайте завтра в 11')
+      const [q] = await db.select().from(question)
+      expect(q?.answeredAt).not.toBeNull()
+      // Nothing waits any more: the next words on the card are not understood.
+      expect(await borisSays('ещё что-то', cardMessage)).toMatch(/Не поняла/)
+    })
   })
 
   it('FR-CONV-11: «Хорошо» marks the draft good once', async () => {
