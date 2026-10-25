@@ -316,7 +316,8 @@ describe('the bid', () => {
   })
 })
 
-describe('«Изменить»', () => {
+// Each case walks the whole bot path; on the Mac runner with two CI runs at once 5 seconds was too short.
+describe('«Изменить»', { timeout: 30000 }, () => {
   const NEW = 'Понимаю вашу задачу. Когда нужен запуск?'
 
   it('FR-LEAD-7: «Изменить» takes a new text by reply and brings an updated card', async () => {
