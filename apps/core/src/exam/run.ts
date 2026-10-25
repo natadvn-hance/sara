@@ -59,6 +59,8 @@ export type ExamDeps = {
   mind: MindSearch
   /** Where the roles live: their versions are stored with the run. Default: the configured folder. */
   rolesDir?: string
+  /** The Claude binary the calls go to; kept in the event of the finished run (the schema has no column for it). */
+  claudeBin?: string
 }
 
 export type ExamOptions = {
@@ -134,7 +136,11 @@ export function scenarioMind(mind: MindSearch, s: ExamScenario): MindSearch {
   }
 }
 
-/** The exam is background work: its calls go after the live ones, and wait out the Claude limit. */
+/**
+ * The exam is background work: its calls are P3 and wait out the Claude limit. The queue of priorities is the one of
+ * the gateway of this process, so P3 puts the exam's own calls after each other's and nothing more: the live turns run
+ * in the core's process and do not see it. Run the exam at night.
+ */
 function inTheBackground(gateway: Gateway): Gateway {
   return {
     call: (role, input, schema, opts) =>
@@ -364,6 +370,7 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
       s3: summary.s3,
       passed: summary.passed,
       scenarios: results.length,
+      ...(d.claudeBin ? { claude_bin: d.claudeBin } : {}),
     },
   })
   return summary

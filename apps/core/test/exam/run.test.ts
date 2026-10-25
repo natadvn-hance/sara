@@ -243,6 +243,22 @@ describe('runExam', { timeout: 30_000 }, () => {
     expect(calls.every((c) => c.priority === 'P3')).toBe(true)
   })
 
+  it('FR-TRAIN-8: the event of a finished run names the Claude binary that answered', async () => {
+    const fake = await fakeGateway(db, { interlocutor: CALL_BORIS })
+    await runExam(
+      {
+        db,
+        gateway: fake.gateway,
+        mind: fakeMind(),
+        rolesDir: fake.rolesDir,
+        claudeBin: '/usr/local/bin/claude',
+      },
+      { dirs: [HANDMADE], only: ['x-t-01-price-first'], judge: false },
+    )
+    const [done] = await db.select().from(event).where(eq(event.type, 'exam.finished'))
+    expect(done?.payload).toMatchObject({ claude_bin: '/usr/local/bin/claude', passed: true })
+  })
+
   it('FR-TRAIN-8: the judge marks are stored and do not count until the judge is trusted', async () => {
     const judge = { tone: 1, voice: 1, procedure_ok: false, notes: 'шаблонно' }
     const { summary, fake } = await exam(

@@ -7,7 +7,7 @@ import { newEventId } from '@sara/shared'
 import { count } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { chatMessage, event, examRun, mindIndex, mindProposal } from '../../src/db/schema'
-import { assertNotCi, main, parseArgs, UsageError } from '../../src/exam/cli'
+import { assertNotCi, fakeClaudeEnv, main, parseArgs, UsageError } from '../../src/exam/cli'
 import { folderMindVersion } from '../../src/exam/mindState'
 import { appendEvent } from '../../src/journal/journal'
 import { createSecretStore } from '../../src/secrets/store'
@@ -60,6 +60,30 @@ describe('the exam command line', { timeout: 90_000 }, () => {
     expect(() => assertNotCi({})).not.toThrow()
     expect(() => assertNotCi({ CI: 'false' })).not.toThrow()
     expect(() => assertNotCi({ CI: '' })).not.toThrow()
+  })
+
+  it('FR-TRAIN-8: the answers of the fake Claude CLI are forwarded to it only outside production', () => {
+    const env = { FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT: '{}', PATH: '/bin', HOME: '/h' }
+    expect(fakeClaudeEnv(env)).toEqual({ FAKE_CLAUDE_MODE: 'ok', FAKE_CLAUDE_OUTPUT: '{}' })
+    expect(fakeClaudeEnv({ ...env, NODE_ENV: 'production' })).toEqual({})
+  })
+
+  it('FR-TRAIN-8: --help tells the exit codes and that P3 orders only the calls of the exam itself', async () => {
+    const lines: string[] = []
+    // Help needs no database and no token, and CI may read it.
+    const code = await main(
+      ['--help'],
+      { CI: 'true' },
+      { out: (l) => lines.push(l), err: (l) => lines.push(l) },
+    )
+    expect(code).toBe(0)
+    const text = lines.join('\n')
+    for (const word of ['--only', '--compare', '--judge', 'build', 'SARA_EXAM_DIRS'])
+      expect(text).toContain(word)
+    expect(text).toMatch(/код выхода 3/i)
+    expect(text).toMatch(/P3/)
+    expect(text).toMatch(/ночью/)
+    expect(parseArgs(['-h']).command).toBe('help')
   })
 
   it('FR-TRAIN-8: the command run as the server runs it exits at once in CI, before it opens a database', async () => {

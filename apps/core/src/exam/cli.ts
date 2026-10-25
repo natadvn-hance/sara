@@ -20,7 +20,7 @@ const ROOT = resolve(import.meta.dirname, '../../../..')
 export class UsageError extends Error {}
 
 export type Args = {
-  command: 'run' | 'build'
+  command: 'run' | 'build' | 'help'
   only: string[]
   compare: boolean
   judge: boolean
@@ -37,6 +37,7 @@ export function parseArgs(argv: string[]): Args {
     judgeCounts: false,
     limit: 30,
   }
+  if (argv.includes('--help') || argv.includes('-h')) return { ...args, command: 'help' }
   const rest = [...argv]
   if (rest[0] === 'build') {
     args.command = 'build'
@@ -95,13 +96,35 @@ function lineOf(r: ScenarioResult): string[] {
   ]
 }
 
-/** The answers the fake Claude CLI is told to give (tests and the check under node): only its own variables. */
-const fakeClaudeEnv = (env: NodeJS.ProcessEnv): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(env).filter(
-      (e): e is [string, string] => e[0].startsWith('FAKE_CLAUDE_') && e[1] !== undefined,
-    ),
-  )
+/**
+ * The answers the fake Claude CLI is told to give (tests and the check under node): only its own variables, and never
+ * in production, where no fake is run and nothing of the environment should reach the child.
+ */
+export const fakeClaudeEnv = (env: NodeJS.ProcessEnv): Record<string, string> =>
+  env.NODE_ENV === 'production'
+    ? {}
+    : Object.fromEntries(
+        Object.entries(env).filter(
+          (e): e is [string, string] => e[0].startsWith('FAKE_CLAUDE_') && e[1] !== undefined,
+        ),
+      )
+
+export const HELP = [
+  'pnpm exam [--only <номер>] [--compare] [--judge] [--judge-counts]',
+  '  Прогоняет сценарии экзамена через движок хода (без отправки) и сохраняет прогон в core.exam_run.',
+  '  --only <номер>  только эти сценарии (можно несколько раз или через запятую); такой прогон считается отдельным набором',
+  '  --compare       сторож выкладки: сравнивает с последним прошедшим прогоном того же набора (или по неизменившимся сценариям)',
+  '  --judge         позвать судью: его оценки показываются, но итог не меняют',
+  '  --judge-counts  оценки судьи считаются (только после сверки с оценками Бориса на золотом наборе); отдельный набор',
+  'pnpm exam:build [--limit N]',
+  '  Предлагает сценарии из истории чатов строками core.mind_proposal (вид scenario).',
+  'Коды выхода: 0 прошёл или сторож не включён; 1 сторож не пропускает (S1, сценарий без ответа модели, сценарий хуже, чем в прошлом',
+  'прошедшем прогоне, разум менялся во время прогона); 2 не запустился (CI, ошибка в аргументах, набор не читается, индекс разума',
+  'не совпадает с папкой); 3 сравнивать не с чем. Код выхода 3 лечится так: сначала прогони выложенную версию без --compare.',
+  'SARA_EXAM_DIRS (папки через двоеточие) заменяет папки сценариев для проверки на малом наборе; с --compare не годится.',
+  'Очередь P3 упорядочивает только вызовы внутри процесса экзамена: боевые ходы идут в процессе ядра и её не видят,',
+  'а подписка у них общая. Поэтому запускай экзамен ночью.',
+]
 
 /**
  * Where the scenarios are: the handmade ones in the repository and the ones from history in the mind folder.
@@ -179,7 +202,7 @@ async function execute(args: Args, env: NodeJS.ProcessEnv, io: Io): Promise<numb
     const mindVersion = await mind.version()
     io.out(`Экзамен, разум ${mindVersion}.`)
     const summary = await runExam(
-      { db, gateway, mind, rolesDir: config.rolesDir },
+      { db, gateway, mind, rolesDir: config.rolesDir, claudeBin: config.claudeBin },
       {
         dirs: examDirs(env, config.mindDir),
         only: args.only,
@@ -207,6 +230,11 @@ export async function main(
   io: Io = { out: console.log, err: console.error },
 ): Promise<number> {
   try {
+    // The help is read anywhere, CI included: it runs nothing.
+    if (argv.includes('--help') || argv.includes('-h')) {
+      for (const line of HELP) io.out(line)
+      return 0
+    }
     assertNotCi(env)
     const args = parseArgs(argv)
     if (args.compare && env.SARA_EXAM_DIRS)
