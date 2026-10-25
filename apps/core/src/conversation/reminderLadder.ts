@@ -83,13 +83,22 @@ export function nextReminder(i: {
 }
 
 /**
- * The ready text of old Sara (followUpTemplates.js, 06.10.2026): it goes when the model gives no text for 3 hours
- * past the time, because a reminder must go out for sure. Gender-neutral on purpose, the account is Hance.
+ * The ready text of old Sara (followUpTemplates.js, 06.10.2026): it goes when the model gives no text that passes the
+ * checks, because a reminder must go out for sure. Gender-neutral on purpose, the account is Hance. Variant 1 is the
+ * other wording for the second time, so a client never reads the same ready text twice in a row.
  */
-export function reminderFallback(clientName: string | null, tone: ReminderTone): string {
+export function reminderFallback(
+  clientName: string | null,
+  tone: ReminderTone,
+  variant: 0 | 1 = 0,
+): string {
   const first = (clientName ?? '').trim().split(/\s+/)[0]
   const greeting = first ? `${first}, здравствуйте.` : 'Здравствуйте.'
-  return tone === 'friendly'
-    ? `${greeting} Если вопрос ещё открыт, пишите в любой момент: помогу разобраться, с чего начать. Хорошего дня!`
-    : `${greeting} Если задача ещё актуальна, давайте обсудим детали: подскажу, с чего начать. Удобно созвониться на 15 минут?`
+  if (tone === 'friendly')
+    return variant === 0
+      ? `${greeting} Если вопрос ещё открыт, пишите в любой момент: помогу разобраться, с чего начать. Хорошего дня!`
+      : `${greeting} Не буду отвлекать: если вопрос снова станет актуальным, просто напишите, я на связи. Хорошего дня!`
+  return variant === 0
+    ? `${greeting} Если задача ещё актуальна, давайте обсудим детали: подскажу, с чего начать. Удобно созвониться на 15 минут?`
+    : `${greeting} Пишу ещё раз про ваш заказ. Если он в силе, давайте обсудим, с чего начать: удобно здесь, в переписке, или лучше созвониться?`
 }

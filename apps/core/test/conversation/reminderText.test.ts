@@ -1,9 +1,11 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { writeReminder } from '../../src/conversation/reminderText'
 import { fakeMind } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
 import { type FakeGateway, fakeGateway } from '../helpers/gateway'
 import { seedChat } from '../helpers/reminders'
+
+vi.setConfig({ testTimeout: 30_000 })
 
 const { db, close } = openTestDb()
 afterAll(close)

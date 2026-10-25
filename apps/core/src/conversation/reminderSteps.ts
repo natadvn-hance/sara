@@ -1,5 +1,5 @@
 import { type ChatMessage, formatCallback, newEventId, normalizeText } from '@sara/shared'
-import { and, eq, gte, like, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, like, ne, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
@@ -357,7 +357,7 @@ export async function writeStep(
   p: Planned,
   read: boolean,
   limitMs: number,
-): Promise<{ text: string | null }> {
+): Promise<{ text: string | null; modelFailed: boolean }> {
   try {
     const w = await writeReminder(
       { db: d.db, gateway: d.gateway, mind: d.mind, profi: d.profi },
@@ -386,14 +386,20 @@ export async function writeStep(
         checks: { issues: w.issues, attempts: w.attempts, failure: w.failure, fallback: false },
       })
       .where(eq(convTurn.id, rowId))
-    return { text: w.text }
+    // A model that gave no answer is asked again later; one whose text failed the checks twice is not, the ready
+    // text goes at once (the same model, asked again and again, would only spend the subscription).
+    return { text: w.text, modelFailed: w.text === null && w.failure !== null }
   } catch (e) {
     console.error('reminder: the text was not written', e instanceof Error ? e.message : e)
-    return { text: null }
+    return { text: null, modelFailed: true }
   }
 }
 
-/** No text from the model in time: the ready text of old Sara goes (it was approved by Boris long ago). */
+/**
+ * No text from the model that passes the checks: the ready text of old Sara goes (Boris approved it long ago). Of its
+ * two wordings the one our side has not sent to this client yet is taken, so the second reminder never repeats the
+ * first word for word; when both were sent, the one that is not the last message of ours.
+ */
 export async function fallbackStep(
   d: RemindDeps,
   rowId: string,
@@ -402,7 +408,33 @@ export async function fallbackStep(
 ): Promise<{ text: string }> {
   const conv = await getConversation(d.db, conversationId)
   const names = conv ? await clientNames(d.db, conv) : []
-  const text = reminderFallback(names[0] ?? null, p.tone)
+  const variants = ([0, 1] as const).map((v) => reminderFallback(names[0] ?? null, p.tone, v))
+  const used = conv ? await ladderTexts(d.db, conv.id) : new Set<string>()
+  if (conv) {
+    const ours = await d.db
+      .select({ text: chatMessage.text })
+      .from(chatMessage)
+      .where(and(eq(chatMessage.conversationId, conv.id), eq(chatMessage.side, 'specialist')))
+    for (const m of ours) used.add(normalizeText(m.text))
+  }
+  const [last] = conv
+    ? await d.db
+        .select({ text: convTurn.text })
+        .from(convTurn)
+        .where(
+          and(
+            eq(convTurn.conversationId, conv.id),
+            eq(convTurn.kind, 'reminder'),
+            eq(convTurn.outcome, 'sent'),
+          ),
+        )
+        .orderBy(desc(convTurn.createdAt))
+        .limit(1)
+    : []
+  const text =
+    variants.find((v) => !used.has(normalizeText(v))) ??
+    variants.find((v) => normalizeText(v) !== normalizeText(last?.text ?? '')) ??
+    (variants[0] as string)
   await d.db
     .update(convTurn)
     .set({

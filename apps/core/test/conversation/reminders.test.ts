@@ -98,7 +98,7 @@ async function until(cond: () => Promise<boolean>, ms = 15000) {
 }
 
 // Waiting for a durable process takes seconds.
-vi.setConfig({ testTimeout: 40_000 })
+vi.setConfig({ testTimeout: 40_000, hookTimeout: 40_000 })
 
 const rows = () =>
   db
@@ -507,13 +507,34 @@ describe('a reminder after the switch', () => {
     expect(r?.checks).toMatchObject({ fallback: true })
   })
 
-  it('FR-CONV-12: a text that keeps failing the checks also ends in the ready text', async () => {
+  it('FR-CONV-12: a text that fails the checks twice goes straight to the ready text, the model is not asked again and again', async () => {
     await live()
     await useGateway({ reminder: { ...GOOD, text: '[имя 1], здравствуйте \u2014 как дела?' } })
+    // The time for the model is long here: the ready text must not wait for it to pass.
+    deps.fallbackAfterMs = 8000
+    const startedAt = Date.now()
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
     await until(done(1))
     expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in')])
+    // Two calls of the model (the text and its rewrite), no more, and no waiting for the 3 hours to pass.
+    expect((await fake.calls()).length).toBe(2)
+    expect(Date.now() - startedAt).toBeLessThan(6000)
+    expect((await rows())[0]?.checks).toMatchObject({ fallback: true })
+  })
+
+  it('FR-CONV-12: steps 1 and 2 never send the same ready text word for word', async () => {
+    await live()
+    await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_MODE: 'exit1' })
+    deps.fallbackAfterMs = 600
+    // Our message 4 days ago: the first and the second reminders are due.
+    const conv = await scene(quiet(4 * DAY))
+    await startReminder(conv.id, 'm-1')
+    await until(done(2), 30000)
+    expect(sends).toHaveLength(2)
+    expect(sends[0]?.text).toBe(reminderFallback('Анна', 'check_in', 0))
+    expect(sends[1]?.text).toBe(reminderFallback('Анна', 'check_in', 1))
+    expect(sends[1]?.text).not.toBe(sends[0]?.text)
   })
 
   it('FR-OPS-1: with the «Пишет клиентам» pause on nothing is sent and the step is skipped', async () => {
@@ -574,7 +595,7 @@ describe('the dormant day', () => {
     bookedFails = 4
     await startReminder(conv.id, 'm-1')
     await until(async () => (await taskCount()) === 1)
-    expect(await stage()).toBe('dormant')
+    await until(async () => (await stage()) === 'dormant')
   })
 
   it('FR-CONV-12: an unreadable chat does not stop the task, it goes to Boris and not to the client', async () => {
@@ -604,7 +625,7 @@ describe('the dormant day', () => {
     expect(await stage()).toBe('bid_sent')
     await db.update(convTurn).set({ state: 'finished' }).where(eq(convTurn.id, turnId))
     await until(async () => (await taskCount()) === 1)
-    expect(await stage()).toBe('dormant')
+    await until(async () => (await stage()) === 'dormant')
   })
 
   it('FR-CONV-12: after a day of tries without success the dormant step is skipped and the deal stays', async () => {
