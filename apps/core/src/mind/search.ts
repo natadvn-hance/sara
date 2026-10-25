@@ -1,12 +1,12 @@
 import type { ConvStage, MindType, Tone, Topic } from '@sara/shared'
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import type { MindHit, MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { mindIndex } from '../db/schema'
 import { markdownSections } from './loader'
 
 /** A long order text gives at most this many words to the query, the last ones. */
-const MAX_WORDS = 64
+const MAX_WORDS = 32
 
 const COLUMNS = {
   id: mindIndex.recordId,
@@ -53,6 +53,53 @@ function queryWords(text: string): string[] {
   return [...new Set(words)].slice(-MAX_WORDS)
 }
 
+type RankedQuery = {
+  words: string[]
+  scope: string
+  types: MindType[]
+  field?: 'body' | 'example_client'
+  limit: number
+}
+
+/**
+ * The best hits for the words, highest rank first. The query is built once in a materialized CTE and the rank once in
+ * the select list, so a long query costs one pass over the matching rows, not one per use of the expression.
+ */
+async function ranked(db: Db, q: RankedQuery): Promise<MindHit[]> {
+  if (q.words.length === 0 || q.limit <= 0) return []
+  const query = sql.join(
+    q.words.map((w) => sql`plainto_tsquery('russian', ${w})`),
+    sql` || `,
+  )
+  // The example text has no stored vector: it is made once per row in a lateral step, not once per use.
+  const example = q.field === 'example_client'
+  const vector = example ? sql`l.v` : sql`${mindIndex.tsv}`
+  const source = example
+    ? sql`${mindIndex} cross join q cross join lateral (select to_tsvector('russian', coalesce(${mindIndex.exampleClient}, '')) as v offset 0) l`
+    : sql`${mindIndex} cross join q`
+  const types =
+    q.types.length > 0
+      ? sql`${mindIndex.type} in (${sql.join(
+          q.types.map((t) => sql`${t}`),
+          sql`, `,
+        )})`
+      : sql`true`
+  const rows = await db.execute<Row & { rank: number }>(sql`
+    with q as materialized (select ${query} as query)
+    select ${mindIndex.recordId} as id, ${mindIndex.type} as type, ${mindIndex.scope} as scope,
+      ${mindIndex.title} as title, ${mindIndex.body} as body, ${mindIndex.topic} as topic,
+      ${mindIndex.tones} as tones, ${mindIndex.stages} as stages,
+      ${mindIndex.exampleClient} as "exampleClient", ${mindIndex.exampleBoris} as "exampleBoris",
+      ts_rank_cd(${vector}, q.query) as rank
+    from ${source}
+    where (${mindIndex.scope} = 'shared' or ${mindIndex.scope} = ${q.scope})
+      and ${types}
+      and ${vector} @@ q.query
+    order by rank desc, ${mindIndex.recordId}
+    limit ${q.limit}`)
+  return rows.rows.map((r) => toHit(r, Number(r.rank)))
+}
+
 const unquote = (s: string) => s.replace(/^[«"“](.*)[»"”]$/, '$1').trim()
 
 /**
@@ -68,30 +115,13 @@ export function createMindSearch(db: Db): MindSearch {
     },
 
     async search(q) {
-      const words = queryWords(q.text)
-      if (words.length === 0 || q.limit <= 0) return []
-      const query = sql.join(
-        words.map((w) => sql`plainto_tsquery('russian', ${w})`),
-        sql` || `,
-      )
-      const vector =
-        q.field === 'example_client'
-          ? sql`to_tsvector('russian', coalesce(${mindIndex.exampleClient}, ''))`
-          : sql`${mindIndex.tsv}`
-      const rank = sql<number>`ts_rank_cd(${vector}, ${query})`
-      const rows = await db
-        .select({ ...COLUMNS, rank })
-        .from(mindIndex)
-        .where(
-          and(
-            inScope(q.scope),
-            q.types.length > 0 ? inArray(mindIndex.type, q.types) : undefined,
-            sql`${vector} @@ (${query})`,
-          ),
-        )
-        .orderBy(desc(rank), mindIndex.recordId)
-        .limit(q.limit)
-      return rows.map((r) => toHit(r, Number(r.rank)))
+      return ranked(db, {
+        words: queryWords(q.text),
+        scope: q.scope,
+        types: q.types,
+        field: q.field,
+        limit: q.limit,
+      })
     },
 
     async byIds(ids) {

@@ -129,6 +129,86 @@ describe('mind search', () => {
     expect(worst).toBeLessThan(300)
   })
 
+  it('FR-MIND-2: the worst case, a 64-word query and an example search over 1000 examples, is under 300 ms', async () => {
+    // 160 distinct words; every example takes 40 of them for the body and 25 for the client text, so a query of
+    // 32 words matches nearly all 1000 records and every one of them must be ranked.
+    const stems = ['сайт', 'лендинг', 'реклама', 'цена', 'сроки', 'дизайн', 'магазин', 'клиника']
+    const stems2 = ['договор', 'созвон', 'кейсы', 'бюджет', 'город', 'отзывы', 'логотип', 'текст']
+    const vocab = [...stems, ...stems2].flatMap((w) =>
+      Array.from({ length: 10 }, (_, n) => `${w}${n}`),
+    )
+    let seed = 7
+    const pick = (n: number) =>
+      Array.from({ length: n }, () => {
+        seed = (seed * 48271) % 2147483647
+        return vocab[seed % vocab.length]
+      }).join(' ')
+    const rows = Array.from({ length: 1000 }, (_, i) => {
+      const title = `Образец ${i}`
+      const body = `${pick(40)}.`
+      return {
+        recordId: `e-gen-${i}`,
+        path: `mind/shared/speech/examples/e-gen-${i}.md`,
+        type: 'example',
+        scope: i % 2 === 0 ? 'shared' : DIR,
+        title,
+        body,
+        exampleClient: `${pick(25)}?`,
+        exampleBoris: 'Давайте созвонимся.',
+        version: 1,
+        mindVersion: 'gen',
+        tsv: sql`setweight(to_tsvector('russian', ${title}), 'A') || setweight(to_tsvector('russian', ${body}), 'B')`,
+      }
+    })
+    await db.insert(mindIndex).values(rows)
+    const filler = Array.from({ length: 32 }, (_, i) => `заказ${i}`)
+    const long = [...filler, ...vocab.slice(0, 32)].join(' ')
+    expect(long.split(' ')).toHaveLength(64)
+    const queries = [
+      { text: long },
+      { text: long, field: 'example_client' as const },
+      { text: vocab.slice(40, 72).join(' '), field: 'example_client' as const },
+      {
+        text: 'Сколько стоит лендинг3 для клиники7 и когда созвон',
+        field: 'example_client' as const,
+      },
+    ]
+    let worst = 0
+    for (let round = 0; round < 3; round++) {
+      for (const q of queries) {
+        const t0 = performance.now()
+        const hits = await mind.search({ ...q, scope: DIR, types: ['example'], limit: 5 })
+        worst = Math.max(worst, performance.now() - t0)
+        expect(hits.length).toBeGreaterThan(0)
+      }
+    }
+    expect(worst).toBeLessThan(300)
+  }, 30_000)
+
+  it('FR-MIND-2: a long text gives the query only its last 32 words', async () => {
+    const root = await tempMind()
+    await putRecord(
+      root,
+      'mind/shared/knowledge/k-early.md',
+      { id: 'k-early', type: 'knowledge' },
+      'Про бассейн.',
+    )
+    await putRecord(
+      root,
+      'mind/shared/knowledge/k-late.md',
+      { id: 'k-late', type: 'knowledge' },
+      'Про веранду.',
+    )
+    await ensureMindIndex(db, root)
+    const filler = (n: number) => Array.from({ length: n }, (_, i) => `заказ${i}`)
+    const find = async (text: string) =>
+      (await mind.search({ text, scope: DIR, types: ['knowledge'], limit: 5 })).map((h) => h.id)
+    const at32 = ['бассейн', ...filler(30), 'веранда']
+    expect(at32).toHaveLength(32)
+    expect(await find(at32.join(' '))).toEqual(['k-early', 'k-late'])
+    expect(await find(['бассейн', ...filler(31), 'веранда'].join(' '))).toEqual(['k-late'])
+  })
+
   it('FR-MIND-3: a proposal and an outdated record are not found', async () => {
     const root = await tempMind()
     const body = 'Гарантия на сайт один год.'
