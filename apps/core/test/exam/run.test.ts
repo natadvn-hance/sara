@@ -58,6 +58,7 @@ async function exam(
     only?: string[]
     judge?: boolean
     judgeCounts?: boolean
+    guard?: boolean
     dirs?: string[]
     mind?: ReturnType<typeof fakeMind>
   },
@@ -70,9 +71,24 @@ async function exam(
       only: o.only,
       judge: o.judge ?? false,
       judgeCounts: o.judgeCounts,
+      guard: o.guard,
     },
   )
   return { summary, fake }
+}
+
+/** A folder with some of the handmade scenarios; `edit` changes one of them (a title, an expectation). */
+async function scenarioDir(
+  ids: string[],
+  edit: Record<string, (s: Record<string, unknown>) => void> = {},
+): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'exam-set-'))
+  for (const id of ids) {
+    const s = JSON.parse(await readFile(join(HANDMADE, `${id}.json`), 'utf8'))
+    edit[id]?.(s)
+    await writeFile(join(dir, `${id}.json`), JSON.stringify(s))
+  }
+  return dir
 }
 
 describe('runExam', { timeout: 30_000 }, () => {
@@ -216,7 +232,7 @@ describe('runExam', { timeout: 30_000 }, () => {
     const versions: Record<string, number> = {}
     for (const role of ['interlocutor', 'checker', 'examiner'] as const)
       versions[role] = (await loadRole(fake.rolesDir, role)).meta.version
-    expect(run?.rolesVersion).toEqual(versions)
+    expect(run?.rolesVersion).toMatchObject(versions)
     expect(Object.values(versions).every((v) => v >= 1)).toBe(true)
   })
 
@@ -395,6 +411,125 @@ describe('runExam', { timeout: 30_000 }, () => {
       /x-no-such/,
     )
     expect((await db.select({ n: count() }).from(examRun))[0]?.n).toBe(0)
+  })
+})
+
+describe('the baseline of the guard', { timeout: 60_000 }, () => {
+  const ONE = ['x-t-01-price-first', 'x-t-04-thanks-wait']
+  const THREE = ['x-t-01-price-first', 'x-t-03-how-start', 'x-t-04-thanks-wait']
+  /** The answers for THREE in the order of their ids: x-t-01, x-t-03, x-t-04. */
+  const GOOD = { interlocutor: { $sequence: [CALL_BORIS, REPLY, NONE] }, checker: CLEAN }
+
+  it('FR-TRAIN-8: a guard run with no run that passed has no baseline, does not pass and is no baseline itself', async () => {
+    const dirs = [await scenarioDir(ONE)]
+    const seq = { interlocutor: { $sequence: [CALL_BORIS, NONE] } }
+    const first = await exam(seq, { dirs, guard: true })
+    expect(first.summary).toMatchObject({ baseline: null, passed: false, s1: 0, comparedTo: null })
+    // The run that was never compared with anything does not become the baseline of the next one.
+    const second = await exam(seq, { dirs, guard: true })
+    expect(second.summary).toMatchObject({ baseline: null, passed: false })
+    // The deployed version, run without the guard, passes and is the first baseline.
+    const record = await exam(seq, { dirs })
+    expect(record.summary).toMatchObject({ baseline: null, passed: true })
+    const guarded = await exam(seq, { dirs, guard: true })
+    expect(guarded.summary).toMatchObject({
+      baseline: 'same',
+      passed: true,
+      comparedTo: record.summary.runId,
+    })
+  })
+
+  it('FR-TRAIN-8: a changed set is compared scenario by scenario on what it shares with the last run that passed', async () => {
+    const base = await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, NONE] } },
+      { dirs: [await scenarioDir(ONE)] },
+    )
+    expect(base.summary.passed).toBe(true)
+    // A new scenario joined the set: the set is another one, the two scenarios of before are still compared.
+    const grown = await exam(GOOD, { dirs: [await scenarioDir(THREE)], guard: true })
+    expect(grown.summary).toMatchObject({ baseline: 'overlap', passed: true, overlap: 2 })
+    expect(grown.summary.comparedTo).toBe(base.summary.runId)
+    expect(grown.summary.setHash).not.toBe(base.summary.setHash)
+    // The grown set passed, so it is the baseline now, and the same set is compared as itself.
+    const again = await exam(GOOD, { dirs: [await scenarioDir(THREE)], guard: true })
+    expect(again.summary).toMatchObject({ baseline: 'same', passed: true })
+    expect(again.summary.comparedTo).toBe(grown.summary.runId)
+  })
+
+  it('FR-TRAIN-8: a scenario that got worse fails the run even when the others made up for it', async () => {
+    await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, NONE] } },
+      { dirs: [await scenarioDir(ONE)] },
+    )
+    // x-t-04 now calls Boris where nothing was needed (S2); the new scenario x-t-03 is as good as can be.
+    const worse = await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, REPLY, CALL_BORIS] }, checker: CLEAN },
+      { dirs: [await scenarioDir(THREE)], guard: true },
+    )
+    expect(worse.summary).toMatchObject({ baseline: 'overlap', passed: false, s1: 0 })
+    expect(worse.summary.worse).toEqual(['x-t-04-thanks-wait'])
+  })
+
+  it('FR-TRAIN-8: a scenario that was edited is not compared with its old self', async () => {
+    await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, NONE] } },
+      { dirs: [await scenarioDir(ONE)] },
+    )
+    // x-t-04 is edited and now gets a wrong move; it is a new scenario, so only x-t-01 is compared.
+    const dirs = [
+      await scenarioDir(ONE, {
+        'x-t-04-thanks-wait': (s) => {
+          s.title = 'Клиент благодарит и ждёт, другая редакция'
+        },
+      }),
+    ]
+    const edited = await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, CALL_BORIS] } },
+      { dirs, guard: true },
+    )
+    expect(edited.summary).toMatchObject({ baseline: 'overlap', overlap: 1, passed: true })
+    expect(edited.summary.worse).toEqual([])
+    // With every scenario edited there is nothing to compare with, and a guard run has no baseline.
+    const all = await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, NONE] } },
+      {
+        dirs: [
+          await scenarioDir(ONE, {
+            'x-t-01-price-first': (s) => {
+              s.title = 'Другое'
+            },
+            'x-t-04-thanks-wait': (s) => {
+              s.title = 'Другое'
+            },
+          }),
+        ],
+        guard: true,
+      },
+    )
+    expect(all.summary).toMatchObject({ baseline: null, passed: false })
+  })
+
+  it('FR-TRAIN-8: a part of the set never stands as the baseline of a whole one', async () => {
+    await exam(
+      { interlocutor: CALL_BORIS },
+      { only: ['x-t-01-price-first'], dirs: [await scenarioDir(ONE)] },
+    )
+    const whole = await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, NONE] } },
+      { dirs: [await scenarioDir(ONE)], guard: true },
+    )
+    expect(whole.summary).toMatchObject({ baseline: null, passed: false })
+  })
+
+  it('FR-TRAIN-8: a judge that counts is compared only with a judge that counts', async () => {
+    const judge = { tone: 5, voice: 5, procedure_ok: true, notes: 'хорошо' }
+    const dirs = [await scenarioDir(['x-t-01-price-first'])]
+    await exam({ interlocutor: CALL_BORIS }, { dirs })
+    const counting = await exam(
+      { interlocutor: CALL_BORIS, examiner: judge },
+      { dirs, judge: true, judgeCounts: true, guard: true },
+    )
+    expect(counting.summary).toMatchObject({ baseline: null, passed: false })
   })
 })
 

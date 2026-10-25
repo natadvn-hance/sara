@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { ExamScenario } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
-import { dossierFromScenario, examNames, loadScenarios } from '../../src/exam/scenarios'
+import {
+  dossierFromScenario,
+  examNames,
+  loadScenarios,
+  scenarioHash,
+} from '../../src/exam/scenarios'
 import { redact } from '../../src/gateway/redact'
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
@@ -209,6 +214,15 @@ describe('loadScenarios', () => {
     })
     expect((await loadScenarios([changed])).setHash).not.toBe(ab.setHash)
     expect((await loadScenarios([one])).setHash).not.toBe(ab.setHash)
+  })
+
+  it('FR-TRAIN-8: a scenario has a hash of its own that follows its content', () => {
+    const a = ExamScenario.parse(scenarioOf('x-a'))
+    expect(scenarioHash(a)).toMatch(/^[0-9a-f]{12}$/)
+    expect(scenarioHash(ExamScenario.parse(scenarioOf('x-a')))).toBe(scenarioHash(a))
+    expect(scenarioHash(ExamScenario.parse(scenarioOf('x-a', { title: 'Другое' })))).not.toBe(
+      scenarioHash(a),
+    )
   })
 
   it('FR-TRAIN-8: a scenario folder can be nested under a missing parent without failing', async () => {

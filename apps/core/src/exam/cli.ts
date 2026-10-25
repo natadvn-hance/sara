@@ -12,7 +12,7 @@ import { ensureMindIndex } from '../mind/indexer'
 import { createMindSearch } from '../mind/search'
 import { createSecretStore } from '../secrets/store'
 import { buildScenarios } from './build'
-import { ExamSetupError, runExam, type ScenarioResult } from './run'
+import { ExamSetupError, type ExamSummary, runExam, type ScenarioResult } from './run'
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
 
@@ -112,6 +112,39 @@ function examDirs(env: NodeJS.ProcessEnv, mindDir: string): string[] {
   return [join(ROOT, 'tests/exam/scenarios'), join(mindDir, 'exam/scenarios')]
 }
 
+export const NO_BASELINE =
+  'Прошлого прошедшего прогона на этом наборе нет: сначала прогони выложенную версию (pnpm exam без --compare, на выложенном коде).'
+
+/** Says how the run went and returns the exit code: 0, 1 (the guard did not pass), 3 (the guard has nothing to compare with). */
+export function verdict(args: Args, summary: ExamSummary, io: Io): number {
+  io.out(
+    `Прогон ${summary.runId}: набор ${summary.setHash}, сценариев ${summary.scenarios}, итог ${num(summary.score)}, S1 ${summary.s1}, S2 ${summary.s2}, S3 ${summary.s3}.`,
+  )
+  if (summary.baseline === 'same')
+    io.out(
+      `Сравнение с последним прошедшим прогоном того же набора (${summary.comparedTo}): ${num(summary.previousScore ?? 0)}.`,
+    )
+  else if (summary.baseline === 'overlap')
+    io.out(
+      `Набор изменился. Сравнение с последним прошедшим прогоном (${summary.comparedTo}) по сценариям, которые не менялись: ${summary.overlap}.`,
+    )
+  else io.out('Прошедшего прогона для сравнения нет.')
+  if (summary.unanswered > 0)
+    io.out(
+      `Модель не ответила в сценариях: ${summary.unanswered} (Собеседник, Проверяющий или судья, который считается). Проверь связь с Claude (pnpm probe:claude): такой прогон не показывает, как Сара отвечает.`,
+    )
+  if (summary.worse.length > 0)
+    io.out(`Хуже, чем в прошлом прошедшем прогоне, стали сценарии: ${summary.worse.join(', ')}.`)
+  if (summary.passed) io.out('Прошёл: S1 нет, ни один сценарий не стал хуже.')
+  else if (summary.unanswered > 0) io.out('Не прошёл: часть сценариев осталась без ответа.')
+  else if (summary.s1 > 0) io.out(`Не прошёл: есть S1 (${summary.s1}).`)
+  else if (summary.worse.length > 0) io.out('Не прошёл: итог хуже прошлого прошедшего прогона.')
+  else if (args.compare && summary.baseline === null) io.out(NO_BASELINE)
+  else io.out('Не прошёл: итог хуже прошлого прогона.')
+  if (!args.compare || summary.passed) return 0
+  return summary.baseline === null && summary.s1 === 0 && summary.unanswered === 0 ? 3 : 1
+}
+
 async function execute(args: Args, env: NodeJS.ProcessEnv, io: Io): Promise<number> {
   const config = loadConfig(env)
   const { db, close } = createDb(config.databaseUrl)
@@ -145,6 +178,7 @@ async function execute(args: Args, env: NodeJS.ProcessEnv, io: Io): Promise<numb
         only: args.only,
         judge: args.judge,
         judgeCounts: args.judgeCounts,
+        guard: args.compare,
         concurrency: 2,
         scope: config.accounts[0]?.id ?? 'shared',
         onResult: (r) => {
@@ -152,30 +186,14 @@ async function execute(args: Args, env: NodeJS.ProcessEnv, io: Io): Promise<numb
         },
       },
     )
-    io.out(
-      `Прогон ${summary.runId}: итог ${num(summary.score)}, S1 ${summary.s1}, S2 ${summary.s2}, S3 ${summary.s3}, сценариев ${summary.scenarios}.`,
-    )
-    io.out(
-      summary.previousScore === null
-        ? 'Прошлого прогона того же набора нет.'
-        : `Прошлый прогон того же набора: ${num(summary.previousScore)}.`,
-    )
-    if (summary.unanswered > 0)
-      io.out(
-        `Собеседник не ответил в сценариях: ${summary.unanswered}. Проверь связь с Claude (pnpm probe:claude): такой прогон не показывает, как Сара отвечает.`,
-      )
-    if (summary.passed) io.out('Прошёл: S1 нет, итог не хуже прошлого.')
-    else if (summary.unanswered > 0) io.out('Не прошёл: часть сценариев осталась без ответа.')
-    else if (summary.s1 > 0) io.out(`Не прошёл: есть S1 (${summary.s1}).`)
-    else io.out('Не прошёл: итог хуже прошлого прогона.')
-    return args.compare && !summary.passed ? 1 : 0
+    return verdict(args, summary, io)
   } finally {
     gateway.stop()
     await close()
   }
 }
 
-/** The command; returns the exit code: 0, 1 (the guard did not pass), 2 (the command cannot run as asked). */
+/** The command; returns the exit code: 0, 1 (the guard did not pass), 2 (cannot run as asked), 3 (no baseline). */
 export async function main(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
@@ -183,7 +201,12 @@ export async function main(
 ): Promise<number> {
   try {
     assertNotCi(env)
-    return await execute(parseArgs(argv), env, io)
+    const args = parseArgs(argv)
+    if (args.compare && env.SARA_EXAM_DIRS)
+      throw new UsageError(
+        'Сторож выкладки читает набор целиком: --compare нельзя вместе с SARA_EXAM_DIRS.',
+      )
+    return await execute(args, env, io)
   } catch (e) {
     if (e instanceof UsageError || e instanceof ExamSetupError) {
       io.err(e.message)

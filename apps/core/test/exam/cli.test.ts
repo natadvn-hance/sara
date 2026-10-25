@@ -18,7 +18,7 @@ const { db, close } = openTestDb()
 afterAll(close)
 beforeEach(() => resetDb(db))
 
-describe('the exam command line', { timeout: 30_000 }, () => {
+describe('the exam command line', { timeout: 90_000 }, () => {
   it('FR-TRAIN-8: the flags are --only, --compare, --judge and --judge-counts, and build takes --limit', () => {
     expect(parseArgs([])).toEqual({
       command: 'run',
@@ -87,17 +87,23 @@ describe('the exam command line', { timeout: 30_000 }, () => {
     })
     const NONE = interlocutorAnswer({ move: 'none', topic: 'smalltalk', text: null, fact_ids: [] })
 
-    async function envWith(answer: unknown): Promise<NodeJS.ProcessEnv> {
+    /**
+     * The environment of a run against the fake CLI. `small` runs one scenario instead of the whole set (the
+     * folders of the set cannot be changed in a guard run, see below).
+     */
+    async function envWith(
+      answer: unknown,
+      o: { small?: boolean } = {},
+    ): Promise<NodeJS.ProcessEnv> {
       const dir = await mkdtemp(join(tmpdir(), 'exam-cli-'))
       await createSecretStore(join(dir, 'data')).set('claude_oauth_token', 'tok')
-      // A set of one scenario, so that the whole set can be run and compared.
       await mkdir(join(dir, 'scenarios'))
       await copyFile(
         join(ROOT, 'tests/exam/scenarios/x-t-01-price-first.json'),
         join(dir, 'scenarios/x-t-01-price-first.json'),
       )
       return {
-        SARA_EXAM_DIRS: join(dir, 'scenarios'),
+        ...(o.small ? { SARA_EXAM_DIRS: join(dir, 'scenarios') } : {}),
         DATABASE_URL: testDatabaseUrl(),
         SARA_DATA_DIR: join(dir, 'data'),
         SARA_MIND_DIR: join(dir, 'mind'),
@@ -111,9 +117,9 @@ describe('the exam command line', { timeout: 30_000 }, () => {
       return { lines, io: { out: (l: string) => lines.push(l), err: (l: string) => lines.push(l) } }
     }
 
-    it('FR-TRAIN-8: one scenario runs, is printed and stored, and --compare passes it', async () => {
+    it('FR-TRAIN-8: one scenario runs, is printed and stored, with the set and the number of scenarios', async () => {
       const { lines, io: sink } = io()
-      const code = await main(['--compare'], await envWith(CALL_BORIS), sink)
+      const code = await main([], await envWith(CALL_BORIS, { small: true }), sink)
       expect(code, lines.join('\n')).toBe(0)
       const text = lines.join('\n')
       expect(text).toContain('x-t-01-price-first')
@@ -122,36 +128,67 @@ describe('the exam command line', { timeout: 30_000 }, () => {
       const [stored] = await db.select().from(examRun)
       expect(stored).toMatchObject({ score: 1, passed: true })
       expect(stored?.mindVersion).toBeTruthy()
+      // The verdict names the set it is about, so a verdict on another set cannot be mistaken for it.
+      expect(text).toContain(`набор ${stored?.scenarioSet}`)
+      expect(text).toMatch(/сценариев 1\b/)
     })
 
-    it('FR-TRAIN-8: --compare exits 1 on a worse run than the last one of the same set', async () => {
-      const first = io()
-      expect(await main(['--compare'], await envWith(CALL_BORIS), first.io)).toBe(0)
-      // The same scenario now gets a «none» where Boris was to be called: the wrong move.
-      const second = io()
-      const code = await main(['--compare'], await envWith(NONE), second.io)
+    it('FR-TRAIN-8: --compare with no run that passed exits 3 and says what to do first', async () => {
+      const sink = io()
+      const code = await main(['--compare'], await envWith(CALL_BORIS), sink.io)
+      expect(code, sink.lines.join('\n')).toBe(3)
+      expect(sink.lines.join('\n')).toContain(
+        'Прошлого прошедшего прогона на этом наборе нет: сначала прогони выложенную версию',
+      )
+      // The run is kept, and it did not pass: it is not the baseline of the next one.
+      const [stored] = await db.select().from(examRun)
+      expect(stored).toMatchObject({ passed: false, s1: 0 })
+      const again = io()
+      expect(await main(['--compare'], await envWith(CALL_BORIS), again.io)).toBe(3)
+    })
+
+    it('FR-TRAIN-8: --compare exits 0 on a run as good as the last one that passed and 1 on a worse one', async () => {
+      // The deployed version, run without the guard, makes the baseline.
+      expect(await main([], await envWith(CALL_BORIS), io().io)).toBe(0)
+      const same = io()
+      expect(await main(['--compare'], await envWith(CALL_BORIS), same.io)).toBe(0)
+      expect(same.lines.join('\n')).toMatch(/прошёл/i)
+      // Every scenario now gets a «none»: the ones that wanted a call for Boris got worse.
+      const worse = io()
+      const code = await main(['--compare'], await envWith(NONE), worse.io)
       expect(code).toBe(1)
-      expect(second.lines.join('\n')).toMatch(/не прошёл/i)
-      expect(second.lines.join('\n')).toMatch(/хуже/i)
+      const text = worse.lines.join('\n')
+      expect(text).toMatch(/не прошёл/i)
+      expect(text).toMatch(/хуже/i)
+      expect(text).toContain('x-t-01-price-first')
     })
 
     it('FR-TRAIN-8: without --compare a worse run is reported and the exit code stays 0', async () => {
-      expect(await main([], await envWith(CALL_BORIS), io().io)).toBe(0)
+      expect(await main([], await envWith(CALL_BORIS, { small: true }), io().io)).toBe(0)
       const worse = io()
-      expect(await main([], await envWith(NONE), worse.io)).toBe(0)
+      expect(await main([], await envWith(NONE, { small: true }), worse.io)).toBe(0)
       expect(worse.lines.join('\n')).toMatch(/не прошёл/i)
       const runs = await db.select().from(examRun).orderBy(examRun.startedAt)
       expect(runs.map((r) => r.passed)).toEqual([true, false])
     })
 
-    it('FR-TRAIN-8: a run in which the Interlocutor did not answer says so and does not pass --compare', async () => {
+    it('FR-TRAIN-8: the folders of the set cannot be changed in a guard run', async () => {
       const sink = io()
-      const env = { ...(await envWith(CALL_BORIS)), FAKE_CLAUDE_MODE: 'exit1' }
-      const code = await main(['--compare'], env, sink.io)
-      expect(code).toBe(1)
+      const env = await envWith(CALL_BORIS, { small: true })
+      expect(await main(['--compare'], env, sink.io)).toBe(2)
+      expect(sink.lines.join('\n')).toMatch(/SARA_EXAM_DIRS/)
+      expect(await db.select().from(examRun)).toEqual([])
+    })
+
+    it('FR-TRAIN-8: a run in which the Interlocutor did not answer says so and does not pass', async () => {
+      const sink = io()
+      const env = { ...(await envWith(CALL_BORIS, { small: true })), FAKE_CLAUDE_MODE: 'exit1' }
+      const code = await main([], env, sink.io)
+      expect(code).toBe(0)
       const text = sink.lines.join('\n')
       expect(text).toMatch(/Собеседник не ответил/)
       expect(text).toMatch(/probe:claude/)
+      expect(text).toMatch(/не прошёл/i)
       const [stored] = await db.select().from(examRun)
       expect(stored).toMatchObject({ passed: false, score: 0.5, s1: 0 })
     })

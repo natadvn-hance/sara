@@ -95,6 +95,11 @@ export async function loadScenarios(dirs: string[]): Promise<LoadedScenarios> {
   return { scenarios, setHash, errors }
 }
 
+/** The hash of one scenario's content: a run keeps it, so the next run knows which scenarios have not changed. */
+export function scenarioHash(s: ExamScenario): string {
+  return createHash('sha256').update(JSON.stringify(s)).digest('hex').slice(0, 12)
+}
+
 /** A stable uuid for a scenario: the journal wants one where the live dossier has its conversation number. */
 export function examUuid(id: string): string {
   const h = createHash('sha256').update(`exam:${id}`).digest('hex')

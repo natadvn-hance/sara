@@ -7,7 +7,7 @@ import {
   TOPICS,
   type Topic,
 } from '@sara/shared'
-import { and, desc, eq, isNotNull, ne } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { loadConfig } from '../config'
 import { planTurn } from '../conversation/engine'
 import type { MindSearch, PolicySettings, TurnPlan } from '../conversation/types'
@@ -16,9 +16,10 @@ import { examResult, examRun } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import { loadRole } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
+import { type Baseline, findBaseline, gotWorse, SAME } from './baseline'
 import { type Grade, gradeScenario, movedTo, UNANSWERED } from './grade'
 import { formatExaminerInput } from './prompt'
-import { caseHitOf, dossierFromScenario, examNames, loadScenarios } from './scenarios'
+import { caseHitOf, dossierFromScenario, examNames, loadScenarios, scenarioHash } from './scenarios'
 
 const LOCKED = new Set<Topic>(LOCKED_TOPICS)
 
@@ -37,9 +38,6 @@ export const EXAM_SETTINGS: PolicySettings = {
     TOPICS.map((t) => [t, LOCKED.has(t) ? 'call' : 'self']),
   ) as PolicySettings['autonomy'],
 }
-
-/** A score that went through a 4-byte float column is the same score within this. */
-const SAME = 1e-6
 
 /**
  * The deploy guard (FR-TRAIN-8): no S1, and a score not worse than the last run of the same set that passed. A run in which the
@@ -72,6 +70,12 @@ export type ExamOptions = {
   judgeCounts?: boolean
   /** How many scenarios run at once (default 1). */
   concurrency?: number
+  /**
+   * The guard run (`--compare`): a run with no run that passed to compare with does not pass, and so never becomes a
+   * baseline. Without it such a run, if clean, passes: that is how the first baseline is made, by running the
+   * version that is deployed.
+   */
+  guard?: boolean
   /** The mind scope of the dossiers (default `shared`). */
   scope?: string
   /** Called with each scenario's result when it is done, in the order they finish. */
@@ -98,6 +102,14 @@ export type ExamSummary = {
   s2: number
   s3: number
   passed: boolean
+  /** The key of the set the run was of, as stored in `exam_run.scenario_set`. */
+  setHash: string
+  /** What the run was compared with: the same set, another set on the scenarios not changed since, or nothing. */
+  baseline: Baseline['kind'] | null
+  /** How many scenarios were compared with the baseline. */
+  overlap: number
+  /** The scenarios that got worse than in the baseline. */
+  worse: string[]
   /** In how many scenarios a model gave no answer (the Interlocutor, the Checker, a judge that counts): the run never passes. */
   unanswered: number
   scenarios: number
@@ -182,7 +194,12 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
   ].join('+')
 
   const rolesDir = d.rolesDir ?? loadConfig().rolesDir
-  const rolesVersion: Record<string, number> = {}
+  // The versions of the roles, and what the next run needs to know of this one's scenarios (see RunMeta).
+  const hashes = new Map(chosen.map((s) => [s.id, scenarioHash(s)]))
+  const rolesVersion: Record<string, unknown> = {
+    scenarios: Object.fromEntries(hashes),
+    partial: ids.length > 0,
+  }
   for (const role of ['interlocutor', 'checker', 'examiner'] as const)
     rolesVersion[role] = (await loadRole(rolesDir, role)).meta.version
   const mindVersion = await d.mind.version()
@@ -260,23 +277,11 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
   const score = round4(results.reduce((sum, r) => sum + r.grade.score, 0) / results.length)
   const s1 = countOf('S1')
   const unanswered = failures.filter((f) => UNANSWERED.includes(f.id)).length
-  const [previous] = await d.db
-    .select({ id: examRun.id, score: examRun.score })
-    .from(examRun)
-    .where(
-      and(
-        eq(examRun.scenarioSet, setKey),
-        ne(examRun.id, runId),
-        // Only a run that passed is a baseline: a failed one (an S1, an unanswered scenario, a worse score) is the
-        // very thing the next run must not be allowed to match.
-        eq(examRun.passed, true),
-        isNotNull(examRun.finishedAt),
-        isNotNull(examRun.score),
-      ),
-    )
-    .orderBy(desc(examRun.finishedAt), desc(examRun.startedAt))
-    .limit(1)
-  const before = previous?.score == null ? null : { id: previous.id, score: previous.score }
+  const baseline = await findBaseline(d.db, { setKey, hashes, runId })
+  const worse = gotWorse(
+    baseline,
+    results.map((r) => ({ id: r.id, score: r.grade.score })),
+  )
   const summary: ExamSummary = {
     runId,
     mindVersion,
@@ -284,11 +289,20 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
     s1,
     s2: countOf('S2'),
     s3: countOf('S3'),
-    passed: unanswered === 0 && examVerdict({ score, s1 }, before),
+    passed:
+      unanswered === 0 &&
+      worse.length === 0 &&
+      examVerdict({ score, s1 }, baseline?.kind === 'same' ? baseline : null) &&
+      // A guard run with nothing to compare with proved nothing.
+      !(o.guard && baseline === null),
+    setHash: setKey,
+    baseline: baseline?.kind ?? null,
+    overlap: baseline?.scores.size ?? 0,
+    worse,
     unanswered,
     scenarios: results.length,
-    comparedTo: before?.id ?? null,
-    previousScore: before?.score ?? null,
+    comparedTo: baseline?.id ?? null,
+    previousScore: baseline?.score ?? null,
     results,
   }
   await d.db
