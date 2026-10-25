@@ -552,6 +552,13 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   try {
     await DBOS.runStep(
       async () => {
+        // The core may have died after the card went out and was written to the task, before this step was recorded:
+        // the run then comes back here, and Boris must not get the card twice.
+        const [out] = await d()
+          .db.select({ messageId: task.telegramMessageId })
+          .from(task)
+          .where(eq(task.id, taskId))
+        if (out?.messageId != null) return
         const silent = await quietNow(d().db, new Date())
         // What the order page said about the client is read here, inside the step, so a run recorded before this
         // card kept its steps; an order whose page was not opened has none.

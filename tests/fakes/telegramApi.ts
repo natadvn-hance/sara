@@ -28,6 +28,8 @@ export type FakeTelegram = {
   setConflict(on: boolean): void
   /** Every HTML message is refused like markup Telegram cannot parse (plain messages go through). */
   setRejectHtml(on: boolean): void
+  /** sendMessage answers this many ms late: the message is in `sent` at once, the caller waits (a slow Telegram). */
+  setSendDelay(ms: number): void
   close(): Promise<void>
 }
 
@@ -97,6 +99,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   let conflict = false
   let fileBroken = false
   let rejectHtml = false
+  let sendDelayMs = 0
   const now = () => Math.floor(Date.now() / 1000)
 
   const server = createServer((req, res) => {
@@ -165,6 +168,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
             )
           }
           sent.push(params)
+          if (sendDelayMs > 0) await new Promise((r) => setTimeout(r, sendDelayMs))
           return reply({
             message_id: nextMessage++,
             date: now(),
@@ -295,6 +299,9 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     },
     setRejectHtml(on) {
       rejectHtml = on
+    },
+    setSendDelay(ms) {
+      sendDelayMs = ms
     },
     close: () => new Promise((r) => server.close(() => r())),
   }
