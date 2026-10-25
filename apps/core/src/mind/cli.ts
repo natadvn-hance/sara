@@ -109,9 +109,28 @@ export async function acceptProposals(mindDir: string, paths: string[]): Promise
 }
 
 const USAGE =
-  'Команды: mind index; mind proposals --to <клон sara-mind>; mind accept <путь в mind/proposals>… [--mind <клон>]'
+  'Команды: mind index; mind proposals --to <клон sara-mind>; mind accept <путь в mind/proposals>… --mind <клон sara-mind>'
 
-async function main(argv: string[]): Promise<void> {
+type Io = { log(line: string): void; error(line: string): void }
+
+/**
+ * The commands of development. Results go to `io.log`, every refusal and problem to `io.error`; the number is the exit
+ * code: 1 for a refusal and for `mind index` that left a record unloaded.
+ */
+export async function main(
+  argv: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  io: Io = console,
+): Promise<number> {
+  try {
+    return await runCommand(argv, env, io)
+  } catch (e) {
+    io.error(e instanceof Error ? e.message : String(e))
+    return 1
+  }
+}
+
+async function runCommand(argv: string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
   const { positionals, values } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -119,44 +138,45 @@ async function main(argv: string[]): Promise<void> {
   })
   const [command, ...rest] = positionals
   // pnpm --filter runs this inside apps/core; folders are given from where the developer typed the command.
-  const here = (p: string) => resolve(process.env.INIT_CWD ?? process.cwd(), p)
-  const config = loadConfig()
+  const here = (p: string) => resolve(env.INIT_CWD ?? process.cwd(), p)
 
   if (command === 'accept') {
     if (rest.length === 0) throw new Error(USAGE)
-    const mindDir = values.mind ? here(values.mind) : config.mindDir
-    for (const a of await acceptProposals(mindDir, rest)) {
+    // Accept writes into a clone and commits there: never on the server, never into a folder picked by the config.
+    if (env.NODE_ENV === 'production')
+      throw new Error(
+        'mind accept не работает при NODE_ENV=production: разум на сервере только читается',
+      )
+    if (!values.mind) throw new Error(`Укажи клон sara-mind: --mind <папка>. ${USAGE}`)
+    for (const a of await acceptProposals(here(values.mind), rest)) {
       const commit = a.committed ? 'коммит сделан' : 'папка не git, коммита нет'
-      console.log(`${a.id}: ${a.from} → ${a.to}, подтверждено, ${commit}`)
+      io.log(`${a.id}: ${a.from} → ${a.to}, подтверждено, ${commit}`)
     }
-    return
+    return 0
   }
   if (command !== 'index' && command !== 'proposals') throw new Error(USAGE)
   if (command === 'proposals' && !values.to) throw new Error(USAGE)
 
+  const config = loadConfig(env)
   const { db, close } = createDb(config.databaseUrl)
   try {
     if (command === 'proposals') {
       const to = here(values.to ?? '')
-      console.log(`Выложено предложений: ${await exportProposals(db, to)} в ${to}`)
-      return
+      io.log(`Выложено предложений: ${await exportProposals(db, to)} в ${to}`)
+      return 0
     }
-    for (const e of (await loadMind(config.mindDir)).errors) {
-      console.log(`Не загружено: ${e.path}: ${e.message}`)
-    }
-    const r = await ensureMindIndex(db, config.mindDir)
+    const { errors } = await loadMind(config.mindDir)
+    for (const e of errors) io.error(`Не загружено: ${e.path}: ${e.message}`)
+    // The unloaded records are reported above; the index itself stays quiet about them.
+    const r = await ensureMindIndex(db, config.mindDir, () => {})
     const what = r.changed ? 'индекс перестроен' : 'без изменений'
-    console.log(
-      `Разум ${r.mindVersion} из ${config.mindDir}: записей в индексе ${r.records}, ${what}`,
-    )
+    io.log(`Разум ${r.mindVersion} из ${config.mindDir}: записей в индексе ${r.records}, ${what}`)
+    return errors.length > 0 ? 1 : 0
   } finally {
     await close()
   }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  await main(process.argv.slice(2)).catch((e: Error) => {
-    console.log(e.message)
-    process.exitCode = 1
-  })
+  process.exitCode = await main(process.argv.slice(2))
 }

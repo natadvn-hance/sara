@@ -1,8 +1,10 @@
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { acceptProposals } from '../../src/mind/cli'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mindIndex } from '../../src/db/schema'
+import { acceptProposals, main } from '../../src/mind/cli'
 import { loadMind } from '../../src/mind/loader'
+import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
 import { git, gitCommitAll, putFile, putRecord, tempMind } from '../helpers/mind'
 
 const FROM = 'mind/proposals/shared/knowledge/k-price.md'
@@ -161,5 +163,80 @@ describe('mind accept', () => {
     await expect(acceptProposals(root, ['shared/knowledge/k-flow.md'])).rejects.toThrow(/confirmed/)
     expect(await gone(join(root, 'mind/shared/knowledge/k-flow.md'))).toBe(true)
     expect(await gone(join(root, 'mind/proposals/shared/knowledge/k-flow.md'))).toBe(false)
+  })
+})
+
+describe('mind command line', () => {
+  const { db, close } = openTestDb()
+  afterAll(close)
+  beforeEach(() => resetDb(db))
+
+  const io = () => ({ log: vi.fn<(s: string) => void>(), error: vi.fn<(s: string) => void>() })
+
+  it('FR-MIND-3: mind accept needs --mind and never falls back to the mind folder of the config', async () => {
+    const root = await proposalMind()
+    const out = io()
+    const env = { SARA_MIND_DIR: root }
+    expect(await main(['accept', FROM], env, out)).toBe(1)
+    expect(out.error).toHaveBeenCalledWith(expect.stringContaining('--mind'))
+    expect(out.log).not.toHaveBeenCalled()
+    expect(await gone(join(root, FROM))).toBe(false)
+    expect(await gone(join(root, TO))).toBe(true)
+
+    expect(await main(['accept', FROM, '--mind', root], env, out)).toBe(0)
+    expect(out.log).toHaveBeenCalledWith(expect.stringContaining('k-price'))
+    expect(await gone(join(root, FROM))).toBe(true)
+  })
+
+  it('FR-MIND-3: mind accept is refused when NODE_ENV is production', async () => {
+    const root = await proposalMind()
+    const out = io()
+    expect(await main(['accept', FROM, '--mind', root], { NODE_ENV: 'production' }, out)).toBe(1)
+    expect(out.error).toHaveBeenCalledWith(expect.stringContaining('production'))
+    expect(await gone(join(root, FROM))).toBe(false)
+    expect(await gone(join(root, TO))).toBe(true)
+  })
+
+  it('FR-MIND-3: mind accept takes --mind relative to where the developer typed the command', async () => {
+    const root = await proposalMind()
+    const out = io()
+    const env = { INIT_CWD: join(root, '..') }
+    const name = root.slice(root.lastIndexOf('/') + 1)
+    expect(await main(['accept', FROM, '--mind', name], env, out)).toBe(0)
+    expect(await gone(join(root, TO))).toBe(false)
+  })
+
+  it('FR-MIND-3: errors of the commands go to stderr and the exit code is 1', async () => {
+    const out = io()
+    expect(await main([], {}, out)).toBe(1)
+    expect(await main(['accept'], {}, out)).toBe(1)
+    expect(await main(['proposals'], {}, out)).toBe(1)
+    expect(await main(['nope'], {}, out)).toBe(1)
+    expect(out.error).toHaveBeenCalledTimes(4)
+    expect(out.log).not.toHaveBeenCalled()
+  })
+
+  it('FR-MIND-2: mind index builds the index and exits 1 when a record failed to load', async () => {
+    const root = await tempMind()
+    await putRecord(root, TO, { id: 'k-price', type: 'knowledge' }, 'Цена по запросу.')
+    const env = { DATABASE_URL: testDatabaseUrl(), SARA_MIND_DIR: root }
+    const ok = io()
+    expect(await main(['index'], env, ok)).toBe(0)
+    expect(ok.log).toHaveBeenCalledWith(expect.stringContaining('записей в индексе 1'))
+    expect(ok.error).not.toHaveBeenCalled()
+
+    await putRecord(
+      root,
+      'mind/shared/knowledge/k-bad.md',
+      { id: 'k-bad', type: 'knowledge', status: 'maybe' },
+      'Неверный статус.',
+    )
+    const bad = io()
+    expect(await main(['index'], env, bad)).toBe(1)
+    expect(bad.error).toHaveBeenCalledWith(
+      expect.stringContaining('mind/shared/knowledge/k-bad.md'),
+    )
+    expect(bad.log).toHaveBeenCalledWith(expect.stringContaining('записей в индексе 1'))
+    expect((await db.select().from(mindIndex)).map((r) => r.recordId)).toEqual(['k-price'])
   })
 })
