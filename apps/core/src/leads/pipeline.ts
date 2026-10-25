@@ -181,7 +181,8 @@ async function storePage(
           bidPriceRub: full.bid_price_rub,
           clientName: full.client_name,
           text: full.text,
-          clientInfo: full.client_info,
+          // A page that shows no client leaves what an earlier read stored.
+          ...(full.client_info && { clientInfo: full.client_info }),
           ...(verdict !== 'go' && { status: verdict }),
         })
         .where(eq(lead.id, l.id))
@@ -704,7 +705,10 @@ async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
   if (!l.draftText)
     await storeDraft(
       l,
-      await draftFor({ ...sourceOf(l), ...full }, { correlationId: l.correlationId }),
+      await draftFor(
+        { ...sourceOf(l), ...full, client_info: full.client_info ?? sourceOf(l).client_info },
+        { correlationId: l.correlationId },
+      ),
     )
   await sendCard(taskId, 'summary')
 }
