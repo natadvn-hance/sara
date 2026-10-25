@@ -84,6 +84,15 @@ async function journal(
   })
 }
 
+/** Whether the trace row already ended with this outcome: a repeat of a step after a crash must not journal twice. */
+async function endedWith(d: RemindDeps, rowId: string, outcome: string): Promise<boolean> {
+  const [r] = await d.db
+    .select({ outcome: convTurn.outcome })
+    .from(convTurn)
+    .where(eq(convTurn.id, rowId))
+  return r?.outcome === outcome
+}
+
 async function finishRow(d: RemindDeps, rowId: string, patch: Row) {
   const now = new Date().toISOString()
   await d.db
@@ -350,8 +359,14 @@ async function deliver(
 ): Promise<Sent> {
   const r = await deliverMessage({ db: d.db, profi: d.profi }, outboxId)
   if (r === 'confirmed') {
-    await finishRow(d, rowId, { outcome: 'sent', decision: 'send', decisionReason: 'ушло клиенту' })
-    await journal(d, 'conv.reminder_sent', conv, rowId, { step: p.step })
+    if (!(await endedWith(d, rowId, 'sent'))) {
+      await finishRow(d, rowId, {
+        outcome: 'sent',
+        decision: 'send',
+        decisionReason: 'ушло клиенту',
+      })
+      await journal(d, 'conv.reminder_sent', conv, rowId, { step: p.step })
+    }
     return { outcome: 'sent', end: false }
   }
   if (r === 'changed') {
@@ -401,12 +416,14 @@ export async function sendStep(
     return { outcome: g.end ? 'stopped' : 'skipped', end: g.end }
   }
   if (g.shadow) {
-    await finishRow(d, rowId, {
-      outcome: 'drafted',
-      decision: 'draft',
-      decisionReason: 'режим тени: клиенту ничего не ушло',
-    })
-    await journal(d, 'conv.reminder_drafted', conv, rowId, { step: p.step })
+    if (!(await endedWith(d, rowId, 'drafted'))) {
+      await finishRow(d, rowId, {
+        outcome: 'drafted',
+        decision: 'draft',
+        decisionReason: 'режим тени: клиенту ничего не ушло',
+      })
+      await journal(d, 'conv.reminder_drafted', conv, rowId, { step: p.step })
+    }
     return { outcome: 'drafted', end: false }
   }
   const id = await d.db.transaction((tx) =>
@@ -442,12 +459,14 @@ export async function dormantStep(
 ): Promise<{ asked: boolean }> {
   const conv = await getConversation(d.db, conversationId)
   if (!conv) return { asked: false }
-  await finishRow(d, rowId, {
-    outcome: 'dormant',
-    decision: shadow ? 'trace' : 'task',
-    decisionReason: shadow ? 'в тени задача Борису только в трассе' : 'клиент молчит 7 дней',
-  })
-  await journal(d, 'conv.dormant', conv, rowId, { shadow })
+  if (!(await endedWith(d, rowId, 'dormant'))) {
+    await finishRow(d, rowId, {
+      outcome: 'dormant',
+      decision: shadow ? 'trace' : 'task',
+      decisionReason: shadow ? 'в тени задача Борису только в трассе' : 'клиент молчит 7 дней',
+    })
+    await journal(d, 'conv.dormant', conv, rowId, { shadow })
+  }
   if (shadow) return { asked: false }
   if (conv.dealId)
     try {

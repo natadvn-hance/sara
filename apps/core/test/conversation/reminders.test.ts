@@ -1,5 +1,5 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import type { ChatMessage } from '@sara/shared'
+import { type ChatMessage, newEventId } from '@sara/shared'
 import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onConvPress } from '../../src/conversation/commands'
@@ -400,6 +400,15 @@ describe('a reminder after the switch', () => {
     expect((await db.select().from(deal))[0]?.stage).toBe('lost')
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
     expect(sends).toHaveLength(2)
+  })
+
+  it('FR-CONV-12: an answer of Boris for a process that is gone is harmless, and the task answers «уже сделано»', async () => {
+    await live()
+    await decideDormant('conv-remind:no-such-conversation:m-1:dormant', 'remind')
+    const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) }, decideDormant }
+    expect(await onConvPress(press, { taskId: newEventId(), action: 'remind' })).toBe(
+      'Это уже сделано.',
+    )
   })
 
   it('FR-CONV-12: no model text for 3 hours past the time means the ready text of old Sara', async () => {

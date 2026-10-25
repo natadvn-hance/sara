@@ -249,6 +249,11 @@ export async function syncReminders(
   await startReminder(conv.id, anchor.platformMessageId)
 }
 
+/** DBOS tells a send to a process that never existed by this code (`DBOSNonExistentWorkflowError`, not exported). */
+const NON_EXISTENT_WORKFLOW = 16
+const isMissingWorkflow = (e: unknown) =>
+  (e as { dbosErrorCode?: number } | null)?.dbosErrorCode === NON_EXISTENT_WORKFLOW
+
 /** Boris's answer on the dormant task reaches the process that waits for it (a process that is gone is fine). */
 export async function decideDormant(
   reminderTurnId: string,
@@ -258,6 +263,7 @@ export async function decideDormant(
   try {
     await DBOS.send(wf, decision, 'decision', `dormant:${reminderTurnId}:${decision}`)
   } catch (e) {
-    if ((e as Error).name !== 'DBOSNonExistentWorkflowError') throw e
+    // DBOS names this error by its class only in the code: the error object's `name` is plain «Error».
+    if (!isMissingWorkflow(e)) throw e
   }
 }
