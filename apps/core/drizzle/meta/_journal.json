@@ -71,6 +71,13 @@
       "when": 1792875242762,
       "tag": "0009_conversation",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792878790584,
+      "tag": "0010_direction_onboarding",
+      "breakpoints": true
     }
   ]
 }
