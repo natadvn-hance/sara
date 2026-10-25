@@ -159,7 +159,16 @@ describe('the Analyst', () => {
     const props = Object.keys(
       (roleJsonSchema(AnalystOutput) as { properties: Record<string, unknown> }).properties,
     )
-    expect(props).toEqual(['reading', 'hidden_need', 'risk', 'condition', 'text', 'price_rub'])
+    // The reading comes first, the text and the price last, and the optional case ids after them.
+    expect(props).toEqual([
+      'reading',
+      'hidden_need',
+      'risk',
+      'condition',
+      'text',
+      'price_rub',
+      'case_ids',
+    ])
     const reading = (
       roleJsonSchema(AnalystOutput) as {
         properties: { reading: { properties: Record<string, unknown> } }
@@ -348,5 +357,112 @@ describe('what the Analyst is told about the client', () => {
     const o = await order()
     expect(analystInput(o, 400)).not.toContain('Клиент на площадке')
     expect(analystInput({ ...o, client_info: null }, 400)).toBe(analystInput(o, 400))
+  })
+})
+
+const CASE = {
+  id: 'clinic_site',
+  title: 'Сайт клиники',
+  url: 'https://hance.example/cases/clinic',
+  summary: 'Запись онлайн, плюс 40% обращений',
+  tags: ['сайт', 'медицина'],
+  show_when: 'Клиенту нужен сайт услуг с записью',
+  never_when: null,
+}
+const FORMAT = {
+  parts: [
+    { id: 'understanding', title: 'Понимание', hint: 'Про ситуацию клиента' },
+    { id: 'question', title: 'Вопрос', hint: 'Один короткий вопрос' },
+  ],
+  max_chars: 500,
+  tone: ['спокойно, без клише'],
+  examples: [],
+  max_cases: 2,
+}
+const PROFILE = { reply_format: FORMAT, cases: [CASE] }
+
+describe('the Analyst reads the direction (FR-LEAD-6)', () => {
+  it('FR-LEAD-6: a profile with no format and no cases gives the very input the Analyst always had', async () => {
+    const o = await order()
+    expect(analystInput(o, 479)).toBe(analystInput(o, 479, ''))
+    const old = stubGateway([answer(BODY)])
+    await writeDraft(old.gw, o)
+    const none = stubGateway([answer(BODY)])
+    await writeDraft(none.gw, o, { profile: { reply_format: null, cases: [] } })
+    expect(none.inputs).toEqual(old.inputs)
+  })
+
+  it('FR-LEAD-6: the input carries the direction format and the case rules, and no link', async () => {
+    const { gw, inputs } = stubGateway([answer(BODY)])
+    await writeDraft(gw, await order(), { profile: PROFILE })
+    expect(inputs[0]).toContain('Формат отклика этого направления')
+    expect(inputs[0]).toContain('clinic_site: Сайт клиники')
+    expect(inputs[0]).toContain('Показывай, когда: Клиенту нужен сайт услуг с записью')
+    expect(inputs[0]).not.toContain('https://')
+    expect(inputs[0]).not.toContain('Ирина')
+  })
+
+  it('FR-LEAD-6: case_ids from the model become the library links, and the greeting is still first', async () => {
+    const { gw } = stubGateway([{ ...answer(BODY), case_ids: ['clinic_site', 'nope'] }])
+    const d = await writeDraft(gw, await order(), { profile: PROFILE })
+    expect(d).toMatchObject({ cases: ['clinic_site'] })
+    expect((d as { text: string }).text).toBe(
+      `Ирина, добрый день!\n\n${BODY}\n\nПохожая работа: Сайт клиники, https://hance.example/cases/clinic`,
+    )
+  })
+
+  it('FR-LEAD-6: the model is told a shorter length by the room kept for the cases', async () => {
+    const { gw, inputs } = stubGateway([answer(BODY)])
+    await writeDraft(gw, await order(), { profile: PROFILE })
+    const reserve = 2 + 'Похожая работа: Сайт клиники, https://hance.example/cases/clinic'.length
+    expect(inputs[0]).toContain(`Длина текста: не больше ${479 - reserve} знаков`)
+  })
+
+  it('FR-LEAD-6: a text that fits the ceiling but not the cases room is kept, and the cases that do not fit are left out', async () => {
+    const reserve = 2 + 'Похожая работа: Сайт клиники, https://hance.example/cases/clinic'.length
+    const body = 'а'.repeat(479 - reserve + 5)
+    const { gw } = stubGateway([{ ...answer(body), case_ids: ['clinic_site'] }])
+    const d = await writeDraft(gw, await order(), { profile: PROFILE })
+    expect(d).toMatchObject({ attempts: 1, cases: [], text: `Ирина, добрый день!\n\n${body}` })
+  })
+
+  it('FR-LEAD-6: a text longer than the whole ceiling is asked once more, saying so', async () => {
+    const { gw, inputs } = stubGateway([answer('а'.repeat(480)), answer('Коротко. Когда запуск?')])
+    const d = await writeDraft(gw, await order(), { profile: PROFILE })
+    expect(d.attempts).toBe(2)
+    expect(inputs[1]).toContain('Прошлый вариант вышел')
+  })
+
+  it('FR-LEAD-6: the room kept for the cases never leaves the model less than 150 characters', async () => {
+    const tight = { ...PROFILE, reply_format: { ...FORMAT, max_chars: 200, max_cases: 1 } }
+    const { gw, inputs } = stubGateway([answer('б'.repeat(160))])
+    const d = await writeDraft(gw, await order(), { profile: tight })
+    expect(inputs[0]).toContain('Длина текста: не больше 150 знаков')
+    // 19 + 2 + 160 fits the 200 of the format, so the draft stands (the case is left out).
+    expect(d).toMatchObject({ attempts: 1, cases: [] })
+  })
+
+  it('FR-LEAD-6: the format own max_chars is the ceiling the model is told and the text is held to', async () => {
+    const small = { ...PROFILE, reply_format: { ...FORMAT, max_chars: 200, max_cases: 0 } }
+    const { gw, inputs } = stubGateway([answer('б'.repeat(300)), answer('Коротко. Когда запуск?')])
+    const d = await writeDraft(gw, await order(), { profile: small })
+    expect(inputs[0]).toContain('Длина текста: не больше 179 знаков')
+    expect(d.attempts).toBe(2)
+    expect((d as { text: string }).text.length).toBeLessThanOrEqual(200)
+  })
+
+  it('FR-LEAD-6: a draft without the cases field is as before', async () => {
+    const { gw } = stubGateway([answer(BODY)])
+    const d = await writeDraft(gw, await order(), { profile: PROFILE })
+    expect(d).toMatchObject({ cases: [], text: `Ирина, добрый день!\n\n${BODY}` })
+  })
+
+  it('FR-LEAD-6: the Analyst case_ids come last in its schema and are not required', () => {
+    const schema = roleJsonSchema(AnalystOutput) as {
+      properties: Record<string, unknown>
+      required: string[]
+    }
+    expect(Object.keys(schema.properties).at(-1)).toBe('case_ids')
+    expect(schema.required).not.toContain('case_ids')
   })
 })

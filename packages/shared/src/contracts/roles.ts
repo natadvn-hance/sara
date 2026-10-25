@@ -60,6 +60,11 @@ export const AnalystOutput = z.object({
   condition: z.string().max(300),
   text: z.string().min(1).max(2000),
   price_rub: z.number().int().nonnegative().nullable(),
+  /**
+   * The ids of the direction's cases that fit this order (FR-LEAD-6); the program puts in the links and checks the
+   * ids against the library. Last in the schema and not required: a direction without cases never sees the field.
+   */
+  case_ids: z.array(z.string()).max(3).optional(),
 })
 export type AnalystOutput = z.infer<typeof AnalystOutput>
 

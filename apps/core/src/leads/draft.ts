@@ -1,4 +1,11 @@
 import { AnalystOutput, type ClientInfo, type ProfiOrder, plural } from '@sara/shared'
+import {
+  analystProfileText,
+  bidCeiling,
+  caseReserve,
+  placeCases,
+  type ReplyProfile,
+} from '../direction/reply'
 import type { Gateway } from '../gateway/gateway'
 import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
@@ -25,6 +32,8 @@ export type Draft = {
   priceRub: number | null
   attempts: number
   analysis: Analysis
+  /** The ids of the direction's cases that went into the text (their links are the library's). */
+  cases?: string[]
 }
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
@@ -155,11 +164,19 @@ function clientLine(info: DraftSource['client_info']): string | null {
  * What the Analyst sees: the order as the Sorter sees it (no name, ADR-016), what the order page says about the
  * client, and the room left for the text.
  */
-export function analystInput(o: DraftSource, maxBody: number): string {
-  return [sorterInput(o), clientLine(o.client_info), `Длина текста: не больше ${maxBody} знаков`]
+export function analystInput(o: DraftSource, maxBody: number, profileText = ''): string {
+  return [
+    sorterInput(o),
+    clientLine(o.client_info),
+    profileText === '' ? null : profileText,
+    `Длина текста: не больше ${maxBody} знаков`,
+  ]
     .filter((l): l is string => l !== null)
     .join('\n')
 }
+
+/** The least room the model keeps for the text of a bid, whatever the cases would take. */
+const MIN_BODY = 150
 
 const chars = (n: number) => `${n} ${plural(n, ['знак', 'знака', 'знаков'])}`
 
@@ -170,17 +187,24 @@ const chars = (n: number) => `${n} ${plural(n, ['знак', 'знака', 'зн�
 export async function writeDraft(
   gw: Gateway,
   o: DraftSource,
-  opts: { correlationId?: string; causationId?: string } = {},
+  opts: { correlationId?: string; causationId?: string; profile?: ReplyProfile } = {},
 ): Promise<Draft | DraftMiss> {
+  // The direction's own format and cases (FR-LEAD-6); with none the numbers and the input are what they always were.
+  const profile: ReplyProfile = opts.profile ?? { reply_format: null, cases: [] }
+  const ceiling = bidCeiling(profile)
   const greeting = greetingOf(o.client_name)
-  const maxBody = BID_TEXT_MAX - greeting.length - 2
-  const base = analystInput(o, maxBody)
+  // The model is told a shorter limit by the room the cases may take, but never under what a bid needs; a text
+  // that fits the ceiling stays whole and the cases that do not fit are the ones left out.
+  const bodyCeiling = ceiling - greeting.length - 2
+  const maxBody = Math.max(Math.min(MIN_BODY, bodyCeiling), bodyCeiling - caseReserve(profile))
+  const base = analystInput(o, maxBody, analystProfileText(profile))
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
   let analysis: Analysis | null = null
   const redact = { names: namesToHide(o.client_name, o.client_info?.name) }
   for (let attempts = 1; attempts <= 2; attempts++) {
-    const r = await gw.call('analyst', input, AnalystOutput, { ...opts, redact })
+    const { profile: _profile, ...callOpts } = opts
+    const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
@@ -191,15 +215,18 @@ export async function writeDraft(
     } else if (BRACKETED.test(body)) {
       reason = 'has_tag'
       input = `${base}\n\nВ прошлом варианте остались метки в квадратных скобках. Напиши текст без них, словами.`
-    } else if (text.length > BID_TEXT_MAX) {
+    } else if (text.length > ceiling) {
       reason = 'too_long'
-      input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${BID_TEXT_MAX}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
+      input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
     } else {
+      // The program puts the links in: the model only named the ids, and only the library's count.
+      const placed = placeCases(text, profile, r.output.case_ids ?? [])
       return {
-        text,
+        text: placed.text,
         priceRub: priceWithin(r.output.price_rub, o.budget_text),
         attempts,
         analysis,
+        cases: placed.shown,
       }
     }
   }

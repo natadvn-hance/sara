@@ -254,17 +254,18 @@ describe('onboarding flow', { timeout: 30000 }, () => {
     expect(e?.payload).toEqual({ step: 1 })
   })
 
-  it('FR-ACC-3: a step outside 1-3 and a step without an onboarding are refused', async () => {
+  it('FR-ACC-3: the screens 4 and 8, the speed step 7 and a step without an onboarding are refused', async () => {
     const { gateway } = await fakeGateway(db, ANSWERS)
     expect(await submitStep({ db, gateway }, ACC, 1, { say: 'x' })).toMatchObject({
       ok: false,
       reason: 'no_onboarding',
     })
     await startOnboarding(db, ACC, 'edit')
-    expect(await submitStep({ db, gateway }, ACC, 5, { say: 'x' })).toMatchObject({
-      ok: false,
-      reason: 'bad_step',
-    })
+    for (const step of [0, 4, 7, 8])
+      expect(await submitStep({ db, gateway }, ACC, step, { say: 'x' })).toMatchObject({
+        ok: false,
+        reason: 'bad_step',
+      })
     expect(await confirmStep(db, ACC, 1)).toBeNull()
   })
 

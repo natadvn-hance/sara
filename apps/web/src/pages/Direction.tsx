@@ -253,6 +253,10 @@ export function DirectionPage({ accountId }: { accountId: string }) {
             ? 'Кейсов в библиотеке пока нет.'
             : `Кейсов в библиотеке: ${d.profile.cases.length}.`}
         </p>
+        <p>{`Скорость: ${d.profile.speed === 'fast' ? 'быстрая' : 'обычная'}.`}</p>
+        <p className="text-sm text-muted">
+          Формат, кейсы и скорость правятся в настройке, шаги 5-7: «Править текущее направление».
+        </p>
       </Card>
 
       <Card>

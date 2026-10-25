@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, leadLabel, outbox, question, task } from '../../apps/core/src/db/schema'
+import { saveProfile } from '../../apps/core/src/direction/profile'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
@@ -134,6 +135,61 @@ beforeEach(async () => {
 })
 
 describe('the draft on the card', () => {
+  it('FR-LEAD-6: a direction with a format and a case gives a draft with the case link, and the journal keeps the id only', async () => {
+    await saveProfile(
+      db,
+      'hance-marketing',
+      {
+        reply_format: {
+          parts: [{ id: 'understanding', title: 'Понимание', hint: 'Про ситуацию клиента' }],
+          max_chars: 500,
+          tone: [],
+          examples: [],
+          max_cases: 1,
+        },
+        cases: [
+          {
+            id: 'clinic_site',
+            title: 'Сайт клиники',
+            url: 'https://hance.example/cases/clinic',
+            summary: 'Запись онлайн',
+            tags: ['сайт'],
+            show_when: 'Нужен сайт услуг',
+            never_when: null,
+          },
+        ],
+      },
+      'boris',
+    )
+    byRole = { ...byRole, analyst: { ...ANALYST, case_ids: ['clinic_site'] } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const link = 'Похожая работа: Сайт клиники, https://hance.example/cases/clinic'
+    expect((await leadOf(id))?.draftText).toBe(`${DRAFT}\n\n${link}`)
+    expect(cards()[0]?.text).toContain(link)
+    const [drafted] = await eventsOf('lead.drafted', id)
+    expect(drafted?.payload).toMatchObject({ drafted: true, cases: ['clinic_site'] })
+    expect(JSON.stringify(drafted?.payload)).not.toContain('hance.example')
+    // The Analyst was told the rules and was not given the link.
+    const log = (await readFile(claudeLog, 'utf8'))
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+    const call = log.find((c) => c.args.some((a) => a.endsWith('analyst/role.md')))
+    expect(call?.stdin).toContain('clinic_site: Сайт клиники')
+    expect(call?.stdin).not.toContain('hance.example')
+  })
+
+  it('FR-LEAD-6: a direction with no format and no cases drafts exactly as before', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    expect((await leadOf(id))?.draftText).toBe(DRAFT)
+    const [drafted] = await eventsOf('lead.drafted', id)
+    expect(drafted?.payload).toMatchObject({ drafted: true, cases: [] })
+  })
+
   it('FR-LEAD-6: a shown order comes as a card with the Analyst draft and the price', async () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
@@ -161,6 +217,7 @@ describe('the draft on the card', () => {
         price_rub: 90000,
         attempts: 1,
         reason: null,
+        cases: [],
       },
     ])
   })
@@ -208,6 +265,7 @@ describe('the draft on the card', () => {
         price_rub: null,
         attempts: 1,
         reason: 'no_answer',
+        cases: [],
       },
     ])
   })

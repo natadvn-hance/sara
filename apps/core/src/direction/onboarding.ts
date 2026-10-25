@@ -7,19 +7,33 @@ import {
   OnboardingDraft,
   type OnboardingStep,
   OnbStops,
+  ReplyFormat,
   type StepState,
 } from '@sara/shared'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { ZodType } from 'zod'
 import type { Db, DbOrTx } from '../db/client'
-import { directionOnboarding, directionOverride } from '../db/schema'
+import { directionOnboarding, directionOverride, lead } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import type { RoleName } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
 import { rulesText } from '../leads/scorer'
 import { type CalibrationSummary, calibrationPassed, latestCalibration } from './calibration'
+import { type Contradiction, contradictions } from './contradictions'
 import { rulesDiff } from './diff'
-import { getProfile, saveProfileIn } from './profile'
+import { getProfile, type Profile, saveProfileIn } from './profile'
+import {
+  assembleProfile,
+  cleanExample,
+  clientNames,
+  type FormatConfirmed,
+  FormatData,
+  GAP,
+  leadsByIds,
+  pickSampleLeads,
+  proposeCases,
+  proposeFormat,
+} from './profileSteps'
 import { activeRules, insertVersion } from './store'
 
 export type AboutData = Omit<OnbAbout, 'understood'>
@@ -160,8 +174,11 @@ export async function proposeStep(
 // The draft: one open onboarding per account, saved on every step (FR-ACC-3).
 
 export type OnboardingMode = 'new' | 'edit'
+/** The steps of the rules (1-3) wait to be confirmed before the calibration; 5-7 (the profile) are never required. */
 const STEP_KEYS = ['1', '2', '3'] as const
-const isStep = (n: number): n is 1 | 2 | 3 => n === 1 || n === 2 || n === 3
+const isStep = (n: number): n is OnboardingStep =>
+  n === 1 || n === 2 || n === 3 || n === 5 || n === 6 || n === 7
+const isRulesStep = (n: number): n is 1 | 2 | 3 => n === 1 || n === 2 || n === 3
 
 export type OnboardingView = {
   mode: OnboardingMode
@@ -183,7 +200,14 @@ export type OnboardingView = {
   gatePassed: boolean
   /** Whether the direction works, works in the shadow, or is still being set up. */
   directionState: DirectionState
+  /** The profile as the confirmed steps 5-7 would make it, and what that changes, in plain Russian. */
+  profile: ProfileParts
+  profileChanges: string[]
+  /** What the speed and money contradict, in plain words (step 7). */
+  contradictions: Contradiction[]
 }
+
+type ProfileParts = Pick<Profile, 'speed' | 'reply_format' | 'cases'>
 
 const emptyStep = (): StepState => ({
   say: '',
@@ -246,6 +270,7 @@ async function openRow(db: DbOrTx, accountId: string): Promise<Row | null> {
 async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
   const draft = draftOf(row)
   const mode = row.mode === 'new' ? 'new' : 'edit'
+  const now = await getProfile(db, row.accountId)
   if (!draft)
     return {
       mode,
@@ -258,7 +283,10 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
       broken: true,
       calibration: null,
       gatePassed: false,
-      directionState: (await getProfile(db, row.accountId)).state,
+      directionState: now.state,
+      profile: { speed: now.speed, reply_format: now.reply_format, cases: now.cases },
+      profileChanges: [],
+      contradictions: [],
     }
   const active = (await activeRules(db, row.accountId)).rules
   const base = mode === 'edit' ? active : null
@@ -268,6 +296,7 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
   })
   const rules = assembleRules(base, draft)
   const diff = rules ? rulesDiff(active, rules) : null
+  const parts = assembleProfile(now, draft)
   return {
     mode,
     basedOn: row.basedOnVersion,
@@ -279,7 +308,10 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
     calibration: rules ? await latestCalibration(db, row.accountId, rules) : null,
     // The gate looks at the latest finished calibration; a newer repeat still being scored does not hide it.
     gatePassed: rules ? await calibrationPassed(db, row.accountId, rules) : false,
-    directionState: (await getProfile(db, row.accountId)).state,
+    directionState: now.state,
+    profile: parts.profile,
+    profileChanges: parts.lines,
+    contradictions: await contradictions({ db }, row.accountId, parts.profile),
   }
 }
 
@@ -355,9 +387,53 @@ export type SubmitResult =
   | { ok: true; view: OnboardingView }
   | {
       ok: false
-      reason: 'no_answer' | 'invalid' | 'limit' | 'no_onboarding' | 'bad_step' | 'broken'
+      reason:
+        | 'no_answer'
+        | 'invalid'
+        | 'limit'
+        | 'no_onboarding'
+        | 'bad_step'
+        | 'broken'
+        | 'no_leads'
       view: OnboardingView | null
     }
+
+type Reading =
+  | { ok: true; understood: string; data: unknown }
+  | { ok: false; reason: 'no_answer' | 'invalid' | 'limit' | 'no_leads' }
+
+/** Claude's reading of one step: the rules' steps 1-3, the format with sample bids on real orders (5), the cases (6). */
+async function readStep(
+  d: { db: Db; gateway: Gateway },
+  row: Row,
+  draft: OnboardingDraft,
+  mode: OnboardingMode,
+  step: Exclude<OnboardingStep, 7>,
+  a: { say: string; fix?: string; previous?: { understood: string } },
+): Promise<Reading> {
+  if (isRulesStep(step)) {
+    const confirmed: Confirmed = {
+      about: confirmedOf(AboutSchema, draft.steps['1'])?.about,
+      stopFactors: confirmedOf(StopsSchema, draft.steps['2'])?.stop_factors,
+      redFlags: confirmedOf(StopsSchema, draft.steps['2'])?.red_flags,
+    }
+    const current = mode === 'edit' ? (await activeRules(d.db, row.accountId)).rules : null
+    return proposeStep(d, step, { ...a, confirmed, current })
+  }
+  const profile = await getProfile(d.db, row.accountId)
+  if (step === 6) return proposeCases(d.gateway, { ...a, current: profile.cases })
+  // A correction is made on the same orders Boris was looking at; a first reading takes the best ones now.
+  const seen = FormatData.safeParse(draft.steps['5']?.proposal?.data)
+  const leads =
+    a.fix && seen.success
+      ? await leadsByIds(
+          d.db,
+          seen.data.samples.map((x) => x.lead_id),
+        )
+      : await pickSampleLeads(d.db, row.accountId)
+  if (leads.length === 0) return { ok: false, reason: 'no_leads' }
+  return proposeFormat(d.gateway, leads, { ...a, current: profile.reply_format })
+}
 
 /**
  * Boris says (or corrects) a step: Claude reads it and the reading is stored as the step's proposal beside the
@@ -372,23 +448,13 @@ export async function submitStep(
   const row = await openRow(d.db, accountId)
   if (!row) return { ok: false, reason: 'no_onboarding', view: null }
   const view = await viewOf(d.db, row)
-  if (!isStep(step)) return { ok: false, reason: 'bad_step', view }
+  // Step 7 (the speed) is a choice, not a reading; 4 and 8 are screens.
+  if (!isStep(step) || step === 7) return { ok: false, reason: 'bad_step', view }
   const draft = draftOf(row)
   if (!draft) return { ok: false, reason: 'broken', view }
-  const confirmed: Confirmed = {
-    about: confirmedOf(AboutSchema, draft.steps['1'])?.about,
-    stopFactors: confirmedOf(StopsSchema, draft.steps['2'])?.stop_factors,
-    redFlags: confirmedOf(StopsSchema, draft.steps['2'])?.red_flags,
-  }
   const previous = draft.steps[String(step)]?.proposal
-  const current = view.mode === 'edit' ? (await activeRules(d.db, accountId)).rules : null
-  const r = await proposeStep(d, step, {
-    say: a.say,
-    fix: a.fix,
-    previous: a.fix && previous ? { understood: previous.understood } : undefined,
-    confirmed,
-    current,
-  })
+  const again = a.fix && previous ? { understood: previous.understood } : undefined
+  const r = await readStep(d, row, draft, view.mode, step, { ...a, previous: again })
   if (!r.ok) return { ok: false, reason: r.reason, view }
   return d.db.transaction(async (tx) => {
     await lock(tx, `onboarding:${accountId}`)
@@ -419,10 +485,15 @@ export async function confirmStep(
   accountId: string,
   step: number,
 ): Promise<OnboardingView | null> {
+  // The format's samples become examples first: no greeting, no client name.
+  if (step === 5) {
+    const r = await confirmFormat(db, accountId)
+    return r.ok ? r.view : null
+  }
   return db.transaction(async (tx) => {
     await lock(tx, `onboarding:${accountId}`)
     const row = await openRow(tx, accountId)
-    if (!row || !isStep(step)) return null
+    if (!row || !isStep(step) || step === 7) return null
     const draft = draftOf(row)
     const st = draft?.steps[String(step)]
     if (!draft || !st?.proposal) return null
@@ -433,7 +504,107 @@ export async function confirmStep(
   })
 }
 
-/** Edit mode only: the step stays as the active rules have it. A new direction cannot skip steps 1-3. */
+export type ConfirmFormatResult =
+  | { ok: true; view: OnboardingView }
+  | {
+      ok: false
+      error:
+        | 'no_proposal'
+        | 'unknown_lead'
+        | 'empty'
+        | 'has_name'
+        | 'has_contact'
+        | 'too_long'
+        | 'invalid'
+    }
+
+/**
+ * Step 5, «Да, правильно»: the sample bids (as proposed, or as Boris edited them, by lead id) become the examples of
+ * the format. An example is the body only: the greeting goes, and a text that still names a client of the orders is
+ * refused, so no name reaches a model through the examples (ADR-016).
+ */
+export async function confirmFormat(
+  db: Db,
+  accountId: string,
+  edited: { lead_id: string; body: string }[] = [],
+): Promise<ConfirmFormatResult> {
+  return db.transaction(async (tx): Promise<ConfirmFormatResult> => {
+    await lock(tx, `onboarding:${accountId}`)
+    const row = await openRow(tx, accountId)
+    const draft = row ? draftOf(row) : null
+    const st = draft?.steps['5']
+    const proposal = FormatData.safeParse(st?.proposal?.data)
+    if (!row || !draft || !st || !proposal.success) return { ok: false, error: 'no_proposal' }
+    const samples = proposal.data.samples
+    const by = new Map(edited.map((e) => [e.lead_id, e.body]))
+    if ([...by.keys()].some((id) => !samples.some((x) => x.lead_id === id)))
+      return { ok: false, error: 'unknown_lead' }
+    const clients = await tx
+      .select()
+      .from(lead)
+      .where(
+        inArray(
+          lead.id,
+          samples.map((x) => x.lead_id),
+        ),
+      )
+    const names = clientNames(clients)
+    const examples: string[] = []
+    for (const x of samples) {
+      const c = cleanExample(by.get(x.lead_id) ?? x.body, names)
+      if (!c.ok) return c
+      examples.push(c.text)
+    }
+    const format = ReplyFormat.safeParse({ ...proposal.data.reply_format, examples })
+    if (!format.success) return { ok: false, error: 'invalid' }
+    // The sample is shown with its greeting, so the greeting counts against the format's length.
+    if (
+      examples.some(
+        (e, n) => (samples[n]?.greeting.length ?? 0) + GAP + e.length > format.data.max_chars,
+      )
+    )
+      return { ok: false, error: 'too_long' }
+    const confirmed: FormatConfirmed = { reply_format: format.data }
+    // What Boris edited is what the step shows from now on, not the model's first text.
+    const shown = {
+      ...proposal.data,
+      samples: samples.map((x, n) => ({ ...x, body: examples[n] ?? x.body })),
+    }
+    draft.steps['5'] = {
+      ...st,
+      proposal: st.proposal ? { ...st.proposal, data: shown } : st.proposal,
+      confirmed,
+      skipped: false,
+    }
+    await write(tx, accountId, draft)
+    await appendEvent(tx, journal('direction.step_confirmed', accountId, { step: 5 }))
+    return { ok: true, view: await viewOf(tx, { ...row, draft }) }
+  })
+}
+
+/** Step 7: the speed Boris chose. There is nothing for Claude to read, so it is confirmed at once. */
+export async function confirmSpeed(
+  db: Db,
+  accountId: string,
+  speed: 'normal' | 'fast',
+): Promise<OnboardingView | null> {
+  return db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const row = await openRow(tx, accountId)
+    const draft = row ? draftOf(row) : null
+    if (!row || !draft) return null
+    const old = draft.steps['7'] ?? emptyStep()
+    draft.steps['7'] = { ...old, confirmed: { speed }, skipped: false }
+    await write(tx, accountId, draft)
+    await appendEvent(tx, journal('direction.step_confirmed', accountId, { step: 7 }))
+    return viewOf(tx, { ...row, draft })
+  })
+}
+
+/**
+ * The step stays as the active rules (or profile) have it. A new direction cannot skip steps 1-3; steps 5-7 can
+ * always be skipped, the profile has its own defaults.
+ */
 export async function skipStep(
   db: Db,
   accountId: string,
@@ -442,7 +613,7 @@ export async function skipStep(
   return db.transaction(async (tx) => {
     await lock(tx, `onboarding:${accountId}`)
     const row = await openRow(tx, accountId)
-    if (!row || !isStep(step) || row.mode !== 'edit') return null
+    if (!row || !isStep(step) || (isRulesStep(step) && row.mode !== 'edit')) return null
     const draft = draftOf(row)
     if (!draft) return null
     const st = draft.steps[String(step)] ?? emptyStep()
@@ -523,13 +694,17 @@ export async function finishOnboarding(
     if (row.basedOnVersion !== active.version) return { ok: false, error: 'stale' }
     const draft = draftOf(row)
     const rules = draft ? assembleRules(row.mode === 'edit' ? active.rules : null, draft) : null
-    if (!rules) return { ok: false, error: 'incomplete' }
+    if (!draft || !rules) return { ok: false, error: 'incomplete' }
     const done = async (version: number | null) => {
       await tx
         .update(directionOnboarding)
         .set({ state: 'finished', updatedAt: new Date().toISOString() })
         .where(eq(directionOnboarding.accountId, accountId))
-      if (opts.state) await saveProfileIn(tx, accountId, { state: opts.state }, 'boris')
+      // The profile parts of steps 5-7 and the state go in together with the version, in this transaction: if the
+      // profile cannot be saved the version is not made either.
+      const { patch } = assembleProfile(await getProfile(tx, accountId), draft)
+      const profile = opts.state ? { ...patch, state: opts.state } : patch
+      if (Object.keys(profile).length > 0) await saveProfileIn(tx, accountId, profile, 'boris')
       return { ok: true as const, version }
     }
     const sections = rulesDiff(active.rules, rules).sections

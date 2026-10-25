@@ -11,6 +11,7 @@ import {
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
+import { getProfile } from '../direction/profile'
 import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
@@ -229,10 +230,13 @@ async function storePage(
 /** The Analyst's draft, or why there is none; any failure is «no answer», the card comes anyway. */
 async function draftFor(
   o: DraftSource,
-  opts: { correlationId: string; causationId?: string },
+  opts: { correlationId: string; causationId?: string; accountId: string },
 ): Promise<Draft | DraftMiss> {
   try {
-    return await writeDraft(d().gateway, o, opts)
+    // The direction's format and cases for the Analyst; a profile that cannot be read leaves the draft as it was.
+    const profile = await getProfile(d().db, opts.accountId).catch(() => null)
+    const { accountId: _account, ...rest } = opts
+    return await writeDraft(d().gateway, o, { ...rest, ...(profile ? { profile } : {}) })
   } catch (err) {
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
     return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
@@ -280,6 +284,7 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
         price_rub: dr.priceRub,
         attempts: dr.attempts,
         reason: null,
+        cases: dr.cases ?? [],
       }
     : {
         drafted: false,
@@ -288,6 +293,7 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
         price_rub: null,
         attempts: dr.attempts,
         reason: dr.reason,
+        cases: [],
       }
 
 const CardAnalysis = AnalystOutput.pick({ hidden_need: true, risk: true, condition: true })
@@ -479,7 +485,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         async () =>
           (await capSpent().catch(() => false))
             ? null
-            : draftFor({ ...order, ...withPage }, { correlationId, causationId: e.id }),
+            : draftFor({ ...order, ...withPage }, { correlationId, causationId: e.id, accountId }),
         { name: 'draft' },
       )
     : null
@@ -736,7 +742,7 @@ async function draftThenCard(
       l,
       await draftFor(
         { ...sourceOf(l), ...full, client_info: full.client_info ?? sourceOf(l).client_info },
-        { correlationId: l.correlationId },
+        { correlationId: l.correlationId, accountId: l.accountId },
       ),
     )
   await sendCard(taskId, 'summary')

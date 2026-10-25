@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { DirectionRulesShape } from './direction'
+import { DirectionProfileData, DirectionRulesShape, ReplyFormat } from './direction'
 
 /** What each onboarding role returns (FR-ACC-3): the plain restatement for «Правильно понимаю?» and the structure. */
 const understood = z.string().min(1).max(1200)
@@ -50,3 +50,15 @@ export type StepState = z.infer<typeof StepState>
 /** The draft is saved on every step (FR-ACC-3); keys are step numbers. */
 export const OnboardingDraft = z.object({ steps: z.record(z.string(), StepState) })
 export type OnboardingDraft = z.infer<typeof OnboardingDraft>
+
+/** Step 5: the format of a bid and three sample bodies, one per order given, in that order (the greeting is the code's). */
+export const OnbFormat = z.object({
+  understood,
+  reply_format: ReplyFormat,
+  samples: z.array(z.string().min(1).max(500)).max(3),
+})
+export type OnbFormat = z.infer<typeof OnbFormat>
+
+/** Step 6: the whole case library with the show rules, as Claude understood Boris's links and words. */
+export const OnbCases = z.object({ understood, cases: DirectionProfileData.shape.cases })
+export type OnbCases = z.infer<typeof OnbCases>
