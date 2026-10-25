@@ -121,6 +121,31 @@ describe('lessons', () => {
     expect(p?.content).toContain('## Борис')
   })
 
+  it('FR-TRAIN-6: a lesson whose proposal cannot be kept leaves nothing behind', async () => {
+    await expect(
+      createLesson(db, newLesson('conv-turn:1', [example(), example()])),
+    ).rejects.toThrow()
+    expect(await db.select().from(lesson)).toEqual([])
+    expect(await db.select().from(mindProposal)).toEqual([])
+  })
+
+  it('NFR-PRIV-2: a name or a phone in the insight never reaches the example', () => {
+    const c = exampleChange({
+      scope: 'shared',
+      topic: 'call',
+      tone: 'neutral',
+      stage: null,
+      clientText: 'Позвоните',
+      borisText: 'Созвонимся завтра',
+      insight: 'Анна просит звонить на +7 999 123-45-67',
+      source: 'edit:conv-turn:2',
+      names: ['Анна'],
+    })
+    expect(JSON.stringify(c)).not.toContain('Анна')
+    expect(JSON.stringify(c)).not.toContain('999')
+    expect(c.fields.title).toContain('[имя 1]')
+  })
+
   it("NFR-PRIV-2: «Анна, добрый день» in Boris's text becomes the name label in the example", async () => {
     const c = example()
     expect(c.sections['Борис']).toBe('[имя 1], добрый день! Сроки скажу после созвона')

@@ -3,7 +3,7 @@ import { redact } from '../../gateway/redact'
 import type { ProposalKind } from '../../mind/proposals'
 import type { MindChange } from '../types'
 
-const DASHES = /[—–]/g
+const DASHES = /[\u2013\u2014]/g
 /** Splits two texts hidden in one pass, so one client's name gets one tag in both. */
 const SPLIT = '\n<<<раздел>>>\n'
 
@@ -60,8 +60,12 @@ export function exampleChange(l: {
   source: string
   names: string[]
 }): MindChange {
-  const [client = '', boris = ''] = hideClient([l.clientText, l.borisText], l.names)
-  const title = l.insight.trim().slice(0, 80) || 'Ответ Бориса'
+  // The insight too: the model may have named the client or copied a contact (NFR-PRIV-2).
+  const [client = '', boris = '', insight = ''] = hideClient(
+    [l.clientText, l.borisText, l.insight],
+    l.names,
+  )
+  const title = insight.trim().slice(0, 80) || 'Ответ Бориса'
   return {
     file: 'record',
     action: 'create',
@@ -77,7 +81,7 @@ export function exampleChange(l: {
     sections: {
       Клиент: client.trim(),
       Борис: boris.replace(DASHES, '-').trim(),
-      Контекст: l.insight.trim(),
+      Контекст: insight.trim(),
     },
     scenario: null,
     section: null,
@@ -94,8 +98,8 @@ export function knowledgeChange(l: {
   source: string
   names: string[]
 }): MindChange {
-  const [fact = '', when = '', notSay = ''] = hideClient(
-    [l.fact.fact, l.fact.when, l.fact.not_say],
+  const [title = '', fact = '', when = '', notSay = ''] = hideClient(
+    [l.fact.title, l.fact.fact, l.fact.when, l.fact.not_say],
     l.names,
   ).map((t) => t.replace(DASHES, '-').trim())
   return {
@@ -104,7 +108,7 @@ export function knowledgeChange(l: {
     recordId: 'k-i-{n}',
     type: 'knowledge',
     scope: l.scope,
-    fields: { title: l.fact.title.slice(0, 120), topic: l.topic },
+    fields: { title: title.slice(0, 120), topic: l.topic },
     sections: { Факт: fact, 'Когда говорить': when, 'Чего не говорить': notSay },
     scenario: null,
     section: null,

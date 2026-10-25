@@ -1,7 +1,7 @@
 import { newEventId } from '@sara/shared'
 import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { lead, leadLabel, lesson, question, task } from '../db/schema'
+import { lead, leadLabel, lesson, lessonBatch, question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
@@ -191,14 +191,32 @@ export async function openQuestion(
     .orderBy(desc(question.askedAt))
   const edits = recent.filter((q) => (DRAFT_KINDS as string[]).includes(q.kind))
   const whys = recent.filter((q) => !(DRAFT_KINDS as string[]).includes(q.kind))
-  if (edits.length === 0) return whys[0] ?? null
+  if (edits.length === 0) {
+    // «Почему нет?» on two lessons, or on a lesson and a lead: a plain answer is never put on one of them by a guess.
+    const aboutLesson = whys.some((q) => q.kind === 'why_lesson')
+    if (aboutLesson && new Set(whys.map((q) => `${q.kind}:${q.entityId}`)).size > 1)
+      return { ambiguous: [...whys].reverse() }
+    return whys[0] ?? null
+  }
   if (whys.length === 0 && new Set(edits.map((q) => q.entityId)).size === 1) return edits[0] ?? null
   return { ambiguous: recent.reverse() }
 }
 
-/** What a question is about, for a note to Boris: the lead's title (null for the proposal's «почему?»). */
+/**
+ * What a question is about, for a note to Boris: the lead's title, «урок N» by the lesson's number in its batch (null
+ * for the proposal's «почему?»).
+ */
 export async function titleOf(db: Db, q: QuestionRow): Promise<string | null> {
-  if (q.kind === 'why_decline' || q.kind === 'why_lesson') return null
+  if (q.kind === 'why_lesson') {
+    const [b] = await db
+      .select({ ids: lessonBatch.lessonIds })
+      .from(lesson)
+      .innerJoin(lessonBatch, eq(lessonBatch.id, lesson.batchId))
+      .where(eq(lesson.id, q.entityId))
+    const i = ((b?.ids as string[] | undefined) ?? []).indexOf(q.entityId) + 1
+    return i > 0 ? `урок ${i}` : null
+  }
+  if (q.kind === 'why_decline') return null
   const leadId = (DRAFT_KINDS as string[]).includes(q.kind)
     ? (await db.select({ id: task.entityId }).from(task).where(eq(task.id, q.entityId)))[0]?.id
     : q.entityId

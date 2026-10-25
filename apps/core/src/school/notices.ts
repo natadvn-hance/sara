@@ -1,4 +1,5 @@
-import { sql } from 'drizzle-orm'
+import { newEventId } from '@sara/shared'
+import { eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun } from '../db/schema'
 import { getSetting } from '../settings/store'
@@ -18,11 +19,12 @@ const mskHour = (now: Date) => new Date(now.getTime() + MSK_MS).getUTCHours()
  * May the school send this message of its own accord now (FR-NOTIF-3, M5 design 5.16): only from 10:00 to 22:59
  * Moscow time and only while today's messages are under `school.messages_per_day`. A message over the count is
  * deferred: it becomes a line of the evening summary and the caller tries again tomorrow. The place is taken under a
- * lock, so two ticks never make one message too many.
+ * lock, so two ticks never make one message too many. The answer is the place's name (null: not now), to give it back
+ * with `releaseNotice` when the message does not go.
  */
-export async function takeNotice(db: Db, now: Date, kind: NoticeKind): Promise<boolean> {
+export async function takeNotice(db: Db, now: Date, kind: NoticeKind): Promise<string | null> {
   const hour = mskHour(now)
-  if (hour < FROM_HOUR || hour >= TO_HOUR) return false
+  if (hour < FROM_HOUR || hour >= TO_HOUR) return null
   const day = mskDay(now)
   const cap = await getSetting(db, 'school.messages_per_day')
   return db.transaction(async (tx) => {
@@ -36,11 +38,17 @@ export async function takeNotice(db: Db, now: Date, kind: NoticeKind): Promise<b
         .insert(jobRun)
         .values({ name: `deferred:${kind}`, day })
         .onConflictDoNothing()
-      return false
+      return null
     }
-    await tx.insert(jobRun).values({ name: `notice:${n + 1}:${kind}`, day })
-    return true
+    const name = `notice:${kind}:${newEventId()}`
+    await tx.insert(jobRun).values({ name, day })
+    return name
   })
+}
+
+/** A message that did not go (Telegram refused, nothing left to send) gives its place of the day back. */
+export async function releaseNotice(db: Db, name: string): Promise<void> {
+  await db.delete(jobRun).where(eq(jobRun.name, name))
 }
 
 /** The messages that did not fit the day, most important first: lines of the evening summary. */

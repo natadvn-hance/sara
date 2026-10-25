@@ -1,5 +1,5 @@
 import { getSetting } from '../settings/store'
-import { batchesStep } from './lessons/batches'
+import { batchesStep, revertPending, writePending } from './lessons/batches'
 import { historyCards, importMind } from './lessons/history'
 import { runNight } from './night'
 import type { NightJob, SchoolDeps } from './types'
@@ -9,18 +9,24 @@ type Step = { name: string; run(d: SchoolDeps, now: Date): Promise<unknown> }
 /** The night school's jobs (M5 design 5.12); the parts add theirs. */
 export const NIGHT_JOBS: NightJob[] = []
 
-/** The school's jobs, in order on every tick; the parts add theirs. */
+/** A step that does nothing while the school is off. */
+const whenOn =
+  (run: Step['run']): Step['run'] =>
+  async (d, now) => {
+    if (await getSetting(d.db, 'school.on')) await run(d, now)
+  }
+
+/**
+ * The school's jobs, in order on every tick; the parts add theirs. Each is its own step, so one failing never stops
+ * the others; the batch goes before the history card (M5 design 5.16, the order of importance).
+ */
 export const SCHOOL_STEPS: Step[] = [
   { name: 'night', run: (d, now) => runNight(d, NIGHT_JOBS, now) },
-  {
-    name: 'lessons',
-    async run(d, now) {
-      if (!(await getSetting(d.db, 'school.on'))) return
-      await importMind(d)
-      await historyCards(d, now)
-      await batchesStep(d, now)
-    },
-  },
+  { name: 'writePending', run: whenOn((d) => writePending(d)) },
+  { name: 'revertPending', run: whenOn((d) => revertPending(d)) },
+  { name: 'batches', run: (d, now) => batchesStep(d, now) },
+  { name: 'historyCards', run: whenOn((d, now) => historyCards(d, now)) },
+  { name: 'importMind', run: whenOn((d) => importMind(d)) },
 ]
 
 /** Runs the school's jobs once a minute; one failing job never stops the others (as learning/jobs.ts). */

@@ -2,15 +2,16 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
+import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { lesson } from '../../apps/core/src/db/schema'
-import { createMindWriter } from '../../apps/core/src/mind/writer'
-import { batchesStep } from '../../apps/core/src/school/lessons/batches'
+import { lesson, mindProposal } from '../../apps/core/src/db/schema'
+import { batchesStep, writePending } from '../../apps/core/src/school/lessons/batches'
 import { exampleChange } from '../../apps/core/src/school/lessons/records'
 import { createLesson } from '../../apps/core/src/school/lessons/store'
+import type { MindWriter } from '../../apps/core/src/school/types'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
@@ -104,7 +105,22 @@ describe('lesson batches through the bot', () => {
           }),
         ],
       })
-    const writer = createMindWriter({ db, mindDir: '/nowhere', reindex: async () => {} })
+    const applied: string[][] = []
+    const writer: MindWriter = {
+      apply: async (ids) => {
+        applied.push([...ids].sort())
+        return {
+          ok: true,
+          commitId: newEventId(),
+          sha: 'a',
+          mindVersion: 'v',
+          written: ids,
+          refused: [],
+        }
+      },
+      revert: async () => ({ ok: false, reason: 'unknown', detail: 'not here' }),
+      sync: async () => ({ pushed: false, pulled: 0, error: null }),
+    }
     await batchesStep(
       { db, notifier: app.bot.notifier, writer },
       new Date('2026-10-26T11:00:00+03:00'),
@@ -117,5 +133,14 @@ describe('lesson batches through the bot', () => {
       async () => (await db.select().from(lesson).where(eq(lesson.state, 'yes'))).length === 1,
     )
     await until(() => tg.answers.some((a) => a.text === 'Отметила'))
+    const all = batch?.reply_markup?.inline_keyboard[5]?.[0]
+    expect(all?.text).toBe('Все да')
+    tg.pushPress(111, all?.callback_data ?? '')
+    // The second «Отметила» comes once the press has closed the batch.
+    await until(() => tg.answers.filter((a) => a.text === 'Отметила').length === 2)
+    expect(await db.select().from(lesson).where(eq(lesson.state, 'yes'))).toHaveLength(5)
+    await writePending({ db, notifier: app.bot.notifier, writer })
+    const proposals = await db.select({ id: mindProposal.id }).from(mindProposal)
+    expect(applied).toEqual([proposals.map((p) => p.id).sort()])
   })
 })

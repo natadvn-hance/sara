@@ -2,12 +2,12 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { newEventId, parseCallback } from '@sara/shared'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { lesson, mindProposal } from '../../../src/db/schema'
 import type { Notifier } from '../../../src/notify/notifier'
-import { onSchoolPress } from '../../../src/school/lessons/batches'
-import { historyCards, importMind } from '../../../src/school/lessons/history'
+import { onSchoolPress, writePending } from '../../../src/school/lessons/batches'
+import { historyCards, importMind, readable } from '../../../src/school/lessons/history'
 import type { MindWriter } from '../../../src/school/types'
 import { setSetting } from '../../../src/settings/store'
 import { openTestDb, resetDb } from '../../helpers/db'
@@ -23,6 +23,7 @@ const msk = (date: string, hhmm: string) => new Date(`${date}T${hhmm}:00+03:00`)
 
 function fakes() {
   const cards: { text: string; rows: { text: string; callbackData: string }[][] }[] = []
+  const edits: { id: number; text: string }[] = []
   const applied: string[][] = []
   let next = 1
   const notifier: Notifier = {
@@ -32,11 +33,15 @@ function fakes() {
       cards.push({ text, rows })
       return { messageId: next++ }
     },
-    editText: async () => {},
+    editText: async (id, text) => {
+      edits.push({ id, text })
+    },
   }
   const writer: MindWriter = {
     apply: async (ids) => {
       applied.push([...ids].sort())
+      // As the real writer: a written proposal is accepted and never comes back.
+      await db.update(mindProposal).set({ state: 'accepted' }).where(inArray(mindProposal.id, ids))
       return {
         ok: true,
         commitId: newEventId(),
@@ -49,7 +54,7 @@ function fakes() {
     revert: async (id) => ({ ok: true, commitId: id }),
     sync: async () => ({ pushed: false, pulled: 0, error: null }),
   }
-  return { d: { db, notifier, writer }, cards, applied }
+  return { d: { db, notifier, writer }, cards, edits, applied }
 }
 
 async function historyExamples(n: number): Promise<string[]> {
@@ -94,8 +99,13 @@ describe('history and the starting mind', () => {
     const ids = await historyExamples(3)
     await historyCards(f.d, msk('2026-10-26', '11:00'))
     const p = button(f.cards[0] as never, 'Да, все')
-    expect(await onSchoolPress(f.d, p, new Date())).toContain('Записала в разум: 3')
+    expect(await onSchoolPress(f.d, p, new Date())).toContain('Записываю в разум: 3')
+    // Written on the school's tick, never inside the press; the result goes on the card.
+    expect(f.applied).toEqual([])
+    await writePending(f.d)
+    await writePending(f.d)
     expect(f.applied).toEqual([[...ids].sort()])
+    expect(f.edits.map((e) => e.text)).toEqual(['Записала в разум: 3'])
     const [l] = await db.select().from(lesson)
     expect(l).toMatchObject({ source: 'history', kind: 'bulk', state: 'yes' })
     expect(await onSchoolPress(f.d, p, new Date())).toBe('Уже сделано')
@@ -112,6 +122,8 @@ describe('history and the starting mind', () => {
       ['history', 'ready'],
       ['history', 'ready'],
     ])
+    // Boris reads the example itself, not its front matter.
+    expect(ls[0]?.after).toBe('## Клиент\nцена?\n## Борис\nсозвонимся')
     const linked = await db.select().from(mindProposal)
     expect(linked.every((r) => r.lessonId !== null)).toBe(true)
     expect(f.applied).toEqual([])
@@ -139,11 +151,35 @@ describe('history and the starting mind', () => {
     expect(await importMind({ db, mindDir: dir })).toBe(1)
     expect(await importMind({ db, mindDir: dir })).toBe(0)
     const [l] = await db.select().from(lesson)
-    expect(l).toMatchObject({ source: 'import', state: 'ready', kind: 'voice' })
+    expect(l).toMatchObject({
+      source: 'import',
+      state: 'ready',
+      kind: 'voice',
+      after: '## Форма\nКоротко',
+    })
     const [p] = await db
       .select()
       .from(mindProposal)
       .where(eq(mindProposal.lessonId, l?.id ?? ''))
     expect(p).toMatchObject({ path: 'mind/proposals/shared/speech/portrait.md', state: 'new' })
+  })
+
+  it('FR-TRAIN-6: a mind file is shown by its title and body, a scenario by its title and the client', () => {
+    expect(readable('---\nid: k-1\ntitle: "Цены"\ntype: knowledge\n---\n## Факт\nОт 50 000')).toBe(
+      'Цены\n## Факт\nОт 50 000',
+    )
+    expect(
+      readable(
+        JSON.stringify({
+          title: 'Торг',
+          messages: [
+            { author: 'client', text: 'Дорого' },
+            { author: 'boris', text: 'Почему?' },
+            { author: 'client', text: 'Нашёл дешевле' },
+          ],
+        }),
+      ),
+    ).toBe('Торг\nКлиент: Нашёл дешевле')
+    expect(readable('просто текст')).toBe('просто текст')
   })
 })

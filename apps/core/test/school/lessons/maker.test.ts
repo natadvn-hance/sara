@@ -59,6 +59,14 @@ describe('the lesson maker', () => {
     expect(await makeInsight(f.gateway, edit)).toBeNull()
   })
 
+  it("NFR-PRIV-2: a tag the model wrote stays a tag in the insight, never the client's name", async () => {
+    const f = await fakeGateway(db, {
+      'lesson-maker': { ...answer, insight: '[имя 1] торопит, срок не обещать' },
+    })
+    const r = await makeInsight(f.gateway, edit)
+    expect(r?.insight).toBe('[имя 1] торопит, срок не обещать')
+  })
+
   it("NFR-PRIV-2: the client's name never reaches the lesson maker", async () => {
     const f = await fakeGateway(db, { 'lesson-maker': answer })
     await makeInsight(f.gateway, edit)
