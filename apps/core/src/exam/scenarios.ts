@@ -139,6 +139,14 @@ export function caseHitOf(c: ExamCase): CaseHit {
 }
 
 /**
+ * A scenario built from history keeps a phone of the client as the tag `[телефон 1]`. The engine finds a phone in the
+ * client's words by its figures (the call detector), so in the dossier the tag becomes a phone that is none: the turn
+ * sees the request for a call it saw in work. The gateway hides it again before the model reads it.
+ */
+const PHONE_TAG = /\[телефон \d+\]/gu
+const FAKE_PHONE = '+7 900 000-00-00'
+
+/**
  * The dossier the turn engine reads for a scenario: what the live dossier would hold at that moment of the chat. The
  * flags of a new day and of the night follow `s.now`, the stage and the state are the scenario's, and the cases that
  * our side's earlier messages already told are the told cases.
@@ -147,7 +155,7 @@ export function dossierFromScenario(s: ExamScenario, scope = 'shared'): Dossier 
   const messages: DossierMessage[] = s.messages.map((m, i) => ({
     author: m.author,
     side: sideOf(m.author),
-    text: m.text,
+    text: m.text.replace(PHONE_TAG, FAKE_PHONE),
     sentAt: m.at,
     platformMessageId: `${s.id}:${i + 1}`,
   }))

@@ -119,6 +119,82 @@ describe('buildScenarios', { timeout: 30_000 }, () => {
     expect(s.order.title).not.toContain('Анн')
   })
 
+  it('NFR-PRIV-2: a name that only Boris or the client said is hidden when the bid greeted no one', async () => {
+    // The bid of old Sara said only «Добрый день!», and there is no lead: the names are in the other messages.
+    await chat('c1', [
+      [
+        'sara_v1',
+        'Добрый день! Увидели ваш заказ, давайте обсудим задачу.',
+        '2026-10-01T10:00:00Z',
+      ],
+      ['client', 'Здравствуйте, это Ирина Петрова. Сколько стоит сайт?', '2026-10-01T10:30:00Z'],
+      [
+        'boris',
+        'Ирина, добрый день! Цена зависит от задачи, давайте обсудим.',
+        '2026-10-01T11:00:00Z',
+      ],
+    ])
+    expect(await buildScenarios(db, { limit: 5 })).toBe(1)
+    const text = (await proposals())[0]?.content ?? ''
+    for (const leak of ['Ирин', 'Петров']) expect(text, `leaked ${leak}`).not.toContain(leak)
+    const s = ExamScenario.parse(JSON.parse(text))
+    expect(s.client_name).toBe('[имя 1]')
+    expect(s.messages.map((m) => m.text).join(' ')).toContain('[имя 1]')
+    expect(s.expect.boris_reply).toContain('[имя 1], добрый день')
+  })
+
+  it('NFR-PRIV-2: «меня зовут X» of the client and a name from a later message of ours are hidden too', async () => {
+    await chat('c1', [
+      ['sara_v1', 'Добрый день! Увидели ваш заказ.', '2026-10-01T10:00:00Z'],
+      ['sara_v1', 'Олег, смотрим ваш заказ внимательнее.', '2026-10-01T10:05:00Z'],
+      [
+        'client',
+        'Меня зовут Мария Сидорова. Подскажите, как будем работать?',
+        '2026-10-01T10:30:00Z',
+      ],
+      ['boris', 'Начнём с короткого созвона, расскажу как идёт работа.', '2026-10-01T11:00:00Z'],
+    ])
+    expect(await buildScenarios(db, { limit: 5 })).toBe(1)
+    const text = (await proposals())[0]?.content ?? ''
+    for (const leak of ['Олег', 'Мария', 'Сидоров'])
+      expect(text, `leaked ${leak}`).not.toContain(leak)
+  })
+
+  it('NFR-PRIV-2: a message that opens with a name the builder cannot know is not proposed at all', async () => {
+    // «Anna,» is no name the rules find, and no lead names her: the scenario would leak it, so it is left out.
+    await chat('c1', [
+      ['sara_v1', 'Добрый день! Увидели ваш заказ.', '2026-10-01T10:00:00Z'],
+      ['client', 'Anna, подскажите, сколько стоит сайт?', '2026-10-01T10:30:00Z'],
+      ['boris', 'Цена зависит от задачи, давайте обсудим на звонке.', '2026-10-01T11:00:00Z'],
+    ])
+    expect(await buildScenarios(db, { limit: 5 })).toBe(0)
+    // The openers that are no names do not hold a scenario back.
+    await chat('c2', [
+      ['sara_v1', 'Добрый день! Увидели ваш заказ.', '2026-10-02T10:00:00Z'],
+      ['client', 'Здравствуйте, подскажите, сколько стоит сайт?', '2026-10-02T10:30:00Z'],
+      ['boris', 'Борис, понимаю, цена зависит от задачи, давайте обсудим.', '2026-10-02T11:00:00Z'],
+    ])
+    expect(await buildScenarios(db, { limit: 5 })).toBe(1)
+  })
+
+  it('FR-TRAIN-8: a bare «телефон» is not a request for a call', async () => {
+    await chat('c1', [
+      ['sara_v1', 'Добрый день! Увидели ваш заказ.', '2026-10-01T10:00:00Z'],
+      ['client', 'Подскажите, какой у вас телефон на сайте указан?', '2026-10-01T10:30:00Z'],
+      ['boris', 'Телефон есть в шапке сайта, посмотрите там, пожалуйста.', '2026-10-01T11:00:00Z'],
+    ])
+    await chat('c2', [
+      ['sara_v1', 'Добрый день! Увидели ваш заказ.', '2026-10-02T10:00:00Z'],
+      ['client', 'Давайте созвонимся завтра?', '2026-10-02T10:30:00Z'],
+      ['boris', 'Да, давайте, напишу вам время чуть позже.', '2026-10-02T11:00:00Z'],
+    ])
+    await buildScenarios(db, { limit: 5 })
+    const built = (await proposals()).map((r) => ExamScenario.parse(JSON.parse(r.content)))
+    const byText = (re: RegExp) => built.find((b) => re.test(b.messages.at(-1)?.text ?? ''))
+    expect(byText(/телефон/)?.expect).toMatchObject({ move: 'reply' })
+    expect(byText(/созвонимся/)?.expect).toMatchObject({ move: 'call_boris', topic: 'call' })
+  })
+
   it('FR-TRAIN-8: nothing is written but the proposal, and the journal knows of it by number', async () => {
     await chat('c1', [
       ['sara_v1', BID, '2026-10-01T10:00:00Z'],

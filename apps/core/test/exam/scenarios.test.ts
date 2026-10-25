@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { ExamScenario } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
+import { detectCallRequest } from '../../src/conversation/callDetector'
 import {
   dossierFromScenario,
   examNames,
@@ -285,6 +286,37 @@ describe('dossierFromScenario', () => {
     )
     expect(morning.newDay).toBe(true)
     expect(morning.night).toBe(false)
+  })
+
+  it('FR-TRAIN-8: the call detection of the engine sees a phone tag of a history scenario as the phone it was', () => {
+    const d = dossierFromScenario(
+      parse({
+        messages: [
+          { author: 'sara_v1', text: 'Добрый день!', at: '2026-11-09T07:00:00Z' },
+          {
+            author: 'client',
+            text: 'Мой номер [телефон 1], позвоните',
+            at: '2026-11-09T07:10:00Z',
+          },
+        ],
+      }),
+    )
+    const said = d.messages.at(-1)?.text ?? ''
+    expect(said).not.toContain('[телефон')
+    expect(detectCallRequest(said)?.phone).toBeTruthy()
+    // Other tags stay tags.
+    const other = dossierFromScenario(
+      parse({
+        messages: [
+          {
+            author: 'client',
+            text: 'Пишите на [почта 1] или [ссылка 1]',
+            at: '2026-11-09T07:10:00Z',
+          },
+        ],
+      }),
+    )
+    expect(other.messages[0]?.text).toBe('Пишите на [почта 1] или [ссылка 1]')
   })
 
   it('FR-TRAIN-8: the state, the note of Boris and an empty order come through', () => {

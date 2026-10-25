@@ -35,7 +35,7 @@ const CATEGORIES: [Category, RegExp][] = [
   ['discount', /скидк|акци[яию]|дешевле|торг/iu],
   ['contract', /договор|гарант|\bакт[аы]?\b|документ/iu],
   ['nda', /\bnda\b|\bнда\b|конфиденц|неразглаш/iu],
-  ['call', /созвон|позвон|звонок|звонить|телефон|набер|встреч/iu],
+  ['call', /созвон|позвон|звонок|звонить|набер|встреч/iu],
   ['timeline', /срок|сколько\s+времени|как\s+быстро|когда\s+будет|за\s+сколько\s+дн/iu],
   ['cases', /пример|кейс|портфолио|работали\s+с|делали\s+(?:уже|для)/iu],
   [
@@ -131,12 +131,67 @@ function spread(candidates: Candidate[], limit: number): Candidate[] {
   return picked
 }
 
-/** The name our bid greeted the client with, as the live dossier finds it. */
-function greetedName(chat: Row[]): string | null {
-  const first = chat.find((m) => m.side === 'specialist')
-  const greeted = /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
-  const folded = greeted?.toLowerCase().replace(/ё/g, 'е') ?? ''
-  return greeted && !NOT_NAMES.has(folded) ? greeted : null
+const NAME = '[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?'
+/** «Ирина, добрый день», «Ирина! Добрый день»: a name before the comma at the start of a message of ours. */
+const LEADING_NAME = new RegExp(`^\\s*(${NAME})\\s*[,!]`, 'u')
+/** «Меня зовут Ирина Петрова», «это Ирина»: how a client names himself. */
+const SELF_NAME = new RegExp(`(?:[Мм]еня\\s+зовут|[Ээ]то)\\s+(${NAME}(?:\\s+${NAME})?)`, 'gu')
+/** A word that opens a message before a comma and is no client's name: the stoplist of the greeting check, and Boris. */
+const NOT_A_NAME = new Set([
+  ...NOT_NAMES,
+  'борис',
+  'расскажите',
+  'напишите',
+  'посмотрите',
+  'пожалуйста',
+  'если',
+  'вот',
+  'так',
+  'ну',
+])
+const fold = (w: string) => w.toLowerCase().replace(/ё/g, 'е')
+
+/**
+ * The names to hide in a chat (ADR-016): the lead's, a name before the comma in any message of ours (a bid that said
+ * only «Добрый день!» gives none, but Boris's answer may start «Ирина, ...»), and the name a client gave himself. A name
+ * the builder cannot find leaks: with no name found at all, a scenario whose message opens with an unknown capitalized word and a comma is dropped.
+ */
+function namesOf(rows: Row[], leadName: string | undefined): string[] {
+  const found = new Map<string, string>()
+  const add = (name: string | undefined) => {
+    if (name?.trim()) found.set(fold(name), name.trim())
+  }
+  add(leadName)
+  for (const m of rows) {
+    if (m.side === 'specialist') {
+      const word = LEADING_NAME.exec(m.text)?.[1]
+      if (word && !NOT_A_NAME.has(fold(word))) add(word)
+    }
+    if (m.side === 'client') for (const x of m.text.matchAll(SELF_NAME)) add(x[1])
+  }
+  return [...found.values()]
+}
+
+/** The first word that opens a text before a comma and is neither a known name nor a stopword; null if none. */
+function unknownOpener(texts: string[], names: string[]): string | null {
+  const known = new Set(names.flatMap((n) => n.split(/\s+/)).map(fold))
+  for (const t of texts) {
+    const word = /^\s*(\p{Lu}[\p{L}-]*)\s*,/u.exec(t)?.[1]
+    if (word && !NOT_A_NAME.has(fold(word)) && !known.has(fold(word))) return word
+  }
+  return null
+}
+
+/** Whether a text still holds a name or a stem of it (a case ending may differ): the last look before a proposal. */
+function holdsName(text: string, names: string[]): boolean {
+  const lower = fold(text)
+  return names
+    .flatMap((n) => n.split(/\s+/))
+    .filter((w) => [...w].length >= 3)
+    .some((w) => {
+      const word = fold(w)
+      return lower.includes(word.length >= 5 ? word.slice(0, -2) : word)
+    })
 }
 
 async function scenarioOf(db: Db, c: Candidate, n: number): Promise<ExamScenario | null> {
@@ -144,9 +199,7 @@ async function scenarioOf(db: Db, c: Candidate, n: number): Promise<ExamScenario
   const [known] = answer.orderId
     ? await db.select().from(lead).where(eq(lead.id, answer.orderId))
     : []
-  const names = [
-    ...new Set([known?.clientName, greetedName(c.rows)].filter((x): x is string => !!x?.trim())),
-  ]
+  const names = namesOf(c.rows, known?.clientName)
   const tag = (t: string) => hide(t, names)
   const from = Math.max(0, c.turn - CONTEXT)
   const window = c.rows.slice(from, c.answer)
@@ -201,8 +254,16 @@ async function scenarioOf(db: Db, c: Candidate, n: number): Promise<ExamScenario
   const text = JSON.stringify(parsed.data)
   const left = redact(text).counts
   if (left.phone + left.email + left.link > 0) return null
-  const lower = text.toLowerCase().replace(/ё/g, 'е')
-  if (names.some((x) => x.length >= 3 && lower.includes(x.toLowerCase().replace(/ё/g, 'е'))))
+  if (holdsName(text, names)) return null
+  // With no name found at all, a message that opens with a capitalized word and a comma may open with the client's
+  // name that no rule can read («Anna, ...»): the scenario would leak it, so it is not proposed.
+  if (
+    names.length === 0 &&
+    unknownOpener(
+      [...opening, ...window, answer].map((m) => m.text),
+      names,
+    )
+  )
     return null
   return parsed.data
 }
