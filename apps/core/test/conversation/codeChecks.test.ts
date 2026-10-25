@@ -639,6 +639,49 @@ describe('cases in a reply', () => {
     ).toEqual(['facts.numbers'])
   })
 
+  it('FR-CONV-4: an abbreviation in the name of a case is no brand: «для компании под NDA, без названия» passes', () => {
+    const NDA = caseHit({
+      id: 'k-case-18',
+      title: 'Компания под NDA',
+      summary: 'Сделали сайт и настроили рекламу.',
+      showRules: ['Компанию не называть: NDA.'],
+      nameOpen: false,
+    })
+    const B2B = caseHit({
+      id: 'k-case-22',
+      title: 'B2B-компания под NDA',
+      summary: 'Выстроили систему продаж.',
+      showRules: ['Компанию не называть: NDA.'],
+      nameOpen: false,
+    })
+    const HORECA = caseHit({
+      id: 'k-case-05',
+      title: 'A/B Company: аудиобрендинг для HoReCa',
+      summary: 'Собрали аудиобрендинг для HoReCa.',
+      showRules: ['Компанию не называть: NDA.'],
+      nameOpen: false,
+    })
+    const FUNNEL = caseHit({
+      id: 'k-case-23',
+      title: 'SaaS-сервис: CRM, SEO и SMM',
+      summary: 'Выстроили воронку.',
+      showRules: ['Компанию не называть: NDA.'],
+      nameOpen: false,
+    })
+    for (const [c, text] of [
+      [NDA, 'Делали для компании под NDA, без названия: сайт и реклама.'],
+      [B2B, 'Делали для B2B-компании под NDA, название не скажу.'],
+      [HORECA, 'Делали аудиобрендинг для HoReCa, там помогли A/B тесты.'],
+      [FUNNEL, 'Делали для SaaS, настроили CRM, SEO и SMM.'],
+    ] as const)
+      expect(withCases(text, { offered: [c], choice: choose(c) }), text).toEqual([])
+    // A real brand next to an abbreviation is still closed.
+    const SKY: CaseHit = { ...SKYROOM, title: 'SkyRoom: студии для B2B под NDA' }
+    expect(
+      withCases('Делали для SkyRoom, B2B.', { offered: [SKY], choice: choose(SKY) }),
+    ).toContain('case.closed')
+  })
+
   it('FR-CONV-4: «взгляните на наш кейс» is robotic', () => {
     for (const text of [
       'Взгляните на наш кейс!',

@@ -37,9 +37,59 @@ export function namesCase(text: string, title: string): boolean {
 }
 
 /**
+ * Abbreviations and trade words of the portfolio that stand in a case's title but name no company: «Компания под NDA»,
+ * «B2B-компания», «аудиобрендинг для HoReCa». Folded; a hyphenated word with one of them («B2B-компания») is no brand.
+ */
+const NOT_A_BRAND = new Set([
+  'nda',
+  'a/b',
+  'b2b',
+  'b2c',
+  'c2c',
+  'b2g',
+  'crm',
+  'erp',
+  'cms',
+  'saas',
+  'seo',
+  'smm',
+  'sem',
+  'ppc',
+  'cpa',
+  'cpc',
+  'cpl',
+  'roi',
+  'kpi',
+  'ctr',
+  'it',
+  'hr',
+  'pr',
+  'ui',
+  'ux',
+  'api',
+  'pwa',
+  'sms',
+  'mvp',
+  'gtm',
+  'jtbd',
+  'ai',
+  'horeca',
+  'ecommerce',
+  'e-commerce',
+  'fintech',
+  'fitnesstech',
+  'edtech',
+  'proptech',
+  'online',
+  'offline',
+  'digital',
+])
+
+/**
  * The words of a case's name that are a name and not a description: a word with a Latin letter or a digit, a hyphenated
- * word, or a capitalized word that is not the first. «Сеть стоматологий» has none (it says what the client is), so a
- * company under NDA may be told by it; the code cannot know a name the record does not show.
+ * word, or a capitalized word that is not the first, but never an abbreviation (NOT_A_BRAND). «Сеть стоматологий» has
+ * none (it says what the client is), so a company under NDA may be told by it; the code cannot know a name the record
+ * does not show.
  */
 function brandWords(title: string): string[] {
   return caseName(title)
@@ -47,7 +97,11 @@ function brandWords(title: string): string[] {
     .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
     .filter(
       (w, k) =>
-        w.length > 1 && (/[A-Za-z0-9]/.test(w) || w.includes('-') || (k > 0 && /^\p{Lu}/u.test(w))),
+        w.length > 1 &&
+        !fold(w)
+          .split('-')
+          .some((part) => NOT_A_BRAND.has(part)) &&
+        (/[A-Za-z0-9]/.test(w) || w.includes('-') || (k > 0 && /^\p{Lu}/u.test(w))),
     )
 }
 
