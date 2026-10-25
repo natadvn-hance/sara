@@ -5,6 +5,7 @@ import { TransitionError, transition } from '../domain/deal'
 import { getSetting } from '../settings/store'
 import {
   dormantStep,
+  expireDormantTask,
   fallbackStep,
   giveUpDormant,
   groundStep,
@@ -152,7 +153,15 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
       const answer = await DBOS.recv<string>('decision', {
         timeoutSeconds: d().dormantWaitS ?? DORMANT_WAIT_S,
       })
-      if (answer !== 'remind') return
+      if (answer !== 'remind') {
+        // No answer in the whole time: the task is closed, not left open with buttons that promise what will not come.
+        if (answer === null)
+          await DBOS.runStep(() => expireDormantTask(d(), rowId), {
+            name: `dormant-expire-${k}`,
+            ...DB_STEP,
+          })
+        return
+      }
       continued = true
       continue
     }
@@ -290,6 +299,7 @@ export async function syncReminders(
     fresh.owner === 'sara'
   if (!on) {
     await cancelReminders(conv.id)
+    await resolveDormantTasks(conv.id)
     return
   }
   // The ladder's own reminders stand in the chat as our side's messages and are not a new beginning.
@@ -310,12 +320,16 @@ const isMissingWorkflow = (e: unknown) =>
 export async function decideDormant(
   reminderTurnId: string,
   decision: 'remind' | 'close',
-): Promise<void> {
+): Promise<boolean> {
   const wf = reminderTurnId.slice(0, reminderTurnId.lastIndexOf(':'))
+  // Only a process that still waits can be told; the caller says so plainly to Boris when it does not.
+  if ((await DBOS.getWorkflowStatus(wf))?.status !== 'PENDING') return false
   try {
     await DBOS.send(wf, decision, 'decision', `dormant:${reminderTurnId}:${decision}`)
+    return true
   } catch (e) {
     // DBOS names this error by its class only in the code: the error object's `name` is plain «Error».
     if (!isMissingWorkflow(e)) throw e
+    return false
   }
 }

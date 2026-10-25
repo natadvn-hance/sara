@@ -312,6 +312,14 @@ export async function groundStep(
   return g
 }
 
+/** Boris did not answer the task of a quiet client in the whole time: it is closed, no button of it promises anything. */
+export async function expireDormantTask(d: RemindDeps, rowId: string): Promise<void> {
+  await d.db
+    .update(task)
+    .set({ state: 'resolved', resolution: 'expired', resolvedAt: new Date().toISOString() })
+    .where(and(eq(task.kind, 'conv_dormant'), eq(task.entityId, rowId), eq(task.state, 'open')))
+}
+
 /** The dormant day could not be told to Boris in the whole time it was tried: the row says why. */
 export async function giveUpDormant(d: RemindDeps, rowId: string, why: string): Promise<void> {
   await finishRow(d.db, rowId, {
