@@ -19,7 +19,7 @@ import type {
 } from './types'
 
 /** Records on every turn: who Sara is, the greeting, Boris's topics, Hance's values, the speech portrait. */
-const ALWAYS = ['j-constitution', 'j-greeting', 'j-autonomy', 'j-hance-values', 's-portrait']
+export const ALWAYS = ['j-constitution', 'j-greeting', 'j-autonomy', 'j-hance-values', 's-portrait']
 
 /** One rewrite after failed checks, then a draft (M4 design 5.6). */
 const MAX_ATTEMPTS = 2
