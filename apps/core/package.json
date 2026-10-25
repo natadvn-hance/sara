@@ -11,7 +11,8 @@
     "bids": "tsx src/settings/cli.ts",
     "report:shadow": "tsx src/analytics/shadowCli.ts",
     "direction": "tsx src/direction/cli.ts",
-    "score:eval": "tsx src/leads/scoreEvalCli.ts"
+    "score:eval": "tsx src/leads/scoreEvalCli.ts",
+    "report:school": "tsx src/school/reportCli.ts"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "5.3.0",
