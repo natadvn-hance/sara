@@ -118,22 +118,56 @@ const DASHES = /[\u2013\u2014]/
 const THOUSANDS = /^\s*(?:тыс|т\.\s*р|к(?!\p{L}))/iu
 const MILLIONS = /^\s*(?:млн|миллион)/iu
 
-type Num = { shown: string; keys: string[] }
+type Num = { shown: string; key: string }
 
-/** The numbers of a text that may be facts, each with the values it may stand for («50 тысяч» is 50 and 50000). */
+const PERCENT = /^\s*(?:%|проц)/iu
+/** What stands between two numbers of a range: «50-70 тысяч», «от 50 до 70 тысяч». */
+const RANGE = /^\s*(?:\p{Pd}|до|или)\s*$/iu
+
+/**
+ * The numbers of a text that may be facts. A number is keyed by its scaled value only («50 тысяч» is 50000, never
+ * also 50), a percent keeps its sign («30%» is not 30), and a scale or percent at the end of a range belongs to the
+ * number before it («50-70 тысяч», «от 50 до 70 тысяч»).
+ */
 function numbersIn(masked: string): Num[] {
-  const out: Num[] = []
+  type Raw = {
+    shown: string
+    start: number
+    end: number
+    value: number
+    scale: number | null
+    percent: boolean
+  }
+  const raws: Raw[] = []
   for (const m of masked.matchAll(NUMBER)) {
     const shown = m[0]
-    const after = masked.slice(m.index + shown.length)
+    const end = m.index + shown.length
+    const after = masked.slice(end)
     const digits = shown.replace(/[^\d.,]/g, '').replace(',', '.')
     // A small number written into a word is a name, not a fact: 3D, 1С, 2-й.
     if (digits.length === 1 && /^-?\p{L}/u.test(after)) continue
-    const value = Number(digits)
-    const scale = THOUSANDS.test(after) ? 1000 : MILLIONS.test(after) ? 1_000_000 : 1
-    out.push({ shown, keys: [...new Set([String(value), String(value * scale)])] })
+    raws.push({
+      shown,
+      start: m.index,
+      end,
+      value: Number(digits),
+      scale: THOUSANDS.test(after) ? 1000 : MILLIONS.test(after) ? 1_000_000 : null,
+      percent: shown.endsWith('%') || PERCENT.test(after),
+    })
   }
-  return out
+  // Walk back so the scale of «70 тысяч» reaches «50» and, through «30-50-70 тысяч», every number of the range.
+  for (let k = raws.length - 2; k >= 0; k--) {
+    const here = raws[k]
+    const next = raws[k + 1]
+    if (!here || !next || here.scale !== null || here.percent) continue
+    if (!RANGE.test(masked.slice(here.end, next.start))) continue
+    here.scale = next.scale
+    here.percent = next.percent
+  }
+  return raws.map((r) => {
+    const value = Math.round(r.value * (r.scale ?? 1) * 1e6) / 1e6
+    return { shown: r.shown, key: r.percent ? `${value}%` : String(value) }
+  })
 }
 
 /** The numbers of a text as written: «50 000», «1,5», «30%»; never a phone, a clock time or a date. */
@@ -192,7 +226,7 @@ function factIssues(i: CheckInput, text: string): CheckIssue[] {
   const sources = [...i.factIds.map((id) => i.knowledgeTexts[id] ?? ''), i.clientTurnText]
   for (const s of sources) {
     const { rest, found } = cutOut(s, true)
-    for (const n of numbersIn(rest)) for (const k of n.keys) allowed.add(k)
+    for (const n of numbersIn(rest)) allowed.add(n.key)
     for (const f of found) {
       allowedTokens.add(`${f.kind}:${f.key}`)
       // «9:00» in a record also lets «с 9 до 18» through; «27.10» lets «27 октября».
@@ -209,8 +243,8 @@ function factIssues(i: CheckInput, text: string): CheckIssue[] {
     issues.push({ id: 'facts.numbers', detail: `${KIND_NAME[f.kind]} ${f.shown} не из разума` })
   }
   for (const n of numbersIn(rest)) {
-    if (n.keys.some((k) => allowed.has(k)) || told.has(n.keys[0] ?? '')) continue
-    told.add(n.keys[0] ?? '')
+    if (allowed.has(n.key) || told.has(n.key)) continue
+    told.add(n.key)
     issues.push({ id: 'facts.numbers', detail: `число ${n.shown} не из разума` })
   }
   return issues
