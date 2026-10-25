@@ -212,6 +212,16 @@ describe('mind search', () => {
     expect(await find(['бассейн', ...filler(31), 'веранда'].join(' '))).toEqual(['k-late'])
   })
 
+  it('FR-MIND-2: a query of stop words only finds nothing, and with a real word the stop words do not matter', async () => {
+    await ensureMindIndex(db, await priceMind())
+    const find = async (text: string, field?: 'example_client') =>
+      (await mind.search({ text, scope: DIR, types: [], limit: 5, field })).map((h) => h.id)
+    expect(await find('что как это для')).toEqual([])
+    expect(await find('что как это для', 'example_client')).toEqual([])
+    expect(await find('что, как? это!')).toEqual([])
+    expect(await find('что как это сайт цена')).toEqual(['k-price'])
+  })
+
   it('FR-MIND-3: a proposal and an outdated record are not found', async () => {
     const root = await tempMind()
     const body = 'Гарантия на сайт один год.'
