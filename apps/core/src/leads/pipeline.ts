@@ -3,6 +3,7 @@ import {
   AnalystOutput,
   ClientInfo,
   type EventEnvelope,
+  type GetOrderOutput,
   newEventId,
   ProfiOrder,
   type TaskAction,
@@ -24,7 +25,7 @@ import {
 } from '../learning/questions'
 import { analysisMessages, type LeadCard, TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
-import type { ProfiClient } from '../profi/client'
+import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
@@ -47,7 +48,7 @@ export type LeadPipelineDeps = {
   gateway: Gateway
   notifier: Notifier
   /** The wallet for the money check before a bid (FR-LEAD-9). */
-  profi: Pick<ProfiClient, 'sessionHealth'>
+  profi: Pick<ProfiClient, 'sessionHealth' | 'getOrder'>
   remindAfterMs: () => Promise<number>
   /** Card sending is retried, for example while the bot is starting (default 5 attempts from 2 s). */
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
@@ -78,6 +79,7 @@ const ev = (
     | 'lead.scored'
     | 'lead.skipped'
     | 'lead.stale'
+    | 'lead.page_read'
     | 'lead.held'
     | 'lead.drafted'
     | 'draft.edited'
@@ -115,6 +117,112 @@ const sourceOf = (l: LeadRow): DraftSource => ({
   client_name: l.clientName,
   client_info: ClientInfo.safeParse(l.clientInfo).data ?? null,
 })
+
+/** What the order page said (the plain data of a durable step), or why it could not be read. */
+type PageRead = { ok: true; page: GetOrderOutput } | { ok: false; error: string }
+
+/**
+ * The order page through the node; any failure is «not read»: the card goes on with what the board showed. An answer
+ * the node gives from its store (the tab may not move, the page gave no order answer), or an older node's answer that
+ * does not say, is no read either: it would pass a closed order and an order already bid on.
+ */
+async function readPage(accountId: string, orderId: string): Promise<PageRead> {
+  try {
+    const page = await d().profi.getOrder(accountId, orderId)
+    return page.from_page === true ? { ok: true, page } : { ok: false, error: 'NOT_READ' }
+  } catch (err) {
+    const error = err instanceof ProfiError ? err.errorClass : 'INTERNAL'
+    console.error('order page not read', orderId, error)
+    return { ok: false, error }
+  }
+}
+
+/** The order with what its page added: the fee, and the client name and text only where the board gave none. */
+function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'>>(
+  o: T,
+  r: PageRead,
+): T & { client_info: ClientInfo | null } {
+  if (!r.ok) return { ...o, client_info: null }
+  const p = r.page
+  return {
+    ...o,
+    bid_price_rub: p.bid_price_rub > 0 ? p.bid_price_rub : o.bid_price_rub,
+    client_name: o.client_name || p.client_name,
+    text: o.text || p.text,
+    client_info: p.client_info ?? null,
+  }
+}
+
+/**
+ * What the page says about offering the order: already bid on (checked first: such an order may show no form),
+ * closed, or fine (also when it was not read).
+ */
+const pageVerdict = (r: PageRead): 'go' | 'closed' | 'bid_already' =>
+  !r.ok ? 'go' : r.page.has_bid === true ? 'bid_already' : !r.page.open ? 'closed' : 'go'
+
+/**
+ * The page's findings go on the lead, and into the journal as numbers and flags, never as the client's words
+ * (ADR-016). A closed order or one this account already bid on gets its status and is not offered.
+ */
+async function storePage(
+  l: { id: string; correlationId: string },
+  full: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
+    client_info: ClientInfo | null
+  },
+  r: PageRead,
+  sorted: Sorted,
+): Promise<'go' | 'closed' | 'bid_already'> {
+  const verdict = pageVerdict(r)
+  await d().db.transaction(async (tx) => {
+    if (r.ok) {
+      await tx
+        .update(lead)
+        .set({
+          bidPriceRub: full.bid_price_rub,
+          clientName: full.client_name,
+          text: full.text,
+          // A page that shows no client leaves what an earlier read stored.
+          ...(full.client_info && { clientInfo: full.client_info }),
+          ...(verdict !== 'go' && { status: verdict }),
+        })
+        .where(eq(lead.id, l.id))
+    }
+    await appendEvent(
+      tx,
+      ev(
+        'lead.page_read',
+        { kind: 'lead', id: l.id },
+        l.correlationId,
+        'sara',
+        r.ok
+          ? {
+              ok: true,
+              open: r.page.open,
+              has_bid: r.page.has_bid,
+              fee_rub: r.page.bid_price_rub > 0 ? r.page.bid_price_rub : null,
+              client_info: full.client_info !== null,
+              error: null,
+            }
+          : {
+              ok: false,
+              open: null,
+              has_bid: null,
+              fee_rub: null,
+              client_info: false,
+              error: r.error,
+            },
+      ),
+    )
+    // An order that stops here never reaches the task step, which journals the Sorter's verdict.
+    if (verdict !== 'go' && sorted.verdict) {
+      await appendEvent(
+        tx,
+        ev('lead.sorted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', sorted),
+      )
+    }
+  })
+  return verdict
+}
 
 /** The Analyst's draft, or why there is none; any failure is «no answer», the card comes anyway. */
 async function draftFor(
@@ -339,6 +447,29 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (scored.decision === 'drop') return
   }
 
+  // Only an order that passed the Sorter and the Scorer on what the board showed costs a visit of the one tab. A run
+  // recorded before this step existed resumes along its old steps and keeps the board's data.
+  let withPage: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
+    client_info: ClientInfo | null
+  } = { ...order, client_info: null }
+  if (await DBOS.patch('order-page')) {
+    // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
+    // (with its draft, draftThenCard).
+    const held = await DBOS.runStep(() => capSpent().catch(() => false), { name: 'capBeforePage' })
+    if (!held) {
+      const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
+        name: 'orderPage',
+      })
+      withPage = fuller(order, read)
+      const verdict = await DBOS.runStep(
+        () => storePage({ id: order.order_id, correlationId }, withPage, read, sorted),
+        { name: 'orderPageStored', ...DB_STEP },
+      )
+      // Closed, or already bid on: nothing to offer, no card and no model call.
+      if (verdict !== 'go') return
+    }
+  }
+
   // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.
   // An order the day's cap will hold goes to the summary undrafted: «Показать» writes its draft if Boris asks.
   const draft = (await DBOS.patch('analyst-draft'))
@@ -346,7 +477,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         async () =>
           (await capSpent().catch(() => false))
             ? null
-            : draftFor(order, { correlationId, causationId: e.id }),
+            : draftFor({ ...order, ...withPage }, { correlationId, causationId: e.id }),
         { name: 'draft' },
       )
     : null
@@ -406,11 +537,12 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     title: order.title,
     city: order.city,
     budgetText: order.budget_text,
-    clientName: order.client_name,
-    text: order.text,
+    // What the order page added (a name or a text the board lacked) is on the card too.
+    clientName: withPage.client_name,
+    text: withPage.text,
     verdict: sorted.verdict,
     reason: sorted.reason,
-    bidPriceRub: order.bid_price_rub,
+    bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
     draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
@@ -537,10 +669,52 @@ async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> 
   }
 }
 
-/** A dropped order Boris wants after all: its draft first (the Scorer's drop wrote none), then its card. */
+/**
+ * A dropped order Boris wants after all: its page first (the Scorer's drop never opened it, and hours have passed),
+ * then its draft, then its card. An order closed meanwhile, or already bid on, ends its decision task with a word
+ * to Boris instead of a card.
+ */
 async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
+  const read = await readPage(l.accountId, l.id)
+  const full = fuller(
+    { bid_price_rub: l.bidPriceRub, client_name: l.clientName, text: l.text },
+    read,
+  )
+  const verdict = await storePage(l, full, read, { verdict: null, reason: null })
+  if (verdict !== 'go') {
+    const ended = await d().db.transaction(async (tx) => {
+      const rows = await tx
+        .update(task)
+        .set({ state: 'resolved', resolution: 'skip', resolvedAt: new Date().toISOString() })
+        .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+        .returning({ id: task.id })
+      // Decided meanwhile (Boris pressed something): nothing to end, nothing to say.
+      if (rows.length === 0) return false
+      await appendEvent(
+        tx,
+        ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'sara', {
+          action: 'skip',
+          reason: verdict,
+        }),
+      )
+      return true
+    })
+    if (ended) {
+      await deliverDecision(taskId, 'skip')
+      await d().notifier.sendText(
+        verdict === 'closed' ? CARD_FLOW_TEXTS.pageClosed : CARD_FLOW_TEXTS.pageBidAlready,
+      )
+    }
+    return
+  }
   if (!l.draftText)
-    await storeDraft(l, await draftFor(sourceOf(l), { correlationId: l.correlationId }))
+    await storeDraft(
+      l,
+      await draftFor(
+        { ...sourceOf(l), ...full, client_info: full.client_info ?? sourceOf(l).client_info },
+        { correlationId: l.correlationId },
+      ),
+    )
   await sendCard(taskId, 'summary')
 }
 

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,7 @@ import { outboxNode, rawEvent, rawMessage, rawOrder } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { startInsurance } from '../src/eyes/insurance'
 import { standInParsers } from '../src/eyes/parsers'
+import { profiParsers } from '../src/eyes/profiParsers'
 import { attachRecorder } from '../src/eyes/recorder'
 import { nodeTestUrl, openNodeTestDb, resetNodeDb } from './helpers/db'
 import { loginStandIn } from './helpers/site'
@@ -216,11 +218,10 @@ describe('eyes', () => {
     ).toEqual(['good'])
   })
 
-  it('ST-M1-06: an order known only from the board waits for its page and goes out once with the fee', async () => {
+  it('FR-LEAD-1: an order from the board goes out at once with the words of the board and a fee of 0, once', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
     const board = (id: string) => ({
       t: 'order' as const,
-      needsPage: true,
       order: {
         order_id: id,
         title: 'Реклама на ТВ',
@@ -238,43 +239,65 @@ describe('eyes', () => {
       { recognized: true, what: 'feed', signals: [board('901'), board('902')] },
       'response',
     )
-    expect(await events('profi.order_seen')).toHaveLength(0)
-    expect(e.ordersWantingPage()).toEqual(['901', '902'])
-    // The order page knows the fee; its own reading of the text is rougher than the board's.
-    await e.onParsed(
-      {
-        recognized: true,
-        what: 'order',
-        signals: [
-          {
-            t: 'order',
-            order: {
-              ...board('901').order,
-              text: 'обрезано',
-              budget_text: null,
-              bid_price_rub: 145,
-            },
-            published_at: null,
-          },
-        ],
-      },
-      'dom',
-    )
-    // An order page that cannot be read still lets the order through, without a fee.
-    await e.settleOrder('902')
+    // The next minute the board shows them again: nothing new.
     await e.onParsed({ recognized: true, what: 'feed', signals: [board('901')] }, 'response')
     const seen = await events('profi.order_seen')
     expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub, x.payload.text])).toEqual([
-      ['901', 145, 'Полный текст с доски'],
+      ['901', 0, 'Полный текст с доски'],
       ['902', 0, 'Полный текст с доски'],
     ])
-    expect(seen[0]?.payload.budget_text).toBe('до 50 000 ₽')
-    expect(e.ordersWantingPage()).toEqual([])
+    expect(seen[0]?.payload).toMatchObject({
+      client_name: 'Андрей',
+      budget_text: 'до 50 000 ₽',
+      published_at: '2026-10-24T08:00:00.000Z',
+    })
+  })
+
+  it('FR-LEAD-1: the live board answer is read into order_seen events at once, each with the fee unknown', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: profiParsers })
+    const sample = JSON.parse(
+      readFileSync(
+        join(import.meta.dirname, '../../../tests/fixtures/profi/response/board.json'),
+        'utf8',
+      ),
+    ) as { url: string; body: unknown }
+    await e.onRaw({
+      kind: 'response',
+      url: sample.url,
+      body: sample.body,
+      receivedAt: new Date().toISOString(),
+    })
+    const seen = await events('profi.order_seen')
+    expect(seen.length).toBeGreaterThan(20)
+    for (const x of seen) {
+      expect(x.payload.bid_price_rub).toBe(0)
+      expect(x.payload.title).toBeTruthy()
+    }
+    // Read again the next minute: no order twice.
+    await e.onRaw({
+      kind: 'response',
+      url: sample.url,
+      body: sample.body,
+      receivedAt: new Date().toISOString(),
+    })
+    expect(await events('profi.order_seen')).toHaveLength(seen.length)
+  })
+
+  it('FR-LEAD-1: the eyes count the board answers and know whether the board has more pages', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    expect(e.board()).toBeNull()
+    await e.onParsed({ recognized: true, what: 'feed', signals: [], more: true }, 'response')
+    expect(e.board()).toEqual({ seq: 1, more: true })
+    await e.onParsed({ recognized: true, what: 'feed', signals: [], more: false }, 'response')
+    expect(e.board()).toEqual({ seq: 2, more: false })
+    // The feed page read from its elements is no board answer; nor is one the readers did not recognize.
+    await e.onParsed({ recognized: true, what: 'feed', signals: [] }, 'dom')
+    await e.onParsed({ recognized: false, signals: [] }, 'response')
+    expect(e.board()).toEqual({ seq: 2, more: false })
   })
 
   const boardOrder = (id: string) => ({
     t: 'order' as const,
-    needsPage: true,
     order: {
       order_id: id,
       title: 'Реклама на ТВ',
@@ -296,10 +319,8 @@ describe('eyes', () => {
 
   it('ST-M1-06: the fee from the order page answer is preferred to the page text, a discount too', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
-    await e.onParsed({ recognized: true, what: 'feed', signals: [boardOrder('911')] }, 'response')
+    // The page read as the fallback: its own answer came first, the page text then missed the discount.
     await e.onParsed(fee('911', 1, 67), 'response')
-    expect(await events('profi.order_seen')).toHaveLength(0)
-    // The page text missed the discount and read the usual price.
     await e.onParsed(
       {
         recognized: true,
@@ -316,19 +337,8 @@ describe('eyes', () => {
     )
     const seen = await events('profi.order_seen')
     expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['911', 1]])
-    // The board's publication time travels with the order, so the core can drop a stale one (FR-LEAD-10).
-    expect(seen[0]?.payload.published_at).toBe('2026-10-24T08:00:00.000Z')
     const [stored] = await db.select().from(rawOrder).where(eq(rawOrder.orderId, '911'))
     expect(stored?.body).toMatchObject({ bid_price_rub: 1, bid_base_price_rub: 67, has_bid: false })
-  })
-
-  it('ST-M1-06: an order whose page text cannot be read still goes out with the answer fee', async () => {
-    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
-    await e.onParsed({ recognized: true, what: 'feed', signals: [boardOrder('912')] }, 'response')
-    await e.onParsed(fee('912', 145), 'response')
-    await e.settleOrder('912')
-    const seen = await events('profi.order_seen')
-    expect(seen.map((x) => [x.payload.order_id, x.payload.bid_price_rub])).toEqual([['912', 145]])
   })
 
   it('ST-M1-06: an order page answer alone never makes an order', async () => {
@@ -336,7 +346,6 @@ describe('eyes', () => {
     await e.onParsed(fee('913', 88), 'response')
     expect(await events('profi.order_seen')).toHaveLength(0)
     expect(await e.knowsOrder('913')).toBe(false)
-    expect(e.ordersWantingPage()).toEqual([])
   })
 
   it('FR-CONV-1: a chat named by the stream is read; on its first reading only the unanswered tail is news', async () => {
@@ -427,52 +436,39 @@ describe('eyes', () => {
     expect(await e.knownChats()).toEqual(['c-b', 'c-a', 'c-c'])
   })
 
-  it('ST-M1-06: a board order without the client name or text takes them from its page', async () => {
+  it('FR-LEAD-1: a carousel card without the client name or text goes out as the board showed it', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
-    const order = (over: Record<string, unknown>) => ({
-      order_id: '95300777',
-      title: 'Реклама ВКонтакте',
-      category: 'Реклама ВКонтакте',
-      city: 'Дистанционно · Москва',
-      text: '',
-      client_name: '',
-      budget_text: null,
-      bid_price_rub: 0,
-      seen_at: new Date().toISOString(),
-      ...over,
-    })
-    // A carousel card: no client name and no description on the board.
+    // A carousel card: no client name and no description on the board. The page is read later, by get_order.
     await e.onParsed(
       {
         recognized: true,
         what: 'feed',
-        signals: [{ t: 'order', needsPage: true, order: order({}), published_at: null }],
-      },
-      'response',
-    )
-    await e.onParsed(
-      {
-        recognized: true,
-        what: 'order',
         signals: [
           {
             t: 'order',
-            order: order({
-              client_name: 'Ирина',
-              text: 'Нужна реклама для кофейни',
-              bid_price_rub: 140,
-            }),
+            order: {
+              order_id: '95300777',
+              title: 'Реклама ВКонтакте',
+              category: 'Реклама ВКонтакте',
+              city: 'Дистанционно · Москва',
+              text: '',
+              client_name: '',
+              budget_text: null,
+              bid_price_rub: 0,
+              seen_at: new Date().toISOString(),
+            },
             published_at: null,
           },
         ],
       },
-      'dom',
+      'response',
     )
     const [seen] = await events('profi.order_seen')
     expect(seen?.payload).toMatchObject({
-      client_name: 'Ирина',
-      text: 'Нужна реклама для кофейни',
-      bid_price_rub: 140,
+      order_id: '95300777',
+      client_name: '',
+      text: '',
+      bid_price_rub: 0,
     })
   })
 })

@@ -23,7 +23,10 @@ export type AccountRuntime = {
 
 type StoredOrder = ProfiOrder & { published_at?: string | null }
 
-/** The order as the eyes stored it; whether it closed is known only from its page (src/bid/bidTools.ts). */
+/**
+ * The order as the eyes stored it, never read from its page now (from_page false): whether it closed or was bid on
+ * is known only from its page (src/bid/bidTools.ts).
+ */
 export async function storedOrder(
   db: NodeDb,
   accountId: string,
@@ -40,6 +43,7 @@ export async function storedOrder(
     open: true,
     published_at: published_at ?? null,
     has_bid: typeof has_bid === 'boolean' ? has_bid : null,
+    from_page: false,
   }
 }
 

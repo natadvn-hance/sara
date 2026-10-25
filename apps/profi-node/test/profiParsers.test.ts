@@ -161,7 +161,6 @@ describe('Profi.ru page readers', () => {
     expect(r.signals).toHaveLength(1)
     expect(r.signals[0]).toMatchObject({
       t: 'order',
-      needsPage: true,
       order: {
         order_id: '95300001',
         title: 'Реклама на ТВ',
@@ -172,6 +171,30 @@ describe('Profi.ru page readers', () => {
       },
       published_at: new Date(1792824677 * 1000).toISOString(),
     })
+  })
+
+  it('FR-LEAD-1: a board answer says whether the board has more pages (nextCursor), the last page says no', () => {
+    const page = (nextCursor: string | null) => ({
+      data: {
+        boSearchBoardItems: {
+          items: [
+            { id: '95300002', type: 'SNIPPET', title: 'Лендинг', lastUpdateDate: 1792824677 },
+          ],
+          totalCount: 346,
+          nextCursor,
+        },
+      },
+    })
+    expect(profiParsers.fromResponse('https://profi.ru/graphql', page('WzgwLjMxXQ==')).more).toBe(
+      true,
+    )
+    expect(profiParsers.fromResponse('https://profi.ru/graphql', page(null)).more).toBe(false)
+    // An answer without the cursor at all is a board that ends here.
+    expect(
+      profiParsers.fromResponse('https://profi.ru/graphql', {
+        data: { boSearchBoardItems: { items: [], totalCount: 0 } },
+      }).more,
+    ).toBe(false)
   })
 
   it('ADR-002: other GraphQL answers are not mistaken for the board', () => {

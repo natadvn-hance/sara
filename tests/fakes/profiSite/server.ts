@@ -14,8 +14,18 @@ import {
   loginPage,
   NORMAL_LAYOUT,
   orderPage,
+  widgetPage,
 } from './pages'
 
+/** What the client of an order shows on the page: the backoffice answer getKlientInfo is drawn from it. */
+export type SiteKlient = {
+  name: string
+  title: string
+  verified: boolean
+  positive: number
+  negative: number
+  tags: string[]
+}
 export type SiteOrder = {
   id: string
   subject: string
@@ -31,6 +41,8 @@ export type SiteOrder = {
   hasBid: boolean
   /** The form will not take a bid without «Стоимость услуги». */
   priceRequired: boolean
+  /** The client as getKlientInfo shows them; null: the site has no answer for this order. */
+  klient: SiteKlient | null
 }
 export type SiteBid = { orderId: string; price: string; text: string }
 /** How the bid form behaves: ok, silent (refused, the form stays), lost (the form closes, no bid on the order). */
@@ -44,6 +56,10 @@ export type BidSettings = BidLook & {
   showWallet: boolean
   /** The opener's words, in the answer (tariffsBlock.scrollButtonText) and on the page. */
   openerText: string
+  /** The client answer (getKlientInfo) comes this late, in ms. */
+  klientDelayMs: number
+  /** An open order shows its bid form; false is a changed layout: no form, and no «closed» mark either. */
+  formShown: boolean
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -60,6 +76,10 @@ export type ProfiSite = {
   bids: SiteBid[]
   /** Presses of the send button that reached the site, taken or not. */
   bidPosts: number
+  /** Requests for the board (/api/feed), the first page and the following ones. */
+  feedRequests: number
+  /** The board gives this many orders to a page and the rest by cursor, as the live one does; 0: all at once. */
+  boardPageSize: number
   bidSettings: BidSettings
   setBalance(rub: number): void
   /** Back to a fresh form: no bids, 5000 ₽, the wallet pays, the answer comes. */
@@ -76,6 +96,15 @@ export type ProfiSite = {
 }
 
 let seq = 90000000
+
+const DECOY: SiteKlient = {
+  name: 'Чужой',
+  title: 'На Профи.ру с 1 января 2019',
+  verified: false,
+  positive: 0,
+  negative: 9,
+  tags: ['Не платит'],
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((ok) => {
@@ -109,42 +138,44 @@ function orderScreen(o: SiteOrder, s: BidSettings) {
         { type: 'LEADGEN', title: 'Отклик', price: { value: `${fee} ₽`, currencySymbol: '₽' } },
       ],
     },
-    form: o.open
-      ? {
-          buttons: { refuse: null, submit },
-          elements: {
-            amount: {
-              name: 'stavka',
-              type: 'INPUT',
-              label: 'Стоимость услуги',
-              placeholder: 'Сумма',
+    form:
+      o.open && s.formShown
+        ? {
+            buttons: { refuse: null, submit },
+            elements: {
+              amount: {
+                name: 'stavka',
+                type: 'INPUT',
+                label: 'Стоимость услуги',
+                placeholder: 'Сумма',
+              },
+              commentsForClient: {
+                name: 'comments4client',
+                type: 'TEXTAREA',
+                label: 'Предложение или вопрос клиенту',
+                placeholder: COMMENT_PLACEHOLDER,
+              },
+              paymentMethod: null,
             },
-            commentsForClient: {
-              name: 'comments4client',
-              type: 'TEXTAREA',
-              label: 'Предложение или вопрос клиенту',
-              placeholder: COMMENT_PLACEHOLDER,
+          }
+        : null,
+    bidForms:
+      o.open && s.formShown
+        ? [
+            {
+              type: 'LEADGEN',
+              bidSlideData: {
+                buttons: { submit },
+                elements: [
+                  { name: 'stavka', type: 'INPUT', required: o.priceRequired },
+                  { name: 'comments4client', type: 'TEXTAREA', required: false },
+                ],
+                paymentInfo: { value: fee, currencySymbol: '₽' },
+                paymentInfoLabel: 'К оплате:',
+              },
             },
-            paymentMethod: null,
-          },
-        }
-      : null,
-    bidForms: o.open
-      ? [
-          {
-            type: 'LEADGEN',
-            bidSlideData: {
-              buttons: { submit },
-              elements: [
-                { name: 'stavka', type: 'INPUT', required: o.priceRequired },
-                { name: 'comments4client', type: 'TEXTAREA', required: false },
-              ],
-              paymentInfo: { value: fee, currencySymbol: '₽' },
-              paymentInfoLabel: 'К оплате:',
-            },
-          },
-        ]
-      : [],
+          ]
+        : [],
   }
 }
 
@@ -158,7 +189,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
-  const state = { balance: 5000, openerClicks: 0, bidPosts: 0 }
+  const state = { balance: 5000, openerClicks: 0, bidPosts: 0, feedRequests: 0, boardPageSize: 0 }
   const bids: SiteBid[] = []
   const freshBidSettings = (): BidSettings => ({
     mode: 'ok',
@@ -171,9 +202,12 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     opener: 'continue',
     openerAmount: null,
     openerText: 'Написать клиенту',
+    klientDecoy: false,
     answer: true,
     hasBidField: true,
     showWallet: true,
+    klientDelayMs: 0,
+    formShown: true,
   })
   const bidSettings = freshBidSettings()
 
@@ -224,7 +258,19 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       return res.writeHead(302, { location: '/login' }).end()
     }
     if (banned) return html(res, bannedPage())
-    if (p === '/api/feed') return json(res, { [layout.feedKey]: orders.filter((x) => x.open) })
+    if (p === '/api/feed') {
+      state.feedRequests++
+      const open = orders.filter((x) => x.open)
+      const size = state.boardPageSize
+      if (size <= 0) return json(res, { [layout.feedKey]: open })
+      // Paged like the live board: a page and the cursor of the next one (here the index of its first order).
+      const from = Number(url.searchParams.get('cursor') ?? 0) || 0
+      const next = from + size
+      return json(res, {
+        [layout.feedKey]: open.slice(from, next),
+        nextCursor: next < open.length ? String(next) : null,
+      })
+    }
     if (p.startsWith('/api/order/')) {
       const found = orders.find((x) => x.id === p.slice('/api/order/'.length))
       return found ? json(res, found) : json(res, { error: 'not found' }, 404)
@@ -246,6 +292,30 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       if (!bidSettings.answer || !found) return json(res, { data: { orders: [] } })
       return json(res, {
         data: { orders: [{ _id: found.id, boOrderScreen: orderScreen(found, bidSettings) }] },
+      })
+    }
+    // The backoffice API of the live site: every method at one address, the method named in the request.
+    if (p === '/backoffice/api/' && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}') as {
+        method?: string
+        orderId?: string
+      }
+      const found = orders.find((x) => x.id === body.orderId)
+      // The widget's question about another client is answered at once.
+      const k = body.orderId === 'decoy' ? DECOY : found?.klient
+      if (body.method !== 'getKlientInfo' || !k) return json(res, { error: 'not found' }, 404)
+      if (body.orderId !== 'decoy' && bidSettings.klientDelayMs > 0)
+        await new Promise((r) => setTimeout(r, bidSettings.klientDelayMs))
+      return json(res, {
+        data: {
+          name: k.name,
+          title: k.title,
+          labels: k.verified ? [{ text: 'Номер подтверждён' }] : [],
+          reviews: {
+            count: { positive: k.positive, negative: k.negative },
+            list: [{ tags: k.tags }],
+          },
+        },
       })
     }
     if (p === '/api/bid' && req.method === 'POST') {
@@ -277,6 +347,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
     if (p === '/backoffice/n.php')
       return html(res, orderPage(url.searchParams.get('o') ?? '', bidSettings))
+    if (p === '/backoffice/widget.html') return html(res, widgetPage())
     if (p === '/chats') return html(res, chatsPage())
     // Like the real messenger page: it polls the site all the time, so the network never goes quiet.
     if (p === '/api/ping') return json(res, { ok: true })
@@ -317,6 +388,15 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     get bidPosts() {
       return state.bidPosts
     },
+    get feedRequests() {
+      return state.feedRequests
+    },
+    get boardPageSize() {
+      return state.boardPageSize
+    },
+    set boardPageSize(n: number) {
+      state.boardPageSize = n
+    },
     bids,
     bidSettings,
     setBalance(rub) {
@@ -327,6 +407,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.balance = 5000
       state.openerClicks = 0
       state.bidPosts = 0
+      state.feedRequests = 0
+      state.boardPageSize = 0
       Object.assign(bidSettings, freshBidSettings())
     },
     orders,
@@ -345,6 +427,14 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         open: true,
         hasBid: false,
         priceRequired: true,
+        klient: {
+          name: partial.clientName ?? 'Ирина',
+          title: 'На Профи.ру с 7 сентября 2020',
+          verified: true,
+          positive: 2,
+          negative: 0,
+          tags: [],
+        },
         ...partial,
       }
       orders.unshift(order)

@@ -113,6 +113,11 @@ export const GetOrderOutput = ProfiOrder.extend({
   has_bid: z.boolean().nullable(),
   /** The client as the order page shows them; absent from a node that does not read it yet. */
   client_info: ClientInfo.nullable().optional(),
+  /**
+   * True when open, has_bid and the fee come from the order page read now. False: the node could not read the page
+   * (the tab may not move, the page gave no order answer) and answers from what it stored; absent: an older node.
+   */
+  from_page: z.boolean().optional(),
 })
 export type GetOrderOutput = z.infer<typeof GetOrderOutput>
 

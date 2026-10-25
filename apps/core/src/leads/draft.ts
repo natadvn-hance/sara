@@ -1,4 +1,4 @@
-import { AnalystOutput, type ProfiOrder, plural } from '@sara/shared'
+import { AnalystOutput, type ClientInfo, type ProfiOrder, plural } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
 import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
@@ -14,8 +14,8 @@ export type DraftSource = Pick<
   ProfiOrder,
   'title' | 'category' | 'city' | 'budget_text' | 'text' | 'client_name'
 > & {
-  /** What the order page says about the client; only the name is read, to hide it from the model. */
-  client_info?: { name: string | null } | null
+  /** What the order page says about the client; absent when the page was not read. Its name is only hidden from the model, never sent (ADR-016). */
+  client_info?: (Pick<ClientInfo, 'name'> & Partial<ClientInfo>) | null
 }
 
 /** The Analyst's reading of the order and its short разбор, kept beside the draft. */
@@ -96,9 +96,33 @@ export function priceWithin(price: number | null, budgetText: string | null): nu
   return sums && sums.length > 0 && price > Math.max(...sums) ? null : price
 }
 
-/** What the Analyst sees: the order as the Sorter sees it (no name, ADR-016) and the room left for the text. */
+/** The client as the order page shows them, in one line without the name (ADR-016); null when it shows nothing. */
+function clientLine(info: DraftSource['client_info']): string | null {
+  if (!info) return null
+  const parts = [
+    info.on_profi_since,
+    info.phone_verified === null || info.phone_verified === undefined
+      ? null
+      : info.phone_verified
+        ? 'номер подтверждён'
+        : 'номер не подтверждён',
+    info.reviews &&
+      `отзывы специалистов: ${info.reviews.positive} ${plural(info.reviews.positive, ['хороший', 'хороших', 'хороших'])}, ${info.reviews.negative} ${plural(info.reviews.negative, ['плохой', 'плохих', 'плохих'])}`,
+    info.review_tags &&
+      info.review_tags.length > 0 &&
+      `отметки в отзывах: ${info.review_tags.join(', ')}`,
+  ].filter((p): p is string => typeof p === 'string' && p !== '')
+  return parts.length > 0 ? `Клиент на площадке: ${parts.join('; ')}` : null
+}
+
+/**
+ * What the Analyst sees: the order as the Sorter sees it (no name, ADR-016), what the order page says about the
+ * client, and the room left for the text.
+ */
 export function analystInput(o: DraftSource, maxBody: number): string {
-  return `${sorterInput(o)}\nДлина текста: не больше ${maxBody} знаков`
+  return [sorterInput(o), clientLine(o.client_info), `Длина текста: не больше ${maxBody} знаков`]
+    .filter((l): l is string => l !== null)
+    .join('\n')
 }
 
 const chars = (n: number) => `${n} ${plural(n, ['знак', 'знака', 'знаков'])}`

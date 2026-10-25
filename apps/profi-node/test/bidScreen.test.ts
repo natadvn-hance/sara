@@ -21,6 +21,7 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
     expect(orderScreenFromAnswer(r.url, r.body, '10000001')).toEqual({
       orderId: '10000001',
       open: true,
+      disabled: false,
       feeRub: 71,
       hasBid: false,
       // The recorded sample keeps the length of the words only; the live text is «Откликнуться».
@@ -42,12 +43,19 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
     const blocked = withScreen('order-page.json', (s) => {
       s.disabledBidBlock = { title: 'Заказ закрыт' }
     })
-    expect(orderScreenFromAnswer(blocked.url, blocked.body, '10000001')?.open).toBe(false)
+    expect(orderScreenFromAnswer(blocked.url, blocked.body, '10000001')).toMatchObject({
+      open: false,
+      disabled: true,
+    })
     const noForm = withScreen('order-page.json', (s) => {
       s.form = null
       s.bidForms = []
     })
-    expect(orderScreenFromAnswer(noForm.url, noForm.body, '10000001')?.open).toBe(false)
+    // No form can be a changed layout or a bid already made: only the disabled block is the site saying «closed».
+    expect(orderScreenFromAnswer(noForm.url, noForm.body, '10000001')).toMatchObject({
+      open: false,
+      disabled: false,
+    })
   })
 
   it('FR-LEAD-8: a bid already on the order, and a payment way in the form, are seen', () => {

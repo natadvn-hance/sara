@@ -5,6 +5,8 @@ import { getSetting } from '../settings/store'
 /** Card flow texts for Boris (Russian, plain, no long dash). */
 export const CARD_FLOW_TEXTS = {
   staleHeld: 'Заявке больше суток, карточку не присылаю.',
+  pageClosed: 'Заявка уже закрыта, карточку не присылаю.',
+  pageBidAlready: 'На эту заявку уже есть отклик, карточку не присылаю.',
 }
 
 /** FR-LEAD-10: an order older than this is not offered. */
