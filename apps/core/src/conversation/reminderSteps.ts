@@ -39,6 +39,12 @@ export type RemindDeps = {
   dormantWaitS?: number
   /** The least time between two reminders (default a day); tests shorten it. */
   minGapMs?: number
+  /** How often the dormant day is tried again while something stands in its way (default an hour). */
+  dormantRetryEveryMs?: number
+  /** How often it is tried again after a failure, a Telegram outage say (default 10 minutes). */
+  dormantStepRetryMs?: number
+  /** How many tries the dormant day gets before it is given up (default 24, a day). */
+  dormantTries?: number
 }
 
 /** The step the ladder is at: when it is due, which reminder and in what tone. */
@@ -184,6 +190,49 @@ async function accountHolds(db: Db, accountId: string): Promise<boolean> {
 }
 
 /**
+ * The chat as the client's side of the check: nobody wrote after our message (the ladder's own earlier reminders
+ * aside), and what the stored marks say about our last message. The chat is only read, never stored: a message nobody
+ * has heard of yet reaches the conversation through its own event or the 10-minute check, which also start the turn
+ * it needs. A reminder must not swallow a client's word.
+ */
+async function readGround(
+  d: RemindDeps,
+  conv: ConversationRow,
+  anchor: string,
+): Promise<{ read: boolean; lastId: string | null } | Ground> {
+  let chat: ChatMessage[]
+  try {
+    chat = (await d.profi.readChat(conv.accountId, conv.chatId)).messages
+  } catch (e) {
+    console.error('reminder: chat unreadable', e instanceof Error ? e.message : e)
+    return SKIP('не могу прочитать чат')
+  }
+  const at = chat.findIndex((m) => m.platform_message_id === anchor)
+  if (at < 0) return STOP('нашего сообщения нет в чате')
+  const after = chat.slice(at + 1)
+  if (after.some((m) => m.author === 'client')) return STOP('клиент ответил')
+  if (after.some((m) => m.author === 'unknown')) return STOP('автор сообщения неясен')
+  // The ladder's own earlier reminders stand after the anchor too; anything else of our side is a new beginning.
+  const ladder = await ladderTexts(d.db, conv.id)
+  if (after.some((m) => m.author === 'specialist' && !ladder.has(normalizeText(m.text))))
+    return STOP('наша сторона уже написала')
+  // «Прочитал» is the stored mark of our last message, which only the client's read event sets (design 5.11).
+  const lastOurs = chat.findLast((m) => m.author === 'specialist')
+  const [stored] = lastOurs
+    ? await d.db
+        .select({ read: chatMessage.read })
+        .from(chatMessage)
+        .where(
+          and(
+            eq(chatMessage.accountId, conv.accountId),
+            eq(chatMessage.platformMessageId, lastOurs.platform_message_id),
+          ),
+        )
+    : []
+  return { read: stored?.read ?? false, lastId: chat.at(-1)?.platform_message_id ?? null }
+}
+
+/**
  * Whether a reminder may go now: the last word before it is spoken, at the wake-up and again right before sending
  * (FR-CONV-12, FR-CONV-6). Nothing goes for a conversation that is closed, Boris's or booked, to a client who wrote
  * or when our side wrote since the anchor, while a turn runs, and (after the switch) while the «Пишет клиентам»
@@ -209,24 +258,12 @@ export async function checkGround(
     return SKIP('не смогла узнать про встречу')
   }
   const v1Writes = await getSetting(db, 'conv.v1_writes')
-  // The chat is only read here, never stored: a message nobody has heard of yet reaches the conversation through its
-  // own event or the 10-minute check, which also start the turn it needs. A reminder must not swallow a client's word.
-  let chat: ChatMessage[]
-  try {
-    chat = (await d.profi.readChat(conv.accountId, conv.chatId)).messages
-  } catch (e) {
-    console.error('reminder: chat unreadable', e instanceof Error ? e.message : e)
-    return SKIP('не могу прочитать чат')
-  }
-  const at = chat.findIndex((m) => m.platform_message_id === anchor)
-  if (at < 0) return STOP('нашего сообщения нет в чате')
-  const after = chat.slice(at + 1)
-  if (after.some((m) => m.author === 'client')) return STOP('клиент ответил')
-  if (after.some((m) => m.author === 'unknown')) return STOP('автор сообщения неясен')
-  // The ladder's own earlier reminders stand after the anchor too; anything else of our side is a new beginning.
-  const ladder = await ladderTexts(db, conv.id)
-  if (after.some((m) => m.author === 'specialist' && !ladder.has(normalizeText(m.text))))
-    return STOP('наша сторона уже написала')
+  // The dormant day is a task for Boris, not a message to the client: the chat is not read for it (a client who wrote
+  // meanwhile cancels the process through his own event).
+  const seen = o.dormant
+    ? { read: false, lastId: null as string | null }
+    : await readGround(d, conv, anchor)
+  if ('go' in seen) return seen
   const [running] = await db
     .select({ id: convTurn.id })
     .from(convTurn)
@@ -244,25 +281,7 @@ export async function checkGround(
     if (await accountHolds(db, conv.accountId)) return SKIP('аккаунт на паузе')
     if (!(await getSetting(db, 'outbound.messages'))) return SKIP('пауза «Пишет клиентам»')
   }
-  // «Прочитал» is the stored mark of our last message, which only the client's read event sets (design 5.11).
-  const lastOurs = chat.findLast((m) => m.author === 'specialist')
-  const [stored] = lastOurs
-    ? await db
-        .select({ read: chatMessage.read })
-        .from(chatMessage)
-        .where(
-          and(
-            eq(chatMessage.accountId, conv.accountId),
-            eq(chatMessage.platformMessageId, lastOurs.platform_message_id),
-          ),
-        )
-    : []
-  return {
-    go: true,
-    read: stored?.read ?? false,
-    lastId: chat.at(-1)?.platform_message_id ?? null,
-    shadow: v1Writes,
-  }
+  return { go: true, read: seen.read, lastId: seen.lastId, shadow: v1Writes }
 }
 
 /** The wake-up of a step: its trace row, and the check; a step that may not go is closed in the trace. */
@@ -272,6 +291,8 @@ export async function groundStep(
   conversationId: string,
   anchor: string,
   p: Planned,
+  /** `retry`: a skip leaves the row open, the caller will try again and closes the row itself in the end. */
+  o: { retry?: boolean } = {},
 ): Promise<Ground> {
   await ensureRow(d, rowId, conversationId, anchor, p)
   const g = await checkGround(d, conversationId, anchor, { dormant: p.step === 'dormant' })
@@ -282,12 +303,22 @@ export async function groundStep(
       .where(eq(convTurn.id, rowId))
     return g
   }
+  if (!g.end && o.retry) return g
   await finishRow(d.db, rowId, {
     outcome: g.end ? 'stopped' : 'skipped',
     decision: 'nothing',
     decisionReason: g.why,
   })
   return g
+}
+
+/** The dormant day could not be told to Boris in the whole time it was tried: the row says why. */
+export async function giveUpDormant(d: RemindDeps, rowId: string, why: string): Promise<void> {
+  await finishRow(d.db, rowId, {
+    outcome: 'skipped',
+    decision: 'nothing',
+    decisionReason: `не смогла сообщить Борису: ${why}`,
+  })
 }
 
 /**
@@ -487,6 +518,23 @@ export async function sendStep(
   return deliver(d, rowId, conv, id, p)
 }
 
+/** The deal of a dormant client becomes dormant too; a stage that cannot (a booked meeting) stays as it is. */
+async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> {
+  if (!conv.dealId) return
+  try {
+    await transition(d.db, {
+      dealId: conv.dealId,
+      to: 'dormant',
+      actor: 'sara',
+      reason: 'клиент молчит 7 дней',
+      correlationId: conv.id,
+    })
+  } catch (e) {
+    // Already dormant, or a stage that cannot become dormant: the task has gone all the same.
+    if (!(e instanceof TransitionError)) throw e
+  }
+}
+
 /**
  * The seventh day: the client is dormant. In shadow only the trace says so. After the switch the deal, if there is
  * one, becomes dormant and Boris gets one task with «Закрыть» and «Напоминать дальше» (design 5.11).
@@ -515,24 +563,12 @@ export async function dormantStep(
     await settle()
     return { asked: false }
   }
-  if (conv.dealId)
-    try {
-      await transition(d.db, {
-        dealId: conv.dealId,
-        to: 'dormant',
-        actor: 'sara',
-        reason: 'клиент молчит 7 дней',
-        correlationId: conv.id,
-      })
-    } catch (e) {
-      // Already dormant, or a stage that cannot become dormant (a booked meeting): the task still goes.
-      if (!(e instanceof TransitionError)) throw e
-    }
   const [have] = await d.db
     .select({ id: task.id })
     .from(task)
     .where(and(eq(task.kind, 'conv_dormant'), eq(task.entityId, rowId)))
   if (have) {
+    await dormantDeal(d, conv)
     await settle()
     return { asked: true }
   }
@@ -582,6 +618,8 @@ export async function dormantStep(
       payload: { kind: 'conv_dormant', turn_id: rowId },
     })
   })
+  // The deal moves only with the task: a task that could not be sent leaves it where it is (a retry follows).
+  await dormantDeal(d, conv)
   await settle()
   return { asked: true }
 }

@@ -6,6 +6,7 @@ import { getSetting } from '../settings/store'
 import {
   dormantStep,
   fallbackStep,
+  giveUpDormant,
   groundStep,
   isLadderMessage,
   ladderTexts,
@@ -56,6 +57,10 @@ const FALLBACK_AFTER_MS = 3 * 3600_000
 const RETRY_EVERY_MS = 10 * 60_000
 /** Boris has this long to answer the task of a dormant client; with no answer the ladder ends. */
 const DORMANT_WAIT_S = 30 * 24 * 3600
+/** The dormant day is tried every hour for a day while something stands in its way, soon again after a failure. */
+const DORMANT_TRIES = 24
+const DORMANT_RETRY_MS = 3600_000
+const DORMANT_STEP_RETRY_MS = 10 * 60_000
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 
 /** The text of a reminder: the model's, written again until the time is up, then the ready text of old Sara. */
@@ -84,6 +89,49 @@ async function obtainText(
   return f.text
 }
 
+/**
+ * The dormant day goes to Boris, and it is not lost for a passing trouble: while something stands in the way (a turn
+ * runs, a meeting service does not answer) it is tried every hour for a day, and a failure of the step itself, Telegram
+ * being down say, is tried again soon, like a turn's steps. The chat is not read for it, it is no message to the client.
+ * 'end': the ladder is over; 'shadow': only the trace says so; 'asked': Boris has his task.
+ */
+async function askBoris(
+  k: number,
+  conversationId: string,
+  anchor: string,
+  rowId: string,
+  p: Planned,
+): Promise<'asked' | 'shadow' | 'end'> {
+  let why = 'не вышло'
+  for (let a = 0; a < (d().dormantTries ?? DORMANT_TRIES); a++) {
+    const g = await DBOS.runStep(
+      () => groundStep(d(), rowId, conversationId, anchor, p, { retry: true }),
+      { name: `ground-${k}-${a}`, ...DB_STEP },
+    )
+    if (!g.go && g.end) return 'end'
+    if (g.go) {
+      try {
+        const t = await DBOS.runStep(() => dormantStep(d(), rowId, conversationId, g.shadow), {
+          name: `dormant-${k}-${a}`,
+        })
+        return t.asked ? 'asked' : 'shadow'
+      } catch (e) {
+        why = 'Telegram не отвечает'
+        console.error('reminder: the dormant task did not go', e instanceof Error ? e.message : e)
+        await DBOS.sleep(d().dormantStepRetryMs ?? DORMANT_STEP_RETRY_MS)
+        continue
+      }
+    }
+    why = g.why
+    await DBOS.sleep(d().dormantRetryEveryMs ?? DORMANT_RETRY_MS)
+  }
+  await DBOS.runStep(() => giveUpDormant(d(), rowId, why), {
+    name: `dormant-giveup-${k}`,
+    ...DB_STEP,
+  })
+  return 'end'
+}
+
 async function runRemind(conversationId: string, anchor: string): Promise<void> {
   const wf = remindWorkflowId(conversationId, anchor)
   let sent = 0
@@ -98,6 +146,16 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
     const wait = Date.parse(next.at) - (await DBOS.now())
     if (wait > 0) await DBOS.sleep(wait)
     const rowId = `${wf}:${next.step}`
+    if (next.step === 'dormant') {
+      // Shadow has nobody to ask: the ladder ends at the dormant day.
+      if ((await askBoris(k, conversationId, anchor, rowId, next)) !== 'asked') return
+      const answer = await DBOS.recv<string>('decision', {
+        timeoutSeconds: d().dormantWaitS ?? DORMANT_WAIT_S,
+      })
+      if (answer !== 'remind') return
+      continued = true
+      continue
+    }
     const g = await DBOS.runStep(() => groundStep(d(), rowId, conversationId, anchor, next), {
       name: `ground-${k}`,
       ...DB_STEP,
@@ -105,22 +163,8 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
     if (!g.go) {
       // The client wrote, our side wrote, a pause: the ladder ends. A step only skipped (a running turn, an
       // unreadable chat, a pause of sending) is not repeated later, the next step comes at its own time.
-      if (g.end || next.step === 'dormant') return
+      if (g.end) return
       sent++
-      continue
-    }
-    if (next.step === 'dormant') {
-      const task = await DBOS.runStep(() => dormantStep(d(), rowId, conversationId, g.shadow), {
-        name: `dormant-${k}`,
-        ...DB_STEP,
-      })
-      // Shadow has nobody to ask: the ladder ends at the dormant day.
-      if (!task.asked) return
-      const answer = await DBOS.recv<string>('decision', {
-        timeoutSeconds: d().dormantWaitS ?? DORMANT_WAIT_S,
-      })
-      if (answer !== 'remind') return
-      continued = true
       continue
     }
     const text = await obtainText(k, conversationId, rowId, next, g.read)
