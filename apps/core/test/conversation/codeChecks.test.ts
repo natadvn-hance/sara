@@ -265,8 +265,36 @@ describe('the code checks of a reply', () => {
       'Ответила нейросеть.',
       'Я языковая модель.',
       'Я программа.',
+      'Я Claude, модель от Anthropic.',
+      'Я ChatGPT.',
+      'Я виртуальный ассистент.',
+      'Я ваш помощник по сайту.',
+      'Это автоматический ответ.',
+      'Я не человек.',
+      'Мы бот агентства.',
+      'Вам отвечает бот.',
     ])
       expect(ids({ text }), text).toEqual(['robotic.ai'])
+  })
+
+  it('FR-CONV-4: talking about bots and neural networks as work is not talking about herself', () => {
+    for (const text of [
+      'Чат-бот для записи тоже делаем.',
+      'Тексты пишем без нейросетей.',
+      'Да, нейросети используем для креативов.',
+      'Мы делаем чат-боты и сайты.',
+      'Мы помощники в продвижении сайтов.',
+      'Объясню, как алгоритм подбирает показы.',
+      'Автоматические сообщения для записи клиентов настроим.',
+      'Я программирую только в команде.',
+    ])
+      expect(ids({ text }), text).toEqual([])
+    // A model's name is allowed only when the client wrote it in this turn.
+    const text = 'Интеграцию с ChatGPT делаем.'
+    expect(ids({ text })).toEqual(['robotic.ai'])
+    expect(ids({ text, clientTurnText: 'Нужна интеграция с ChatGPT' })).toEqual([])
+    // But the client asking does not let Sara say what she is.
+    expect(ids({ text: 'Я не бот.', clientTurnText: 'Вы бот?' })).toEqual(['robotic.ai'])
   })
 
   it('FR-CONV-4: lists and markup are robotic', () => {

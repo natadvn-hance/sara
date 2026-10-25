@@ -1,6 +1,7 @@
 import type { CheckInput, CheckIssue } from '../types'
 import {
-  AI_PATTERNS,
+  AI_NAME,
+  AI_SELF_PATTERNS,
   CALL_PROMISE_PATTERNS,
   CALL_WORD,
   GREETINGS,
@@ -268,10 +269,12 @@ function roboticIssues(i: CheckInput, text: string): CheckIssue[] {
     if (p.trim() && flat.includes(p))
       issues.push({ id: 'robotic.phrase', detail: `роботная фраза «${phrase.trim()}»` })
   }
-  for (const re of AI_PATTERNS) {
-    const m = re.exec(folded)
-    if (m) issues.push({ id: 'robotic.ai', detail: `слова про ИИ о себе: «${m[0]}»` })
-  }
+  // One issue however many words: «Я бот» and «пишет бот» are the same fault.
+  const named = AI_NAME.exec(folded)?.[0]
+  const ai =
+    AI_SELF_PATTERNS.map((re) => re.exec(folded)?.[0]).find(Boolean) ??
+    (named && !fold(i.clientTurnText).includes(named) ? named : null)
+  if (ai) issues.push({ id: 'robotic.ai', detail: `слова про ИИ о себе: «${ai}»` })
   if (/^\s*(?:\d+[.)]|[-•*])\s/m.test(text))
     issues.push({ id: 'robotic.list', detail: 'строки списком' })
   const markup = /\*\*|#|`/.exec(text)
