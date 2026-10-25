@@ -203,6 +203,50 @@ describe('gradeScenario', () => {
     expect(held.severity).toBeNull()
   })
 
+  it('FR-TRAIN-8: a client whom Boris leads is forwarded without the model, and that is a move «none», not a failure', () => {
+    const forward = {
+      action: 'forward',
+      would: 'forward',
+      reason: 'клиента ведёт Борис',
+      holdUntil: null,
+    } as const
+    const g = gradeScenario(
+      scenarioOf({ move: 'none' }),
+      planOf({ output: null, decision: forward }),
+      null,
+    )
+    expect(g).toEqual({ severity: null, failures: [], score: 1, advisory: [] })
+    // The scenario that wanted a reply from Sara for such a client is wrong in its move.
+    const wrong = gradeScenario(
+      scenarioOf({ move: 'reply' }),
+      planOf({ output: null, decision: forward }),
+      null,
+    )
+    expect(wrong.failures.map((f) => f.id)).toEqual(['move.wrong'])
+  })
+
+  it('FR-TRAIN-8: what nobody sees is not graded: the issues and the text of a forwarded or silent turn are ignored', () => {
+    const issue = { id: 'facts.unknown', detail: 'номер k-x не из отобранных записей' } as const
+    const forward = {
+      action: 'forward',
+      would: 'forward',
+      reason: 'клиента ведёт Борис',
+      holdUntil: null,
+    } as const
+    const nothing = { action: 'nothing', would: 'nothing', reason: 'ок', holdUntil: null } as const
+    for (const decision of [forward, nothing]) {
+      const g = gradeScenario(
+        scenarioOf({ move: 'none', must_mention_any: ['созвон'], case: 'needed' }),
+        planOf({ issues: [issue], decision, output: { text: 'Скидка 50%', move: 'reply' } }),
+        null,
+      )
+      expect(g.failures, decision.action).toEqual([])
+    }
+    // A turn that is seen keeps its issues.
+    const seen = gradeScenario(scenarioOf(), planOf({ issues: [issue] }), null)
+    expect(seen.severity).toBe('S1')
+  })
+
   it('FR-TRAIN-8: urgency is checked when the scenario names it', () => {
     const missed = gradeScenario(
       scenarioOf({ move: 'call_boris', urgent: true }),

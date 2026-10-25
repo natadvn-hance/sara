@@ -54,9 +54,13 @@ export function movedTo(plan: TurnPlan): Move | null {
   return plan.output?.move ?? null
 }
 
-/** The text of a reply that is a reply; the other moves hold no text. */
+/** A turn nobody reads: forwarded to Boris, or nothing to answer. Its text, if any, is never seen by a client. */
+const unseen = (plan: TurnPlan) =>
+  plan.decision.action === 'forward' || plan.decision.action === 'nothing'
+
+/** The text of a reply that is a reply and goes somewhere; the other moves hold no text. */
 const textOf = (plan: TurnPlan): string | null =>
-  plan.output?.move === 'reply' && plan.output.text ? plan.output.text : null
+  !unseen(plan) && plan.output?.move === 'reply' && plan.output.text ? plan.output.text : null
 
 /** The case the reply tells, by the Interlocutor's own choice. */
 const toldCaseId = (plan: TurnPlan): string | null =>
@@ -103,13 +107,19 @@ export function gradeScenario(
     failures.push({ id, severity, detail })
 
   // The checks of the engine, as they stood after its rewrite. A greeting the scenario names is judged below.
-  for (const i of plan.issues) {
+  // What nobody sees (a client Boris leads, nothing to answer) is not checked: no client reads that text.
+  for (const i of unseen(plan) ? [] : plan.issues) {
     if (want.greeting !== undefined && i.id.startsWith('greeting.')) continue
     add(i.id, CHECK_SEVERITY[i.id], i.detail)
   }
 
-  if (!out) {
+  // A client Boris leads is forwarded without the model (the gate of the turn): no answer is asked of it.
+  const forwarded = !out && plan.decision.action === 'forward'
+  if (!out && !forwarded) {
     add('run.failed', 'S2', `Собеседник не ответил: ${plan.failure ?? 'неизвестная причина'}`)
+  } else if (!out) {
+    const moved = movedTo(plan)
+    if (moved !== want.move) add('move.wrong', 'S2', `ход ${moved}, ждали ${want.move}`)
   } else {
     const moved = movedTo(plan)
     if (moved !== want.move)
@@ -162,10 +172,12 @@ export function gradeScenario(
       add('run.checker', 'S2', 'Проверяющий не ответил: S1 по смыслу не проверены')
 
     const told = toldCaseId(plan)
-    if (want.case === 'none' && told !== null)
-      add('case.needless', 'S2', `кейс ${told} не нужен в этом ответе`)
-    if (want.case === 'needed' && told === null)
-      add('case.missing', 'S3', 'клиент просил примеры, а кейс не рассказан')
+    if (!unseen(plan)) {
+      if (want.case === 'none' && told !== null)
+        add('case.needless', 'S2', `кейс ${told} не нужен в этом ответе`)
+      if (want.case === 'needed' && told === null)
+        add('case.missing', 'S3', 'клиент просил примеры, а кейс не рассказан')
+    }
   }
 
   if (o.judgeCounts && o.judgeFailed) add('run.judge', 'S2', 'судья не ответил')

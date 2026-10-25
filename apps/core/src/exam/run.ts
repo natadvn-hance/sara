@@ -142,6 +142,24 @@ function inTheBackground(gateway: Gateway): Gateway {
   }
 }
 
+/** A client Boris took («Беру сам»): the turn forwards his words and calls no model (design 5.5, the gate of a turn). */
+const isTaken = (s: ExamScenario) => s.state.owner === 'boris' && s.state.owner_reason === 'take'
+
+/** The plan of such a turn: nothing answered, nothing asked of the model, the words go to Boris. */
+function forwardedPlan(): TurnPlan {
+  return {
+    ...brokenPlan(null),
+    attempts: 0,
+    decision: {
+      action: 'forward',
+      would: 'forward',
+      reason: 'клиента ведёт Борис',
+      holdUntil: null,
+    },
+    failure: null,
+  }
+}
+
 /** The plan of a scenario whose engine broke: nothing answered, the reason kept. */
 function brokenPlan(e: unknown): TurnPlan {
   return {
@@ -218,10 +236,12 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
     const names = examNames(s)
     let plan: TurnPlan
     try {
-      plan = await planTurn(
-        { gateway, mind: scenarioMind(d.mind, s) },
-        { dossier, names, settings: EXAM_SETTINGS, now: new Date(s.now) },
-      )
+      plan = isTaken(s)
+        ? forwardedPlan()
+        : await planTurn(
+            { gateway, mind: scenarioMind(d.mind, s) },
+            { dossier, names, settings: EXAM_SETTINGS, now: new Date(s.now) },
+          )
     } catch (e) {
       plan = brokenPlan(e)
     }

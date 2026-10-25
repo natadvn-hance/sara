@@ -403,6 +403,23 @@ describe('runExam', { timeout: 30_000 }, () => {
     expect(summary.passed).toBe(false)
   })
 
+  it('FR-TRAIN-8: a client whom Boris took is forwarded without the model, like in work', async () => {
+    // The model would have said what is an S1 for any seen reply; nobody sees it, and nobody asks the model.
+    const bad = interlocutorAnswer({
+      topic: 'price',
+      text: 'Сайт стоит 90 000 рублей, скидка 20%.',
+      fact_ids: ['k-invented'],
+    })
+    const { summary, fake } = await exam(
+      { interlocutor: bad, checker: CLEAN },
+      { only: ['x-t-16-owner-boris'] },
+    )
+    expect(await fake.calls()).toEqual([])
+    expect(summary).toMatchObject({ score: 1, s1: 0, unanswered: 0, passed: true })
+    const [row] = await db.select().from(examResult)
+    expect(row).toMatchObject({ move: 'none', text: null, severity: null })
+  })
+
   it('FR-TRAIN-8: a run in which the mind changed under it does not pass, and keeps the version it began with', async () => {
     let calls = 0
     const mind = fakeMind()
