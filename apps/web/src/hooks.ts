@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ApiError, go } from './api'
+import { insideTelegram } from './app/telegram'
 
 /** One action at a time with its error text; a lost session goes to the login page. */
 export function useAction() {
@@ -11,7 +12,9 @@ export function useAction() {
     try {
       await f()
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) return go('/login')
+      // In the Mini App the shell asks to reopen the app instead (there is no password page there).
+      if (e instanceof ApiError && e.status === 401)
+        return insideTelegram() ? undefined : go('/login')
       setError({
         message: e instanceof Error ? e.message : String(e),
         code: e instanceof ApiError ? e.code : undefined,

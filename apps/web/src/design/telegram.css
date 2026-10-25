@@ -1,0 +1,21 @@
+/*
+ * The Mini App takes Telegram's own colours (docs/ux/design-system.md, section 2): the page is the secondary
+ * background, a group of rows the main one, as in Telegram's settings. Telegram's script sets --tg-theme-*; the
+ * values after the comma are for the moment before it has.
+ */
+html.mini {
+  --bg: var(--tg-theme-secondary-bg-color, #efeff4);
+  --surface: var(--tg-theme-bg-color, #ffffff);
+  --text: var(--tg-theme-text-color, #1a1a1a);
+  --muted: var(--tg-theme-hint-color, #6b6b6b);
+  --border: var(--tg-theme-section-separator-color, #e6e3df);
+}
+@media (prefers-color-scheme: dark) {
+  html.mini {
+    --bg: var(--tg-theme-secondary-bg-color, #121212);
+    --surface: var(--tg-theme-bg-color, #1c1c1c);
+    --text: var(--tg-theme-text-color, #f2f2f2);
+    --muted: var(--tg-theme-hint-color, #a0a0a0);
+    --border: var(--tg-theme-section-separator-color, #2c2c2c);
+  }
+}

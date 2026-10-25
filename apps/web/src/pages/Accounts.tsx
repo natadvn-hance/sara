@@ -1,7 +1,6 @@
 import { formatRub } from '@sara/shared'
-import { useQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
-import { ApiError, api, go } from '../api'
+import { go } from '../api'
+import { useScreen } from '../app/useScreen'
 import { Card } from '../components/ui/card'
 
 type Account = {
@@ -22,14 +21,7 @@ const STATE: Record<string, string> = {
 }
 
 export function AccountsPage() {
-  const q = useQuery({
-    queryKey: ['accounts'],
-    queryFn: () => api<{ accounts: Account[] }>('/api/accounts'),
-    retry: false,
-  })
-  useEffect(() => {
-    if (q.error instanceof ApiError && q.error.status === 401) go('/login')
-  }, [q.error])
+  const q = useScreen<{ accounts: Account[] }>(['accounts'], '/api/accounts')
   return (
     <main className="mx-auto grid max-w-xl gap-4 px-4 py-6">
       <h1 className="font-display text-2xl">Аккаунты</h1>

@@ -5,6 +5,8 @@ import type {
   ReplyFormat,
   StepState,
 } from '@sara/shared'
+import { markAuthLost } from './app/auth'
+import { telegramInitData } from './app/telegram'
 
 export class ApiError extends Error {
   constructor(
@@ -18,13 +20,19 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> =
+    body === undefined ? {} : { 'content-type': 'application/json' }
+  // Inside Telegram the signed launch data goes with every request (M7 design, section 7).
+  const initData = telegramInitData()
+  if (initData) headers.authorization = `tma ${initData}`
   const res = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
   })
   const data = await res.json().catch(() => ({}))
+  if (res.status === 401 && initData) markAuthLost()
   if (!res.ok)
     throw new ApiError(
       res.status,
