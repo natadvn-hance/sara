@@ -6,6 +6,7 @@ import {
   CALL_PROMISE_PATTERNS,
   CALL_WORD,
   GREETINGS,
+  NOT_NAMES,
   ROBOTIC_PHRASES,
 } from './phrases'
 
@@ -131,7 +132,13 @@ const RANGE = /^\s*(?:\p{Pd}|до|или)\s*$/iu
  * also 50), a percent keeps its sign («30%» is not 30), and a scale or percent at the end of a range belongs to the
  * number before it («50-70 тысяч», «от 50 до 70 тысяч»).
  */
-function numbersIn(masked: string): Num[] {
+function numbersIn(cutText: string): Num[] {
+  // «топ-10», «x2», «2x» are a ranking and a multiplier, claims that need a source like any number, so they are
+  // spaced out (same length) to be read; «3D», «B2B», «1С» stay names.
+  const masked = cutText
+    .replace(/(?<![\p{L}\d])(топ)-(?=\d)/giu, '$1 ')
+    .replace(/(?<![\p{L}\d])[xх×](?=\d)/giu, ' ')
+    .replace(/(?<=\d)[xх×](?![\p{L}\d])/giu, ' ')
   type Raw = {
     shown: string
     start: number
@@ -177,25 +184,43 @@ export function extractNumbers(text: string): string[] {
   return numbersIn(cutOut(text, true).rest).map((n) => n.shown)
 }
 
-const NAME = '(?:\\[имя \\d+\\]|[\\p{L}-]+(?:\\s+[\\p{L}-]+)?)'
-const GREETING_START = new RegExp(
-  `^\\s*(?:${NAME}\\s*,\\s*)?(?:${GREETINGS.join('|')})(?!\\p{L})`,
-  'u',
-)
+const GREETING = new RegExp(`^(?:${GREETINGS.join('|')})(?!\\p{L})`, 'u')
+/** A name before the greeting, as written: a capitalized word or two, or the tag the model was given. */
+const NAME_FIRST = /^\s*(\[имя \d+\]|\p{Lu}[\p{L}-]*(?:\s+\p{Lu}[\p{L}-]*)?)\s*[,!.]?\s*/u
 
-/** Whether a reply opens with a greeting, maybe after the name and a comma: «Анна, здравствуйте». */
+/**
+ * Whether a reply opens with a greeting, maybe after the name: «Анна, здравствуйте», «Анна! Здравствуйте». A
+ * capitalized opener that is not a name, «Понимаю, добрый день у вас был», is no name (the stoplist of NOT_NAMES).
+ */
 export function startsWithGreeting(text: string): boolean {
-  return GREETING_START.test(fold(text))
+  if (GREETING.test(fold(text.trimStart()))) return true
+  const name = NAME_FIRST.exec(text)
+  if (!name) return false
+  const first = fold(name[1] ?? '')
+  if (!first.startsWith('[') && first.split(/\s+/).some((w) => NOT_NAMES.has(w))) return false
+  return GREETING.test(fold(text.slice(name[0].length)))
 }
 
-const MOSCOW_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' })
+const MOSCOW_DATE = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Europe/Moscow',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+})
+
+/** The Moscow calendar day of a moment as a number that orders by date (20261025). */
+function moscowDay(d: Date): number {
+  const part = (type: string) =>
+    Number(MOSCOW_DATE.formatToParts(d).find((p) => p.type === type)?.value)
+  return part('year') * 10_000 + part('month') * 100 + part('day')
+}
 
 /** Whether the last message from our side was on an earlier Moscow day (null: there was none). */
 export function isNewMoscowDay(lastOursAt: string | null, now: Date): boolean {
   if (lastOursAt === null) return true
   const last = new Date(lastOursAt)
   if (Number.isNaN(last.getTime())) return true
-  return MOSCOW_DAY.format(last) < MOSCOW_DAY.format(now)
+  return moscowDay(last) < moscowDay(now)
 }
 
 /** The first run of `n` words of `text` that also stands in one of `sources`, joined by spaces. */
@@ -278,7 +303,8 @@ function roboticIssues(i: CheckInput, text: string): CheckIssue[] {
   if (ai) issues.push({ id: 'robotic.ai', detail: `слова про ИИ о себе: «${ai}»` })
   if (/^\s*(?:\d+[.)]|[-•*])\s/m.test(text))
     issues.push({ id: 'robotic.list', detail: 'строки списком' })
-  const markup = /\*\*|#|`/.exec(text)
+  // Bold, a heading at the start of a line or code; «#кофейня» is a hashtag, not markup.
+  const markup = /\*\*|^#{1,6}\s|`/m.exec(text)
   if (markup) issues.push({ id: 'robotic.markup', detail: `разметка: ${markup[0]}` })
 
   const turn = i.clientTurnText.trim().length
@@ -325,9 +351,9 @@ function promiseIssues(text: string): CheckIssue[] {
 /** The code checks of a reply (FR-CONV-4, M4 design 5.6): every problem found, each with a reason Boris can read. */
 export function checkReplyText(i: CheckInput): CheckIssue[] {
   const text = i.text?.trim() ?? ''
-  // Without a text there is nothing to check: only a reply must have one.
-  if (!text)
-    return i.move === 'reply' ? [{ id: 'empty', detail: 'ход «ответить», а текста нет' }] : []
+  // Only a reply is sent to the client, so only a reply is checked and must have a text.
+  if (i.move !== 'reply') return []
+  if (!text) return [{ id: 'empty', detail: 'ход «ответить», а текста нет' }]
   return [
     ...factIssues(i, text),
     ...greetingIssues(i, text),

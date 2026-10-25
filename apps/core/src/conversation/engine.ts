@@ -117,7 +117,8 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
       output = null
       break
     }
-    output = res.output
+    // Only a reply carries a text; one written with another move is never checked, so it is never shown or kept.
+    output = res.output.move === 'reply' ? res.output : { ...res.output, text: null }
     issues = checkReplyText({
       text: output.text,
       move: output.move,
@@ -138,6 +139,7 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
         borisWords,
         draft: output.text,
         names: input.names,
+        correlationId: d.conversationId,
       })
       checkerRan = checker.ran
       if (checker.modelCallId) modelCallIds.push(checker.modelCallId)

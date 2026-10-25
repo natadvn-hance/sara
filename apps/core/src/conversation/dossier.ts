@@ -4,6 +4,7 @@ import type { Db } from '../db/client'
 import { chatMessage, deal, lead } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
 import { isNewMoscowDay } from './check/codeChecks'
+import { NOT_NAMES } from './check/phrases'
 import { getConversation } from './store'
 import { inMoscowHours } from './time'
 import type { ConversationRow, Dossier, DossierMessage } from './types'
@@ -39,31 +40,6 @@ export function untilOurs<T extends DossierMessage>(messages: T[], anchor: strin
   return cut < 0 ? messages : messages.slice(0, cut)
 }
 
-/** Words that open a message before a comma and are not a name. */
-const NOT_NAMES = new Set([
-  'здравствуйте',
-  'здравствуй',
-  'привет',
-  'приветствую',
-  'добрый',
-  'доброе',
-  'доброго',
-  'добрая',
-  'спасибо',
-  'благодарю',
-  'хорошо',
-  'отлично',
-  'конечно',
-  'да',
-  'нет',
-  'итак',
-  'извините',
-  'простите',
-  'понимаю',
-  'понял',
-  'поняла',
-])
-
 /**
  * The names of the client to hide from the model (ADR-016): the lead's or the order page's (the dossier has the one
  * it found), and the name old Sara greeted the client with. She opened every chat «<Имя>, добрый день!» or
@@ -88,7 +64,8 @@ export async function clientNames(
     .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
     .limit(1)
   const greeted = /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
-  const names = [known, greeted && !NOT_NAMES.has(greeted.toLowerCase()) ? greeted : null]
+  const folded = greeted?.toLowerCase().replace(/ё/g, 'е') ?? ''
+  const names = [known, greeted && !NOT_NAMES.has(folded) ? greeted : null]
   return [...new Map(names.flatMap((n) => (n ? [[n.toLowerCase(), n] as const] : []))).values()]
 }
 

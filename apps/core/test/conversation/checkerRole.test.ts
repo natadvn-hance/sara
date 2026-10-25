@@ -114,6 +114,34 @@ describe('the Checker role', () => {
     expect(clean).toMatchObject({ issues: [], ran: true })
   })
 
+  it('NFR-UX-1: a long or medium dash in a Checker note becomes a short hyphen', async () => {
+    const LONG = String.fromCharCode(0x2014)
+    const MEDIUM = String.fromCharCode(0x2013)
+    const gw = await answering({
+      unsupported: [`Срок ${LONG} неделя ${MEDIUM} не из записей`],
+      contradicts_boris: `Борис назвал три недели${LONG}это расходится`,
+      robotic: [],
+      promises: [],
+    })
+    const r = await runCheckerRole(gw, draft)
+    expect(r.issues.map((x) => x.detail)).toEqual([
+      'Срок - неделя - не из записей',
+      'Борис назвал три недели - это расходится',
+    ])
+  })
+
+  it('FR-CONV-4: the Checker call carries the conversation as its correlation id', async () => {
+    let seen: string | undefined
+    const gw: Gateway = {
+      call: async (_role, _input, _schema, opts) => {
+        seen = opts?.correlationId
+        return { ok: true, output: CLEAN, durationMs: 1, modelCallId: 'mc-1' } as never
+      },
+    }
+    await runCheckerRole(gw, { ...draft, correlationId: 'conv-7' })
+    expect(seen).toBe('conv-7')
+  })
+
   it('FR-CONV-4: a failed Checker call does not pass the reply silently', async () => {
     const gw = await gateway({ FAKE_CLAUDE_MODE: 'exit1' })
     expect(await runCheckerRole(gw, draft)).toEqual({
