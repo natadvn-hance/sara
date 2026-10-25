@@ -251,10 +251,10 @@ describe('model gateway', () => {
     await Promise.all([first, trial, live])
     const order = (await calls()).sort((a, b) => a.start - b.start).map((c) => c.stdin)
     expect(order).toEqual(['first', 'live', 'trial'])
-    const rows = await db.execute<{ priority: string }>(
-      sql`select priority from core.model_call order by started_at`,
-    )
-    expect(rows.rows.map((r) => r.priority)).toEqual(['P2', 'P2', 'P3'])
+    // Two calls may start in the same millisecond, so the recorded priorities are compared without their order;
+    // the order itself is checked above by the CLI runs.
+    const rows = await db.execute<{ priority: string }>(sql`select priority from core.model_call`)
+    expect(rows.rows.map((r) => r.priority).sort()).toEqual(['P2', 'P2', 'P3'])
   })
 
   it('FR-OPS-3: calls start by role priority when the slots are busy', async () => {
