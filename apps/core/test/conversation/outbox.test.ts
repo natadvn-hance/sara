@@ -59,7 +59,9 @@ beforeEach(async () => {
   })
   await setSetting(db, 'conv.v1_writes', false, 'system')
   await setSetting(db, 'outbound.messages', true, 'system')
-})
+  // The reset, the sync and the settings are a dozen queries on a database other test processes may hold locks on:
+  // a loaded machine took over 10 s once (not seen alone, 0.4-1.9 s), so the hook gets an honest 30 s.
+}, 30_000)
 
 describe('sending to a client', () => {
   it('FR-CONV-9: a reply goes with its key and the last message the turn saw', async () => {
