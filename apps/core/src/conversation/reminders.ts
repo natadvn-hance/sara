@@ -204,7 +204,16 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
   }
 }
 
-const remindWorkflow = DBOS.registerWorkflow(runRemind, { name: 'convRemind' })
+/**
+ * A ladder lives for weeks, and DBOS counts every restart that finds a process unfinished as a recovery attempt; the
+ * default of 100 would send a long-sleeping process to the dead-letter queue after enough deploys.
+ */
+export const REMIND_MAX_RECOVERY_ATTEMPTS = 10_000
+
+const remindWorkflow = DBOS.registerWorkflow(runRemind, {
+  name: 'convRemind',
+  maxRecoveryAttempts: REMIND_MAX_RECOVERY_ATTEMPTS,
+})
 
 /**
  * Starts the process for our message the client did not answer: `conv-remind:<conversation>:<message>`, so a repeat
@@ -301,16 +310,19 @@ export async function syncReminders(
     return
   }
   const fresh = (await getConversation(db, conv.id)) ?? conv
-  const on =
-    (await getSetting(db, 'pipeline.conversations')) &&
-    (await getSetting(db, 'conv.reminders')) &&
-    !fresh.closedAt &&
-    fresh.owner === 'sara'
-  if (!on) {
+  if (fresh.closedAt || fresh.owner !== 'sara') {
+    // Closed, or Boris leads the client: the processes end, and so does the task that asks him about the client.
     await cancelReminders(conv.id)
     await resolveDormantTasks(conv.id)
     return
   }
+  // Conversations or reminders switched off: nothing new starts (startReminder), what waits goes on waiting and
+  // skips its steps while the switch is off.
+  if (
+    !(await getSetting(db, 'pipeline.conversations')) ||
+    !(await getSetting(db, 'conv.reminders'))
+  )
+    return
   // The ladder's own reminders stand in the chat as our side's messages and are not a new beginning.
   const ladder = await ladderTexts(db, conv.id)
   const anchor = messages.findLast((m) => m.side === 'specialist' && !isLadderMessage(m, ladder))

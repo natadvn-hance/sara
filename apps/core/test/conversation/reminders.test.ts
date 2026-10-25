@@ -6,6 +6,7 @@ import { onConvPress } from '../../src/conversation/commands'
 import { checkGround } from '../../src/conversation/reminderSteps'
 import {
   decideDormant,
+  REMIND_MAX_RECOVERY_ATTEMPTS,
   type RemindDeps,
   reminderFallback,
   remindWorkflowId,
@@ -746,7 +747,7 @@ describe('when a reminder must not go', () => {
     expect(await rows()).toHaveLength(0)
   })
 
-  it('FR-CONV-12: a reminder that wakes after the switches went off does nothing', async () => {
+  it('FR-CONV-12: a reminder that wakes while the switches are off is skipped, not ended', async () => {
     await live()
     const conv = await scene(quiet(25 * HOUR))
     for (const [key, why] of [
@@ -759,9 +760,27 @@ describe('when a reminder must not go', () => {
       const g = await checkGround(deps, conv.id, 'm-1', { dormant: false })
       expect(g.go).toBe(false)
       expect(g.go ? '' : g.why).toMatch(why)
-      expect(g.go ? false : g.end).toBe(true)
+      // Only this step is skipped: the process goes on when the switch is turned back on.
+      expect(g.go ? true : g.end).toBe(false)
     }
     expect(sends).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: a reminder whose switch went off while its text was written is skipped, and the process lives on', async () => {
+    await live()
+    await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_DELAY_MS: '2500' })
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await rows()).length === 1)
+    await setSetting(db, 'conv.reminders', false, 'system')
+    await until(done(1), 20000)
+    const [r] = await rows()
+    expect(r?.outcome).toBe('skipped')
+    expect(r?.decisionReason).toMatch(/напоминания выключены/)
+    expect(sends).toHaveLength(0)
+    // The next step waits for its own time; nothing ended the process.
+    await sleep(500)
+    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
   })
 
   it('FR-CONV-12: an unreadable chat sends nothing and skips the step', async () => {
@@ -775,6 +794,12 @@ describe('when a reminder must not go', () => {
     expect((await rows())[0]?.outcome).toBe('skipped')
     expect(sends).toHaveLength(0)
     expect((await fake.calls()).length).toBe(0)
+  })
+})
+
+describe('the durable process of a reminder', () => {
+  it('NFR-REL-3: a reminder that waits for weeks survives more restarts than the default 100 recoveries', () => {
+    expect(REMIND_MAX_RECOVERY_ATTEMPTS).toBeGreaterThanOrEqual(1000)
   })
 })
 

@@ -159,6 +159,24 @@ describe('what the chat as read says about reminders', () => {
     expect(await statusOf(wf(conv, 'm-1'))).toBeNull()
   })
 
+  it('FR-CONV-12: turning reminders or conversations off keeps the waiting process, which goes on when they are back', async () => {
+    const conv = await seedChat(db, CHAT, [ours('m-1', 2 * HOUR)])
+    await sync(conv)
+    for (const key of ['conv.reminders', 'pipeline.conversations'] as const) {
+      await setSetting(db, key, false, 'system')
+      await sync(conv)
+      expect(await statusOf(wf(conv, 'm-1')), key).toBe('PENDING')
+      await setSetting(db, key, true, 'system')
+    }
+    // Closed is different: that ends it.
+    await db
+      .update(conversation)
+      .set({ closedAt: new Date().toISOString() })
+      .where(eq(conversation.id, conv.id))
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-1'))).toBe('CANCELLED')
+  })
+
   it('FR-CONV-2: a message of an unclear author last stops the reminders', async () => {
     const conv = await seedChat(db, CHAT, [ours('m-1', 2 * HOUR)])
     await sync(conv)

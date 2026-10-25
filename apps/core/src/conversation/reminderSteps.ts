@@ -257,8 +257,9 @@ export async function checkGround(
   const { db } = d
   const conv = await getConversation(db, conversationId)
   if (!conv) return STOP('разговора нет')
-  if (!(await getSetting(db, 'pipeline.conversations'))) return STOP('разговоры выключены')
-  if (!(await getSetting(db, 'conv.reminders'))) return STOP('напоминания выключены')
+  // A switch turned off skips the step but does not end the process: it goes on when the switch is back on.
+  if (!(await getSetting(db, 'pipeline.conversations'))) return SKIP('разговоры выключены')
+  if (!(await getSetting(db, 'conv.reminders'))) return SKIP('напоминания выключены')
   if (conv.closedAt) return STOP('разговор закрыт')
   if (conv.owner !== 'sara') return STOP('клиента ведёт Борис')
   try {
