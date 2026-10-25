@@ -16,7 +16,7 @@ import { examResult, examRun } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import { loadRole } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
-import { type Grade, gradeScenario, movedTo } from './grade'
+import { type Grade, gradeScenario, movedTo, UNANSWERED } from './grade'
 import { formatExaminerInput } from './prompt'
 import { caseHitOf, dossierFromScenario, examNames, loadScenarios } from './scenarios'
 
@@ -98,7 +98,7 @@ export type ExamSummary = {
   s2: number
   s3: number
   passed: boolean
-  /** In how many scenarios the Interlocutor gave no answer: such a run measures nothing and never passes. */
+  /** In how many scenarios a model gave no answer (the Interlocutor, the Checker, a judge that counts): the run never passes. */
   unanswered: number
   scenarios: number
   /** The earlier run of the same set that this one was compared with, if any. */
@@ -218,7 +218,10 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
       judge = r.ok ? r.output : { failed: r.errorClass }
     }
     const marks = judge && 'tone' in judge ? judge : null
-    const grade = gradeScenario(s, plan, marks, { judgeCounts })
+    const grade = gradeScenario(s, plan, marks, {
+      judgeCounts,
+      judgeFailed: judge !== null && 'failed' in judge,
+    })
     const out = plan.output
     const result: ScenarioResult = {
       id: s.id,
@@ -256,7 +259,7 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
   const countOf = (sev: string) => failures.filter((f) => f.severity === sev).length
   const score = round4(results.reduce((sum, r) => sum + r.grade.score, 0) / results.length)
   const s1 = countOf('S1')
-  const unanswered = failures.filter((f) => f.id === 'run.failed').length
+  const unanswered = failures.filter((f) => UNANSWERED.includes(f.id)).length
   const [previous] = await d.db
     .select({ id: examRun.id, score: examRun.score })
     .from(examRun)

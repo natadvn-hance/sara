@@ -271,14 +271,34 @@ describe('runExam', { timeout: 30_000 }, () => {
     expect(row?.judge).toMatchObject({ tone: 1, counted: true })
   })
 
-  it('FR-TRAIN-8: a judge that fails leaves the scenario graded by code alone', async () => {
+  it('FR-TRAIN-8: a judge that fails does not hold a run whose judge does not count', async () => {
+    const { summary } = await exam(
+      { interlocutor: CALL_BORIS, examiner: { tone: 9 } },
+      { only: ['x-t-01-price-first'], judge: true },
+    )
+    expect(summary).toMatchObject({ score: 1, passed: true, unanswered: 0 })
+    const [row] = await db.select().from(examResult)
+    expect(row?.judge).toMatchObject({ failed: 'bad_output' })
+  })
+
+  it('FR-TRAIN-8: a judge that counts and fails leaves the scenario unanswered, so the run does not pass', async () => {
     const { summary } = await exam(
       { interlocutor: CALL_BORIS, examiner: { tone: 9 } },
       { only: ['x-t-01-price-first'], judge: true, judgeCounts: true },
     )
-    expect(summary.score).toBe(1)
+    expect(summary).toMatchObject({ unanswered: 1, passed: false })
     const [row] = await db.select().from(examResult)
-    expect(row?.judge).toMatchObject({ failed: 'bad_output' })
+    expect(checkIds(row)).toEqual(['run.judge'])
+  })
+
+  it('FR-TRAIN-8: a Checker that did not answer leaves the scenario unanswered, so the run does not pass', async () => {
+    const { summary } = await exam(
+      { interlocutor: REPLY, checker: { unsupported: 'not a list' } },
+      { only: ['x-t-03-how-start'] },
+    )
+    expect(summary).toMatchObject({ unanswered: 1, passed: false, s1: 0 })
+    const [row] = await db.select().from(examResult)
+    expect(checkIds(row)).toEqual(['run.checker'])
   })
 
   it('FR-TRAIN-8: without the judge flag the examiner is not called', async () => {

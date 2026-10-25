@@ -39,6 +39,7 @@ function planOf(o: {
   issues?: CheckIssue[]
   decision?: Decision
   failure?: string | null
+  checkerRan?: boolean
 }): TurnPlan {
   return {
     recall: {
@@ -55,7 +56,7 @@ function planOf(o: {
     attempts: 1,
     decision: o.decision ?? SEND,
     modelCallIds: [],
-    checkerRan: true,
+    checkerRan: o.checkerRan ?? true,
     failure: o.failure ?? null,
   }
 }
@@ -377,6 +378,35 @@ describe('gradeScenario', () => {
       { id: 'run.failed', severity: 'S2', detail: expect.stringContaining('timeout') },
     ])
     expect(g.score).toBe(0.5)
+  })
+
+  it('FR-TRAIN-8: a Checker that did not answer on a reply is an unanswered scenario, not a clean one', () => {
+    // Without the Checker its S1 findings are missing, and the rules turn the reply into a draft: nothing is proved.
+    const g = gradeScenario(scenarioOf(), planOf({ checkerRan: false }), null)
+    expect(g.failures).toEqual([
+      { id: 'run.checker', severity: 'S2', detail: expect.stringContaining('Проверяющий') },
+    ])
+    expect(g.score).toBe(0.5)
+    // A move with no text has nothing for the Checker to read.
+    const quiet = gradeScenario(
+      scenarioOf({ move: 'call_boris' }),
+      planOf({ output: { move: 'call_boris', text: null }, decision: CALL, checkerRan: false }),
+      null,
+    )
+    expect(quiet.severity).toBeNull()
+  })
+
+  it('FR-TRAIN-8: a failed judge that counts is an unanswered scenario, and one that does not count is not', () => {
+    const counted = gradeScenario(scenarioOf(), planOf({}), null, {
+      judgeCounts: true,
+      judgeFailed: true,
+    })
+    expect(counted.failures).toEqual([
+      { id: 'run.judge', severity: 'S2', detail: expect.stringContaining('судья') },
+    ])
+    const advisory = gradeScenario(scenarioOf(), planOf({}), null, { judgeFailed: true })
+    expect(advisory.failures).toEqual([])
+    expect(advisory.score).toBe(1)
   })
 
   describe('the judge', () => {

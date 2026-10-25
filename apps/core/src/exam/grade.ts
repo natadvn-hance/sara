@@ -11,6 +11,12 @@ import type { TurnPlan } from '../conversation/types'
 
 export type Severity = 'S1' | 'S2' | 'S3'
 
+/**
+ * The failures that mean a scenario was not measured: the Interlocutor, the Checker, or a judge that counts gave no
+ * answer. A run with one of them never passes, whatever its score.
+ */
+export const UNANSWERED = ['run.failed', 'run.checker', 'run.judge']
+
 /** One thing a scenario did wrong: the check or the expectation, how bad it is, and what exactly. */
 export type Failure = { id: string; severity: Severity; detail: string }
 
@@ -88,7 +94,7 @@ export function gradeScenario(
   s: ExamScenario,
   plan: TurnPlan,
   judge: ExaminerOutput | null,
-  o: { judgeCounts?: boolean } = {},
+  o: { judgeCounts?: boolean; judgeFailed?: boolean } = {},
 ): Grade {
   const want = s.expect
   const out = plan.output
@@ -150,6 +156,11 @@ export function gradeScenario(
       }
     }
 
+    // The Checker finds the unsupported claims and broken promises the code cannot see. Without its answer the reply
+    // is only a draft by the rules, and its S1 findings are missing: the scenario proved nothing.
+    if (text !== null && !plan.checkerRan)
+      add('run.checker', 'S2', 'Проверяющий не ответил: S1 по смыслу не проверены')
+
     const told = toldCaseId(plan)
     if (want.case === 'none' && told !== null)
       add('case.needless', 'S2', `кейс ${told} не нужен в этом ответе`)
@@ -157,6 +168,7 @@ export function gradeScenario(
       add('case.missing', 'S3', 'клиент просил примеры, а кейс не рассказан')
   }
 
+  if (o.judgeCounts && o.judgeFailed) add('run.judge', 'S2', 'судья не ответил')
   const marks = judge ? judgeFailures(judge) : []
   const counted = merged(o.judgeCounts ? [...failures, ...marks] : failures)
   const worst = counted.reduce<Severity | null>(
