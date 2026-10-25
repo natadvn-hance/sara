@@ -64,7 +64,11 @@ const DORMANT_RETRY_MS = 3600_000
 const DORMANT_STEP_RETRY_MS = 10 * 60_000
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 
-/** The text of a reminder: the model's, written again until the time is up, then the ready text of old Sara. */
+/**
+ * The text of a reminder: the model's; when the model itself gave nothing (a limit, a failure) it is asked again every
+ * so often until the reminder is 3 hours late; when its text failed the checks twice, or the time is up, the ready
+ * text of old Sara goes.
+ */
 async function obtainText(
   k: number,
   conversationId: string,
@@ -80,6 +84,8 @@ async function obtainText(
       name: `write-${k}-${a}`,
     })
     if (w.text) return w.text
+    // The checks failed twice: the model is not asked again, the ready text goes.
+    if (!w.modelFailed) break
     const wait = Math.min(d().retryEveryMs ?? RETRY_EVERY_MS, deadline - (await DBOS.now()))
     if (wait > 0) await DBOS.sleep(wait)
   }

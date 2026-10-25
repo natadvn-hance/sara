@@ -149,6 +149,17 @@ describe('the ready texts of old Sara', () => {
 
   it('NFR-UX-1: the ready texts have no long or medium dash', () => {
     for (const tone of ['check_in', 'friendly'] as const)
-      expect(reminderFallback('Анна', tone)).not.toMatch(/[\u2013\u2014]/)
+      for (const variant of [0, 1] as const)
+        expect(reminderFallback('Анна', tone, variant)).not.toMatch(/[\u2013\u2014]/)
+  })
+
+  it('FR-CONV-12: each ready text has another wording for the second time, without a number or a promise to call', () => {
+    for (const tone of ['check_in', 'friendly'] as const) {
+      const [a, b] = [0, 1].map((v) => reminderFallback('Анна Иванова', tone, v as 0 | 1))
+      expect(a).not.toBe(b)
+      expect(b?.startsWith('Анна, здравствуйте.')).toBe(true)
+      expect(b).not.toMatch(/\d/)
+      expect(b).not.toMatch(/перезвон|наберу|позвоню/i)
+    }
   })
 })
