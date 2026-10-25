@@ -72,6 +72,8 @@
 | | `draft_analysis` | jsonb | П | разбор Аналитика: шаги чтения заказа (`reading`: явное, неявные слои, чего хочет, кто это, риски, работа для нас) и короткий итог (`hidden_need`, `risk`, `condition`); null: разбора нет |
 | | `client_info` | jsonb | П | что страница заказа говорит о клиенте (контракт `ClientInfo`): на Профи.ру с какой даты, номер подтверждён, отзывы других специалистов и их теги; читается `profi.get_order`, когда заявка прошла Оценщика; null: страницу не читали или клиент не показан |
 | `lead_score` | `lead_id`, `direction_id`, `scoring_version_id`, `gates_passed` (bool), `score` (0-100), `reasons` (jsonb), `confidence`, `model_call_id` | | Н | оценка заявки направлением |
+| `lead_candidate` | `order_id`, `account_id` (вместе первичный ключ), `score` (null: Оценщик не ответил), `decision` (`show`, `drop`, `unscored`), `stop_factor`, `margin` (балл минус порог своих правил), `created_at` | | Н | голос каждого направления о заказе, пишется после оценки и для отсеянных тоже (FR-LEAD-4) |
+| `lead_route` | `order_id` (первичный ключ), `account_id` (null: заказ никому), `state` (`none`, `routed`), `needs_choice`, `alternatives` (jsonb), `decided_at` | | Н | какое направление получило заказ; решается один раз и не переоткрывается; на `outbox` для откликов частичный уникальный индекс по `payload->>'leadId'`: второй отклик на заказ база не примет |
 | `deal` | `id` | uuid | Н | клиент после отклика |
 | | `lead_id`, `account_id`, `direction_id` | | Н | связи |
 | | `chat_id` | text | Н | номер чата на площадке |

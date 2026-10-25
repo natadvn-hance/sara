@@ -38,7 +38,7 @@
 | FR-LEAD-1 | M1 | FR-TRAIN-4 | M5 |
 | FR-LEAD-2 | M0 скелет, M2 | FR-TRAIN-5 | M5 |
 | FR-LEAD-3 | M2, M3 | FR-TRAIN-6 | M5 |
-| FR-LEAD-4 | M3 | FR-TRAIN-7 | M5 |
+| FR-LEAD-4 | M3 (частично: охрана от двойного отклика и маршрут одного аккаунта; живая проверка с двумя аккаунтами в M8) | FR-TRAIN-7 | M5 |
 | FR-LEAD-5 | M2 | FR-TRAIN-8 | M4 |
 | FR-LEAD-6 | M2 | FR-TRAIN-9 | M5 |
 | FR-LEAD-7 | M0 скелет, M2 | FR-AUTO-1 | M5 |

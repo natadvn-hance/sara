@@ -77,6 +77,7 @@ export const TEXTS = {
   bidUncertain:
     'Не знаю, ушёл ли отклик: площадка не ответила. Проверь заявку на Профи.ру, прежде чем откликаться вручную.',
   bidsPausedPress: 'Отправка откликов на паузе. Включи её и нажми снова.',
+  lostRoute: 'Эта заявка досталась другому направлению',
   bidSent: (title: string, spentRub: number) =>
     `✅ Отклик отправлен: ${title}, ${formatRub(spentRub)}`,
   bidRefused: (title: string, errorClass: string) =>

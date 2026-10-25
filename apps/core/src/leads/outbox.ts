@@ -3,6 +3,7 @@ import { type EventType, newEventId, type ProfiErrorClass } from '@sara/shared'
 import { and, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { lead, outbox, task } from '../db/schema'
+import { lostRoute } from '../direction/router'
 import { createDeal } from '../domain/deal'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
@@ -88,7 +89,9 @@ const legacyWorkflowIdOf = (leadId: string) => `outbox:${keyOf(leadId)}`
 export async function recordBid(
   tx: DbOrTx,
   p: BidPayload,
-): Promise<{ outboxId: string; created: boolean }> {
+): Promise<{ outboxId: string | null; created: boolean }> {
+  // An order another direction won is not this account's to bid on, whatever the card in front of Boris says.
+  if (await lostRoute(tx, p.leadId, p.accountId)) return { outboxId: null, created: false }
   const id = newEventId()
   const rows = await tx
     .insert(outbox)
