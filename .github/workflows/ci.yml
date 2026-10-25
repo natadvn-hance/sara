@@ -69,11 +69,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # gitleaks-action downloads itself to a fixed temp file that a persistent runner keeps from the last run.
-      - run: rm -f "${TMPDIR:-/tmp}/gitleaks.tmp"
+      # gitleaks-action downloads itself to a fixed file in TMPDIR: the runner's own temp folder, emptied after each
+      # job, keeps it apart from the other runner and from the last run.
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TMPDIR: ${{ runner.temp }}
 
   test:
     needs: changes
