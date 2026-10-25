@@ -82,7 +82,11 @@ beforeAll(async () => {
     dataDir: join(dir, 'data'),
     extraEnv: {
       FAKE_CLAUDE_ARGS_LOG: cliLog,
-      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({ interlocutor: interlocutorAnswer() }),
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({
+        interlocutor: interlocutorAnswer({
+          case: { moment: 'doubt', case_id: 'k-case-01', why: 'Клиент сомневается в сроке' },
+        }),
+      }),
     },
   })
   const mind = fakeMind()
@@ -264,6 +268,25 @@ describe('the turn workflow', () => {
     await expect(pokeTurn(c as never)).resolves.toBeUndefined()
     expect(await db.select().from(convTurn)).toHaveLength(0)
   }, 30000)
+
+  it('FR-CONV-3: the turn trace keeps the case, its moment, why it was chosen and its title', async () => {
+    await clientWrites('m-2', 'Вы делали что-то похожее для клиник?')
+    const [turn] = await turnsDone(1)
+    expect(turn?.understanding).toMatchObject({
+      topic: 'process',
+      case: {
+        moment: 'doubt',
+        case_id: 'k-case-01',
+        why: 'Клиент сомневается в сроке',
+        title: 'Лиса-Клиник: онлайн-запись, Краснодар',
+      },
+    })
+    // The next turn of the chat is not offered this case again.
+    await clientWrites('m-3', 'А ещё примеры есть?')
+    const next = (await turnsDone(2)).find((t) => t.id !== turn?.id)
+    expect((next?.recalled as { cases?: string[] } | null)?.cases).not.toContain('k-case-01')
+    expect((next?.recalled as { cases?: string[] } | null)?.cases).toContain('k-case-02')
+  })
 
   it('FR-CONV-7: three client messages with typing between them get one reply', async () => {
     await clientWrites('m-2', 'Здравствуйте')

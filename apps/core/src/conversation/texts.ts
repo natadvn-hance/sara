@@ -42,6 +42,14 @@ export type CardView = {
   tone: Tone | null
   factIds: string[]
   examples: number
+  /** The case of Hance the reply tells and why it was chosen (Boris reads it under «Почему так»). */
+  caseUsed: { title: string; why: string | null } | null
+}
+
+/** «Кейс: <название>, потому что <причина>.» */
+const caseLine = (c: NonNullable<CardView['caseUsed']>) => {
+  const why = c.why?.trim().replace(/[.\s]+$/, '')
+  return `Кейс: ${c.title}${why ? `, потому что ${why.charAt(0).toLowerCase()}${why.slice(1)}` : ''}.`
 }
 
 const who = (v: CardView) =>
@@ -74,6 +82,7 @@ export const CONV_TEXTS = {
       v.tone ? `Тон: ${TONE_RU[v.tone]}.` : null,
     ].filter(Boolean)
     if (meta.length) lines.push(meta.join(' '))
+    if (v.caseUsed) lines.push(caseLine(v.caseUsed))
     lines.push(
       `Опора: ${v.factIds.length ? v.factIds.join(', ') : 'нет записей разума'}. Образцов: ${v.examples}.`,
     )

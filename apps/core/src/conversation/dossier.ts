@@ -1,7 +1,7 @@
 import { type ClientInfo, CONV_STAGES, type ConvStage } from '@sara/shared'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, ne } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { chatMessage, deal, lead } from '../db/schema'
+import { chatMessage, convTurn, deal, lead } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
 import { isNewMoscowDay } from './check/codeChecks'
 import { NOT_NAMES } from './check/phrases'
@@ -88,7 +88,13 @@ export async function buildDossier(
   db: Db,
   conversationId: string,
   now: Date,
-  o: { night: { from: number; to: number }; profi?: ProfiClient; anchor?: string },
+  o: {
+    night: { from: number; to: number }
+    profi?: ProfiClient
+    anchor?: string
+    /** The turn this dossier is for: its own trace is not an earlier turn's. */
+    turnId?: string
+  },
 ): Promise<Dossier> {
   const conv = await getConversation(db, conversationId)
   if (!conv) throw new Error(`conversation ${conversationId} not found`)
@@ -155,5 +161,35 @@ export async function buildDossier(
     night: inMoscowHours(now, o.night),
     lastOursAt: lastOurs?.sentAt ?? null,
     remindersSent: 0,
+    toldCases: await toldCases(db, conversationId, o.turnId),
   }
+}
+
+/**
+ * The cases the earlier turns of this chat told, from their traces (`understanding.case`), each once. The turn being
+ * planned is left out: planning it again after CHAT_CHANGED must not call its own first try a repeat.
+ */
+async function toldCases(
+  db: Db,
+  conversationId: string,
+  exceptTurn?: string,
+): Promise<{ id: string; title: string }[]> {
+  const rows = await db
+    .select({ understanding: convTurn.understanding })
+    .from(convTurn)
+    .where(
+      and(
+        eq(convTurn.conversationId, conversationId),
+        exceptTurn ? ne(convTurn.id, exceptTurn) : undefined,
+      ),
+    )
+    .orderBy(asc(convTurn.createdAt), asc(convTurn.id))
+  const told = new Map<string, string>()
+  for (const r of rows) {
+    const c = (
+      r.understanding as { case?: { case_id?: string | null; title?: string } | null } | null
+    )?.case
+    if (c?.case_id && !told.has(c.case_id)) told.set(c.case_id, c.title ?? '')
+  }
+  return [...told].map(([id, title]) => ({ id, title }))
 }
