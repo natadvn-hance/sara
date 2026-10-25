@@ -13,6 +13,7 @@
     "direction": "tsx src/direction/cli.ts",
     "score:eval": "tsx src/leads/scoreEvalCli.ts",
     "report:school": "tsx src/school/reportCli.ts",
+    "mind:key": "tsx src/mind/keyCli.ts",
     "mind:sync": "tsx src/mind/syncCli.ts"
   },
   "dependencies": {

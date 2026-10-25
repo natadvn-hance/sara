@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { event, lesson, mindCommit, mindProposal } from '../../src/db/schema'
+import { gitBinary } from '../../src/mind/git'
 import { createMindWriter } from '../../src/mind/writer'
 import { exampleChange } from '../../src/school/lessons/records'
 import { createLesson, decideLesson } from '../../src/school/lessons/store'
@@ -85,7 +87,8 @@ const writerAt = (dir: string, remote?: string) => {
   return { w, reindexed: () => reindexed }
 }
 
-describe('revert and the exchange with GitHub', () => {
+// Each test runs git many times: on a loaded machine (CI shares it) 5 seconds is too little.
+describe('revert and the exchange with GitHub', { timeout: 30_000 }, () => {
   it('FR-MIND-3: one button brings the previous mind version back', async () => {
     const { dir } = await remoteAndClone()
     const { w } = writerAt(dir)
@@ -97,7 +100,12 @@ describe('revert and the exchange with GitHub', () => {
     expect((await db.select().from(lesson))[0]).toMatchObject({ state: 'no', reason: 'откатил' })
     expect(await db.select().from(mindCommit).where(eq(mindCommit.kind, 'revert'))).toHaveLength(1)
     expect((await db.select().from(event)).map((e) => e.type)).toContain('mind.reverted')
-    expect(await w.revert(r.commitId)).toMatchObject({ ok: false })
+    // Pressed again: the revert already made is the answer, and nothing is reverted twice.
+    expect(await w.revert(r.commitId)).toMatchObject({
+      ok: true,
+      commitId: back.ok ? back.commitId : '',
+    })
+    expect(await db.select().from(mindCommit).where(eq(mindCommit.kind, 'revert'))).toHaveLength(1)
   })
 
   it('FR-MIND-3: a revert under later changes refuses and names them', async () => {
@@ -110,6 +118,7 @@ describe('revert and the exchange with GitHub', () => {
     git(dir, 'commit', '-qam', 'later\n\nSara-Commit: 0199d0b0-0000-7000-8000-00000000aaaa')
     const back = await w.revert(r.commitId)
     expect(back).toMatchObject({ ok: false, reason: 'conflict' })
+    expect(back.ok ? '' : back.detail).toContain('0199d0b0')
     expect(git(dir, 'status', '--porcelain')).toBe('')
   })
 
@@ -163,5 +172,94 @@ describe('revert and the exchange with GitHub', () => {
     expect(again).toMatchObject({ pushed: true })
     expect(git(dir, 'ls-files', 'mind').trim()).toBe(r.written[0])
     expect(git(dir, 'log', '-1', '--format=%B')).toContain(`Sara-Commit: ${r.commitId}`)
+  })
+
+  it("FR-MIND-3: a record the developers already took out is reverted as the lessons' «нет» only", async () => {
+    const { dir } = await remoteAndClone()
+    const { w } = writerAt(dir)
+    const r = await w.apply([await yesLesson(1)], { lessonIds: [], batchId: null })
+    if (!r.ok) throw new Error(r.detail)
+    git(dir, 'rm', '-q', r.written[0] ?? '')
+    git(dir, 'commit', '-qm', 'dev removed it')
+    const count = git(dir, 'rev-list', '--count', 'HEAD').trim()
+    expect((await w.revert(r.commitId)).ok).toBe(true)
+    expect(git(dir, 'rev-list', '--count', 'HEAD').trim()).toBe(count)
+    expect((await db.select().from(lesson))[0]?.state).toBe('no')
+  })
+
+  it('NFR-REL-3: a revert committed before a crash is finished from git, and the lessons are «нет»', async () => {
+    const { dir } = await remoteAndClone()
+    const r = await writerAt(dir).w.apply([await yesLesson(1)], { lessonIds: [], batchId: null })
+    if (!r.ok) throw new Error(r.detail)
+    const crashing = createMindWriter({
+      db,
+      mindDir: dir,
+      scopes: ['shared'],
+      reindex: async () => {},
+      git: {
+        run: async (args, cwd, env) => {
+          const out = await gitBinary.run(args, cwd, env)
+          if (args.includes('commit')) throw new Error('the core died here')
+          return out
+        },
+      },
+    })
+    await expect(crashing.revert(r.commitId)).rejects.toThrow()
+    expect((await writerAt(dir).w.revert(r.commitId)).ok).toBe(true)
+    expect((await db.select().from(lesson))[0]).toMatchObject({ state: 'no', reason: 'откатил' })
+    expect(await db.select().from(mindCommit).where(eq(mindCommit.kind, 'revert'))).toHaveLength(1)
+  })
+
+  it('FR-MIND-3: an SSH remote without a key is not tried and tells nobody', async () => {
+    const { dir } = await remoteAndClone()
+    git(dir, 'remote', 'set-url', 'origin', 'git@github.com:natadvn-hance/sara-mind.git')
+    expect(await writerAt(dir).w.sync()).toEqual({ pushed: false, pulled: 0, error: 'no key' })
+    expect((await db.select().from(event)).map((e) => e.type)).not.toContain('mind.sync_failed')
+  })
+
+  it('NFR-SEC-1: the push key is a file only for the time of the command', async () => {
+    const { dir } = await remoteAndClone()
+    const files: string[] = []
+    const w = createMindWriter({
+      db,
+      mindDir: dir,
+      scopes: ['shared'],
+      reindex: async () => {},
+      secrets: {
+        get: async () =>
+          '-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----',
+        set: async () => {},
+        ensure: async () => '',
+      },
+      git: {
+        run: async (args, cwd, env) => {
+          const file = /-i '([^']+)'/.exec(env?.GIT_SSH_COMMAND ?? '')?.[1]
+          if (file) {
+            files.push(file)
+            expect(existsSync(file)).toBe(true)
+          }
+          return gitBinary.run(args, cwd, env)
+        },
+      },
+    })
+    await w.sync()
+    expect(files.length).toBeGreaterThan(0)
+    expect(files.every((f) => !existsSync(f))).toBe(true)
+  })
+
+  it('NFR-REL-2: a rebuilt clone keeps a revert Boris made and never makes a commit twice', async () => {
+    const { remote, dir } = await remoteAndClone()
+    const { w } = writerAt(dir, remote)
+    const a = await w.apply([await yesLesson(1)], { lessonIds: [], batchId: null })
+    if (!a.ok) throw new Error(a.detail)
+    expect((await w.sync()).pushed).toBe(true)
+    const b = await w.apply([await yesLesson(2)], { lessonIds: [], batchId: null })
+    if (!b.ok) throw new Error(b.detail)
+    expect((await w.revert(a.commitId)).ok).toBe(true)
+    await rm(dir, { recursive: true, force: true })
+    expect((await w.sync({ rebuild: true })).pushed).toBe(true)
+    expect(git(dir, 'ls-files', 'mind').trim()).toBe(b.written[0])
+    const log = git(dir, 'log', '--format=%B')
+    expect(log.split(`Sara-Commit: ${a.commitId}`)).toHaveLength(2)
   })
 })

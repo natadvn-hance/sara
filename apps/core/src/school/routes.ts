@@ -4,6 +4,8 @@ import { requireSession } from '../auth/session'
 import { mindCommit } from '../db/schema'
 import type { SchoolDeps } from './types'
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
 /** What Boris's screens hear back from a revert (FR-MIND-3). */
 const REVERT_HTTP: Record<string, number> = {
   conflict: 409,
@@ -39,6 +41,8 @@ export function registerSchoolRoutes(app: FastifyInstance, d: SchoolDeps): void 
 
     /** One button brings the previous mind version back (FR-MIND-3). */
     scoped.post<{ Params: { id: string } }>('/api/mind/commits/:id/revert', async (req, reply) => {
+      if (!UUID.test(req.params.id))
+        return reply.code(404).send({ ok: false, error: 'нет такой записи' })
       const r = await d.writer.revert(req.params.id)
       if (r.ok) return { ok: true, commitId: r.commitId }
       return reply.code(REVERT_HTTP[r.reason] ?? 500).send({ ok: false, error: r.detail })

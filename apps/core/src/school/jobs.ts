@@ -17,7 +17,9 @@ export const NIGHT_JOBS: NightJob[] = [
     free: true,
     estimate: async () => 0,
     async run(d) {
-      await d.writer.sync()
+      const r = await d.writer.sync()
+      // «no key» is a server without a push key (plan B4): nothing to tell. Anything else marks the night failed.
+      if (r.error && r.error !== 'no key') throw new Error('mind sync failed')
       return 'done'
     },
   },
@@ -37,7 +39,8 @@ const whenOn =
 export const SCHOOL_STEPS: Step[] = [
   { name: 'night', run: (d, now) => runNight(d, NIGHT_JOBS, now) },
   { name: 'writePending', run: whenOn((d) => writePending(d)) },
-  { name: 'revertPending', run: whenOn((d) => revertPending(d)) },
+  // «Отменить» Boris pressed runs even with the school off: taking a record back never waits.
+  { name: 'revertPending', run: (d) => revertPending(d) },
   { name: 'batches', run: (d, now) => batchesStep(d, now) },
   { name: 'historyCards', run: whenOn((d, now) => historyCards(d, now)) },
   { name: 'importMind', run: whenOn((d) => importMind(d)) },

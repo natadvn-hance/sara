@@ -31,6 +31,7 @@
     "direction:show": "pnpm --filter @sara/core direction show",
     "direction:rollback": "pnpm --filter @sara/core direction rollback",
     "report:school": "pnpm --filter @sara/core report:school",
+    "mind:key": "pnpm --filter @sara/core mind:key",
     "mind:sync": "pnpm --filter @sara/core mind:sync"
   },
   "devDependencies": {

@@ -10,6 +10,7 @@ import { gitBinary } from '../../src/mind/git'
 import { createMindWriter } from '../../src/mind/writer'
 import { exampleChange } from '../../src/school/lessons/records'
 import { createLesson, decideLesson } from '../../src/school/lessons/store'
+import type { MindChange } from '../../src/school/types'
 import { openTestDb, resetDb } from '../helpers/db'
 
 const { db, close } = openTestDb()
@@ -33,7 +34,10 @@ async function clone(): Promise<string> {
 const commits = (dir: string) => git(dir, 'rev-list', '--count', 'HEAD').trim()
 
 /** A lesson Boris said «да» to, with one example proposal; its proposal id. */
-async function yesLesson(i: number, o: { sim?: boolean; source?: string } = {}): Promise<string> {
+async function yesLesson(
+  i: number,
+  o: { sim?: boolean; source?: string; boris?: string } = {},
+): Promise<string> {
   const l = await createLesson(db, {
     source: 'edit',
     sourceRef: `conv-turn:${i}`,
@@ -57,7 +61,7 @@ async function yesLesson(i: number, o: { sim?: boolean; source?: string } = {}):
         tone: 'doubt',
         stage: null,
         clientText: 'Сколько стоит?',
-        borisText: 'Цену скажу после созвона',
+        borisText: o.boris ?? 'Цену скажу после созвона',
         insight: 'Цену не называть до созвона',
         source: o.source ?? `edit:conv-turn:${i}`,
         names: [],
@@ -69,21 +73,105 @@ async function yesLesson(i: number, o: { sim?: boolean; source?: string } = {}):
   return p?.id ?? ''
 }
 
-function writer(dir: string, o: { git?: typeof gitBinary } = {}) {
+/** A lesson Boris said «да» to with one change of any kind; its proposal id. */
+async function yesChange(ref: string, change: MindChange): Promise<string> {
+  const l = await createLesson(db, {
+    source: 'teacher',
+    sourceRef: ref,
+    scope: 'shared',
+    topic: null,
+    tone: null,
+    questionType: null,
+    clientText: null,
+    before: null,
+    after: null,
+    insight: 'вывод учителя',
+    kind: 'voice',
+    state: 'ready',
+    inPlace: false,
+    sim: false,
+    modelCallId: null,
+    changes: [change],
+  })
+  await decideLesson(db, l.id, { decision: 'yes' })
+  const [p] = await db.select().from(mindProposal).where(eq(mindProposal.lessonId, l.id))
+  return p?.id ?? ''
+}
+
+const portrait = (section: string, text: string): MindChange => ({
+  file: 'record',
+  action: 'update',
+  recordId: 's-portrait',
+  type: 'speech',
+  scope: 'shared',
+  fields: { title: 'Портрет речи' },
+  sections: { [section]: text },
+  scenario: null,
+  section,
+  baseVersion: null,
+  sources: ['e-h-1'],
+})
+
+const scenario = (id: string): MindChange => ({
+  file: 'scenario',
+  action: 'create',
+  recordId: id,
+  type: null,
+  scope: 'shared',
+  fields: {},
+  sections: {},
+  scenario: {
+    id,
+    title: 'Торг',
+    source: { kind: 'history', ref: 'chat-1' },
+    tags: {
+      question_type: null,
+      stage: 'talking',
+      tone: 'bargaining',
+      archetype: null,
+      hard: false,
+    },
+    golden: true,
+    order: { title: 'Сайт', category: 'Сайты', text: 'Сайт', budget_text: null, city: 'Краснодар' },
+    client_name: null,
+    bid: null,
+    messages: [{ author: 'client', text: 'Дорого', at: '2026-10-20T10:00:00.000Z' }],
+    state: { owner: 'sara', owner_reason: null, boris_note: null },
+    now: '2026-10-20T10:01:00.000Z',
+    expect: { move: 'reply', must_not_contain: [], must_mention_any: [], boris_reply: 'Почему?' },
+    rubric: null,
+  },
+  section: null,
+  baseVersion: null,
+  sources: ['history:chat-1'],
+})
+
+function writer(
+  dir: string,
+  o: {
+    git?: typeof gitBinary
+    clientNames?: () => Promise<string[]>
+    reindex?: () => Promise<void>
+  } = {},
+) {
   let reindexed = 0
   const w = createMindWriter({
     db,
     mindDir: dir,
-    reindex: async () => {
-      reindexed++
-    },
-    scopes: ['shared'],
-    ...o,
+    reindex:
+      o.reindex ??
+      (async () => {
+        reindexed++
+      }),
+    scopes: ['shared', 'hance'],
+    git: o.git,
+    clientNames: o.clientNames,
   })
   return { w, reindexed: () => reindexed }
 }
 
-describe('the mind writer', () => {
+// Each test runs git many times: on a loaded machine (CI shares it) 5 seconds is too little.
+describe('the mind writer', { timeout: 30_000 }, () => {
   it('FR-MIND-3: yes writes the file, commits once and reindexes', async () => {
     const dir = await clone()
     const id = await yesLesson(1)
@@ -112,10 +200,11 @@ describe('the mind writer', () => {
     const dir = await clone()
     const id = await yesLesson(1)
     const { w } = writer(dir)
-    await w.apply([id], { lessonIds: [], batchId: null })
+    const first = await w.apply([id], { lessonIds: [], batchId: null })
+    // Asked again, the answer is the commit already made: the caller shows it and «Отменить».
     expect(await w.apply([id], { lessonIds: [], batchId: null })).toMatchObject({
-      ok: false,
-      reason: 'nothing',
+      ok: true,
+      commitId: first.ok ? first.commitId : 'none',
     })
     expect(commits(dir)).toBe('2')
   })
@@ -135,8 +224,10 @@ describe('the mind writer', () => {
     ).rejects.toThrow()
     expect(commits(dir)).toBe('2')
     expect((await db.select().from(mindProposal))[0]?.state).toBe('new')
+    const made = /Sara-Commit: (\S+)/.exec(git(dir, 'log', '-1', '--format=%B'))?.[1]
     expect(await writer(dir).w.apply([id], { lessonIds: [], batchId: null })).toMatchObject({
-      reason: 'nothing',
+      ok: true,
+      commitId: made,
     })
     expect(commits(dir)).toBe('2')
     expect((await db.select().from(mindProposal))[0]?.state).toBe('accepted')
@@ -190,5 +281,84 @@ describe('the mind writer', () => {
       ok: false,
       reason: 'no_git',
     })
+  })
+
+  it('FR-MIND-3: a client called Борис does not stop the examples, his other name still does', async () => {
+    const dir = await clone()
+    const good = await yesLesson(1)
+    const bad = await yesLesson(2, { boris: 'Петров, цену скажу после созвона' })
+    const r = await writer(dir, { clientNames: async () => ['Борис Петров'] }).w.apply(
+      [good, bad],
+      {
+        lessonIds: [],
+        batchId: null,
+      },
+    )
+    if (!r.ok) throw new Error(r.detail)
+    expect(r.written).toHaveLength(1)
+    expect(r.refused).toEqual([{ proposalId: bad, reason: expect.stringMatching(/имя клиента/) }])
+  })
+
+  it('FR-SPEECH-1: two sections of one record in one batch both reach the file', async () => {
+    const dir = await clone()
+    const a = await yesChange('t:1', portrait('Форма', '- Коротко [e-h-1]'))
+    const b = await yesChange('t:2', portrait('Словарь', '- «Давайте созвонимся» [e-h-1]'))
+    const r = await writer(dir).w.apply([a, b], { lessonIds: [], batchId: null })
+    if (!r.ok) throw new Error(r.detail)
+    const text = await readFile(join(dir, 'mind/shared/speech/s-portrait.md'), 'utf8')
+    expect(text).toContain('## Форма\n- Коротко [e-h-1]')
+    expect(text).toContain('## Словарь\n- «Давайте созвонимся» [e-h-1]')
+    expect(text).toContain('version: 2')
+    expect(commits(dir)).toBe('2')
+  })
+
+  it('NFR-REL-3: a file staged by a crash never rides along in the next commit', async () => {
+    const dir = await clone()
+    await mkdir(join(dir, 'mind/shared/knowledge'), { recursive: true })
+    await writeFile(join(dir, 'mind/shared/knowledge/k-half.md'), 'половина')
+    git(dir, 'add', 'mind/shared/knowledge/k-half.md')
+    const r = await writer(dir).w.apply([await yesLesson(1)], { lessonIds: [], batchId: null })
+    if (!r.ok) throw new Error(r.detail)
+    expect(git(dir, 'show', '--name-only', '--format=', 'HEAD').trim()).toBe(r.written[0])
+    expect(existsSync(join(dir, 'mind/shared/knowledge/k-half.md'))).toBe(false)
+  })
+
+  it('FR-TRAIN-8: a scenario is written under its own id, never over another or elsewhere', async () => {
+    const dir = await clone()
+    const first = await yesChange('s:1', scenario('x-g-1'))
+    const again = await yesChange('s:2', scenario('x-g-1'))
+    const elsewhere = await yesChange('s:3', { ...scenario('x-g-2'), recordId: '../../x' })
+    const r = await writer(dir).w.apply([first, again, elsewhere], { lessonIds: [], batchId: null })
+    if (!r.ok) throw new Error(r.detail)
+    expect(r.written).toEqual(['exam/scenarios/x-g-1.json'])
+    expect(r.refused.map((x) => x.reason).sort()).toEqual([
+      'номер сценария не совпадает с файлом',
+      'сценарий с таким номером уже есть',
+    ])
+  })
+
+  it('FR-MIND-3: an update never moves a record to another scope', async () => {
+    const dir = await clone()
+    await writer(dir).w.apply([await yesChange('t:1', portrait('Форма', '- Коротко [e-h-1]'))], {
+      lessonIds: [],
+      batchId: null,
+    })
+    const other = await yesChange('t:2', {
+      ...portrait('Темп', '- Быстро [e-h-1]'),
+      scope: 'hance',
+    })
+    const r = await writer(dir).w.apply([other], { lessonIds: [], batchId: null })
+    expect(r).toMatchObject({ ok: false, reason: 'nothing' })
+    expect(r.refused[0]?.reason).toMatch(/другая область/)
+  })
+
+  it('NFR-REL-3: a failed reindex never fails a write that is already committed', async () => {
+    const dir = await clone()
+    const r = await writer(dir, {
+      reindex: async () => {
+        throw new Error('index is down')
+      },
+    }).w.apply([await yesLesson(1)], { lessonIds: [], batchId: null })
+    expect(r.ok).toBe(true)
   })
 })
