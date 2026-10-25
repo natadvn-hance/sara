@@ -2,6 +2,7 @@ import type { CheckInput, CheckIssue } from '../types'
 import {
   AI_NAME,
   AI_SELF_PATTERNS,
+  CALL_DAY,
   CALL_PROMISE_PATTERNS,
   CALL_WORD,
   GREETINGS,
@@ -306,19 +307,19 @@ const CALL_TIMES = [
   /(?<![\p{L}\d])в\s+\d{1,2}\s+(?:час(?:а|ов)?|утра|вечера|ночи)(?!\p{L})/u,
 ]
 
+/** At most one issue: a call promised by Sara or by Boris through her, or a day or an hour she picks for a call. */
 function promiseIssues(text: string): CheckIssue[] {
-  const issues: CheckIssue[] = []
   const folded = fold(text)
   for (const re of CALL_PROMISE_PATTERNS) {
     const m = re.exec(folded)
-    if (m) issues.push({ id: 'promise.call', detail: `обещание звонка от себя: «${m[0]}»` })
+    if (m) return [{ id: 'promise.call', detail: `обещание звонка от себя: «${m[0]}»` }]
   }
   for (const sentence of folded.split(/[.!?\n]+/)) {
     if (!CALL_WORD.test(sentence)) continue
-    const time = CALL_TIMES.map((re) => re.exec(sentence)?.[0]).find(Boolean)
-    if (time) issues.push({ id: 'promise.call', detail: `время звонка от себя: «${time}»` })
+    const when = [...CALL_TIMES, CALL_DAY].map((re) => re.exec(sentence)?.[0]).find(Boolean)
+    if (when) return [{ id: 'promise.call', detail: `время звонка от себя: «${when}»` }]
   }
-  return issues
+  return []
 }
 
 /** The code checks of a reply (FR-CONV-4, M4 design 5.6): every problem found, each with a reason Boris can read. */

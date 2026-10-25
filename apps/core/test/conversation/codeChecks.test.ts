@@ -241,6 +241,32 @@ describe('the code checks of a reply', () => {
       expect(ids({ text }), text).toEqual([])
   })
 
+  it('FR-CONV-4: promising that Boris calls, or naming a day or an hour for a call or a meeting, is promise.call', () => {
+    for (const text of [
+      'Борис вам позвонит завтра.',
+      'Борис перезвонит вам сегодня.',
+      'Готова позвонить в любое время.',
+      'Готов вам позвонить, когда скажете.',
+      'С вами свяжется Борис по телефону.',
+      'По телефону с вами свяжется Борис.',
+      'Сделаю звонок, как освободитесь.',
+      'Назначу встречу с Борисом.',
+      'Давайте созвонимся завтра после обеда.',
+      'Созвонимся в понедельник?',
+      'Встретимся в 15:00.',
+      'Встретимся на этой неделе?',
+    ])
+      expect(ids({ text, clientTurnText: 'Давайте в 15:00' }), text).toContain('promise.call')
+    // Inviting without a time is still fine, and so is a word about calls that is not a call to make.
+    for (const text of [
+      'Борис сам со всем разберётся, удобно созвониться?',
+      'Хорошо, предложу встречу, когда вам удобно?',
+      'Сколько звонков приходит с 9:00 до 18:00?',
+      'Сегодня у нас в работе три сайта.',
+    ])
+      expect(ids({ text, clientTurnText: 'Мы работаем 9:00-18:00' }), text).toEqual([])
+  })
+
   it('FR-CONV-4: banned phrases from the portrait are robotic', () => {
     expect(
       checkReplyText(input({ text: 'Понимаю. Всего доброго!', bannedPhrases: ['Всего доброго'] })),
