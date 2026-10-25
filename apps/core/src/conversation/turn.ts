@@ -27,6 +27,13 @@ export type TurnDeps = {
   send(turnId: string, round: number): Promise<'confirmed' | 'changed' | 'uncertain' | 'failed'>
   /** The human pause; tests shorten it. */
   pauseMs?(textLength: number): number
+  /** Every finished turn's fate, for whoever follows turns (M6 meetings); its failure never stops the turn. */
+  onOutcome?(o: {
+    turnId: string
+    conversationId: string
+    outcome: string
+    at: string
+  }): Promise<void>
 }
 
 let deps: TurnDeps | null = null
@@ -105,7 +112,7 @@ async function startRow(turnId: string, conversationId: string, anchor: string):
   const conv = await getConversation(d().db, conversationId)
   if (!conv) throw new Error(`conversation ${conversationId} not found`)
   const now = new Date().toISOString()
-  const rows = await d()
+  await d()
     .db.insert(convTurn)
     .values({
       id: turnId,
@@ -115,13 +122,19 @@ async function startRow(turnId: string, conversationId: string, anchor: string):
       timings: { started: now },
     })
     .onConflictDoNothing()
-    .returning({ id: convTurn.id })
-  if (rows.length) await journal('conv.turn_started', conv, turnId, { anchor })
   const [row] = await d()
     .db.select({ timings: convTurn.timings })
     .from(convTurn)
     .where(eq(convTurn.id, turnId))
   return (row?.timings as { started?: string })?.started ?? now
+}
+
+/** Step «started»: the client has finished writing; journaled once, after the wait (FR-CONV-7). */
+async function markStarted(turnId: string, conversationId: string, anchor: string): Promise<void> {
+  const conv = await getConversation(d().db, conversationId)
+  if (!conv) return
+  await stamp(turnId, 'quiet')
+  await journal('conv.turn_started', conv, turnId, { anchor })
 }
 
 /** Step 1 «услышать»: read the chat, apply the owner rule, decide whether to wait, go or stop. */
@@ -361,6 +374,12 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       outcome = 'failed'
       break
     }
+    // The turn starts for real when the client has finished writing: the moment others measure from (M6).
+    if (round === 1)
+      await DBOS.runStep(() => markStarted(turnId, conversationId, anchor), {
+        name: 'started',
+        ...DB_STEP,
+      })
     const plan = await DBOS.runStep(() => planStep(turnId, conversationId), {
       name: `plan-${round}`,
     })
@@ -414,6 +433,14 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
     name: 'handoff',
     ...DB_STEP,
   })
+  await DBOS.runStep(
+    () =>
+      (
+        d().onOutcome?.({ turnId, conversationId, outcome, at: new Date().toISOString() }) ??
+        Promise.resolve()
+      ).catch((e) => console.error('turn outcome hook failed', e instanceof Error ? e.message : e)),
+    { name: 'outcome' },
+  )
   if (next)
     await DBOS.startWorkflow(convTurnWorkflow, {
       workflowID: turnWorkflowId(conversationId, next),

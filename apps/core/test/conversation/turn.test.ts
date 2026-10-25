@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createConversationEvents } from '../../src/conversation/events'
 import { moscowHour } from '../../src/conversation/time'
 import { pokeTurn, setTurnDeps, startTurnFor, type TurnDeps } from '../../src/conversation/turn'
-import { conversation, convTurn } from '../../src/db/schema'
+import { conversation, convTurn, event } from '../../src/db/schema'
 import { createGateway } from '../../src/gateway/gateway'
 import { createSecretStore } from '../../src/secrets/store'
 import { setSetting } from '../../src/settings/store'
@@ -28,6 +28,7 @@ const CHAT = '95147898'
 const { db, close } = openTestDb()
 const profi = stubProfi([])
 let cards: string[]
+let outcomes: { turnId: string; conversationId: string; outcome: string; at: string }[] = []
 let forwards: string[]
 let sends: { turnId: string; round: number }[]
 let sendAnswer: 'confirmed' | 'changed' = 'confirmed'
@@ -86,6 +87,9 @@ beforeAll(async () => {
       return answer
     },
     pauseMs: () => 200,
+    onOutcome: async (o) => {
+      outcomes.push(o)
+    },
   }
   setTurnDeps(deps)
   await launchDbos(testDatabaseUrl())
@@ -106,6 +110,7 @@ beforeEach(async () => {
     ),
   ]
   cards = []
+  outcomes = []
   forwards = []
   sends = []
   sendAnswer = 'confirmed'
@@ -203,6 +208,17 @@ describe('the turn workflow', () => {
       'k-process-start',
     ])
     expect(await countEvents(db, 'conv.turn_drafted')).toBe(1)
+  }, 30000)
+
+  it('FR-CONV-7: the turn is journaled as started when the wait for the client ends, and tells its outcome', async () => {
+    await clientWrites('m-2', 'Как начнём?')
+    const heardAt = Date.now()
+    await turnsDone(1)
+    const [started] = await db.select().from(event).where(eq(event.type, 'conv.turn_started'))
+    // The quiet after the client's message is 1 second here.
+    expect(Date.parse(started?.occurredAt ?? '')).toBeGreaterThanOrEqual(heardAt + 900)
+    expect(await countEvents(db, 'conv.turn_started')).toBe(1)
+    expect(outcomes.map((o) => o.outcome)).toEqual(['drafted'])
   }, 30000)
 
   it('FR-CONV-5: shadow never calls send_message', async () => {
