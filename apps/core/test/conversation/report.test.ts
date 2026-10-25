@@ -66,7 +66,7 @@ describe('the conversation report', () => {
     expect(text).toContain('Сравнений: 2 (Сара v1 или ты 1, ты 1), среднее сходство 50%')
     expect(text).toContain('dash 1')
     expect(text).toContain('Сбоев модели: 1')
-    expect(text).not.toMatch(/[—–]/)
+    expect(text).not.toMatch(/[\u2014\u2013]/)
   })
 })
 
