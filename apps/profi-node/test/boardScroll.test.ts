@@ -175,3 +175,104 @@ describe('the minute check scrolls the board for its next pages', () => {
     expect(site.feedRequests).toBe(1)
   }, 60000)
 })
+
+type Note = {
+  what: string
+  pages: number
+  stoppedBy: string
+  worked?: string[]
+  tried?: string[]
+  probe?: {
+    cards: number
+    boxes: { tag: string; scrollHeight: number; clientHeight: number }[]
+    buttons: { text: string }[]
+    window: { scrollHeight: number; innerHeight: number }
+  }
+}
+const notes = async () =>
+  (await db.select().from(rawEvent))
+    .map((r) => r.body as Note)
+    .filter((b) => b?.what === 'board_scroll')
+
+describe('the ways to make the board load more', () => {
+  it("FR-LEAD-1: a list in its own scroll box, out of the wheel's reach, loads by the last card scrolled into view, and the way is remembered", async () => {
+    pagedBoard()
+    site.boardLayout = 'box'
+    const ins = insurance({ board: { pages: 3, fullEvery: 1000 } })
+    await ins.feedOnce()
+    expect(await seen()).toBe(15)
+    await ins.feedOnce()
+    ins.stop()
+    expect(await seen()).toBe(15)
+    const [first, second] = await notes()
+    expect(first?.worked).toEqual(['last_card', 'last_card'])
+    expect(first?.stoppedBy).toBe('pages')
+    // The second pass goes straight to the way that worked, with no wheel first.
+    expect(second?.worked).toEqual(['last_card', 'last_card'])
+    expect(second?.tried).toEqual(['last_card'])
+  }, 90000)
+
+  it('FR-LEAD-1: the wheel alone does not reach a list in its own box, so the test box is a fair one', async () => {
+    pagedBoard()
+    site.boardLayout = 'box'
+    const ins = insurance({ board: { pages: 3, ways: ['wheel'] } })
+    await ins.feedOnce()
+    ins.stop()
+    expect(await seen()).toBe(5)
+    expect((await notes())[0]?.stoppedBy).toBe('quiet')
+  }, 60000)
+
+  it('FR-LEAD-1: the scroll box itself, taken to its bottom, loads the next part', async () => {
+    pagedBoard()
+    site.boardLayout = 'box'
+    const ins = insurance({ board: { pages: 3, ways: ['container'], fullEvery: 1000 } })
+    await ins.feedOnce()
+    ins.stop()
+    expect(await seen()).toBe(15)
+    expect((await notes())[0]?.worked).toEqual(['container', 'container'])
+  }, 60000)
+
+  it('FR-LEAD-1: a board with a «Показать ещё» button loads by pressing it', async () => {
+    pagedBoard()
+    site.boardLayout = 'button'
+    const ins = insurance({ board: { pages: 3, fullEvery: 1000 } })
+    await ins.feedOnce()
+    ins.stop()
+    expect(await seen()).toBe(15)
+    expect((await notes())[0]?.worked).toEqual(['button', 'button'])
+  }, 90000)
+
+  it('FR-LEAD-1: a pass that finds no way to load more says what the page looks like, and stays short', async () => {
+    pagedBoard()
+    site.boardLayout = 'box'
+    const ins = insurance({ board: { pages: 3, ways: ['wheel'] } })
+    await ins.feedOnce()
+    ins.stop()
+    const [note] = await notes()
+    expect(note?.tried).toEqual(['wheel'])
+    expect(note?.probe?.cards).toBe(5)
+    // The list sits in a box that scrolls: this is what a calibration needs to see.
+    expect(note?.probe?.boxes[0]).toMatchObject({ tag: 'div' })
+    expect(note?.probe?.boxes[0]?.scrollHeight).toBeGreaterThan(
+      note?.probe?.boxes[0]?.clientHeight ?? 0,
+    )
+    // The note holds the shape of the page, never an order's words.
+    expect(JSON.stringify(note)).not.toMatch(/Заказ \d/)
+  }, 60000)
+
+  it('FR-LEAD-1: with every way tried and nothing loading, the pass gives up within seconds', async () => {
+    pagedBoard()
+    site.boardLayout = 'none'
+    const ins = insurance({ board: { pages: 3, fullEvery: 1000 } })
+    const started = Date.now()
+    await ins.feedOnce()
+    ins.stop()
+    expect(await seen()).toBe(5)
+    const [note] = await notes()
+    expect(note).toMatchObject({
+      stoppedBy: 'quiet',
+      tried: ['wheel', 'last_card', 'container', 'button'],
+    })
+    expect(Date.now() - started).toBeLessThan(25000)
+  }, 60000)
+})

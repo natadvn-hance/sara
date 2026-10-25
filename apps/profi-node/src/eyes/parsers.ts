@@ -34,6 +34,8 @@ export type Parsers = {
   paths: { feed: string; chats: string; chat(id: string): string; order?(id: string): string }
   /** Eyes 3 on the feed page: order numbers on it (recognized: the page had the shape we know). */
   fromFeedDom?(page: Page): Promise<{ recognized: boolean; refs: FeedRef[] }>
+  /** CSS selector of the order cards on the board page: the minute check scrolls to the last of them for more. */
+  boardCards?: string
   /** Eyes 3 on an order page. */
   fromOrderDom?(page: Page, orderId: string): Promise<ParseResult>
   /** Where the chats page is, read from the site's own menu. */
@@ -105,6 +107,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 
 /** Formats of the stand-in site (tests/fakes/profiSite). Replaced by the real ones after calibration (Task 16). */
 export const standInParsers: Parsers = {
+  boardCards: 'a[data-order-id]',
   paths: { feed: '/backoffice/a.php', chats: '/chats', chat: (id) => `/chats/${id}` },
   banMarkers: ['Ваш профиль заблокирован'],
   fromRtp(body) {

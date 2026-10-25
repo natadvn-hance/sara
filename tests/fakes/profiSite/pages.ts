@@ -47,14 +47,25 @@ const rtpScript = (rtpUrl: string) => `const sess = (document.cookie.match(/sess
 window.__RTP = new WebSocket(${JSON.stringify(rtpUrl)} + '/rtp?sess=' + sess)
 window.__RTP.onmessage = () => {}`
 
-export const feedPage = (rtpUrl: string, l: Layout) =>
+/**
+ * How the feed page loads the rest of a long board: when the window is scrolled to its end (window), when its own
+ * scroll box is (box, the mouse in the middle of the window is not over it), by a «Показать ещё» button (button), or
+ * not at all (none).
+ */
+export type BoardLayout = 'window' | 'box' | 'button' | 'none'
+
+export const feedPage = (rtpUrl: string, l: Layout, board: BoardLayout = 'window') =>
   shell(
     'Заказы',
-    '<ul id="feed"></ul>',
+    board === 'box'
+      ? '<div id="box" style="height: 600px; width: 300px; margin-left: 900px; overflow: auto"><ul id="feed"></ul></div>'
+      : board === 'button'
+        ? '<ul id="feed"></ul><button id="more" type="button">Показать ещё</button>'
+        : '<ul id="feed"></ul>',
     `${rtpScript(rtpUrl)}
 let cursor = null, loading = false
 const row = (o) => '<li style="min-height: 420px"><a class="${l.orderLink}" data-order-id="' + o.id + '" href="/backoffice/n.php?o=' + o.id + '">' + o.subject + '</a> <span class="city">' + o.city + '</span></li>'
-// The first page, or (more) the next one by cursor when the list is scrolled to its end, like the live board.
+// The first page, or (more) the next one by cursor, like the live board.
 async function load(more) {
   if (loading) return
   loading = true
@@ -66,9 +77,16 @@ async function load(more) {
   loading = false
 }
 load(false); window.__RTP.addEventListener('message', () => load(false))
-window.addEventListener('scroll', () => {
+if (${JSON.stringify(board)} === 'window') window.addEventListener('scroll', () => {
   if (cursor && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) load(true)
-})`,
+})
+if (${JSON.stringify(board)} === 'box') {
+  const box = document.getElementById('box')
+  box.addEventListener('scroll', () => {
+    if (cursor && box.scrollTop + box.clientHeight >= box.scrollHeight - 200) load(true)
+  })
+}
+if (${JSON.stringify(board)} === 'button') document.getElementById('more').onclick = () => load(true)`,
   )
 
 export type BidLook = {
