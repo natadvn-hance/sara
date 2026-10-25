@@ -255,6 +255,13 @@ function CalibrationStep({
         <p>На этих правилах Сару ещё не проверяли.</p>
       ) : c.state === 'marking' ? (
         <p>Проверка начата, ждёт твоих отметок.</p>
+      ) : c.state === 'stopped' ? (
+        <p>
+          Проверка остановилась (лимит Claude или нет токена). Открой её и посчитай заново, отметки
+          сохранены.
+        </p>
+      ) : c.state === 'failed' ? (
+        <p role="alert">Проверка не получилась. Открой её и посчитай заново, отметки сохранены.</p>
       ) : c.state !== 'done' ? (
         <p role="status">Сара считает, подожди.</p>
       ) : c.agreement === null ? (
@@ -303,13 +310,17 @@ function FinishCard({
   const a = useAction()
   const unchanged = !view.changed
   const c = view.calibration
-  const passed = c?.passed === true
+  // What the core's gate sees, not the latest run's own verdict: a repeat still being scored does not hide it.
+  const passed = view.gatePassed
   const asking = view.directionState === 'draft'
+  // A direction that is still a draft is turned on only after a calibration or with a reason, even with rules
+  // that changed nothing.
+  const gated = !unchanged || asking
 
   const save = (state?: 'on' | 'shadow') =>
     a.run(async () => {
       const r = await api<{ version: number | null }>(`${path(accountId)}/finish`, {
-        ...(unchanged || passed ? {} : { override: { reason } }),
+        ...(!gated || passed ? {} : { override: { reason } }),
         ...(state ? { state } : {}),
       })
       // First the saved card, then the refetch that finds the draft closed: no flash of the start card.
@@ -317,7 +328,7 @@ function FinishCard({
       await qc.invalidateQueries({ queryKey: ['direction', accountId] })
       await qc.invalidateQueries({ queryKey: ['onboarding', accountId] })
     })
-  const needsReason = !unchanged && !passed
+  const needsReason = gated && !passed
   const blocked = a.busy || !view.rules || (needsReason && !reason.trim())
   const all =
     c?.agreement != null ? ` (согласие ${Math.round(c.agreement * 100)}%)` : ' (без проверки)'
@@ -337,7 +348,7 @@ function FinishCard({
           </ul>
         </div>
       )}
-      {unchanged ? null : passed ? (
+      {!gated ? null : passed ? (
         <p className="text-ok">{`Калибровка на этих правилах: согласие ${Math.round((c?.agreement ?? 0) * 100)}%, цель достигнута.`}</p>
       ) : (
         <>
@@ -397,7 +408,7 @@ function FinishCard({
           </>
         ) : (
           <Button disabled={blocked} onClick={() => save()}>
-            {unchanged
+            {unchanged && !needsReason
               ? 'Закончить настройку'
               : needsReason
                 ? `Сохранить всё равно${all}`

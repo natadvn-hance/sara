@@ -703,6 +703,7 @@ test('FR-ACC-3: step 4 shows the calibration of the draft and step 8 turns a new
       changes: ['Порог: 56 → 50'],
       changed: true,
       calibration: null,
+      gatePassed: false,
       directionState: 'draft',
       ...over,
     },
@@ -715,7 +716,7 @@ test('FR-ACC-3: step 4 shows the calibration of the draft and step 8 turns a new
     passed: true,
     reliable: true,
   }
-  const current = view({ calibration: passed })
+  const current = view({ calibration: passed, gatePassed: true })
   await page.route(`**/api/directions/${ACCOUNT}/onboarding`, (route) =>
     route.request().method() === 'GET' ? route.fulfill({ json: current }) : route.continue(),
   )
@@ -761,6 +762,7 @@ test('FR-ACC-3: below the target step 8 saves only with a reason and says the ag
               changes: ['Порог: 56 → 50'],
               changed: true,
               calibration: weak,
+              gatePassed: false,
               directionState: 'on',
             },
           },
@@ -776,6 +778,130 @@ test('FR-ACC-3: below the target step 8 saves only with a reason and says the ag
   await expect(save).toBeDisabled()
   await page.getByLabel('Зачем сохраняешь без проверки?').fill('Нужно срочно')
   await expect(save).toBeEnabled()
+})
+
+test('FR-ACC-4: a held key and Ctrl+1 never mark orders Boris has not looked at', async ({
+  page,
+}) => {
+  await page.route(RUNS, (route) => route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }))
+  const items = CAL_ITEMS.map((i) => ({ ...i }))
+  let marks = 0
+  await page.route(`${RUNS}/${RUN_ID}/marks`, (route) => {
+    const body = route.request().postDataJSON() as { lead_id: string; mark: string }
+    const it = items.find((x) => x.leadId === body.lead_id)
+    if (it && it.mark === null) marks++
+    if (it) it.mark = body.mark
+    return route.fulfill({ json: { ok: true, marked: marks, total: 20, complete: false } })
+  })
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({
+      json: calRun('marking', {
+        calibration: { marked: marks, items, result: null, advice: null, stale: false },
+      }),
+    }),
+  )
+  await page.goto(CALIBRATION)
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByRole('heading', { name: 'Заявка 1' })).toBeVisible()
+  // Holding the key sends keydown again and again: only the first one counts.
+  await page.keyboard.down('1')
+  await page.keyboard.down('1')
+  await page.keyboard.down('1')
+  await page.keyboard.up('1')
+  await expect(page.getByRole('heading', { name: 'Заявка 2' })).toBeVisible()
+  await page.keyboard.press('Control+1')
+  await page.keyboard.press('Meta+2')
+  await page.waitForTimeout(300)
+  expect(marks).toBe(1)
+  await expect(page.getByRole('heading', { name: 'Заявка 2' })).toBeVisible()
+})
+
+test('FR-ACC-4: a stopped calibration is not a dead end: Boris can count again on the same marks', async ({
+  page,
+}) => {
+  let recalibrated = 0
+  await page.route(RUNS, (route) => route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }))
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({ json: calRun('stopped', { stop_reason: 'limit' }) }),
+  )
+  await page.route(`${RUNS}/${RUN_ID}/recalibrate`, (route) => {
+    recalibrated++
+    return route.fulfill({ json: { id: RUN_ID } })
+  })
+  await page.goto(CALIBRATION)
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByText('Подожди, лимит Claude кончился. Попробуй позже.')).toBeVisible()
+  await expect(page.getByText('Твои отметки сохранены')).toBeVisible()
+  await page.getByRole('button', { name: 'Посчитать заново на тех же отметках' }).click()
+  await expect.poll(() => recalibrated).toBe(1)
+})
+
+test('FR-ACC-4: for rules that changed since, the advice and the hint are not offered to apply', async ({
+  page,
+}) => {
+  await page.route(RUNS, (route) => route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }))
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({
+      json: calRun('done', {
+        done: 20,
+        calibration: {
+          marked: 20,
+          items: [],
+          result: calResult,
+          advice: { summary: 'Порог ниже', why: 'Потому что', lines: ['Порог: 56 → 50'] },
+          stale: true,
+        },
+      }),
+    }),
+  )
+  await page.goto(CALIBRATION)
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByText('Правила изменились после этой проверки.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Применить к черновику' })).toHaveCount(0)
+  await expect(page.getByText('Подсказка про порог', { exact: true })).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Проверить заново на тех же заявках' }),
+  ).toBeVisible()
+})
+
+test('FR-ACC-3: a draft direction is not turned on without a calibration even with rules that changed nothing', async ({
+  page,
+}) => {
+  await page.route(`**/api/directions/${ACCOUNT}/onboarding`, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({
+          json: {
+            onboarding: {
+              mode: 'edit',
+              basedOn: 1,
+              step: 4,
+              steps: {},
+              rules: { about: 'x' },
+              changes: [],
+              changed: false,
+              calibration: {
+                runId: RUN_ID,
+                state: 'stopped',
+                agreement: null,
+                decisive: 0,
+                passed: false,
+                reliable: false,
+              },
+              gatePassed: false,
+              directionState: 'draft',
+            },
+          },
+        })
+      : route.continue(),
+  )
+  await page.goto(ONBOARDING)
+  await expect(page.getByText('Проверка остановилась')).toBeVisible()
+  await page.getByRole('button', { name: 'К включению' }).click()
+  const on = page.getByRole('button', { name: 'Включить всё равно (без проверки)' })
+  await expect(on).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Включить в тени' })).toBeDisabled()
+  await page.getByLabel('Зачем сохраняешь без проверки?').fill('Хочу посмотреть в тени')
+  await expect(on).toBeEnabled()
 })
 
 // Last: it changes the active rules, and the first test of this file looks at their threshold.

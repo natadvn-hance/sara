@@ -82,6 +82,7 @@ export type OnboardingView = {
   changed: boolean
   broken?: boolean
   calibration: CalibrationSummary | null
+  gatePassed: boolean
   directionState: DirectionState
 }
 

@@ -59,9 +59,13 @@ function Marking({
   }
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
+      // Only a plain, single press of 1, 2 or 3 on a screen nobody is typing on: a held key (it repeats), a
+      // browser shortcut (Ctrl+1 switches tabs) or a field must never mark an order Boris has not looked at.
+      if (a.busy || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target
       if (
-        a.busy ||
-        (e.target instanceof HTMLElement && /^(TEXTAREA|INPUT)$/.test(e.target.tagName))
+        t instanceof HTMLElement &&
+        (t.isContentEditable || /^(TEXTAREA|INPUT|SELECT)$/.test(t.tagName))
       )
         return
       const hit = MARKS.find((m) => m.key === e.key)
@@ -198,6 +202,8 @@ function Result({
 }) {
   const [advice, setAdvice] = useState<Advice | null>(run.calibration?.advice ?? null)
   const a = useAction()
+  // Rules Boris changed since this check: its advice and hint were about the old ones, so they are not offered.
+  const stale = run.calibration?.stale === true
   const lost = r.misses.filter((m) => m.kind === 'sara_no_boris_yes')
   const extra = r.misses.filter((m) => m.kind === 'sara_yes_boris_no')
   const apply = (source: 'advice' | 'threshold') =>
@@ -229,7 +235,10 @@ function Result({
         )}
         {run.calibration?.stale ? (
           <div className="grid gap-2">
-            <p role="alert">Правила изменились после этой проверки.</p>
+            <p role="alert">
+              Правила изменились после этой проверки. Поправка и подсказка про порог были про старые
+              правила, поэтому их не показываю.
+            </p>
             <div>
               <Button
                 disabled={a.busy}
@@ -255,7 +264,7 @@ function Result({
         ) : null}
       </Card>
 
-      {r.thresholdHint ? (
+      {r.thresholdHint && !stale ? (
         <Card>
           <h2 className="font-display text-lg">Подсказка про порог</h2>
           <p>{`Порог ${r.thresholdHint.from} → ${r.thresholdHint.to}: согласие было ${pct(r.thresholdHint.before)}, стало бы ${pct(r.thresholdHint.after)}.`}</p>
@@ -310,7 +319,7 @@ function Result({
             </div>
             {a.busy ? <p role="status">Думаю…</p> : null}
           </div>
-          {advice ? (
+          {advice && !stale ? (
             <div className="grid gap-2 border-t border-border pt-3">
               <h3 className="font-medium">Предлагаю поправку</h3>
               <p>{advice.summary}</p>
@@ -344,6 +353,7 @@ export function CalibrationPage({ accountId }: { accountId: string }) {
   const [runId, setRunId] = useState<string | null>(params.get('run'))
   const [gone, setGone] = useState(false)
   const start = useAction()
+  const again = useAction()
   const direction = useQuery({
     queryKey: ['direction', accountId],
     queryFn: () => api<DirectionView>(base(accountId)),
@@ -461,6 +471,35 @@ export function CalibrationPage({ accountId }: { accountId: string }) {
         <p role="status">{stoppedText(run.data?.stop_reason ?? null)}</p>
       ) : null}
       {state === 'failed' ? <p role="alert">{failedText(run.data?.stop_reason ?? null)}</p> : null}
+      {run.data && (state === 'stopped' || state === 'failed') ? (
+        <Card>
+          <p>
+            Твои отметки сохранены: Сара может посчитать заново на тех же заявках, отмечать не
+            нужно.
+          </p>
+          {again.error ? (
+            <p role="alert" className="text-danger">
+              {again.error.message}
+            </p>
+          ) : null}
+          <div>
+            <Button
+              disabled={again.busy}
+              onClick={() =>
+                again.run(async () => {
+                  const x = await api<{ id: string }>(
+                    `${base(accountId)}/runs/${run.data.id}/recalibrate`,
+                    {},
+                  )
+                  open(x.id)
+                })
+              }
+            >
+              Посчитать заново на тех же отметках
+            </Button>
+          </div>
+        </Card>
+      ) : null}
       {state === 'done' && run.data?.calibration?.result ? (
         <Result
           key={run.data.id}
