@@ -26,6 +26,7 @@
 - Ни один тест не ходит на живой Профи.ру и не вызывает настоящий Claude (`tests/fakes/fake-claude.mjs`, `FAKE_CLAUDE_OUTPUT_BY_ROLE`).
 - Границы M4: `apps/core/src/{conversation,mind,history,exam}/`, `roles/{interlocutor,checker,reminder,examiner}/`, `tests/exam/`, `tests/e2e/conversation*.test.ts`. Общие файлы только по списку дизайна, раздел 12; `apps/core/src/leads/` и `notify/cards.ts` не трогаются, кроме одной строки фильтра в `leads/outbox.ts` (Task 0.3).
 - Коммиты Conventional Commits по-английски с `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Кейсы Hance в разговоре (требование Бориса от 25.10.2026, `docs/product/cases-in-negotiation.md`): только по сигналу из раздела 2 документа, не больше одного в сообщении, не выдумывать, не повторять, голосом Бориса, ссылку ставит код. Кейсы лежат в разуме записями `k-case-NN` (`sara-mind#1`). Задачи B6 и D4, сценарии в F1 и F2.
 
 ## Review Focus
 
@@ -45,6 +46,7 @@
 | 2 | A (история), B (разум и поиск), D (проверка и роли), G (служба: событие и фальшивая служба) | по одному субагенту на часть, каждый в своём git worktree и со своей базой | ветка от части 0 |
 | 3 | C (разговор и ход) | основная сессия M4 | ветка от части 0 |
 | 4 | E (напоминания), F (экзамен), B2 (векторы, если замер дешёвый) | субагенты | ветка от C (E, F) или от B (B2) |
+| 4 | B6 (поиск по кейсам) с частью B; D4 (момент для кейса) после интерфейса B6, поверх ветки C | исполнители на Sonnet, не больше двух сразу | B от `main`; D поверх ветки C (#118) до её слияния |
 
 Каждая часть: свой пул-реквест в `main` (зелёный CI, не сливать, не выкладывать), до него один свежий проверяющий субагент на opus по всей части, его критичные и важные находки исправляются тестом первым. Пока часть 0 не слита, пул-реквест волны 2 включает её коммиты; в описании «зависит от #N».
 
@@ -95,6 +97,8 @@ export type MindSearch = {
   byIds(ids: string[]): Promise<MindHit[]>
   byStage(stage: ConvStage, scope: string): Promise<MindHit | null>
   bannedPhrases(): Promise<string[]>
+  /** Кейсы из разума для хода (Task B6); заглушка без метода. */
+  cases?(q: { text: string; scope: string; limit: number; exclude?: string[] }): Promise<CaseHit[]>
 }
 export type DossierMessage = { author: ChatAuthor; side: MessageSide; text: string; sentAt: string; platformMessageId: string }
 export type Dossier = {
@@ -368,6 +372,26 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 - [ ] **Step 1-4:** тест `FR-MIND-2: with vectors on, a synonym finds the record full-text misses` на `fakeEmbedder` → реализация → PASS.
 - [ ] **Step 5: Commit** `feat(core): local vectors for the mind search behind mind.vectors`
 
+### Task B6: Поиск по кейсам для разговора
+
+Требование Бориса от 25.10.2026 (`docs/product/cases-in-negotiation.md`, разделы 2-5): кейсы Hance звучат в разговоре органично, его голосом и только по ситуации. Кейсы уже в разуме: записи знания `mind/shared/knowledge/cases/k-case-NN-*.md` (28 штук, `natadvn-hance/sara-mind#1`), у каждой метка «кейс», суть первым абзацем и разделы «Что делали», «Где», «Роль и масштаб», «Результат», «Срок», «Как показывать клиенту». Правила показа написаны словами по пунктам: можно ли называть компанию и ссылку, можно ли называть цифры, NDA. Миграция не нужна.
+
+**Files:** Modify `apps/core/src/conversation/types.ts` (`CaseHit`, необязательный метод `cases` в `MindSearch`: отдельным первым коммитом, его берёт D4), `mind/search.ts`, `scripts/mind-check.ts`; Create `mind/cases.ts`; Test `mind/cases.test.ts`, `scripts/test/mind-check.test.ts`
+
+**Interfaces:**
+- `type CaseHit = MindHit & { summary: string; result: string | null; showRules: string[]; nameOpen: boolean; numbersOpen: boolean }`: `summary` это первый абзац тела, `result` раздел «Результат», `showRules` пункты раздела «Как показывать клиенту»; `nameOpen` ложно, если среди правил «не называть» компанию или есть NDA; `numbersOpen` истинно, только если правило прямо разрешает цифры.
+- `MindSearch.cases?(q: { text: string; scope: string; limit: number; exclude?: string[] }): Promise<CaseHit[]>`: только записи знания с меткой «кейс», тот же индекс и русская морфология, что в B2; `exclude` это кейсы, уже звучавшие в чате.
+- Обычный поиск знания (`search` с типом `knowledge`) кейсы не возвращает: в ответ они попадают только через «Кейсы» и проверки D4, а не как факты.
+- `mind:check`: запись знания с меткой «кейс» без раздела «Как показывать клиенту» это ошибка.
+- [ ] **Step 1: Write the failing tests** (номер требования для кейсов в разговоре даст спецификация; до тех пор `FR-MIND-2`):
+  - `FR-MIND-2: a client about suspended ceilings finds the ceilings case in Russian word forms`;
+  - `FR-MIND-2: the knowledge search never returns a case, the case search returns only cases`;
+  - `FR-MIND-2: a case already told in the chat is left out`;
+  - `FR-MIND-2: the show rules of an NDA case close its name, rules that allow numbers open them`;
+  - `mind:check` ловит кейс без правил показа.
+- [ ] **Step 2-4:** FAIL → реализация → PASS.
+- [ ] **Step 5: Commit** `feat(core): search the mind's cases for a conversation`
+
 ---
 
 ## Часть D. Проверка и роли (FR-CONV-4, FR-SPEECH-3)
@@ -409,6 +433,36 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 - `reminder`: sonnet, P1, 120000; приветствие всегда, без кейсов, обычный или дружеский тон (v1 `followUpPrompt.js`), без канцелярита «просто хотела уточнить», «напоминаю о себе», не дословно прошлое сообщение. `examiner`: sonnet, fallback opus, P3, 120000; рубрика тона и голоса 1-5 с примерами, `procedure_ok`.
 - [ ] **Step 1-4:** тест `NFR-UX-1: role texts have no long dash and every role loads` (`loadRole` для четырёх новых ролей, `RoleMeta` парсится) → PASS.
 - [ ] **Step 5: Commit** `feat(roles): the reminder writer and the exam judge`
+
+### Task D4: Момент для кейса и проверка уместности
+
+Требование Бориса от 25.10.2026 (`docs/product/cases-in-negotiation.md`). Идёт после B6 и после слияния части C: меняет файлы C (`engine.ts`, `prompt.ts`, `cards.ts`).
+
+**Files:** (база: ветка части C до её слияния плюс коммит интерфейса `CaseHit` из B6) Modify `packages/shared/src/contracts/conversation.ts` (`InterlocutorOutput.case`, `CheckerOutput.case`, новые номера проверок), `roles/interlocutor/role.md` и `roles/checker/role.md` (версия роли выше), `conversation/check/codeChecks.ts`, `conversation/check/phrases.ts`, `conversation/check/checkerRole.ts`, `conversation/engine.ts` и `conversation/prompt.ts` (кейсы в recall и заголовок «Кейсы»), `conversation/cards.ts` (строка о кейсе); Test `conversation/codeChecks.test.ts`, `conversation/engine.test.ts`, `conversation/checkerRole.test.ts`
+
+**Interfaces:**
+- Recall на каждом ходе берёт до 3 кейсов `MindSearch.cases` по словам клиента и заказа, без уже звучавших в чате (номера из трасс прошлых ходов и совпадение названия в наших сообщениях). Вход Собеседника получает заголовок «Кейсы»: номер, суть, «Роль и масштаб», «Результат» и правила «Как показывать клиенту» как есть. Пустой список даёт строку «Подходящих кейсов нет, не выдумывай». Без `cases` (заглушка разума) список пуст.
+- `InterlocutorOutput.case: { moment: 'asked' | 'order_asks' | 'doubt' | 'same_problem' | null; case_id: string | null; why: string | null }` (необязательное поле, старые ответы читаются). Момент это один из четырёх сигналов раздела 2 документа; `case_id` только при моменте и только из списка; `why` пишется в трассу хода (`conv_turn.understanding.case`, без миграции) и на карточку: «Кейс: <название>, потому что …».
+- Инструкция Собеседника (разделы 3 и 4 документа): кейс не нужен в первом сообщении без запроса, повтором, если он далёк от ниши, задачи или масштаба клиента; не больше одного в сообщении; голосом Бориса, вплетён в ответ (одна фраза в коротком чате, две-три в подробном письме); конкретика и связка с ситуацией клиента; никаких «взгляните на наш кейс»; ссылок не пишет.
+- Проверки кодом, новые номера в `CHECK_IDS` и `CHECK_SEVERITY`:
+  - `case.unknown` S1: `case_id` не из кейсов этого хода, или текст называет кейс, которого нет в библиотеке (выдуманный кейс);
+  - `case.no_moment` S2: кейс без момента;
+  - `case.repeat` S2: кейс уже звучал в этом чате;
+  - `case.many` S2: в тексте больше одного кейса библиотеки;
+  - `case.closed` S1: цифры из «Результата» кейса, у которого `numbersOpen` ложно, или название компании кейса, у которого `nameOpen` ложно;
+  - `case.ad` S3: фразы рекламы из `phrases.ts` («взгляните на наш кейс», «посмотрите наше портфолио», «у нас богатый опыт»);
+  - `case.link` S3: ссылка в тексте модели. Модель ссылок не пишет; ссылку ставит код, когда в записи кейса она есть, правила её разрешают, а момент `asked` или `order_asks` (сейчас в записях ссылок нет, поэтому до их появления ссылки не будет).
+- Проверяющий получает выбранный кейс и момент; новое поле `CheckerOutput.case` (заметки: не по ситуации, звучит как реклама, не связан с задачей клиента). Любая заметка или проверка кейса проваливает ответ; повтор идёт с указанием «без кейса», и второй ответ кейс назвать уже не может.
+- [ ] **Step 1: Write the failing tests** (`FR-CONV-4`, пока у кейсов нет своего номера):
+  - `FR-CONV-4: a case not in the library fails as an invented case`;
+  - `FR-CONV-4: a case without a moment, a second case and a repeated case fail`;
+  - `FR-CONV-4: numbers of a case not open to clients fail`;
+  - `FR-CONV-4: «взгляните на наш кейс» is robotic`;
+  - `FR-CONV-4: the model writes no case link, the code adds it when the client asked`;
+  - `FR-CONV-3: the turn trace and the card keep the case and why it was chosen`;
+  - `FR-CONV-4: a failed case check rewrites the reply without a case`.
+- [ ] **Step 2-4:** FAIL → реализация → PASS; `evals/samples.json` Собеседника и Проверяющего получают по 3 входа с кейсами: кейс нужен, кейс лишний, подходящего нет.
+- [ ] **Step 5: Commit** `feat(core,roles): a case in a conversation only when the moment calls for it`
 
 ---
 
@@ -563,6 +617,7 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 
 **Interfaces:**
 - Produces: `loadScenarios(dirs: string[]): Promise<{ scenarios: ExamScenario[]; setHash: string; errors: { path: string; message: string }[] }>`; `dossierFromScenario(s: ExamScenario): Dossier` (флаги нового дня и ночи по `s.now`).
+- Кейсы (`docs/product/cases-in-negotiation.md`, раздел 6): среди трудных сценариев три о кейсах: кейс нужен (клиент спросил о примерах), кейс лишний (первое сообщение без запроса), подходящего кейса нет. Кейсы сценариев выдуманные, в своём списке сценария.
 - [ ] **Step 1-4:** тесты `FR-TRAIN-8: every handmade scenario parses and ids are unique`; `FR-TRAIN-8: 20% or more of the set is hard`; `NFR-PRIV-2: handmade scenarios hold no phone, e-mail or link except the trap ones marked so` → PASS.
 - [ ] **Step 5: Commit** `feat(core): exam scenarios and their loader`
 
@@ -572,7 +627,7 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 
 **Interfaces:**
 - Consumes: `planTurn`, `dossierFromScenario`, `CHECK_SEVERITY`, роль `examiner`.
-- Produces: `gradeScenario(s: ExamScenario, plan: TurnPlan, judge: ExaminerOutput | null): { severity: 'S1' | 'S2' | 'S3' | null; failures: { id: string; severity: string; detail: string }[]; score: number }` (дизайн 5.13: 1,0 − 0,5·S2 − 0,2·S3, 0 при S1; тема из `LOCKED_TOPICS` с решением `send` это S1; ход не тот это S2); `runExam(d: { db: Db; gateway: Gateway; mind: MindSearch }, o: { dirs: string[]; only?: string[]; judge: boolean }): Promise<{ runId: string; score: number; s1: number; passed: boolean }>` (правила в режиме «после переключения»; `passed` = нет S1 и итог не хуже прошлого прогона того же `setHash`); `buildScenarios(db: Db, o: { limit: number }): Promise<number>` (из `chat_message`: реплика клиента и следующий ответ `author: boris`, обезличенно; строки `core.mind_proposal` вида `scenario` с путём `exam/scenarios/x-h-<номер>.json`, `golden: false`). CLI отказывается при `CI=true`.
+- Produces: `gradeScenario(s: ExamScenario, plan: TurnPlan, judge: ExaminerOutput | null): { severity: 'S1' | 'S2' | 'S3' | null; failures: { id: string; severity: string; detail: string }[]; score: number }` (дизайн 5.13: 1,0 − 0,5·S2 − 0,2·S3, 0 при S1; тема из `LOCKED_TOPICS` с решением `send` это S1; ход не тот это S2); выдуманный кейс (`case.unknown`) это S1, лишний или повторный кейс S2; `runExam(d: { db: Db; gateway: Gateway; mind: MindSearch }, o: { dirs: string[]; only?: string[]; judge: boolean }): Promise<{ runId: string; score: number; s1: number; passed: boolean }>` (правила в режиме «после переключения»; `passed` = нет S1 и итог не хуже прошлого прогона того же `setHash`); `buildScenarios(db: Db, o: { limit: number }): Promise<number>` (из `chat_message`: реплика клиента и следующий ответ `author: boris`, обезличенно; строки `core.mind_proposal` вида `scenario` с путём `exam/scenarios/x-h-<номер>.json`, `golden: false`). CLI отказывается при `CI=true`.
 - [ ] **Step 1: Write the failing tests**: `FR-TRAIN-8: a fact outside the mind fails the scenario as S1`; `FR-TRAIN-8: a worse run than the last one does not pass`; `FR-TRAIN-8: the run stores the mind version and role versions`; `FR-TRAIN-8: the exam refuses to run in CI`; прогон двух ручных сценариев с фальшивым CLI.
 - [ ] **Step 2-4:** FAIL → реализация → PASS; `pnpm exam --only <id>` один раз под `node --import tsx` с фальшивым CLI (`SARA_CLAUDE_BIN=tests/fakes/fake-claude.mjs`).
 - [ ] **Step 5: Commit** `feat(core): the exam run, grading and the deploy guard`
