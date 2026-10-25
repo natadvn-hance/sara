@@ -185,16 +185,21 @@ export const SEND_TEXTS = {
   uncertain: 'Не уверена, что сообщение дошло. Проверь чат в Профи.ру, повторно не отправляю.',
 }
 
+/** What a text sent now may be told: the last message of the chat it was written for (the service refuses a chat that moved on). */
+export type SendOptions = { expectLast?: string | null }
+
 /** A text from Boris or his «Отправить» on a draft, sent now after the switch; the answer is for Boris. */
 export async function sendTextNow(
   d: { db: Db; profi: ProfiClient },
   conversationId: string,
   text: string,
   author: 'sara' | 'boris',
+  o: SendOptions = {},
 ): Promise<string> {
   const conv = await getConversation(d.db, conversationId)
   if (!conv) return SEND_TEXTS.failed
-  const expectLast = await lastSeen(d.db, conversationId)
+  const expectLast =
+    o.expectLast !== undefined ? o.expectLast : await lastSeen(d.db, conversationId)
   const id = await d.db.transaction((tx) =>
     queueMessage(tx, {
       key: `say:${newEventId()}`,

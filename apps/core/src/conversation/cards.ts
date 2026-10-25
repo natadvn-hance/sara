@@ -135,14 +135,19 @@ export async function sendTurnCard(
   return { taskId, messageId: m.messageId }
 }
 
-/** The card again with the rows it had: used when the card's text grows (the comparison). */
-export async function redrawCard(d: CardDeps, t: Row, tail: string): Promise<void> {
+/** The card again with the rows it had (none when `buttons` is false): used when its text grows (the comparison). */
+export async function redrawCard(
+  d: CardDeps,
+  t: Row,
+  tail: string,
+  o: { buttons?: boolean } = {},
+): Promise<void> {
   if (t.cardMessageId === null || !t.taskId) return
   const view = await cardView(d.db, t)
   await d.notifier.editText?.(
     t.cardMessageId,
     `${CONV_TEXTS.card(view)}\n\n${tail}`,
-    rowsFor(t.taskId, t, view.shadow),
+    o.buttons === false ? [] : rowsFor(t.taskId, t, view.shadow),
   )
 }
 

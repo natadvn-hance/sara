@@ -1,7 +1,7 @@
 import { type Actor, newEventId, type TaskAction } from '@sara/shared'
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull, like } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { chatMessage, convTurn, question, task } from '../db/schema'
+import { chatMessage, convTurn, outbox, question, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { redact } from '../gateway/redact'
 import { appendEvent } from '../journal/journal'
@@ -10,13 +10,19 @@ import { proposeMind } from '../mind/proposals'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { clientNames } from './dossier'
+import { SEND_TEXTS, type SendOptions } from './outbox'
 import { getConversation, updateConversation } from './store'
 
 export type CommandDeps = {
   db: Db
   notifier: Pick<Notifier, 'sendText'>
   /** After the switch: a text goes to the client through the outbox (part C6); the answer is for Boris. */
-  sendText?(conversationId: string, text: string, author: 'sara' | 'boris'): Promise<string>
+  sendText?(
+    conversationId: string,
+    text: string,
+    author: 'sara' | 'boris',
+    o?: SendOptions,
+  ): Promise<string>
 }
 
 export const COMMAND_TEXTS = {
@@ -34,6 +40,12 @@ export const COMMAND_TEXTS = {
   notUnderstood:
     'Не поняла. Ответь на карточку словами: «беру сам», «верни», «напиши: …» или «закрой».',
   noDraft: 'В этой карточке нет текста для клиента.',
+  alreadySent: 'Ответ уже ушёл клиенту или стоит в очереди. Второй раз не отправляю.',
+  sendUncertain:
+    'Не уверена, что прошлая отправка дошла. Проверь чат в Профи.ру, повторно не отправляю.',
+  answeredYourself:
+    'Ты уже ответил сам: в чате есть твоё сообщение после слов клиента. Черновик не отправляю.',
+  stale: 'Черновик устарел: клиент успел дописать. Текст не ушёл, посмотри новые сообщения.',
 }
 
 type CardTask = typeof task.$inferSelect
@@ -217,6 +229,45 @@ export async function say(d: CommandDeps, conversationId: string, text: string):
   return d.sendText(conversationId, text, 'boris')
 }
 
+/** The card's task is resolved once; false when it already was. */
+async function closeCard(db: Db, taskId: string, resolution: string): Promise<boolean> {
+  const rows = await db
+    .update(task)
+    .set({ state: 'resolved', resolution, resolvedAt: new Date().toISOString() })
+    .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+    .returning({ id: task.id })
+  return rows.length > 0
+}
+
+/**
+ * Why a draft must not go out on «Отправить», or null: the turn's own reply is already in the outbox (queued or
+ * sent, or unsure whether it went), or our side wrote in the chat after the client messages the draft answers.
+ */
+async function sendRefusal(db: Db, turn: typeof convTurn.$inferSelect): Promise<string | null> {
+  const own = await db
+    .select({ state: outbox.state })
+    .from(outbox)
+    .where(and(eq(outbox.kind, 'message'), like(outbox.idempotencyKey, `msg:${turn.id}:%`)))
+  if (own.some((r) => r.state === 'queued' || r.state === 'confirmed'))
+    return COMMAND_TEXTS.alreadySent
+  if (own.some((r) => r.state === 'uncertain')) return COMMAND_TEXTS.sendUncertain
+  const covered = ((turn.messageIds as string[] | null) ?? []).at(-1)
+  if (!covered) return null
+  const chat = await db
+    .select({
+      id: chatMessage.platformMessageId,
+      side: chatMessage.side,
+      author: chatMessage.author,
+    })
+    .from(chatMessage)
+    .where(eq(chatMessage.conversationId, turn.conversationId))
+    .orderBy(chatMessage.sentAt, chatMessage.platformMessageId)
+  const at = chat.findIndex((m) => m.id === covered)
+  const ours = at >= 0 ? chat.slice(at + 1).find((m) => m.side === 'specialist') : undefined
+  if (!ours) return null
+  return ours.author === 'sara' ? COMMAND_TEXTS.alreadySent : COMMAND_TEXTS.answeredYourself
+}
+
 async function cardTaskOf(db: Db, taskId: string): Promise<CardTask | null> {
   const [t] = await db.select().from(task).where(eq(task.id, taskId))
   return t && t.kind === 'conv_draft' ? t : null
@@ -256,11 +307,19 @@ export async function onConvPress(
     case 'send': {
       if (await getSetting(d.db, 'conv.v1_writes')) return COMMAND_TEXTS.shadowSend
       if (!turn.text || !d.sendText) return COMMAND_TEXTS.noDraft
-      await d.db
-        .update(task)
-        .set({ state: 'resolved', resolution: 'send', resolvedAt: new Date().toISOString() })
-        .where(eq(task.id, t.id))
-      return d.sendText(conversationId, turn.text, 'sara')
+      const refusal = await sendRefusal(d.db, turn)
+      if (refusal) return refusal
+      // The press is taken once; the service is told the last client message this draft answers, so a chat that
+      // moved on is refused there (CHAT_CHANGED) and not answered over.
+      const claimed = await closeCard(d.db, t.id, 'send')
+      if (!claimed) return COMMAND_TEXTS.done
+      const covered = ((turn.messageIds as string[] | null) ?? []).at(-1)
+      const answer = await d.sendText(conversationId, turn.text, 'sara', {
+        expectLast: covered ?? undefined,
+      })
+      if (answer !== SEND_TEXTS.changed) return answer
+      await d.db.update(task).set({ resolution: 'stale' }).where(eq(task.id, t.id))
+      return COMMAND_TEXTS.stale
     }
     default:
       return COMMAND_TEXTS.notUnderstood

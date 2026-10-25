@@ -85,6 +85,8 @@ export const CONV_TEXTS = {
       similarity === null ? '' : ` Сходство с моим: ${similarity}%.`
     }`,
 
+  answeredYourself: 'Ты ответил сам, черновик не нужен.',
+
   /** The words of a client Boris leads, or of a closed conversation (FR-NOTIF-1, «Клиент написал»). */
   forward: (name: string | null, orderTitle: string | null, words: string, closed: boolean) =>
     `💬 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}${

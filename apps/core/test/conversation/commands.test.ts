@@ -12,6 +12,7 @@ import {
   say,
   take,
 } from '../../src/conversation/commands'
+import { sendTextNow } from '../../src/conversation/outbox'
 import { ensureConversation, getConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
 import {
@@ -21,10 +22,12 @@ import {
   deal,
   lead,
   mindProposal,
+  outbox,
   question,
   task,
 } from '../../src/db/schema'
 import { handleBorisMessage } from '../../src/learning/inbox'
+import { ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -303,5 +306,109 @@ describe('Boris’s commands', () => {
     )
     expect(answer).toBe('Отправила клиенту')
     expect(sent).toEqual(['Начнём с короткого созвона.'])
+  })
+
+  describe('«Отправить» after the switch', () => {
+    type SendOptions = { key?: string; expectLast?: string | null }
+    let calls: { text: string; o: SendOptions | undefined }[]
+    const press = () =>
+      onConvPress(
+        {
+          db,
+          notifier,
+          sendText: async (_c: string, text: string, _a: 'sara' | 'boris', o?: SendOptions) => {
+            calls.push({ text, o })
+            return 'Отправила клиенту'
+          },
+        },
+        { taskId: cardTask, action: 'send' },
+      )
+    beforeEach(async () => {
+      calls = []
+      await setSetting(db, 'conv.v1_writes', false, 'system')
+      await setSetting(db, 'outbound.messages', true, 'system')
+    })
+
+    it.each(['queued', 'confirmed', 'uncertain'])(
+      'FR-CONV-9: it is refused when the turn’s own reply is already %s in the outbox',
+      async (state) => {
+        await db.insert(outbox).values({
+          id: newEventId(),
+          kind: 'message',
+          idempotencyKey: 'msg:t-1:1',
+          payload: { chatId: CHAT, accountId: 'hance-marketing', text: 'Начнём', author: 'sara' },
+          state,
+        })
+        expect(await press()).toMatch(/Ответ уже|не уверена/i)
+        expect(calls).toEqual([])
+        const [t] = await db.select().from(task).where(eq(task.id, cardTask))
+        expect(t?.state).toBe('open')
+      },
+    )
+
+    it('FR-CONV-9: a failed earlier try of the turn does not stop the press', async () => {
+      await db.insert(outbox).values({
+        id: newEventId(),
+        kind: 'message',
+        idempotencyKey: 'msg:t-1:1',
+        payload: { chatId: CHAT, accountId: 'hance-marketing', text: 'Начнём', author: 'sara' },
+        state: 'changed',
+      })
+      expect(await press()).toBe('Отправила клиенту')
+    })
+
+    it('FR-CONV-9: it is refused with «Ты уже ответил сам» when our side wrote after the client', async () => {
+      await db.insert(chatMessage).values({
+        id: newEventId(),
+        accountId: 'hance-marketing',
+        chatId: CHAT,
+        orderId: CHAT,
+        platformMessageId: 'm-3',
+        side: 'specialist',
+        author: 'boris',
+        authorBasis: 'after_cutover',
+        text: 'Анна, наберу вас',
+        sentAt: new Date(Date.now() + 5000).toISOString(),
+        source: 'node',
+        conversationId: convId,
+      })
+      expect(await press()).toMatch(/Ты уже ответил сам/)
+      expect(calls).toEqual([])
+    })
+
+    it('FR-CONV-9: the reply is sent once per card with the turn’s own last client message as the one to expect', async () => {
+      expect(await press()).toBe('Отправила клиенту')
+      expect(calls[0]?.o).toMatchObject({ expectLast: 'm-2' })
+      const [t] = await db.select().from(task).where(eq(task.id, cardTask))
+      expect(t).toMatchObject({ state: 'resolved', resolution: 'send' })
+      expect(await press()).toMatch(/уже/)
+      expect(calls).toHaveLength(1)
+    })
+
+    it('FR-CONV-9: a chat that moved on is refused by the service and Boris is told the draft is out of date', async () => {
+      const conv = (await getConversation(db, convId)) as never
+      const profi = stubProfi([
+        chatMsg('m-1', 'specialist', 'Отклик', new Date(Date.now() - 3600_000).toISOString()),
+        chatMsg('m-2', 'client', 'Как начнём?', new Date().toISOString()),
+        chatMsg('m-3', 'client', 'И ещё вопрос', new Date(Date.now() + 1000).toISOString()),
+      ])
+      // The core has already stored the newer client message when Boris presses the button.
+      await syncChat({ db, profi }, conv, new Date(), { v1Writes: false })
+      profi.sendMessage = async (i) => {
+        if (i.expect_last_message_id !== 'm-3') throw new ProfiError('CHAT_CHANGED', 'moved on')
+        return { found_on_page: true, platform_message_id: 'x' }
+      }
+      const answer = await onConvPress(
+        {
+          db,
+          notifier,
+          sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
+        },
+        { taskId: cardTask, action: 'send' },
+      )
+      expect(answer).toMatch(/устарел/)
+      const [row] = await db.select().from(outbox)
+      expect(row?.state).toBe('changed')
+    })
   })
 })
