@@ -573,6 +573,65 @@ describe('cases in a reply', () => {
       expect(withCases(text, { offered: [CEILINGS] }), text).toEqual([])
   })
 
+  it('FR-CONV-4: a question to the client, a general remark and a negation are no story of a project', () => {
+    for (const text of [
+      'А вы раньше работали с подрядчиками по рекламе?',
+      'Что уже делали для продвижения?',
+      'Вы уже запускали для этого рекламу в Директе?',
+      'Вы сами вели проект?',
+      'Расскажите, что уже делали для продвижения?',
+      'Для большинства наших клиентов первый шаг это аудит.',
+      'Мы не делали такого раньше.',
+      'У нас не было такого клиента.',
+      'Раньше с такими не работали.',
+      'Никогда не запускали рекламу без аудита.',
+      'Лендинг делаем за 2-3 недели.',
+      'Делаем сайты и настраиваем рекламу.',
+    ])
+      expect(withCases(text, { offered: [CEILINGS] }), text).toEqual([])
+  })
+
+  it('FR-CONV-4: an invented story of a project fails as an unknown case, also when a question follows it', () => {
+    for (const text of [
+      'Сделали похожее для стоматологии в Краснодаре, заявки пошли.',
+      'Недавно помогли автосервису запустить рекламу.',
+      'Была у нас клиника, начинали с одного канала.',
+      'Один клиент из Краснодара тоже начинал с директа.',
+      'У клиента с похожим бюджетом начинали с одного канала.',
+      'Сделали похожее для стоматологии, хотите посмотреть?',
+      'Мы запускали такое для кофейни, получилось хорошо.',
+      'Наш клиент начинал с одного канала и дошёл до трёх.',
+      'У нас был клиент с похожей задачей.',
+      'Вывели в топ интернет-магазин из Сочи.',
+    ])
+      expect(withCases(text, { offered: [CEILINGS] }), text).toEqual(['case.unknown'])
+    // The same with no case offered at all.
+    expect(withCases('Помогли автосервису запустить рекламу.', {})).toEqual(['case.unknown'])
+  })
+
+  it('FR-CONV-4: with a case chosen, a story of another project outside its sentence fails', () => {
+    const told = (text: string, hit = CEILINGS) =>
+      withCases(text, { offered: [hit], choice: choose(hit) })
+    // The sentence of the chosen case, and the sentences that go on with it, pass.
+    expect(told('Делали для Потолок-Арт, заявки пошли через сайт.')).toEqual([])
+    expect(told('Делали для Потолок-Арт. Запустили рекламу в Директе и собрали сайт.')).toEqual([])
+    // A second story, by its own words or by the next sentence, does not.
+    for (const text of [
+      'Делали для Потолок-Арт, заявки пошли. Ещё делали сайт для трёх студий йоги, у одной запись выросла вдвое.',
+      'Делали для Потолок-Арт, заявки пошли. Один клиент из Краснодара тоже так начинал.',
+      'Недавно помогли автосервису запустить рекламу. Делали для Потолок-Арт, заявки пошли.',
+      'Делали для Потолок-Арт. Удобно созвониться? Сделали похожее для стоматологии в Краснодаре.',
+    ])
+      expect(told(text), text).toEqual(['case.unknown'])
+    // A case with no brand name is told by its first sentence of work, the next stories are others.
+    expect(told('Делали для сети стоматологий: запись перевели на онлайн.', CLINIC)).toEqual([])
+    expect(
+      told('Делали для сети стоматологий. Ещё помогли автосервису запустить рекламу.', CLINIC),
+    ).toEqual(['case.unknown'])
+    // The word of a question about the client's work is still no story.
+    expect(told('Делали для Потолок-Арт, заявки пошли. А вы раньше запускали рекламу?')).toEqual([])
+  })
+
   it('FR-CONV-4: a case without a moment, a second case and a repeated case fail', () => {
     expect(
       withCases('Делали для Потолок-Арт, заявки пошли.', {

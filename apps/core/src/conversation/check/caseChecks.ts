@@ -1,5 +1,14 @@
-import type { CheckInput, CheckIssue } from '../types'
-import { CASE_AD_PHRASES, CASE_CLAIM, CASE_LINK } from './phrases'
+import type { CaseHit, CheckInput, CheckIssue } from '../types'
+import {
+  CASE_AD_PHRASES,
+  CASE_CLAIM_DID,
+  CASE_CLAIM_INTRO,
+  CASE_LINK,
+  CASE_NEGATION,
+  CASE_NEW_STORY,
+  CASE_OUR_CLIENT,
+  CASE_PAST_ANY,
+} from './phrases'
 
 /**
  * The code checks of a case in a reply (cases in a conversation, docs/product/cases-in-negotiation.md): only a case
@@ -175,6 +184,83 @@ function namesCompany(text: string, title: string): string | null {
   return hit ? hit.tokens.join(' ') : null
 }
 
+/** A statement of a reply the claim check reads, as written and folded, with the number of the sentence it stands in. */
+type Statement = { text: string; folded: string; sentence: number }
+
+/**
+ * The statements of a reply: sentences cut at «.», «!», «?», «;» and line breaks. A question to the client is
+ * no statement of ours, but «Сделали похожее для стоматологии, хотите посмотреть?» has one in front of its question,
+ * so a question keeps its comma parts except the last.
+ */
+function statements(text: string): Statement[] {
+  const out: Statement[] = []
+  let sentence = 0
+  const add = (part: string) => out.push({ text: part, folded: fold(part), sentence })
+  for (const m of text.matchAll(/[^.!?;\n]+[.!?;]*/g)) {
+    const body = m[0].replace(/[.!?;]+$/, '').trim()
+    if (!body) continue
+    if (m[0].includes('?')) {
+      const parts = body.split(/\s*,\s*/)
+      parts.pop()
+      for (const part of parts) if (part) add(part)
+    } else add(body)
+    sentence++
+  }
+  return out
+}
+
+/** What a claim is: the team's own work («did») or another client or project brought in («intro»). */
+type Claim = { kind: 'did' | 'intro'; sentence: number; text: string }
+
+/** Whether the match of a claim is negated: a «не», «нет» or «никогда» in it or just before it. */
+const negated = (text: string, at: number, length: number): boolean =>
+  CASE_NEGATION.test(text.slice(Math.max(0, at - 12), at + length))
+
+/** The claims of a reply: where it tells of a project of ours (case.unknown unless a case of this turn is behind it). */
+function claimsIn(text: string): Claim[] {
+  const claims: Claim[] = []
+  for (const st of statements(text)) {
+    const found = (kind: Claim['kind'], re: RegExp) => {
+      const m = re.exec(st.folded)
+      if (m && !negated(st.folded, m.index, m[0].length))
+        claims.push({ kind, sentence: st.sentence, text: st.text })
+      return Boolean(m)
+    }
+    if (CASE_CLAIM_INTRO.some((re) => found('intro', re))) continue
+    if (CASE_CLAIM_DID.some((re) => found('did', re))) continue
+    // Our client and a verb of the past in one statement: «наш клиент начинал с одного канала».
+    const ours = CASE_OUR_CLIENT.exec(st.folded)
+    const past = CASE_PAST_ANY.exec(st.folded)
+    if (ours && past && !negated(st.folded, ours.index, st.folded.length - ours.index))
+      claims.push({ kind: 'intro', sentence: st.sentence, text: st.text })
+  }
+  return claims
+}
+
+/**
+ * The claims that are not the story of the chosen case. The chosen case is told in the sentences that name its brand,
+ * and when none does (a company under NDA is told by its description) in the first sentence of work; sentences of
+ * work that go on right after it, with no new story in them, are the same story.
+ */
+function claimsOutside(claims: Claim[], chosen: CaseHit): Claim[] {
+  const brands = brandNames(chosen.title)
+  const named = claims.filter((c) => brands.some((b) => namesBrand(c.text, b)))
+  const own = new Set(
+    named.length > 0 ? named.map((c) => c.sentence) : claims.slice(0, 1).map((c) => c.sentence),
+  )
+  let last = Math.max(-1, ...own)
+  const outside: Claim[] = []
+  for (const c of claims) {
+    if (own.has(c.sentence)) continue
+    if (c.kind === 'did' && c.sentence === last + 1 && !CASE_NEW_STORY.test(fold(c.text))) {
+      last = c.sentence
+      continue
+    }
+    outside.push(c)
+  }
+  return outside
+}
+
 export function caseIssues(
   i: CheckInput,
   text: string,
@@ -182,7 +268,6 @@ export function caseIssues(
   numberKeys: (s: string) => Set<string>,
 ): CheckIssue[] {
   const issues: CheckIssue[] = []
-  const folded = fold(text)
   const flat = plain(text)
 
   for (const phrase of CASE_AD_PHRASES)
@@ -207,11 +292,19 @@ export function caseIssues(
   if (choice?.case_id && !chosen && !toldIds.has(choice.case_id))
     issues.push({ id: 'case.unknown', detail: `кейс ${choice.case_id} не из кейсов этого хода` })
   else if (!choice?.case_id) {
-    const claim = CASE_CLAIM.exec(folded)
+    const claim = claimsIn(text)[0]
     if (claim)
       issues.push({
         id: 'case.unknown',
-        detail: `в тексте рассказ о проекте, а кейс не выбран: «${claim[0]}»`,
+        detail: `в тексте рассказ о проекте, а кейс не выбран: «${claim.text.slice(0, 80)}»`,
+      })
+  } else if (chosen) {
+    // The chosen case is told once; a story of any other project beside it is as invented as one with no case.
+    const other = claimsOutside(claimsIn(text), chosen)[0]
+    if (other)
+      issues.push({
+        id: 'case.unknown',
+        detail: `в тексте рассказ о другом проекте, кроме выбранного кейса: «${other.text.slice(0, 80)}»`,
       })
   }
 
