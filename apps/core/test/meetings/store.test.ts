@@ -74,9 +74,54 @@ describe('deal paths', () => {
     const id = await bidDeal()
     await advanceDeal(db, { dealId: id, to: 'lost', actor: 'boris', reason: null, correlationId })
     await expect(
-      advanceDeal(db, { dealId: id, to: 'talking', actor: 'sara', reason: null, correlationId }),
+      advanceDeal(db, {
+        dealId: id,
+        to: 'talking',
+        actor: 'sara',
+        reason: null,
+        correlationId,
+        correction: true,
+      }),
     ).rejects.toBeInstanceOf(TransitionError)
     expect(await stageOf(id)).toBe('lost')
+  })
+
+  it('FR-MEET-4: a final stage is never a stop on the way and a mark never un-wins a deal', async () => {
+    expect(dealPath('found', 'talking')).toEqual(['queued', 'bid_sent', 'talking'])
+    const id = await bidDeal()
+    await advanceDeal(db, { dealId: id, to: 'won', actor: 'boris', reason: null, correlationId })
+    await expect(
+      advanceDeal(db, {
+        dealId: id,
+        to: 'call_booked',
+        actor: 'boris',
+        reason: null,
+        correlationId,
+      }),
+    ).rejects.toBeInstanceOf(TransitionError)
+    await expect(
+      advanceDeal(db, {
+        dealId: id,
+        to: 'call_done',
+        actor: 'sara',
+        reason: null,
+        correlationId,
+        correction: true,
+      }),
+    ).rejects.toBeInstanceOf(TransitionError)
+    expect(await stageOf(id)).toBe('won')
+  })
+
+  it('FR-MEET-4: a refused walk inside a caller transaction undoes only itself', async () => {
+    const id = await bidDeal()
+    await db.transaction(async (tx) => {
+      await tx.update(deal).set({ amountRub: 5000 }).where(eq(deal.id, id))
+      await expect(
+        advanceDeal(tx, { dealId: id, to: 'found', actor: 'boris', reason: null, correlationId }),
+      ).rejects.toBeInstanceOf(TransitionError)
+    })
+    const [row] = await db.select().from(deal).where(eq(deal.id, id))
+    expect(row).toMatchObject({ amountRub: 5000, stage: 'bid_sent' })
   })
 
   it('FR-MEET-4: Отказ corrected to Договор walks the shortest path lost, talking, won', async () => {
@@ -88,6 +133,7 @@ describe('deal paths', () => {
       actor: 'boris',
       reason: null,
       correlationId,
+      correction: true,
     })
     expect(steps).toEqual(['talking', 'won'])
     expect(await stageOf(id)).toBe('won')
@@ -158,9 +204,52 @@ describe('meeting states', () => {
     await db.transaction((tx) => moveMeeting(tx, m, 'cancelled', { cancelledBy: 'boris' }, 'boris'))
     const rows = await db.select().from(event).where(eq(event.entityId, m))
     expect(rows.length).toBe(2)
-    for (const r of rows) expect(JSON.stringify(r.payload)).not.toMatch(/918|123-45/)
+    for (const r of rows) {
+      const text = JSON.stringify(r.payload)
+      expect(text).not.toContain('+7 918 123-45-67')
+      expect(text.replace(/\D/g, '')).not.toContain('79181234567')
+    }
     const [row] = await db.select().from(meeting).where(eq(meeting.id, m))
     expect(row?.phonePurgeAt).not.toBeNull()
+  })
+})
+
+describe('client data purge date', () => {
+  it('FR-MEET-3: every meeting gets a purge date, a phone or a client note given later keeps it', async () => {
+    const id = await bidDeal()
+    const m = await db.transaction((tx) =>
+      createMeeting(tx, {
+        dealId: id,
+        conversationId: null,
+        accountId: ACC,
+        kind: 'sara',
+        state: 'offered',
+        startsAt: null,
+        durationMin: 30,
+        channel: null,
+        offered: ['2026-10-30T12:00:00.000Z'],
+        roundKey: null,
+        createdBy: 'sara',
+      }),
+    )
+    await db.transaction((tx) =>
+      moveMeeting(
+        tx,
+        m,
+        'confirming',
+        {
+          startsAt: '2026-10-30T12:00:00.000Z',
+          phone: '+7 918 123-45-67',
+          channelNote: 'лучше вотсап',
+        },
+        'sara',
+      ),
+    )
+    const [row] = await db.select().from(meeting).where(eq(meeting.id, m))
+    expect(Date.parse(row?.phonePurgeAt as string)).toBe(
+      Date.parse('2026-10-30T12:00:00.000Z') + 30 * 86_400_000,
+    )
+    expect(row?.confirmingAt).not.toBeNull()
   })
 })
 
@@ -188,6 +277,34 @@ describe('ensureDeal', () => {
       orderId: '90000001',
     })
     expect(await countEvents(db, 'deal.stage_changed', a.dealId)).toBe(1)
+  })
+
+  it('FR-MEET-4: ensureDeal never takes a lead of another account', async () => {
+    await db.insert(lead).values({
+      id: '90000007',
+      accountId: 'hance-it',
+      title: 'Сайт',
+      category: 'IT',
+      city: 'Краснодар',
+      text: 'Нужен сайт',
+      clientName: 'Олег',
+      bidPriceRub: 150,
+      seenAt: new Date().toISOString(),
+      correlationId,
+    })
+    const r = await ensureDeal(db, { accountId: ACC, orderId: '90000007', actor: 'boris' })
+    const [row] = await db.select().from(deal).where(eq(deal.id, r.dealId))
+    expect(row).toMatchObject({ leadId: null, orderId: '90000007', accountId: ACC })
+  })
+
+  it('FR-MEET-4: a deal found by its lead gets its missing order number', async () => {
+    await seedLead()
+    const id = newEventId()
+    await db.insert(deal).values({ id, leadId: '95147898', accountId: ACC, stage: 'bid_sent' })
+    const r = await ensureDeal(db, { accountId: ACC, orderId: '95147898', actor: 'boris' })
+    expect(r).toEqual({ dealId: id, created: false })
+    const [row] = await db.select().from(deal).where(eq(deal.id, id))
+    expect(row?.orderId).toBe('95147898')
   })
 
   it('FR-MEET-4: ensureDeal links the lead when the order is known and leaves it empty when not', async () => {

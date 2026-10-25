@@ -119,7 +119,8 @@ export function dealPath(from: DealStage, to: DealStage): DealStage[] | null {
         for (let s = at; s !== from; s = prev.get(s) as DealStage) path.unshift(s)
         return path
       }
-      queue.push(next)
+      // A final stage is never a stop on the way to another one: only a correction leaves it.
+      if (!CORRECTION_FROM.includes(next)) queue.push(next)
     }
   }
   return null
@@ -128,11 +129,21 @@ export function dealPath(from: DealStage, to: DealStage): DealStage[] | null {
 /**
  * Moves a deal to `to` by the shortest allowed path, every step journaled, all in one transaction (M6: a client of
  * old Sara at talking goes talking, call_booked when Boris marks a meeting). No path: TransitionError, nothing changes.
+ * Leaving won or lost needs `correction: true` (Boris correcting his own outcome), so a later meeting mark never
+ * quietly un-wins a deal.
  */
 export async function advanceDeal(
   db: DbOrTx,
-  i: { dealId: string; to: DealStage; actor: Actor; reason: string | null; correlationId: string },
+  i: {
+    dealId: string
+    to: DealStage
+    actor: Actor
+    reason: string | null
+    correlationId: string
+    correction?: boolean
+  },
 ): Promise<DealStage[]> {
+  const { correction, ...step } = i
   const run = async (tx: Tx) => {
     const [row] = await tx
       .select({ stage: deal.stage })
@@ -140,9 +151,12 @@ export async function advanceDeal(
       .where(eq(deal.id, i.dealId))
       .for('update')
     if (!row) throw new Error(`deal ${i.dealId} not found`)
-    const path = dealPath(row.stage as DealStage, i.to)
-    if (path === null) throw new TransitionError(row.stage, i.to)
-    for (const to of path) await transitionTx(tx, { ...i, to })
+    const from = row.stage as DealStage
+    if (CORRECTION_FROM.includes(from) && from !== i.to && !correction)
+      throw new TransitionError(from, i.to)
+    const path = dealPath(from, i.to)
+    if (path === null) throw new TransitionError(from, i.to)
+    for (const to of path) await transitionTx(tx, { ...step, to })
     return path
   }
   // Inside a caller's transaction this is a savepoint: a refused step undoes only this walk.

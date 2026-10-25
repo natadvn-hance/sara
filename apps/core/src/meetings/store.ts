@@ -117,7 +117,7 @@ export async function createMeeting(
     roundKey: m.roundKey,
     movedFrom: m.movedFrom ?? null,
     phone,
-    phonePurgeAt: phone ? purgeAt(m.startsAt) : null,
+    phonePurgeAt: purgeAt(m.startsAt),
     bookedAt: m.state === 'booked' ? now : null,
     createdBy: m.createdBy,
   })
@@ -155,7 +155,10 @@ export async function moveMeeting(
   const now = new Date().toISOString()
   const set: Partial<typeof meeting.$inferInsert> = { ...patch, state: to, updatedAt: now }
   if (to === 'booked' && !row.bookedAt) set.bookedAt = now
-  if (ENDED.includes(to) && row.phone) set.phonePurgeAt = purgeAt(null)
+  if (to === 'confirming') set.confirmingAt = now
+  // The client's phone and words about the meeting go 30 days after it, or after it ended without one.
+  if (patch.startsAt) set.phonePurgeAt = purgeAt(patch.startsAt)
+  if (ENDED.includes(to)) set.phonePurgeAt = purgeAt(null)
   const [updated] = await tx.update(meeting).set(set).where(eq(meeting.id, id)).returning()
   await journal(
     tx,
@@ -186,7 +189,7 @@ export async function ensureDeal(
       sql`select pg_advisory_xact_lock(hashtext(${`deal:${i.accountId}:${i.orderId}`}))`,
     )
     const [found] = await tx
-      .select({ id: deal.id })
+      .select({ id: deal.id, orderId: deal.orderId })
       .from(deal)
       .where(
         and(
@@ -195,8 +198,16 @@ export async function ensureDeal(
         ),
       )
       .limit(1)
-    if (found) return { dealId: found.id, created: false }
-    const [known] = await tx.select({ id: lead.id }).from(lead).where(eq(lead.id, i.orderId))
+    if (found) {
+      // A deal written by older code (a rollback window) has no order number; the funnel joins on it.
+      if (found.orderId === null)
+        await tx.update(deal).set({ orderId: i.orderId }).where(eq(deal.id, found.id))
+      return { dealId: found.id, created: false }
+    }
+    const [known] = await tx
+      .select({ id: lead.id })
+      .from(lead)
+      .where(and(eq(lead.id, i.orderId), eq(lead.accountId, i.accountId)))
     const id = newEventId()
     await tx.insert(deal).values({
       id,
