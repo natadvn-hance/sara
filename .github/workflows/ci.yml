@@ -69,6 +69,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # gitleaks-action downloads itself to a fixed temp file that a persistent runner keeps from the last run.
+      - run: rm -f "${TMPDIR:-/tmp}/gitleaks.tmp"
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,6 +79,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, sara-mac]
+    # A full run takes about 10 minutes; a job stuck past this (the Mac asleep) frees the runner for the rest.
+    timeout-minutes: 40
     env:
       # Its own port and container: the Mac runs other Postgres containers for the dev sessions.
       DATABASE_URL: postgres://sara:sara@localhost:54529/sara
@@ -97,9 +101,10 @@ jobs:
           exit 1
       # Chromium first: the Profi-MCP tests drive a real browser too.
       - run: pnpm --filter @sara/web exec playwright install chromium
-      - run: pnpm test
+      # caffeinate keeps the Mac from idle sleep while the tests run (a closed lid still stops it).
+      - run: caffeinate -i pnpm test
       # The pult e2e uses fixed ports; a dev session running it at the same moment takes them, so one more try.
-      - run: pnpm --filter @sara/web e2e || (sleep 60 && pnpm --filter @sara/web e2e)
+      - run: caffeinate -i pnpm --filter @sara/web e2e || (sleep 60 && caffeinate -i pnpm --filter @sara/web e2e)
       - run: pnpm --filter @sara/web build
       - name: Stop Postgres
         if: always()
