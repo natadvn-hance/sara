@@ -280,13 +280,103 @@ describe('turn engine', () => {
     expect(checker?.stdin).toContain('неизвестно')
   })
 
-  it('FR-CONV-4: a text the model writes with call_boris is dropped, never shown unchecked', async () => {
+  const live = { ...settings, v1Writes: false, outboundMessages: true }
+  const DRAFT = 'Понимаю, вопрос о стоимости. Борис ответит вам лично, когда посмотрит задачу.'
+
+  it('FR-CONV-3: a price question calls Boris and carries a short draft for him, with no price in it', async () => {
     const d = await dossierOf()
     const gw = await gateway({
       interlocutor: interlocutorAnswer({
         move: 'call_boris',
-        text: 'Я бот, цена 90 000.',
+        topic: 'price',
+        text: DRAFT,
+        fact_ids: ['s-portrait'],
+      }),
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings: live, now: new Date() },
+    )
+    expect(plan.output?.text).toBe(DRAFT)
+    expect(plan.output?.text).not.toMatch(/\d/)
+    expect(plan.issues).toEqual([])
+    // One model call: a draft for Boris is not rewritten and the Checker does not read it.
+    expect(plan.attempts).toBe(1)
+    expect(plan.modelCallIds).toHaveLength(1)
+    // The decision stays with Boris: Sara sends nothing herself, whatever the switches say.
+    expect(plan.decision.action).toBe('call_boris')
+    expect(plan.decision.would).toBe('call_boris')
+  })
+
+  it('FR-CONV-4: the checks run on the draft for Boris and their reasons stay, the decision is still call_boris', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        move: 'call_boris',
+        topic: 'price',
+        text: 'Я бот, цена 90 000. Я вам перезвоню.',
         fact_ids: [],
+      }),
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings: live, now: new Date() },
+    )
+    expect(plan.output?.text).toBe('Я бот, цена 90 000. Я вам перезвоню.')
+    expect(plan.issues.map((x) => x.id)).toEqual(
+      expect.arrayContaining(['facts.numbers', 'facts.none', 'robotic.ai', 'promise.call']),
+    )
+    expect(plan.attempts).toBe(1)
+    expect(plan.decision.action).toBe('call_boris')
+  })
+
+  it('FR-CONV-5: a call request calls Boris at once, and the draft the model gave is kept', async () => {
+    const d = await dossierOf()
+    const asked: Dossier = {
+      ...d,
+      messages: [
+        ...d.messages,
+        {
+          author: 'client',
+          side: 'client',
+          text: 'Позвоните мне 8 918 123-45-67',
+          sentAt: new Date().toISOString(),
+          platformMessageId: 'm-4',
+        },
+      ],
+      turnMessageIds: [...d.turnMessageIds, 'm-4'],
+    }
+    const run = async (text: string | null) =>
+      planTurn(
+        {
+          gateway: await gateway({
+            interlocutor: interlocutorAnswer({
+              move: 'call_boris',
+              topic: 'call',
+              text,
+              fact_ids: text ? ['s-portrait'] : [],
+            }),
+          }),
+          mind: fakeMind(),
+        },
+        { dossier: asked, names: ['Анна'], settings: live, now: new Date() },
+      )
+    const withDraft = await run('Спасибо, передам Борису ваш номер, он свяжется с вами.')
+    expect(withDraft.decision.action).toBe('call_boris')
+    expect(withDraft.output?.text).toContain('передам Борису')
+    const without = await run(null)
+    expect(without.decision.action).toBe('call_boris')
+    expect(without.output?.text).toBeNull()
+  })
+
+  it('FR-CONV-4: a text with the move «none» is still dropped, only a call keeps its draft', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        move: 'none',
+        topic: 'smalltalk',
+        text: 'Хорошо, жду',
+        fact_ids: ['s-portrait'],
       }),
     })
     const plan = await planTurn(
@@ -294,9 +384,7 @@ describe('turn engine', () => {
       { dossier: d, names: ['Анна'], settings, now: new Date() },
     )
     expect(plan.output?.text).toBeNull()
-    expect(plan.issues).toEqual([])
-    expect(plan.attempts).toBe(1)
-    expect(plan.decision.would).toBe('call_boris')
+    expect(plan.decision.would).toBe('nothing')
   })
 
   it('FR-CONV-4: a reply that passes the checks is not rewritten', async () => {

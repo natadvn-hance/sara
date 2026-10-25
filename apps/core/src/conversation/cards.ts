@@ -41,6 +41,7 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
   const understanding =
     (t.understanding as {
       tone?: Tone
+      would?: string
       case?: { case_id?: string | null; why?: string | null; title?: string } | null
     } | null) ?? null
   const told = understanding?.case
@@ -59,6 +60,10 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
     factIds: (t.factIds as string[]) ?? [],
     examples: ((t.exampleIds as string[]) ?? []).length,
     caseUsed: told?.case_id ? { title: told.title || told.case_id, why: told.why ?? null } : null,
+    callsBoris: t.decision === 'call_boris' || understanding?.would === 'call_boris',
+    issues: ((t.checks as { issues?: { detail: string }[] } | null)?.issues ?? []).map(
+      (x) => x.detail,
+    ),
   }
 }
 
@@ -74,7 +79,10 @@ function rowsFor(
   })
   const first =
     t.decision === 'call_boris'
-      ? [btn(b.edit, 'edit')]
+      ? // A draft meant for Boris: after the switch he can send it with the button he uses for drafts.
+        !shadow && t.text
+        ? [btn(b.send, 'send'), btn(b.edit, 'edit')]
+        : [btn(b.edit, 'edit')]
       : shadow
         ? [btn(b.good, 'good'), btn(b.edit, 'edit')]
         : [btn(b.send, 'send'), btn(b.edit, 'edit')]

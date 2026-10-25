@@ -199,14 +199,21 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
       chosen = undefined
       break
     }
-    // Only a reply carries a text and a case; with another move they are never checked, so never shown or kept.
+    // A reply carries a text and maybe a case. A call to Boris carries a short draft for him (no case, and Sara never
+    // sends it herself); with the move «none» there is nothing to say, so no text and no case is kept.
+    const draftText = res.output.text?.trim() ? res.output.text : null
     output =
-      res.output.move === 'reply' ? res.output : { ...res.output, text: null, case: undefined }
+      res.output.move === 'reply'
+        ? res.output
+        : res.output.move === 'call_boris'
+          ? { ...res.output, text: draftText, case: undefined }
+          : { ...res.output, text: null, case: undefined }
     const choice = output.case ?? null
     chosen = choice?.case_id ? offered.find((c) => c.id === choice.case_id) : undefined
     issues = checkReplyText({
       text: output.text,
-      move: output.move,
+      // The draft for Boris is read like a reply: its faults are shown to him on the card.
+      move: output.move === 'call_boris' && output.text ? 'reply' : output.move,
       factIds: output.fact_ids,
       recalledIds: recalledIds(r, offered),
       knowledgeTexts,
@@ -235,6 +242,8 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
       issues = [...issues, ...checker.issues]
     }
     if (issues.length === 0) break
+    // A draft for Boris is not rewritten: he reads it with its faults, and the decision is his anyway.
+    if (output.move === 'call_boris') break
     withoutCase = issues.some(isCaseIssue)
   }
   // The link of a case is the code's: put after the checks, when the client asked and the case allows it.

@@ -44,6 +44,10 @@ export type CardView = {
   examples: number
   /** The case of Hance the reply tells and why it was chosen (Boris reads it under «Почему так»). */
   caseUsed: { title: string; why: string | null } | null
+  /** The turn calls Boris (or would, in shadow): its text is a draft for him, not Sara's reply. */
+  callsBoris: boolean
+  /** What the code checks found in the text, for Boris to read beside a draft meant for him. */
+  issues: string[]
 }
 
 /** «Кейс: <название>, потому что <причина>.» */
@@ -71,8 +75,15 @@ export const CONV_TEXTS = {
   card(v: CardView): string {
     const head = v.decision === 'call_boris' ? `🔔 ${who(v)}: ${wouldRu(v)}` : `💬 ${who(v)}`
     const lines = [head, `Клиент: ${quote(v.clientWords)}`, '']
-    if (v.text) lines.push(v.shadow ? 'Ответила бы так:' : 'Черновик ответа:', v.text.trim(), '')
-    else
+    if (v.text) {
+      lines.push(
+        v.callsBoris ? 'Черновик для тебя:' : v.shadow ? 'Ответила бы так:' : 'Черновик ответа:',
+        v.text.trim(),
+        '',
+      )
+      if (v.callsBoris && v.issues.length)
+        lines.push(`В черновике не так: ${v.issues.join('; ')}.`, '')
+    } else
       lines.push(
         v.decision === 'call_boris' ? 'Сама не отвечаю, это к тебе.' : 'Ответа не написала.',
         '',
