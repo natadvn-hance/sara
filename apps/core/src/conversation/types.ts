@@ -67,6 +67,20 @@ export type MindHit = {
   rank: number
 }
 
+/** A case of Hance from the mind (Task B6): the record plus what a turn needs to tell it and what it may show. */
+export type CaseHit = MindHit & {
+  /** The first paragraph of the body after the heading. */
+  summary: string
+  /** The section «Результат», or null when the record has none. */
+  result: string | null
+  /** The items of «Как показывать клиенту». */
+  showRules: string[]
+  /** False when a rule says not to name the company (NDA). */
+  nameOpen: boolean
+  /** True only when a rule says the numbers of the result may be named. */
+  numbersOpen: boolean
+}
+
 export type Recall = {
   mindVersion: string
   understanding: MindHit[]
@@ -89,6 +103,8 @@ export type MindSearch = {
   byIds(ids: string[]): Promise<MindHit[]>
   byStage(stage: ConvStage, scope: string): Promise<MindHit | null>
   bannedPhrases(): Promise<string[]>
+  /** Cases of Hance that fit the text, never the ones in `exclude` (already told in the chat). */
+  cases?(q: { text: string; scope: string; limit: number; exclude?: string[] }): Promise<CaseHit[]>
 }
 
 export type DossierMessage = {
