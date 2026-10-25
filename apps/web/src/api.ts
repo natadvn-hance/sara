@@ -84,6 +84,14 @@ export type OnboardingView = {
   calibration: CalibrationSummary | null
   gatePassed: boolean
   directionState: DirectionState
+  /** The profile as the confirmed steps 5-7 would make it, what that changes, and what contradicts what. */
+  profile: { speed: 'normal' | 'fast'; reply_format: ReplyFormat | null; cases: DirectionCase[] }
+  profileChanges: string[]
+  contradictions: {
+    id: string
+    text: string
+    fix: { label: string; patch: { speed?: 'normal' | 'fast' } } | null
+  }[]
 }
 
 export type RecomputeItem = {

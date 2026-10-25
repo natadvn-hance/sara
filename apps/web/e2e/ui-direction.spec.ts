@@ -904,6 +904,131 @@ test('FR-ACC-3: a draft direction is not turned on without a calibration even wi
   await expect(on).toBeEnabled()
 })
 
+test('FR-ACC-3: steps 5-7 edit the samples, refuse a client name, fix the speed and show what changes', async ({
+  page,
+}) => {
+  const format = {
+    parts: [{ id: 'understanding', title: 'Понимание', hint: 'про ситуацию' }],
+    max_chars: 400,
+    tone: ['спокойно'],
+    examples: [],
+    max_cases: 0,
+  }
+  const samples = [1, 2, 3].map((i) => ({
+    lead_id: `lead-${i}`,
+    greeting: 'Андрей, добрый день!',
+    body: `Понимаю, о чём речь ${i}.`,
+  }))
+  const steps: Record<string, unknown> = {}
+  const state = {
+    speed: 'fast' as 'fast' | 'normal',
+    changes: [] as string[],
+    contradictions: [
+      {
+        id: 'fast_without_bids',
+        text: 'Быстрый режим при выключенных откликах: отклик всё равно не уйдёт.',
+        fix: { label: 'Обычная скорость', patch: { speed: 'normal' } },
+      },
+    ] as unknown[],
+  }
+  const view = () => ({
+    mode: 'edit',
+    basedOn: 1,
+    step: 4,
+    steps,
+    rules: { about: 'x' },
+    changes: [],
+    changed: false,
+    calibration: null,
+    gatePassed: false,
+    directionState: 'on',
+    profile: { speed: state.speed, reply_format: null, cases: [] },
+    profileChanges: state.changes,
+    contradictions: state.contradictions,
+  })
+  const confirmBodies: unknown[] = []
+  let refused = false
+  await page.route(new RegExp(`/api/directions/${ACCOUNT}/onboarding(/.*)?$`), async (route) => {
+    const req = route.request()
+    const url = new URL(req.url())
+    const tail = url.pathname.split('/onboarding')[1] ?? ''
+    if (req.method() === 'GET') return route.fulfill({ json: { onboarding: view() } })
+    if (tail === '/steps/5') {
+      steps['5'] = {
+        say: 'две части',
+        attempts: [{ fix: null, understood: 'Отклик в две части.' }],
+        proposal: { understood: 'Отклик в две части.', data: { reply_format: format, samples } },
+        confirmed: null,
+        skipped: false,
+      }
+      return route.fulfill({ json: { onboarding: view() } })
+    }
+    if (tail === '/steps/5/confirm') {
+      confirmBodies.push(req.postDataJSON())
+      if (!refused) {
+        refused = true
+        return route.fulfill({
+          status: 422,
+          json: { error: 'В образце осталось имя клиента. Убери его.', code: 'has_name' },
+        })
+      }
+      steps['5'] = { ...(steps['5'] as object), confirmed: { reply_format: format } }
+      state.changes = ['Формат отклика изменён']
+      return route.fulfill({ json: { onboarding: view() } })
+    }
+    if (tail === '/steps/6/skip') {
+      steps['6'] = { say: '', attempts: [], proposal: null, confirmed: null, skipped: true }
+      return route.fulfill({ json: { onboarding: view() } })
+    }
+    if (tail === '/steps/7/confirm') {
+      const speed = req.postDataJSON().speed as 'fast' | 'normal'
+      state.speed = speed
+      state.contradictions = speed === 'fast' ? state.contradictions : []
+      steps['7'] = { say: '', attempts: [], proposal: null, confirmed: { speed }, skipped: false }
+      state.changes = [
+        ...state.changes.filter((x) => !x.startsWith('Скорость')),
+        ...(speed === 'fast' ? ['Скорость: быстрая'] : []),
+      ]
+      return route.fulfill({ json: { onboarding: view() } })
+    }
+    return route.continue()
+  })
+  await page.goto(ONBOARDING)
+  await expect(page.getByRole('heading', { name: 'Шаг 4. Калибровка' })).toBeVisible()
+  await page.getByRole('button', { name: 'К формату отклика' }).click()
+  await expect(page.getByRole('heading', { name: 'Шаг 5. Формат отклика' })).toBeVisible()
+  await page.getByLabel('Расскажи своими словами').fill('две части, спокойно')
+  await page.getByRole('button', { name: 'Отправить' }).click()
+  await expect(page.getByText('Образец 1. Начнётся с: Андрей, добрый день!')).toBeVisible()
+  await page.getByLabel('Текст образца 1').fill('Понимаю вас, Андрей.')
+  await page.getByRole('button', { name: 'Да, правильно' }).click()
+  await expect(page.getByRole('alert')).toContainText('имя клиента')
+  expect(confirmBodies[0]).toMatchObject({
+    samples: [
+      { lead_id: 'lead-1', body: 'Понимаю вас, Андрей.' },
+      { lead_id: 'lead-2' },
+      { lead_id: 'lead-3' },
+    ],
+  })
+  await page.getByLabel('Текст образца 1').fill('Понимаю вас.')
+  await page.getByRole('button', { name: 'Да, правильно' }).click()
+  await expect(page.getByRole('heading', { name: 'Шаг 6. Кейсы и ссылки' })).toBeVisible()
+  await page.getByRole('button', { name: 'Пропустить шаг' }).click()
+  await expect(page.getByRole('heading', { name: 'Шаг 7. Скорость и деньги' })).toBeVisible()
+  await expect(page.getByText('Быстрый режим при выключенных откликах')).toBeVisible()
+  await page.getByRole('button', { name: 'Обычная скорость' }).click()
+  await expect(page.getByText('Быстрый режим при выключенных откликах')).toHaveCount(0)
+  await expect(page.getByLabel('Обычная')).toBeChecked()
+  await page.getByLabel('Быстрая').check()
+  await page.getByRole('button', { name: 'Да, так' }).click()
+  await expect(page.getByRole('heading', { name: 'Шаг 8. Включение' })).toBeVisible()
+  await expect(page.getByText('Формат отклика изменён')).toBeVisible()
+  await expect(page.getByText('Скорость: быстрая')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Сохранить отклик, кейсы и скорость' }),
+  ).toBeEnabled()
+})
+
 // Last: it changes the active rules, and the first test of this file looks at their threshold.
 test('FR-ACC-3: three confirmed steps are saved as new rules, without calibration only with a reason', async ({
   page,

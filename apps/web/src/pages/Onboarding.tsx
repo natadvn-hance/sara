@@ -1,4 +1,4 @@
-import type { OnbAbout, OnbIdeal, OnbStops } from '@sara/shared'
+import type { OnbAbout, OnbCases, OnbIdeal, OnbStops, ReplyFormat } from '@sara/shared'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api, go, type OnboardingView } from '../api'
@@ -19,8 +19,8 @@ const TITLES = [
   'Скорость и деньги',
   'Включение',
 ]
-/** The steps that talk to Claude and are built (the rest say «скоро»). */
-const BUILT = [1, 2, 3, 4, 8]
+/** Every step is built; the list stays so a step can be hidden again without touching the stepper. */
+const BUILT = [1, 2, 3, 4, 5, 6, 7, 8]
 
 const ASK: Record<number, { hint: string; example: string }> = {
   1: {
@@ -36,6 +36,15 @@ const ASK: Record<number, { hint: string; example: string }> = {
     hint: 'Опиши два-три лучших заказа из своего опыта: что в них было хорошего.',
     example:
       'Лучший заказ: клиника хотела разобраться, почему нет записей, бюджет от 100 тысяч, понятная задача.',
+  },
+  5: {
+    hint: 'Как должен выглядеть отклик: из каких частей, каким тоном, какой длины. Сара напишет три образца на настоящих заявках, ты их поправишь.',
+    example: 'Две части: понимание ситуации и один вопрос. До 400 знаков, спокойно, без клише.',
+  },
+  6: {
+    hint: 'Пришли ссылки на кейсы и скажи, когда какой показывать. Ссылки в отклик вставляет программа, только из этого списка.',
+    example:
+      'Сайт клиники https://hance.ru/cases/clinic: показывай, когда нужен сайт услуг с записью.',
   },
 }
 
@@ -78,6 +87,34 @@ function Recorded({ step, data }: { step: number; data: unknown }) {
       </div>
     )
   }
+  if (step === 5) {
+    const d = data as { reply_format: ReplyFormat }
+    const f = d.reply_format
+    return (
+      <ul className="grid gap-1 text-sm">
+        <li>{`Части: ${f.parts.map((p) => p.title).join(', ')}`}</li>
+        <li>{`До ${f.max_chars} знаков`}</li>
+        <li>{`Тон: ${f.tone.join('; ') || 'не задан'}`}</li>
+        <li>{`Кейсов в одном отклике: ${f.max_cases}`}</li>
+      </ul>
+    )
+  }
+  if (step === 6) {
+    const d = data as Data<OnbCases>
+    return d.cases.length === 0 ? (
+      <p className="text-sm">Кейсов нет.</p>
+    ) : (
+      <ul className="grid gap-2 text-sm">
+        {d.cases.map((c) => (
+          <li key={c.id} className="break-words">
+            <span className="font-medium">{c.title}</span>
+            {` ${c.url}. ${c.summary} Показывать, когда: ${c.show_when}.`}
+            {c.never_when ? ` Не показывать, когда: ${c.never_when}.` : ''}
+          </li>
+        ))}
+      </ul>
+    )
+  }
   const d = data as Data<OnbIdeal>
   return (
     <div className="grid gap-2 text-sm">
@@ -100,6 +137,8 @@ function Error_({ message }: { message: string | null }) {
   ) : null
 }
 
+type Sample = { lead_id: string; greeting: string; body: string }
+
 function StepCard({
   n,
   view,
@@ -117,8 +156,12 @@ function StepCard({
   const [say, setSay] = useState(st?.say ?? '')
   const [fixing, setFixing] = useState(false)
   const [fix, setFix] = useState('')
+  // Step 5: Boris's edits of the sample bids by lead; what he did not touch goes as proposed.
+  const [edits, setEdits] = useState<Record<string, string>>({})
   const a = useAction()
   const ask = ASK[n]
+  const samples =
+    n === 5 ? ((st?.proposal?.data as { samples?: Sample[] } | undefined)?.samples ?? []) : []
   const previous = st ? st.attempts.slice(0, -1) : []
   // The card is new for every step: the keyboard starts at its heading instead of falling to the page.
   const heading = useRef<HTMLHeadingElement>(null)
@@ -133,13 +176,23 @@ function StepCard({
       onView(r.onboarding)
       setFixing(false)
       setFix('')
+      setEdits({})
     })
   }
   async function act(what: 'confirm' | 'skip') {
     await a.run(async () => {
+      const body =
+        n === 5 && what === 'confirm'
+          ? {
+              samples: samples.map((x) => ({
+                lead_id: x.lead_id,
+                body: edits[x.lead_id] ?? x.body,
+              })),
+            }
+          : {}
       const r = await api<{ onboarding: OnboardingView }>(
         `${path(accountId)}/steps/${n}/${what}`,
-        {},
+        body,
       )
       onView(r.onboarding)
       onDone()
@@ -163,7 +216,7 @@ function StepCard({
         <Button disabled={a.busy || !say.trim()} onClick={() => send(false)}>
           {st?.proposal ? 'Отправить заново' : 'Отправить'}
         </Button>
-        {view.mode === 'edit' ? (
+        {view.mode === 'edit' || n >= 5 ? (
           <Button variant="secondary" disabled={a.busy} onClick={() => act('skip')}>
             Пропустить шаг
           </Button>
@@ -176,6 +229,27 @@ function StepCard({
         <div className="grid gap-3 border-t border-border pt-4">
           <h3 className="font-medium">Я поняла так:</h3>
           <p className="break-words">{st.proposal.understood}</p>
+          {samples.length > 0 ? (
+            <div className="grid gap-3">
+              <h3 className="font-medium">Образцы на настоящих заявках</h3>
+              <p className="text-sm text-muted">
+                Приветствие ставит программа. Поправь текст, как написал бы ты сам: без имени
+                клиента, оно в образцы не попадает.
+              </p>
+              {samples.map((x, i) => (
+                <div key={x.lead_id} className="grid gap-1">
+                  <p className="text-sm text-muted">{`Образец ${i + 1}. Начнётся с: ${x.greeting}`}</p>
+                  <Textarea
+                    label={`Текст образца ${i + 1}`}
+                    value={edits[x.lead_id] ?? x.body}
+                    onChange={(e) => setEdits({ ...edits, [x.lead_id]: e.target.value })}
+                    maxLength={2000}
+                    rows={4}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
           <details>
             <summary className="cursor-pointer text-sm">Как это запишется</summary>
             <div className="mt-2 break-words">
@@ -233,6 +307,118 @@ function StepCard({
   )
 }
 
+const SPEEDS = [
+  {
+    id: 'normal',
+    title: 'Обычная',
+    hint: 'Заявка приходит без спешки, отклик уходит по расписанию.',
+  },
+  {
+    id: 'fast',
+    title: 'Быстрая',
+    hint: 'Заявка приходит со звуком, отклик уходит сразу: так выше шанс быть первой.',
+  },
+] as const
+
+function SpeedStep({
+  view,
+  accountId,
+  onView,
+  onDone,
+}: {
+  view: OnboardingView
+  accountId: string
+  onView: (v: OnboardingView) => void
+  onDone: () => void
+}) {
+  const a = useAction()
+  const [speed, setSpeed] = useState<'normal' | 'fast'>(view.profile.speed)
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => heading.current?.focus(), [])
+  const save = (chosen: 'normal' | 'fast', leave: boolean) =>
+    a.run(async () => {
+      const r = await api<{ onboarding: OnboardingView }>(`${path(accountId)}/steps/7/confirm`, {
+        speed: chosen,
+      })
+      onView(r.onboarding)
+      setSpeed(chosen)
+      if (leave) onDone()
+    })
+  return (
+    <Card>
+      <h2 ref={heading} tabIndex={-1} className="font-display text-lg outline-none">
+        {`Шаг 7. ${TITLES[6]}`}
+      </h2>
+      <p>
+        Скорость отклика. Деньги (бюджет на день, потолок цены отклика) настраиваются в «Деньги»,
+        здесь Сара только сверяет их со скоростью.
+      </p>
+      <fieldset className="grid gap-2">
+        <legend className="mb-1 text-sm text-muted">Скорость</legend>
+        {SPEEDS.map((x) => (
+          <label key={x.id} className="flex min-h-11 items-start gap-3">
+            <input
+              type="radio"
+              name="speed"
+              className="mt-1"
+              checked={speed === x.id}
+              onChange={() => setSpeed(x.id)}
+            />
+            <span>
+              <span className="font-medium">{x.title}</span>
+              <span className="block text-sm text-muted">{x.hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      {view.contradictions.length > 0 ? (
+        <div className="grid gap-2 border-t border-border pt-4">
+          <h3 className="font-medium">Что не сходится</h3>
+          <ul className="grid gap-2 text-sm">
+            {view.contradictions.map((c) => (
+              <li key={c.id} className="break-words">
+                {c.text}
+                {c.fix?.patch.speed ? (
+                  <Button
+                    variant="secondary"
+                    className="ml-2"
+                    disabled={a.busy}
+                    onClick={() => save(c.fix?.patch.speed ?? 'normal', false)}
+                  >
+                    {c.fix.label}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <Error_ message={a.error?.message ?? null} />
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={a.busy} onClick={() => save(speed, true)}>
+          Да, так
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={a.busy}
+          onClick={() =>
+            a.run(async () => {
+              const r = await api<{ onboarding: OnboardingView }>(
+                `${path(accountId)}/steps/7/skip`,
+                {},
+              )
+              onView(r.onboarding)
+              onDone()
+            })
+          }
+        >
+          Оставить как есть
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
 function CalibrationStep({
   accountId,
   view,
@@ -240,7 +426,7 @@ function CalibrationStep({
 }: {
   accountId: string
   view: OnboardingView
-  onNext: () => void
+  onNext: (step: number) => void
 }) {
   const c = view.calibration
   const to = `/accounts/${accountId}/direction/calibration?rules=draft${c ? `&run=${c.runId}` : ''}`
@@ -286,7 +472,10 @@ function CalibrationStep({
               ? 'Открыть результат'
               : 'Продолжить проверку'}
         </a>
-        <Button variant="secondary" onClick={onNext}>
+        <Button variant="secondary" onClick={() => onNext(5)}>
+          К формату отклика
+        </Button>
+        <Button variant="secondary" onClick={() => onNext(8)}>
           К включению
         </Button>
       </div>
@@ -303,12 +492,13 @@ function FinishCard({
   view: OnboardingView
   accountId: string
   onView: (v: OnboardingView) => void
-  onSaved: (version: number | null) => void
+  onSaved: (version: number | null, profile: boolean) => void
 }) {
   const qc = useQueryClient()
   const [reason, setReason] = useState('')
   const a = useAction()
   const unchanged = !view.changed
+  const profileChanged = view.profileChanges.length > 0
   const c = view.calibration
   // What the core's gate sees, not the latest run's own verdict: a repeat still being scored does not hide it.
   const passed = view.gatePassed
@@ -324,7 +514,7 @@ function FinishCard({
         ...(state ? { state } : {}),
       })
       // First the saved card, then the refetch that finds the draft closed: no flash of the start card.
-      onSaved(r.version)
+      onSaved(r.version, view.profileChanges.length > 0)
       await qc.invalidateQueries({ queryKey: ['direction', accountId] })
       await qc.invalidateQueries({ queryKey: ['onboarding', accountId] })
     })
@@ -336,18 +526,30 @@ function FinishCard({
   return (
     <Card>
       <h2 className="font-display text-lg">Шаг 8. Включение</h2>
-      {unchanged ? (
+      {unchanged && !profileChanged ? (
         <p>Пока ничего не изменено.</p>
       ) : (
         <div className="grid gap-1">
           <p className="font-medium">Что изменится:</p>
           <ul className="grid gap-1 text-sm">
-            {view.changes.map((x) => (
+            {[...view.changes, ...view.profileChanges].map((x) => (
               <li key={x}>{x}</li>
             ))}
           </ul>
         </div>
       )}
+      {view.contradictions.length > 0 ? (
+        <div className="grid gap-1">
+          <p className="font-medium">Стоит проверить:</p>
+          <ul className="grid gap-1 text-sm">
+            {view.contradictions.map((x) => (
+              <li key={x.id} className="break-words">
+                {x.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {!gated ? null : passed ? (
         <p className="text-ok">{`Калибровка на этих правилах: согласие ${Math.round((c?.agreement ?? 0) * 100)}%, цель достигнута.`}</p>
       ) : (
@@ -368,9 +570,6 @@ function FinishCard({
           />
         </>
       )}
-      <p className="text-sm text-muted">
-        Формат отклика, кейсы, скорость и деньги появятся в следующих обновлениях.
-      </p>
       <a
         className="text-accent underline"
         href={`/accounts/${accountId}/direction/recompute?rules=draft`}
@@ -409,7 +608,9 @@ function FinishCard({
         ) : (
           <Button disabled={blocked} onClick={() => save()}>
             {unchanged && !needsReason
-              ? 'Закончить настройку'
+              ? profileChanged
+                ? 'Сохранить отклик, кейсы и скорость'
+                : 'Закончить настройку'
               : needsReason
                 ? `Сохранить всё равно${all}`
                 : 'Сохранить правила'}
@@ -429,7 +630,7 @@ function Wizard({
   accountId: string
   view: OnboardingView
   onView: (v: OnboardingView) => void
-  onSaved: (version: number | null) => void
+  onSaved: (version: number | null, profile: boolean) => void
 }) {
   const [selected, setSelected] = useState<number | null>(null)
   const qc = useQueryClient()
@@ -467,7 +668,24 @@ function Wizard({
           onDone={() => setSelected(null)}
         />
       ) : step === 4 ? (
-        <CalibrationStep accountId={accountId} view={view} onNext={() => setSelected(8)} />
+        <CalibrationStep accountId={accountId} view={view} onNext={setSelected} />
+      ) : step === 5 || step === 6 ? (
+        <StepCard
+          key={step}
+          n={step}
+          view={view}
+          accountId={accountId}
+          onView={onView}
+          onDone={() => setSelected(step + 1)}
+        />
+      ) : step === 7 ? (
+        <SpeedStep
+          key={step}
+          view={view}
+          accountId={accountId}
+          onView={onView}
+          onDone={() => setSelected(8)}
+        />
       ) : (
         <FinishCard view={view} accountId={accountId} onView={onView} onSaved={onSaved} />
       )}
@@ -548,7 +766,9 @@ export function OnboardingPage({ accountId }: { accountId: string }) {
   }, [q.error])
   const set = (v: OnboardingView) => qc.setQueryData(key, { onboarding: v })
   // Kept here, not in the wizard: once the rules are saved the draft is closed and the wizard goes away.
-  const [saved, setSaved] = useState<number | null | undefined>(undefined)
+  const [saved, setSaved] = useState<{ version: number | null; profile: boolean } | undefined>(
+    undefined,
+  )
 
   const back = (
     <a
@@ -594,13 +814,18 @@ export function OnboardingPage({ accountId }: { accountId: string }) {
       {saved !== undefined ? (
         <Card>
           <p role="status">
-            {saved === null
-              ? 'Правила не изменились, новая версия не нужна.'
-              : `Правила сохранены: v${saved}`}
+            {saved.version === null
+              ? `Правила не изменились, новая версия не нужна.${saved.profile ? ' Отклик, кейсы и скорость сохранены.' : ''}`
+              : `Правила сохранены: v${saved.version}.${saved.profile ? ' Отклик, кейсы и скорость тоже.' : ''}`}
           </p>
         </Card>
       ) : q.data.onboarding ? (
-        <Wizard accountId={accountId} view={q.data.onboarding} onView={set} onSaved={setSaved} />
+        <Wizard
+          accountId={accountId}
+          view={q.data.onboarding}
+          onView={set}
+          onSaved={(version, profile) => setSaved({ version, profile })}
+        />
       ) : (
         <Start accountId={accountId} onView={set} />
       )}
