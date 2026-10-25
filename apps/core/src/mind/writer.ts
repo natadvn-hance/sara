@@ -493,7 +493,10 @@ export function createMindWriter(d: {
     return withKey(async (env) => {
       const fetched = await git.run(['fetch', '-q', 'origin'], d.mindDir, env)
       if (fetched.code !== 0) return failed('GitHub не ответил')
-      const before = await head()
+      // The developers' commits GitHub has and the clone does not (the merge commit itself is not one of them).
+      const pulled = Number(
+        (await run('rev-list', '--count', 'HEAD..origin/main')).stdout.trim() || '0',
+      )
       const merged = await git.run(
         [...SARA_AUTHOR, 'merge', '--no-edit', '-q', 'origin/main'],
         d.mindDir,
@@ -504,9 +507,6 @@ export function createMindWriter(d: {
         await discardUncommitted()
         return failed('конфликт слияния с GitHub')
       }
-      const pulled = Number(
-        (await run('rev-list', '--count', `${before ?? 'HEAD'}..HEAD`)).stdout.trim() || '0',
-      )
       if (pulled > 0) await d.reindex()
       if (needsKey && !hasKey) return { pushed: false, pulled, error: 'no key' }
       const pushed = await git.run(['push', '-q', 'origin', 'HEAD:main'], d.mindDir, env)
