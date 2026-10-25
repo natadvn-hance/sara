@@ -38,6 +38,9 @@ let sends: { turnId: string; round: number }[]
 let sendAnswer: 'confirmed' | 'changed' = 'confirmed'
 let onCard: () => Promise<void> = async () => {}
 let onSend: () => Promise<void> = async () => {}
+let mindFails = false
+let readsFail = false
+let forwardFails = false
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 beforeAll(async () => {
@@ -66,23 +69,34 @@ beforeAll(async () => {
       FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({ interlocutor: interlocutorAnswer() }),
     },
   })
+  const mind = fakeMind()
   const deps: TurnDeps = {
     db,
     profi: {
       ...profi,
-      readChat: (...a) => profi.readChat(...a),
+      readChat: async (...a) => {
+        if (readsFail) throw new Error('the chat page is not open')
+        return profi.readChat(...a)
+      },
       getOrder: async () => {
         throw new Error('not known')
       },
     },
     gateway,
-    mind: fakeMind(),
+    mind: {
+      ...mind,
+      search: async (q) => {
+        if (mindFails) throw new Error('the mind index is gone')
+        return mind.search(q)
+      },
+    },
     card: async (turnId) => {
       cards.push(turnId)
       await onCard()
     },
     forward: async (turnId) => {
       forwards.push(turnId)
+      if (forwardFails) throw new Error('telegram is down')
     },
     send: async (turnId, round) => {
       sends.push({ turnId, round })
@@ -91,6 +105,8 @@ beforeAll(async () => {
       return answer
     },
     pauseMs: () => 200,
+    stepRetry: { maxAttempts: 2, intervalSeconds: 0.2, backoffRate: 1 },
+    unreadableRetry: { tries: 2, everyMs: 100 },
     onOutcome: async (o) => {
       outcomes.push(o)
     },
@@ -121,6 +137,9 @@ beforeEach(async () => {
   sendAnswer = 'confirmed'
   onCard = async () => {}
   onSend = async () => {}
+  mindFails = false
+  readsFail = false
+  forwardFails = false
   await setSetting(db, 'pipeline.conversations', true, 'system')
   await setSetting(db, 'conv.quiet_after_message_s', 1, 'system')
   await setSetting(db, 'conv.quiet_after_typing_s', 1, 'system')
@@ -310,4 +329,63 @@ describe('the turn workflow', () => {
     expect(rows.find((r) => r.anchorMessageId === 'm-2')?.outcome).toBe('forwarded')
     expect(forwards).toHaveLength(1)
   }, 30000)
+
+  it('FR-CONV-7: a turn that failed to plan still covers the client turn, so the next message gets its own turn', async () => {
+    mindFails = true
+    await clientWrites('m-2', 'Как начнём?')
+    const [first] = await turnsDone(1)
+    expect(first).toMatchObject({
+      decisionReason: 'не смогла подготовить ответ',
+      outcome: 'drafted',
+    })
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBe('m-2')
+    mindFails = false
+    await clientWrites('m-3', 'Ещё вопрос')
+    const rows = await turnsDone(2)
+    expect(rows.map((r) => r.anchorMessageId).sort()).toEqual(['m-2', 'm-3'])
+    expect(rows.find((r) => r.anchorMessageId === 'm-3')).toMatchObject({
+      outcome: 'drafted',
+      decision: 'draft',
+    })
+    expect(cards).toHaveLength(2)
+  }, 40000)
+
+  it('FR-CONV-7: a card that cannot be sent ends the turn as failed and the conversation goes on', async () => {
+    onCard = async () => {
+      throw new Error('telegram is down')
+    }
+    await clientWrites('m-2', 'Как начнём?')
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('failed')
+    expect(await countEvents(db, 'conv.turn_failed')).toBe(1)
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBe('m-2')
+    onCard = async () => {}
+    await clientWrites('m-3', 'Ещё вопрос')
+    const rows = await turnsDone(2)
+    expect(rows.find((r) => r.anchorMessageId === 'm-3')?.outcome).toBe('drafted')
+  }, 40000)
+
+  it('FR-CONV-7: a forward that cannot be sent ends the turn as failed after the handoff', async () => {
+    await clientWrites('m-0', 'Привет')
+    await turnsDone(1)
+    await db.update(conversation).set({ owner: 'boris', ownerReason: 'take' })
+    forwardFails = true
+    await clientWrites('m-2', 'Как начнём?')
+    const rows = await turnsDone(2)
+    expect(rows.find((r) => r.anchorMessageId === 'm-2')?.outcome).toBe('failed')
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBe('m-2')
+  }, 40000)
+
+  it('FR-CONV-2: a chat that stays unreadable ends the turn with a card for Boris', async () => {
+    readsFail = true
+    await clientWrites('m-2', 'Как начнём?')
+    const [t] = await turnsDone(1)
+    expect(t).toMatchObject({
+      outcome: 'failed',
+      decision: 'draft',
+      decisionReason: 'не могу прочитать чат',
+      messageIds: ['m-2'],
+    })
+    expect(cards).toHaveLength(1)
+  }, 40000)
 })
