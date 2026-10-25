@@ -30,7 +30,7 @@ Branch `claude/snippet-first-9d9386`, worktree `.claude/worktrees/snippet-first-
 - Analyst role: paragraph about «Клиент на площадке» (use for risks/condition, never in the text), version 2.
 - `draftThenCard`: the task end is guarded by `.returning()`; the variable `full` in processOrder is `withPage` now.
 - Speed report: lead.found now comes at once and the page read is INSIDE lead.found -> task.created / card.sent (before, the node read the page before sending order_seen). G1 (lead to card, 2 min) will read longer after deploy for that reason, not because of a slower Sara.
-- Not done on purpose: «Показать» (held order shown from the 19:00 summary) does not re-read the page; its press must answer Telegram at once and the existing test fixes its text. The node still refuses a bid on a closed order at the press.
+- An order the day's card cap will hold (`capBeforePage` step, recorded under the same patch) costs no page read and no Analyst call in processOrder; «Показать» now goes through `draftThenCard` (#98), which reads the page first (closed or already bid on: a word to Boris instead of a card).
 
 
 ## Board scroll (25.10.2026, asked by the main session after live data)

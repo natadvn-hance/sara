@@ -453,16 +453,21 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     client_info: ClientInfo | null
   } = { ...order, client_info: null }
   if (await DBOS.patch('order-page')) {
-    const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
-      name: 'orderPage',
-    })
-    withPage = fuller(order, read)
-    const verdict = await DBOS.runStep(
-      () => storePage({ id: order.order_id, correlationId }, withPage, read, sorted),
-      { name: 'orderPageStored', ...DB_STEP },
-    )
-    // Closed, or already bid on: nothing to offer, no card and no model call.
-    if (verdict !== 'go') return
+    // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
+    // (with its draft, draftThenCard).
+    const held = await DBOS.runStep(() => capSpent().catch(() => false), { name: 'capBeforePage' })
+    if (!held) {
+      const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
+        name: 'orderPage',
+      })
+      withPage = fuller(order, read)
+      const verdict = await DBOS.runStep(
+        () => storePage({ id: order.order_id, correlationId }, withPage, read, sorted),
+        { name: 'orderPageStored', ...DB_STEP },
+      )
+      // Closed, or already bid on: nothing to offer, no card and no model call.
+      if (verdict !== 'go') return
+    }
   }
 
   // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.

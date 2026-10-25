@@ -106,18 +106,19 @@ describe('a run recorded before the order page step', () => {
         steps.find((s) => s.function_name === 'DBOS.patch-order-page')?.function_id ?? -1
       expect(first).toBeGreaterThan(0)
       const at = steps.findIndex((s) => s.function_id === first)
-      expect(steps.slice(at, at + 3).map((s) => s.function_name)).toEqual([
+      expect(steps.slice(at, at + 4).map((s) => s.function_name)).toEqual([
         'DBOS.patch-order-page',
+        'capBeforePage',
         'orderPage',
         'orderPageStored',
       ])
       await sys.query(
         'delete from dbos.operation_outputs where workflow_uuid = $1 and function_id between $2 and $3',
-        [wf, first, first + 2],
+        [wf, first, first + 3],
       )
-      for (const s of steps.filter((x) => x.function_id > first + 2)) {
+      for (const s of steps.filter((x) => x.function_id > first + 3)) {
         await sys.query(
-          'update dbos.operation_outputs set function_id = function_id - 3 where workflow_uuid = $1 and function_id = $2',
+          'update dbos.operation_outputs set function_id = function_id - 4 where workflow_uuid = $1 and function_id = $2',
           [wf, s.function_id],
         )
       }

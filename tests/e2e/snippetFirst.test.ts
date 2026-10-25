@@ -397,3 +397,45 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     expect(await leadOf(id)).toMatchObject({ status: 'bid_already' })
   })
 })
+
+describe("an order the day's card cap holds", () => {
+  /** One card fills the cap; the next shown order is held for the summary, which brings «Показать». */
+  async function heldOrder(page: Parameters<typeof fake.setOrderPage>[1]) {
+    await setSetting(db, 'cards.max_per_day', 1, 'boris')
+    await fake.emitOrder({ order_id: orderId(), ...BOARD })
+    await until(() => leadCards().length === 1)
+    const held = orderId()
+    fake.setOrderPage(held, page)
+    await fake.emitOrder({ order_id: held, ...BOARD })
+    await until(async () => (await leadOf(held))?.status === 'held')
+    return held
+  }
+  const show = async () => {
+    await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
+    await until(() => tg.sent.some((m) => m.text.includes('Ещё показала бы')))
+    const summary = tg.sent.find((m) => m.text.includes('Ещё показала бы'))
+    tg.pushPress(111, summary?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data ?? '')
+  }
+
+  it('FR-NOTIF-3: a held order costs no visit of the tab, its page is read when «Показать» brings it', async () => {
+    const held = await heldOrder({ bid_price_rub: 145, client_info: CLIENT })
+    await settle()
+    // Only the first order's page was read; the held one waits for the summary, with no Analyst call either.
+    expect(fake.orderReads).toHaveLength(1)
+    expect(fake.orderReads).not.toContain(held)
+    expect((await journal(held)).map((e) => e.type)).not.toContain('lead.page_read')
+    await show()
+    await until(() => leadCards().length === 2)
+    expect(fake.orderReads).toContain(held)
+    expect(await leadOf(held)).toMatchObject({ bidPriceRub: 145, clientInfo: CLIENT })
+    expect(leadCards().at(-1)?.text).toContain(`отклик 145${NBSP}₽`)
+  })
+
+  it('FR-NOTIF-3: a held order that closed meanwhile is not brought as a card, Boris is told', async () => {
+    const held = await heldOrder({ open: false })
+    await show()
+    await until(() => tg.sent.some((m) => m.text === 'Заявка уже закрыта, карточку не присылаю.'))
+    expect(leadCards()).toHaveLength(1)
+    expect(await leadOf(held)).toMatchObject({ status: 'closed' })
+  })
+})
