@@ -187,11 +187,11 @@ export async function readFormMap(page: Page): Promise<FormMap | null> {
 
       const payment: { text: string; testid: string | null; visible: boolean }[] = []
       const seen = new Set<string>()
-      // Once per block: the footer's amount stays beside the same amount of the tariff block.
+      // Once in the form and once outside it: the footer's amount stays beside the same amount of the tariff block.
       const keep = (el: Element, text: string) => {
         const holder = el.closest('[data-testid]')
         const testid = holder ? attr(holder, 'data-testid') : null
-        const key = `${testid} ${text}`
+        const key = `${inForm(el) ? 'form' : 'page'} ${text}`
         if (seen.has(key) || payment.length >= 30) return
         seen.add(key)
         payment.push({ text, testid, visible: shown(el) })

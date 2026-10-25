@@ -32,7 +32,8 @@ export type SiteOrder = {
   /** The form will not take a bid without «Стоимость услуги». */
   priceRequired: boolean
 }
-export type SiteBid = { orderId: string; price: string; text: string }
+/** A bid the form sent; priceTo only when the form sent a «До». */
+export type SiteBid = { orderId: string; price: string; text: string; priceTo?: string }
 /** How the bid form behaves: ok, silent (refused, the form stays), lost (the form closes, no bid on the order). */
 export type BidSettings = BidLook & {
   mode: 'ok' | 'silent' | 'lost'
@@ -259,7 +260,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       if (found.priceRequired && !price) return json(res, { ok: false, error: 'Укажите стоимость' })
       if (text.length > 500 || state.balance < found.price) return json(res, { ok: false })
       if (bidSettings.mode === 'lost') return json(res, { ok: true })
-      bids.push({ orderId: found.id, price, text })
+      const priceTo = String(b.priceTo ?? '')
+      bids.push({ orderId: found.id, price, text, ...(priceTo && { priceTo }) })
       state.balance -= found.price
       found.hasBid = true
       return json(res, { ok: true })

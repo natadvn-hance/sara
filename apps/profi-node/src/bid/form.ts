@@ -1,5 +1,4 @@
 import type { Locator, Page } from 'playwright'
-import { paymentWay } from './screen'
 
 // The October form as the order answer names it (boOrderScreen.form): «stavka» is «Стоимость услуги», «comments4client»
 // the text. Placeholders are the fallback. Calibrated by the maps of src/eyes/formMap.ts.
@@ -7,9 +6,10 @@ const PRICE = '[name="stavka"], input[placeholder="Сумма"]'
 const TEXT = '[name="comments4client"], textarea[placeholder^="Расскажите о своём опыте"]'
 const CONTINUE = 'Продолжить'
 const TARIFFS = '[data-testid*="tariff" i]'
-// September anchors (old Sara, paymentPanel.js, checked live 19.09.2026).
+// The footer of the open form, holding the amount, the payment way and the send button (old Sara, paymentPanel.js,
+// 19.09.2026; the live map of 25.10.2026).
 const FOOTER = '[data-testid="bid_form_footer"]'
-const WAY = '.payment-methods__name'
+const PAY = '[data-testid="payment_methods_form_pay_button"]'
 
 const shown = (page: Page, css: string) => page.locator(css).filter({ visible: true })
 const rubIn = (text: string | null) => {
@@ -148,12 +148,20 @@ export async function readPayment(
     .split('\n')
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
-  // «К оплате: N ₽» on one line, or «К оплате:» and the amount on the next.
+  // «К оплате: N ₽» on one line, or «К оплате:» and the amount alone on the next.
   const at = lines.findIndex((l) => /^К оплате/.test(l))
-  const dueAt = at < 0 ? -1 : rubIn(lines[at] ?? '') !== null ? at : at + 1
+  const dueAt =
+    at < 0
+      ? -1
+      : rubIn(lines[at] ?? '') !== null
+        ? at
+        : AMOUNT.test(lines[at + 1] ?? '')
+          ? at + 1
+          : -1
   const dueRub = dueAt < 0 ? null : rubIn(lines[dueAt] ?? '')
+  // Every other word of the footer is the way: a picker with the wallet among others is not the wallet.
   const rest = lines.filter((l, i) => i !== at && i !== dueAt && !PRESS.test(l))
-  const wayText = (await read(WAY))?.trim() || rest.join(' ') || null
+  const wayText = rest.join(' ') || null
   const wallet =
     !!wayText &&
     (WALLET.test(wayText) ||
@@ -172,27 +180,37 @@ export async function fillForm(
 ): Promise<'ok' | 'no_field' | 'not_taken'> {
   const text = shown(page, TEXT)
   if ((await text.count()) !== 1) return 'no_field'
+  // Only fields of the form itself: a top-up «Сумма» elsewhere on the page is never filled.
   const block = formBlock(page)
-  const single = shown(page, PRICE)
+  const single = block.locator(PRICE).filter({ visible: true })
   const from = block.getByLabel('От', { exact: true }).filter({ visible: true })
-  const price = (await single.count()) === 1 ? single : (await from.count()) === 1 ? from : null
+  const to = block.getByLabel('До', { exact: true }).filter({ visible: true })
+  const range = (await single.count()) !== 1 && (await from.count()) === 1
+  const price = range ? from : (await single.count()) === 1 ? single : null
   if (!price && v.priceRub !== null) return 'no_field'
   const want = v.priceRub === null ? '' : String(v.priceRub)
   try {
     if (price) await price.fill(want, { timeout: 5000 })
+    // «До» stays empty, even when the page filled it itself.
+    const hasTo = range && (await to.count()) === 1
+    if (hasTo) await to.fill('', { timeout: 5000 })
     await text.fill(v.text, { timeout: 5000 })
     const gotText = await text.inputValue()
     const gotPrice = price ? (await price.inputValue()).replace(/[^\d]/g, '') : ''
+    const gotTo = hasTo ? await to.inputValue() : ''
     // A textarea keeps line breaks as \n whatever was typed.
-    return gotText === v.text.replace(/\r\n?/g, '\n') && gotPrice === want ? 'ok' : 'not_taken'
+    return gotText === v.text.replace(/\r\n?/g, '\n') && gotPrice === want && gotTo === ''
+      ? 'ok'
+      : 'not_taken'
   } catch {
     return 'no_field'
   }
 }
 
 /**
- * Presses the send button of the form that holds the text field. A trial press first: a button that cannot be
- * pressed is 'no_button' and nothing happened; a failure of the press itself is 'unsure'.
+ * Presses the send button of the form that holds the text field: its pay button (live: payment_methods_form_pay_button),
+ * or the one button with the send words in it; never a button outside the form. A trial press first: a button that
+ * cannot be pressed is 'no_button' and nothing happened; a failure of the press itself is 'unsure'.
  */
 export async function clickSubmit(
   page: Page,
@@ -201,11 +219,10 @@ export async function clickSubmit(
   const name = words ?? 'Откликнуться'
   const byName = (scope: Page | ReturnType<Page['locator']>) =>
     scope.getByRole('button', { name, exact: true }).filter({ visible: true })
-  let button = byName(formBlock(page))
-  if ((await button.count()) !== 1) {
-    button = byName(page)
-    if ((await button.count()) !== 1) return 'no_button'
-  }
+  const block = formBlock(page)
+  const pay = block.locator(PAY).filter({ visible: true })
+  const button = (await pay.count()) === 1 ? pay : byName(block)
+  if ((await button.count()) !== 1) return 'no_button'
   try {
     await button.click({ trial: true, timeout: 5000 })
   } catch {
