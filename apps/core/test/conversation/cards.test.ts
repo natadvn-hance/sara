@@ -5,6 +5,7 @@ import { sendTurnCard } from '../../src/conversation/cards'
 import { compareAfterTurn, compareTurn, similarity } from '../../src/conversation/compare'
 import { ensureConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
+import { CONV_TEXTS } from '../../src/conversation/texts'
 import { chatMessage, convTurn, lead, task } from '../../src/db/schema'
 import type { Notifier } from '../../src/notify/notifier'
 import { setSetting } from '../../src/settings/store'
@@ -138,6 +139,21 @@ describe('the draft card', () => {
     await turn('t-1', { text: 'Да \u2014 начнём' })
     await sendTurnCard({ db, notifier }, 't-1')
     expect(sent[0]?.text).not.toMatch(/[\u2014\u2013]/)
+  })
+
+  it('NFR-UX-1: the quoted outside text of the comparison and the forward has no long dash either', () => {
+    const dashes = /[\u2014\u2013]/
+    expect(
+      CONV_TEXTS.compared('14:32', 'boris', 'Анна \u2014 добрый день \u2013 созвонимся', 50),
+    ).not.toMatch(dashes)
+    expect(
+      CONV_TEXTS.forward(
+        'Анна \u2014 Мария',
+        'Сайт \u2014 клиника',
+        'Нет \u2013 да \u2014 ещё',
+        true,
+      ),
+    ).not.toMatch(dashes)
   })
 })
 
