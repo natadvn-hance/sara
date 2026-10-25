@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { jobRun } from '../db/schema'
-import { takeNotice } from './notices'
+import { releaseNotice, takeNotice } from './notices'
 import { SCHOOL_TEXTS } from './texts'
 import type { SchoolDeps } from './types'
 
@@ -26,7 +26,12 @@ export async function syncNoticeStep(
     .execute(sql`select 1 from core.job_run where name = 'sync_notice' and day = ${day}`)
     .then((r) => r.rows)
   if (told) return
-  if (!(await takeNotice(d.db, now, 'sync_failed'))) return
+  const notice = await takeNotice(d.db, now, 'sync_failed')
+  if (!notice) return
+  // Not sent: the day's place goes back and the next tick tries again.
+  await d.notifier.sendText(SCHOOL_TEXTS.syncFailed).catch(async (e) => {
+    await releaseNotice(d.db, notice)
+    throw e
+  })
   await d.db.insert(jobRun).values({ name: 'sync_notice', day }).onConflictDoNothing()
-  await d.notifier.sendText(SCHOOL_TEXTS.syncFailed)
 }
