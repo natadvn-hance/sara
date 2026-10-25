@@ -97,3 +97,27 @@ describe('v1 snapshot', () => {
     expect(readV1Snapshot(file).startedAt).toBe('2026-09-09T16:14:00.000Z')
   })
 })
+
+describe('v1 snapshot with broken dates', () => {
+  it('FR-TRAIN-1: an empty or broken date reads as missing and never starts v1', async () => {
+    const d = await mkdtemp(join(tmpdir(), 'sara-v1-bad-'))
+    const f = join(d, 'profi-leads.db')
+    const db = new DatabaseSync(f)
+    db.exec(`CREATE TABLE leads (id TEXT PRIMARY KEY, status TEXT NOT NULL, responded_at TEXT,
+      boris_wrote_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+    const insert = db.prepare(
+      'INSERT INTO leads (id, status, responded_at, boris_wrote_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    insert.run('8001', 'responded', '', 'вчера', '', '2026-09-12T10:00:00.000Z')
+    insert.run('8002', 'skipped', null, null, '2026-09-11T10:00:00.000Z', 'nonsense')
+    db.close()
+    const s = readV1Snapshot(f)
+    const a = s.leads.find((l) => l.orderId === '8001')
+    expect(a).toMatchObject({ respondedAt: null, borisWroteAt: null })
+    // The made-up times of v1-only messages need a date: a broken one falls back to the other.
+    expect(a?.createdAt).toBe('2026-09-12T10:00:00.000Z')
+    expect(s.leads.find((l) => l.orderId === '8002')?.updatedAt).toBe('2026-09-11T10:00:00.000Z')
+    expect(s.startedAt).toBe('2026-09-11T10:00:00.000Z')
+    await rm(d, { recursive: true, force: true })
+  })
+})

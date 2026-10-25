@@ -5,23 +5,29 @@ import { plural } from '@sara/shared'
 import { loadConfig } from '../config'
 import { createDb } from '../db/client'
 import { getSetting } from '../settings/store'
-import { exportHistory, formatExportReport } from './exportHistory'
+import { parseExportArgs } from './exportArgs'
+import { exportHistory, formatExportReport, v1StoppedAt } from './exportHistory'
 import { proposeSpeechExamples } from './speechProposals'
-import { readTelegramV1Texts } from './telegramExport'
+import { readTelegramExport } from './telegramExport'
 import { readV1Snapshot } from './v1Snapshot'
 
-const arg = (name: string) => {
-  const i = process.argv.indexOf(name)
-  return i > 0 ? process.argv[i + 1] : undefined
+let args: ReturnType<typeof parseExportArgs>
+try {
+  args = parseExportArgs(process.argv.slice(2))
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e)
+  process.exit(1)
 }
-
 const config = loadConfig()
-const accountId = arg('--account') ?? config.accounts[0]?.id
-if (!accountId) throw new Error('Не знаю аккаунт: укажи --account или SARA_ACCOUNTS.')
-const v1Path = arg('--v1')
-const telegramPath = arg('--telegram')
-const v1 = v1Path ? readV1Snapshot(v1Path) : null
-const telegramV1Texts = telegramPath ? readTelegramV1Texts(telegramPath) : new Set<string>()
+const accountId = args.account ?? config.accounts[0]?.id
+if (!accountId) {
+  console.error('Не знаю аккаунт: укажи --account или SARA_ACCOUNTS.')
+  process.exit(1)
+}
+const v1 = args.v1 ? readV1Snapshot(args.v1) : null
+const telegram = args.telegram
+  ? readTelegramExport(args.telegram)
+  : { v1Texts: new Set<string>(), borisTexts: new Set<string>() }
 if (!v1) console.log('Без снимка v1: беру только чаты, которые прочитала служба.')
 
 const { db, close } = createDb(config.databaseUrl)
@@ -29,8 +35,10 @@ try {
   const report = await exportHistory(db, {
     accountId,
     v1,
-    telegramV1Texts,
+    telegramV1Texts: telegram.v1Texts,
+    telegramBorisTexts: telegram.borisTexts,
     v1Writes: await getSetting(db, 'conv.v1_writes'),
+    v1StoppedAt: await v1StoppedAt(db),
   })
   console.log(formatExportReport(report))
   const clientNames = new Map<string, string>()
@@ -38,7 +46,7 @@ try {
   const s = await proposeSpeechExamples(db, { accountId, clientNames })
   const forms = ['новое предложение', 'новых предложения', 'новых предложений'] as const
   console.log(
-    `Образцы речи: ${s.proposed} ${plural(s.proposed, forms)} в разум, пропущено ${s.skipped} (короткие или уже предложены).`,
+    `Образцы речи: ${s.proposed} ${plural(s.proposed, forms)} в разум, пропущено ${s.skipped} (короткие, уже предложены или без известного имени клиента).`,
   )
 } finally {
   await close()

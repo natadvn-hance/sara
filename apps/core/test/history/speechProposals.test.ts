@@ -22,15 +22,33 @@ async function msg(
   chat: string,
   author: ChatAuthor,
   text: string,
-  o: { id?: string; order?: string | null; source?: 'node' | 'v1' } = {},
+  o: { id?: string; order?: string | null; source?: 'node' | 'v1'; noName?: boolean } = {},
 ) {
   n++
   const side = author === 'client' || author === 'system' ? author : 'specialist'
+  const order = o.order === undefined ? chat : o.order
+  // A known client name for every order unless a test says otherwise: without one no example is made (privacy).
+  if (order && !o.noName)
+    await db
+      .insert(lead)
+      .values({
+        id: order,
+        accountId: ACCOUNT,
+        title: 'Сайт',
+        category: 'Сайты',
+        city: 'Москва',
+        text: 'Нужен сайт',
+        clientName: 'Тестова',
+        bidPriceRub: 300,
+        seenAt: at(0),
+        correlationId: newEventId(),
+      })
+      .onConflictDoNothing()
   await db.insert(chatMessage).values({
     id: newEventId(),
     accountId: ACCOUNT,
     chatId: chat,
-    orderId: o.order === undefined ? chat : o.order,
+    orderId: order,
     platformMessageId: o.id ?? `p-${n}`,
     side,
     author,
@@ -60,6 +78,38 @@ async function addLead(id: string, clientName: string) {
   })
 }
 
+describe('speech examples from history: privacy and repeats', () => {
+  it('NFR-PRIV-2: a chat whose client name is not known gives no example', async () => {
+    await msg('9101', 'client', 'Ирина на связи, сколько это стоит?', { noName: true })
+    await msg('9101', 'boris', 'Ирина, добрый день! Посчитаю и напишу.', { noName: true })
+    await msg('9102', 'client', 'Привет', { order: null })
+    await msg('9102', 'boris', 'Добрый день, расскажите о задаче подробнее.', { order: null })
+    expect(await proposeSpeechExamples(db, { accountId: ACCOUNT })).toEqual({
+      proposed: 0,
+      skipped: 2,
+    })
+    expect(await proposals()).toHaveLength(0)
+  })
+
+  it('FR-MIND-3: the same words from a v1 copy and from the real message make one proposal', async () => {
+    await msg('9103', 'boris', 'Посчитаю и вернусь завтра с вариантами.', {
+      source: 'v1',
+      id: 'v1:9103:boris:x',
+    })
+    await msg('9103', 'client', 'Сколько стоит?')
+    await msg('9103', 'boris', 'Посчитаю и вернусь завтра с вариантами.', { id: 'r-9103' })
+    const r = await proposeSpeechExamples(db, { accountId: ACCOUNT })
+    expect(r.proposed).toBe(1)
+    expect(await proposals()).toHaveLength(1)
+  })
+
+  it('FR-SPEECH-2: old Sara’s attachment placeholder is no example', async () => {
+    await msg('9104', 'client', 'Вот файл')
+    await msg('9104', 'boris', '[вложение без текста]')
+    expect((await proposeSpeechExamples(db, { accountId: ACCOUNT })).proposed).toBe(0)
+  })
+})
+
 describe('speech examples from history', () => {
   it("FR-SPEECH-2: an example holds the client's turn and Boris's answer", async () => {
     await msg('9001', 'sara_v1', 'Здравствуйте! Сделаем сайт.')
@@ -73,7 +123,9 @@ describe('speech examples from history', () => {
     })
     const [p] = await proposals()
     expect(p).toMatchObject({
-      path: 'mind/proposals/shared/speech/examples/e-h-b77x.md',
+      path: expect.stringMatching(
+        /^mind\/proposals\/shared\/speech\/examples\/e-h-[0-9a-f]{12}\.md$/,
+      ),
       kind: 'example',
       source: `history:${ACCOUNT}:b-77/x`,
       state: 'new',
@@ -83,7 +135,7 @@ describe('speech examples from history', () => {
       '\n## Клиент\n\nДобрый день.\n\nА сколько по времени займёт?\n\n## Борис\n\nОбычно месяц, если тексты будут готовы.\n',
     )
     expect(p?.content).toMatch(
-      /^---\nid: e-h-b77x\ntype: example\nscope: shared\nstatus: proposal\n/,
+      /^---\nid: e-h-[0-9a-f]{12}\ntype: example\nscope: shared\nstatus: proposal\n/,
     )
     expect(p?.content).not.toMatch(/stages/)
   })
@@ -123,7 +175,9 @@ describe('speech examples from history', () => {
     await msg('9010', 'client', 'Сколько стоит?', v1)
     await msg('9010', 'boris', 'Посчитаю и пришлю смету сегодня.', { id: 'n-9010' })
     await proposeSpeechExamples(db, { accountId: ACCOUNT })
-    const [fromNode, fromV1] = await proposals()
+    const all = await proposals()
+    const fromNode = all.find((p) => p.source.endsWith(':n-9010'))
+    const fromV1 = all.find((p) => p.source.endsWith(':v1:9009:boris:0'))
     expect(fromV1?.content).not.toMatch(/stages/)
     expect(fromV1?.content).toContain(
       '## Клиент\n\nНеизвестно, что клиент написал перед этим: сообщение из базы старой Сары.\n',

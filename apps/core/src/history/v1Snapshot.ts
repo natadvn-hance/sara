@@ -51,6 +51,23 @@ export function openV1Snapshot(path: string): DatabaseSync {
 
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v))
 
+const DATE_KEYS = new Set([
+  'respondedAt',
+  'borisWroteAt',
+  'takenByBorisAt',
+  'replyApprovedAt',
+  'createdAt',
+  'updatedAt',
+])
+/** A v1 date as ISO; an empty or broken one is missing, so no rule ever goes by it. */
+const date = (v: string | null): string | null => {
+  if (!v?.trim()) return null
+  const t = Date.parse(v)
+  return Number.isFinite(t) ? new Date(t).toISOString() : null
+}
+/** The day v1 began, the last resort for a lead whose two own dates are both broken. */
+const EPOCH = '1970-01-01T00:00:00.000Z'
+
 /** Every lead of the snapshot; a column the old file does not have yet reads as null. */
 export function readV1Snapshot(path: string): { leads: V1Lead[]; startedAt: string } {
   const db = openV1Snapshot(path)
@@ -65,13 +82,23 @@ export function readV1Snapshot(path: string): { leads: V1Lead[]; startedAt: stri
     const rows = db.prepare('SELECT * FROM leads ORDER BY created_at, id').all()
     const leads = rows.map((r) => {
       const lead = { orderId: String(r.id) } as Record<string, string | null>
-      for (const [key, column] of Object.entries(COLUMNS))
-        lead[key] = present.has(column) ? str(r[column]) : null
-      return lead as unknown as V1Lead
+      for (const [key, column] of Object.entries(COLUMNS)) {
+        const v = present.has(column) ? str(r[column]) : null
+        lead[key] = DATE_KEYS.has(key) ? date(v) : v
+      }
+      // The made-up times of v1-only messages are built from these two: each falls back to the other.
+      const created = lead.createdAt
+      lead.createdAt = created ?? lead.updatedAt ?? EPOCH
+      lead.updatedAt = lead.updatedAt ?? created ?? EPOCH
+      return { lead: lead as unknown as V1Lead, dated: created !== null }
     })
-    const first = leads[0]
-    if (!first) throw new Error(`В снимке v1 нет ни одного заказа: ${path}`)
-    return { leads, startedAt: first.createdAt }
+    if (leads.length === 0) throw new Error(`В снимке v1 нет ни одного заказа: ${path}`)
+    // v1 began with its earliest lead that has a real date of its own.
+    const starts = leads
+      .filter((l) => l.dated)
+      .map((l) => l.lead.createdAt)
+      .sort()
+    return { leads: leads.map((l) => l.lead), startedAt: starts[0] ?? EPOCH }
   } finally {
     db.close()
   }

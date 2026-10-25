@@ -3,7 +3,11 @@ import { asc, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { migrateNode } from '../../../profi-node/src/db/migrate'
 import { chatMessage, conversation, outbox } from '../../src/db/schema'
-import { exportHistory, formatExportReport } from '../../src/history/exportHistory'
+import {
+  exportHistory,
+  formatExportReport,
+  v1MessageId as v1Id,
+} from '../../src/history/exportHistory'
 import type { V1Lead } from '../../src/history/v1Snapshot'
 import { listEvents } from '../../src/journal/journal'
 import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
@@ -61,12 +65,16 @@ async function raw(r: {
   return id
 }
 
-const run = (leads: V1Lead[] | null, over: { telegram?: string[]; v1Writes?: boolean } = {}) =>
+const run = (
+  leads: V1Lead[] | null,
+  over: { telegram?: string[]; v1Writes?: boolean; v1StoppedAt?: string | null } = {},
+) =>
   exportHistory(db, {
     accountId: ACCOUNT,
     v1: leads ? { leads, startedAt } : null,
     telegramV1Texts: new Set(over.telegram ?? []),
     v1Writes: over.v1Writes ?? true,
+    v1StoppedAt: over.v1StoppedAt ?? null,
   })
 
 const stored = () =>
@@ -257,10 +265,42 @@ describe('history export', () => {
         r.approxTime,
       ]),
     ).toEqual([
-      ['v1:7002:bid:0', 'v1:7002', 'specialist', 'sara_v1', 'v1_bid', 'v1', true],
-      ['v1:7002:client:0', 'v1:7002', 'client', 'client', 'side', 'v1', true],
-      ['v1:7002:boris:0', 'v1:7002', 'specialist', 'boris', 'v1_boris_text', 'v1', true],
-      ['v1:7002:boris:1', 'v1:7002', 'specialist', 'boris', 'v1_boris_text', 'v1', true],
+      [
+        v1Id('7002', 'bid', 'Здравствуйте! Сделаем сайт за месяц.'),
+        'v1:7002',
+        'specialist',
+        'sara_v1',
+        'v1_bid',
+        'v1',
+        true,
+      ],
+      [
+        v1Id('7002', 'client', 'А сколько это будет стоить?'),
+        'v1:7002',
+        'client',
+        'client',
+        'side',
+        'v1',
+        true,
+      ],
+      [
+        v1Id('7002', 'boris', 'Добрый день.'),
+        'v1:7002',
+        'specialist',
+        'boris',
+        'v1_boris_text',
+        'v1',
+        true,
+      ],
+      [
+        v1Id('7002', 'boris', 'Посчитаю и вернусь завтра'),
+        'v1:7002',
+        'specialist',
+        'boris',
+        'v1_boris_text',
+        'v1',
+        true,
+      ],
     ])
     expect(rows.map((r) => r.text)).toEqual([
       'Здравствуйте! Сделаем сайт за месяц.',
@@ -296,8 +336,8 @@ describe('history export', () => {
     const report = await run(leads)
     const rows = await stored()
     expect(rows.map((r) => [r.platformMessageId, r.chatId, r.source])).toEqual([
-      ['v1:7002:bid:0', 'c7', 'v1'],
-      ['v1:7002:boris:0', 'c7', 'v1'],
+      [v1Id('7002', 'bid', 'Здравствуйте! Сделаем сайт за месяц.'), 'c7', 'v1'],
+      [v1Id('7002', 'boris', 'Добрый день.'), 'c7', 'v1'],
       ['r1', 'c7', 'node'],
       ['r2', 'c7', 'node'],
     ])
@@ -349,11 +389,156 @@ describe('history export', () => {
     expect(e?.payload).toMatchObject({ chats: 1, added: 1 })
   })
 
-  it("FR-CONV-10: the export after the switch takes an unproven specialist message for Boris's", async () => {
-    await raw({ chat: 'c1', author: 'specialist', text: 'Сам напишу' })
-    await run(null, { v1Writes: false })
-    const [row] = await db.select().from(chatMessage).where(eq(chatMessage.chatId, 'c1'))
-    expect(row).toMatchObject({ author: 'boris', authorBasis: 'after_cutover' })
+  it("FR-CONV-10: the export after the switch takes for Boris's only what was sent after it", async () => {
+    await raw({
+      chat: 'c1',
+      author: 'specialist',
+      text: 'Раньше',
+      at: '2026-10-01T10:00:00.000Z',
+      id: 'b1',
+    })
+    await raw({
+      chat: 'c1',
+      author: 'specialist',
+      text: 'Позже',
+      at: '2026-11-02T10:00:00.000Z',
+      id: 'b2',
+    })
+    await raw({
+      chat: 'c1',
+      author: 'specialist',
+      text: 'Из истории',
+      at: '2026-11-02T10:01:00.000Z',
+      id: 'b3',
+      history: true,
+    })
+    await run(null, { v1Writes: false, v1StoppedAt: '2026-11-01T00:00:00.000Z' })
+    const rows = await stored()
+    expect(rows.map((r) => [r.platformMessageId, r.author])).toEqual([
+      ['b1', 'unknown'],
+      ['b2', 'boris'],
+      ['b3', 'unknown'],
+    ])
+  })
+
+  it('FR-TRAIN-1: the export proves a message the live sync stored as nobody’s, and joins it to its conversation', async () => {
+    const conv = newEventId()
+    await db
+      .insert(conversation)
+      .values({ id: conv, accountId: ACCOUNT, chatId: 'c1', orderId: '7001' })
+    await raw({
+      chat: 'c1',
+      order: '7001',
+      author: 'specialist',
+      text: 'Здравствуйте! Сделаем сайт за месяц.',
+      id: 'l1',
+    })
+    // The live sync (part C) stored it first, before the conversation was joined, with no proof.
+    await db.insert(chatMessage).values({
+      id: newEventId(),
+      accountId: ACCOUNT,
+      chatId: 'c1',
+      orderId: '7001',
+      platformMessageId: 'l1',
+      side: 'specialist',
+      author: 'unknown',
+      authorBasis: 'v1_or_boris',
+      text: 'Здравствуйте! Сделаем сайт за месяц.',
+      sentAt: minute(1),
+      source: 'node',
+    })
+    await run([lead('7001')])
+    const [row] = await db.select().from(chatMessage).where(eq(chatMessage.platformMessageId, 'l1'))
+    expect(row).toMatchObject({ author: 'sara_v1', authorBasis: 'v1_bid', conversationId: conv })
+  })
+
+  it('FR-TRAIN-1: a stronger author stays; a live «sara» row of Boris’s dictated text becomes his', async () => {
+    await db.insert(outbox).values({
+      id: newEventId(),
+      kind: 'message',
+      idempotencyKey: 'msg:say:1',
+      state: 'confirmed',
+      confirmedAt: minute(1),
+      payload: { accountId: ACCOUNT, chatId: 'c1', text: 'Мой текст клиенту', author: 'boris' },
+    })
+    await raw({
+      chat: 'c1',
+      order: '7001',
+      author: 'specialist',
+      text: 'Мой текст клиенту',
+      at: minute(1),
+      id: 'd1',
+    })
+    await db.insert(chatMessage).values({
+      id: newEventId(),
+      accountId: ACCOUNT,
+      chatId: 'c1',
+      orderId: '7001',
+      platformMessageId: 'd1',
+      side: 'specialist',
+      author: 'sara',
+      authorBasis: 'outbox',
+      text: 'Мой текст клиенту',
+      sentAt: minute(1),
+      source: 'node',
+    })
+    await run(null)
+    const [row] = await db.select().from(chatMessage).where(eq(chatMessage.platformMessageId, 'd1'))
+    expect(row).toMatchObject({ author: 'boris', authorBasis: 'say' })
+  })
+
+  it('FR-TRAIN-1: a v1 copy stays when its real message is still nobody’s', async () => {
+    const leads = [lead('7002', { borisWroteText: 'Посчитаю и вернусь завтра' })]
+    await run(leads)
+    await raw({
+      chat: 'c7',
+      order: '7002',
+      author: 'specialist',
+      text: 'Посчитаю и вернусь завтра',
+      id: 'u1',
+    })
+    // Without the snapshot the real message has no proof: the copy keeps Boris's words.
+    await run(null)
+    const rows = await stored()
+    expect(rows.filter((r) => r.author === 'boris').map((r) => r.source)).toEqual(['v1'])
+  })
+
+  it('FR-TRAIN-1: a newer snapshot with other words keeps both copies', async () => {
+    await run([lead('7002', { borisWroteText: 'Раз' })])
+    await run([lead('7002', { borisWroteText: 'Два' })])
+    const words = (await stored()).filter((r) => r.author === 'boris').map((r) => r.text)
+    expect(words.sort()).toEqual(['Два', 'Раз'])
+  })
+
+  it('FR-TRAIN-1: v1 copies stay out of the conversation, their times are made up', async () => {
+    const conv = newEventId()
+    await db
+      .insert(conversation)
+      .values({ id: conv, accountId: ACCOUNT, chatId: 'c7', orderId: '7002' })
+    const leads = [lead('7002', { borisWroteText: 'Посчитаю', customerReply: 'А цена?' })]
+    await run(leads)
+    await raw({ chat: 'c7', order: '7002', author: 'client', text: 'Добрый день', id: 'k1' })
+    await run(leads)
+    const rows = await stored()
+    expect(rows.filter((r) => r.source === 'v1').every((r) => r.conversationId === null)).toBe(true)
+    expect(rows.find((r) => r.platformMessageId === 'k1')?.conversationId).toBe(conv)
+  })
+
+  it('FR-TRAIN-1: the cut start of Boris’s words is no copy', async () => {
+    const cut = 'ершу завтра, как договорились.'
+    const text = `${cut}\n\n${'Подробный ответ. '.repeat(70)}`
+    expect(text.length).toBeGreaterThanOrEqual(1000)
+    await run([lead('7002', { borisWroteText: text })])
+    const words = (await stored()).filter((r) => r.author === 'boris').map((r) => r.text)
+    expect(words).toHaveLength(1)
+    expect(words[0]).not.toContain(cut)
+  })
+
+  it('FR-TRAIN-1: a v1 paragraph that is also old Sara’s approved draft is nobody’s', async () => {
+    const both = 'Хорошо, тогда созвонимся в четверг.'
+    await run([lead('7002', { borisWroteText: both, proposedReply: both })])
+    const rows = (await stored()).filter((r) => r.text === both)
+    expect(rows.map((r) => r.author)).toEqual(['unknown'])
   })
 
   it('FR-TRAIN-1: the report reads in plain words', () => {

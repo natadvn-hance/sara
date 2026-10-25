@@ -9,9 +9,13 @@ export type AttributionContext = {
   lead: V1Lead | null
   /** Normalized texts v1 sent to clients, from Boris's Telegram export. */
   v1Texts: Set<string>
+  /** Normalized texts Boris had old Sara send as they are, from the same export («Отправила клиенту твой текст»). */
+  borisTexts?: Set<string>
   /** Messages the new Sara sent into this chat; `author: 'boris'` is a text he dictated. */
   ourOutbox: { text: string; at: string; author?: 'sara' | 'boris' }[]
   v1Writes: boolean
+  /** When old Sara stopped writing (conv.v1_writes turned off); null: not known, so the switch proves nothing. */
+  v1StoppedAt?: string | null
   /** The bid the new Sara sent for the chat's order (a confirmed bid in the outbox). */
   ourBid?: string | null
 }
@@ -37,20 +41,30 @@ export const V1_TEMPLATES: string[] = [
   'Отлично, договорились! Встреча:',
 ]
 
+/** v1's text for a bubble with no words of its own (checkReply.js cleanMessageText): nobody's words. */
+export const V1_ATTACHMENT = '[вложение без текста]'
+
 const OUTBOX_WINDOW_MS = 10 * 60_000
 /** v1 kept only the last 1000 characters of Boris's words, so the oldest of them may begin mid-sentence. */
 const BORIS_TEXT_LIMIT = 1000
 /** The shortest cut-off start of his words that still proves a message. */
 const MIN_CUT_PROOF = 15
 
-const TEMPLATES = V1_TEMPLATES.map((t) => ({ text: normalizeText(t), prefix: t.endsWith(':') }))
+// A prefix keeps its colon (normalizeText drops it at the end), so «Встреча:» never matches «Встречаемся».
+const TEMPLATES = V1_TEMPLATES.map((t) => ({
+  text: t.endsWith(':') ? `${normalizeText(t)}:` : normalizeText(t),
+  prefix: t.endsWith(':'),
+  greeting: t.startsWith('Здравствуйте'),
+}))
 
 function isTemplate(norm: string): boolean {
-  return TEMPLATES.some(({ text, prefix }) => {
+  return TEMPLATES.some(({ text, prefix, greeting }) => {
     if (prefix) return norm.startsWith(text)
     if (norm === text) return true
-    // v1 put the client's first name before the greeting: «Ирина, здравствуйте. …».
-    return norm.endsWith(text) && /^\p{L}[\p{L}-]*, $/u.test(norm.slice(0, -text.length))
+    // v1 put the client's first name before its greeting templates: «Ирина, здравствуйте. …».
+    return (
+      greeting && norm.endsWith(text) && /^\p{L}[\p{L}-]*, $/u.test(norm.slice(0, -text.length))
+    )
   })
 }
 
@@ -65,7 +79,7 @@ function borisWords(lead: V1Lead): BorisWords {
   const known = borisWordsCache.get(lead)
   if (known) return known
   const raw = lead.borisWroteText ?? ''
-  const paras = raw.split(/\n\s*\n/).filter((p) => p.trim() !== '')
+  const paras = raw.split(/\n\s*\n/).filter((p) => p.trim() !== '' && p.trim() !== V1_ATTACHMENT)
   const runs = new Set<string>()
   const heads: string[] = []
   for (let i = 0; i < paras.length; i++) {
@@ -93,7 +107,7 @@ export function attribute(
   c: AttributionContext,
 ): { author: ChatAuthor; basis: AuthorBasis } {
   if (m.side !== 'specialist') return { author: m.side, basis: 'side' }
-  const norm = normalizeText(m.text)
+  const norm = m.text.trim() === V1_ATTACHMENT ? '' : normalizeText(m.text)
   const sent = Date.parse(m.sentAt)
   const lead = c.lead
 
@@ -113,31 +127,55 @@ export function attribute(
 
   if (!m.approxTime && c.v1StartedAt && sent < Date.parse(c.v1StartedAt))
     return { author: 'boris', basis: 'before_v1' }
-  if (lead && norm !== '') {
-    const words = borisWords(lead)
-    if (words.runs.has(norm) || words.heads.some((h) => norm.endsWith(h)))
-      return { author: 'boris', basis: 'v1_boris_text' }
-    if (same(norm, lead.dictatedReply)) return { author: 'boris', basis: 'v1_dictated' }
+
+  // Boris's proofs and old Sara's are weighed together: v1 kept its own sent reply among Boris's words when its
+  // mark lagged (checkReply.js), so a text that proves both proves neither (M4 design 5.1, ADR-024).
+  const boris = borisProof(m, norm, sent, c)
+  const v1 = v1Proof(m, norm, c)
+  if (boris && v1) return { author: 'unknown', basis: 'v1_or_boris' }
+  if (boris) return { author: 'boris', basis: boris }
+  if (v1) return { author: 'sara_v1', basis: v1 }
+
+  // After the switch a message from our side that is not ours is Boris's, if it was sent after the switch.
+  if (!c.v1Writes && c.v1StoppedAt && !m.approxTime && sent > Date.parse(c.v1StoppedAt))
+    return { author: 'boris', basis: 'after_cutover' }
+  return { author: 'unknown', basis: 'v1_or_boris' }
+}
+
+function borisProof(
+  m: HistoryMessage,
+  norm: string,
+  sent: number,
+  c: AttributionContext,
+): AuthorBasis | null {
+  const lead = c.lead
+  if (norm !== '') {
+    if (lead) {
+      const words = borisWords(lead)
+      if (words.runs.has(norm) || words.heads.some((h) => norm.endsWith(h))) return 'v1_boris_text'
+      if (same(norm, lead.dictatedReply)) return 'v1_dictated'
+    }
+    if (c.borisTexts?.has(norm)) return 'v1_dictated'
   }
   if (!m.approxTime && lead?.takenByBorisAt && sent > Date.parse(lead.takenByBorisAt))
-    return { author: 'boris', basis: 'v1_taken' }
+    return 'v1_taken'
+  return null
+}
 
-  if (norm !== '') {
-    if (lead?.respondedAt && lead.draftResponse) {
-      const bid =
-        same(norm, lead.draftResponse) || (m.inBid === true && norm.startsWith('стоимость'))
-      if (bid) {
-        const edited =
-          lead.draftResponseOriginal !== null &&
-          normalizeText(lead.draftResponseOriginal) !== normalizeText(lead.draftResponse)
-        return { author: 'sara_v1', basis: edited ? 'v1_bid_edited' : 'v1_bid' }
-      }
+function v1Proof(m: HistoryMessage, norm: string, c: AttributionContext): AuthorBasis | null {
+  if (norm === '') return null
+  const lead = c.lead
+  if (lead?.respondedAt && lead.draftResponse) {
+    const bid = same(norm, lead.draftResponse) || (m.inBid === true && norm.startsWith('стоимость'))
+    if (bid) {
+      const edited =
+        lead.draftResponseOriginal !== null &&
+        normalizeText(lead.draftResponseOriginal) !== normalizeText(lead.draftResponse)
+      return edited ? 'v1_bid_edited' : 'v1_bid'
     }
-    if (same(norm, lead?.proposedReply)) return { author: 'sara_v1', basis: 'v1_proposed' }
-    if (isTemplate(norm)) return { author: 'sara_v1', basis: 'v1_template' }
-    if (c.v1Texts.has(norm)) return { author: 'sara_v1', basis: 'telegram_export' }
   }
-
-  if (!c.v1Writes) return { author: 'boris', basis: 'after_cutover' }
-  return { author: 'unknown', basis: 'v1_or_boris' }
+  if (same(norm, lead?.proposedReply)) return 'v1_proposed'
+  if (isTemplate(norm)) return 'v1_template'
+  if (c.v1Texts.has(norm)) return 'telegram_export'
+  return null
 }

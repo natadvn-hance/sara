@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   CHAT_AUTHORS,
   type ChatAuthor,
@@ -6,11 +7,11 @@ import {
   normalizeText,
   plural,
 } from '@sara/shared'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { chatMessage, conversation, outbox } from '../db/schema'
+import { chatMessage, conversation, outbox, setting, settingHistory } from '../db/schema'
 import { appendEvent } from '../journal/journal'
-import { type AttributionContext, attribute } from './attribution'
+import { type AttributionContext, attribute, V1_ATTACHMENT } from './attribution'
 import type { V1Lead } from './v1Snapshot'
 
 export type ExportReport = {
@@ -38,6 +39,9 @@ type RawRow = {
 
 type NewMessage = typeof chatMessage.$inferInsert
 
+/** The export's author replaces a stored one only when that one had no proof, or was Boris's text taken for Sara's. */
+const UPGRADE = sql`((${chatMessage.authorBasis} = 'v1_or_boris' and excluded.author_basis <> 'v1_or_boris') or (${chatMessage.authorBasis} = 'outbox' and excluded.author_basis = 'say'))`
+
 const iso = (v: Date | string) => new Date(v).toISOString()
 const paragraphs = (s: string | null) => (s ?? '').split(/\n\s*\n/).filter((p) => p.trim() !== '')
 /** v1 glued several messages with a blank line: a copy matches the whole message or one of its paragraphs. */
@@ -45,6 +49,35 @@ const textKeys = (side: string, text: string) =>
   [text, ...paragraphs(text)].map((t) => `${side}:${normalizeText(t)}`)
 /** Paragraphs of one v1 field keep their order: each gets the next millisecond. */
 const plusMs = (at: string, ms: number) => new Date(Date.parse(at) + ms).toISOString()
+/** v1 kept only the last 1000 characters of Boris's words: past that, the first paragraph starts mid-sentence. */
+const BORIS_TEXT_LIMIT = 1000
+
+/**
+ * The number of a message known only from the v1 snapshot: by its words, not its place, so a newer snapshot whose
+ * field v1 cut or rewrote adds its new words instead of colliding with the old ones (M4 design 5.1).
+ */
+export function v1MessageId(orderId: string, kind: string, text: string): string {
+  const hash = createHash('sha256').update(normalizeText(text)).digest('hex').slice(0, 12)
+  return `v1:${orderId}:${kind}:${hash}`
+}
+
+/** When old Sara stopped writing: the latest change of conv.v1_writes to false, while it is still false. */
+export async function v1StoppedAt(db: Db): Promise<string | null> {
+  const [now] = await db
+    .select({ value: setting.value })
+    .from(setting)
+    .where(eq(setting.key, 'conv.v1_writes'))
+  if (now?.value !== false) return null
+  const [off] = await db
+    .select({ at: settingHistory.changedAt })
+    .from(settingHistory)
+    .where(
+      and(eq(settingHistory.key, 'conv.v1_writes'), sql`${settingHistory.value} = 'false'::jsonb`),
+    )
+    .orderBy(desc(settingHistory.changedAt))
+    .limit(1)
+  return off ? new Date(off.at).toISOString() : null
+}
 
 /** The new Sara's own sends for this account: confirmed bids by order and confirmed messages by chat. */
 async function ourSends(db: Db, accountId: string) {
@@ -82,7 +115,6 @@ function v1OnlyMessages(accountId: string, lead: V1Lead, c: AttributionContext):
   const out: NewMessage[] = []
   const add = (
     kind: string,
-    n: number,
     side: MessageSide,
     text: string,
     sentAt: string,
@@ -93,7 +125,7 @@ function v1OnlyMessages(accountId: string, lead: V1Lead, c: AttributionContext):
       accountId,
       chatId,
       orderId: lead.orderId,
-      platformMessageId: `v1:${lead.orderId}:${kind}:${n}`,
+      platformMessageId: v1MessageId(lead.orderId, kind, text),
       side,
       author: who.author,
       authorBasis: who.basis,
@@ -106,19 +138,23 @@ function v1OnlyMessages(accountId: string, lead: V1Lead, c: AttributionContext):
     const m = { side: 'specialist' as const, text: lead.draftResponse, sentAt: lead.respondedAt }
     add(
       'bid',
-      0,
       'specialist',
       m.text,
       m.sentAt,
       attribute({ ...m, approxTime: true, inBid: true }, c),
     )
   }
+  const cut = (lead.borisWroteText ?? '').length >= BORIS_TEXT_LIMIT
   paragraphs(lead.borisWroteText).forEach((p, n) => {
+    // The cut start of his words never matches a real message and is no whole message of his.
+    if ((cut && n === 0) || p.trim() === V1_ATTACHMENT) return
     const at = plusMs(lead.borisWroteAt ?? lead.updatedAt, n)
-    add('boris', n, 'specialist', p.trim(), at, { author: 'boris', basis: 'v1_boris_text' })
+    const m = { side: 'specialist' as const, text: p.trim(), sentAt: at, approxTime: true }
+    // Checked like any message: a paragraph that also proves old Sara (her own reply kept among his words) is nobody's.
+    add('boris', 'specialist', m.text, at, attribute(m, c))
   })
   paragraphs(lead.customerReply).forEach((p, n) => {
-    add('client', n, 'client', p.trim(), plusMs(lead.updatedAt, n), {
+    add('client', 'client', p.trim(), plusMs(lead.updatedAt, n), {
       author: 'client',
       basis: 'side',
     })
@@ -160,7 +196,11 @@ export async function exportHistory(
     accountId: string
     v1: { leads: V1Lead[]; startedAt: string } | null
     telegramV1Texts: Set<string>
+    /** Boris's own words old Sara sent for him, from the same Telegram export. */
+    telegramBorisTexts?: Set<string>
     v1Writes: boolean
+    /** When old Sara stopped writing (v1StoppedAt); null: unknown, so the switch proves nothing. */
+    v1StoppedAt?: string | null
   },
 ): Promise<ExportReport> {
   const leads = new Map((o.v1?.leads ?? []).map((l) => [l.orderId, l]))
@@ -169,8 +209,10 @@ export async function exportHistory(
     v1StartedAt: o.v1?.startedAt ?? null,
     lead: orderId ? (leads.get(orderId) ?? null) : null,
     v1Texts: o.telegramV1Texts,
+    borisTexts: o.telegramBorisTexts,
     ourOutbox: sends.messages.get(chatId) ?? [],
     v1Writes: o.v1Writes,
+    v1StoppedAt: o.v1StoppedAt ?? null,
     ourBid: orderId ? (sends.bids.get(orderId) ?? null) : null,
   })
   const conversations = new Map(
@@ -224,41 +266,74 @@ export async function exportHistory(
       }
     })
     await db.transaction(async (tx) => {
-      if (orderId) {
-        const real = new Set(values.flatMap((v) => textKeys(v.side, v.text)))
-        const copies = await tx
-          .select({ id: chatMessage.id, side: chatMessage.side, text: chatMessage.text })
-          .from(chatMessage)
-          .where(
-            and(
-              eq(chatMessage.accountId, o.accountId),
-              eq(chatMessage.orderId, orderId),
-              eq(chatMessage.source, 'v1'),
-            ),
-          )
-        const gone = copies
-          .filter((v) => real.has(`${v.side}:${normalizeText(v.text)}`))
-          .map((v) => v.id)
-        if (gone.length > 0) await tx.delete(chatMessage).where(inArray(chatMessage.id, gone))
-        replaced += gone.length
-        // What v1 alone remembers of this chat now sits with its real messages.
-        await tx
-          .update(chatMessage)
-          .set({ chatId, conversationId: conversations.get(chatId) ?? null })
-          .where(
-            and(
-              eq(chatMessage.accountId, o.accountId),
-              eq(chatMessage.orderId, orderId),
-              eq(chatMessage.source, 'v1'),
-            ),
-          )
-      }
+      // A row the live sync (part C) stored first gets the export's proof: an unproven author is upgraded, Boris's
+      // dictated text the live sync took for Sara's becomes his, and a row without its conversation joins it.
       const inserted = await tx
         .insert(chatMessage)
         .values(values)
-        .onConflictDoNothing()
-        .returning({ id: chatMessage.id })
-      added += inserted.length
+        .onConflictDoUpdate({
+          target: [chatMessage.accountId, chatMessage.platformMessageId],
+          set: {
+            author: sql`case when ${UPGRADE} then excluded.author else ${chatMessage.author} end`,
+            authorBasis: sql`case when ${UPGRADE} then excluded.author_basis else ${chatMessage.authorBasis} end`,
+            conversationId: sql`coalesce(${chatMessage.conversationId}, excluded.conversation_id)`,
+          },
+          setWhere: sql`${UPGRADE} or (${chatMessage.conversationId} is null and excluded.conversation_id is not null)`,
+        })
+        // xmax is 0 for a row this statement inserted, not for one it updated.
+        .returning({ fresh: sql<boolean>`(xmax = 0)` })
+      added += inserted.filter((r) => r.fresh).length
+      if (!orderId) return
+      // A v1 copy goes once its real message is here and proven (or the copy itself proves nothing either).
+      const finals = await tx
+        .select({ side: chatMessage.side, text: chatMessage.text, author: chatMessage.author })
+        .from(chatMessage)
+        .where(
+          and(
+            eq(chatMessage.accountId, o.accountId),
+            eq(chatMessage.chatId, chatId),
+            eq(chatMessage.source, 'node'),
+          ),
+        )
+      const proven = new Set(
+        finals.filter((v) => v.author !== 'unknown').flatMap((v) => textKeys(v.side, v.text)),
+      )
+      const any = new Set(finals.flatMap((v) => textKeys(v.side, v.text)))
+      const copies = await tx
+        .select({
+          id: chatMessage.id,
+          side: chatMessage.side,
+          text: chatMessage.text,
+          author: chatMessage.author,
+        })
+        .from(chatMessage)
+        .where(
+          and(
+            eq(chatMessage.accountId, o.accountId),
+            eq(chatMessage.orderId, orderId),
+            eq(chatMessage.source, 'v1'),
+          ),
+        )
+      const gone = copies
+        .filter((v) => {
+          const key = `${v.side}:${normalizeText(v.text)}`
+          return proven.has(key) || (v.author === 'unknown' && any.has(key))
+        })
+        .map((v) => v.id)
+      if (gone.length > 0) await tx.delete(chatMessage).where(inArray(chatMessage.id, gone))
+      replaced += gone.length
+      // What v1 alone remembers of this chat now sits with its real messages, but outside its conversation: its
+      // times are made up, so a turn never reads it as the latest words (part C reads by conversation).
+      await tx
+        .update(chatMessage)
+        .set({ chatId, conversationId: null })
+        .where(
+          and(
+            eq(chatMessage.accountId, o.accountId),
+            eq(chatMessage.orderId, orderId),
+            eq(chatMessage.source, 'v1'),
+          ),
+        )
     })
   }
 

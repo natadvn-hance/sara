@@ -1,9 +1,11 @@
-import type { ConvStage, MindFrontmatter } from '@sara/shared'
+import { createHash } from 'node:crypto'
+import { type ConvStage, type MindFrontmatter, normalizeText } from '@sara/shared'
 import { asc, eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, lead } from '../db/schema'
 import { redact } from '../gateway/redact'
 import { proposeMind } from '../mind/proposals'
+import { V1_ATTACHMENT } from './attribution'
 
 type Row = {
   chatId: string
@@ -110,13 +112,19 @@ export async function proposeSpeechExamples(
   let skipped = 0
   const today = moscowDate(new Date())
   for (const { m, turn } of examples) {
-    if (m.text.trim().length <= minLength) {
+    const hidden = m.orderId ? (names.get(m.orderId) ?? []) : []
+    // Without the client's name it cannot be hidden: no example rather than a name in the mind (NFR-PRIV-2).
+    if (
+      m.text.trim().length <= minLength ||
+      m.text.trim() === V1_ATTACHMENT ||
+      hidden.length === 0
+    ) {
       skipped++
       continue
     }
-    const hidden = m.orderId ? (names.get(m.orderId) ?? []) : []
     const stages: ConvStage[] = turn === null ? ['bid_sent'] : []
-    const id = `e-h-${m.platformMessageId.replace(/[^\p{L}\p{N}]/gu, '')}`
+    // One example per wording of Boris: a v1 copy and its real message give the same proposal.
+    const id = `e-h-${createHash('sha256').update(normalizeText(m.text)).digest('hex').slice(0, 12)}`
     const client =
       turn === 'unknown'
         ? UNKNOWN_TURN

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { normalizeText } from '@sara/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { readTelegramV1Texts } from '../../src/history/telegramExport'
+import { readTelegramExport, readTelegramV1Texts } from '../../src/history/telegramExport'
 
 let dir: string
 let file: string
@@ -18,12 +18,14 @@ const exported = {
       id: 1,
       type: 'message',
       from: 'Sara',
+      from_id: 'user1',
       text: '🤖 Sara ответила\nЗаказ 1001 · Сайты\n\nДобрый день! Удобно созвониться завтра?\n\nСсылка',
     },
     {
       id: 2,
       type: 'message',
       from: 'Sara',
+      from_id: 'user1',
       text: [
         '🔁 ',
         { type: 'bold', text: 'Напоминание №1' },
@@ -37,6 +39,7 @@ const exported = {
       id: 3,
       type: 'message',
       from: 'Sara',
+      from_id: 'user1',
       text: [
         '✅ ',
         { type: 'bold', text: 'Отклик отправлен' },
@@ -47,6 +50,7 @@ const exported = {
       id: 4,
       type: 'message',
       from: 'Sara',
+      from_id: 'user1',
       text: '🤖 Sara ответила по твоему «да»\nЗаказ 1005 · Сайты\n\nТогда до четверга!\n\nСсылка',
     },
     // Boris's own words that v1 only carried to the client are not v1's.
@@ -54,13 +58,23 @@ const exported = {
       id: 5,
       type: 'message',
       from: 'Sara',
+      from_id: 'user1',
       text: '🤖 Отправила клиенту твой текст\nЗаказ 1004 · Сайты\n\nЦена 80 тысяч\n\nСсылка',
     },
-    { id: 6, type: 'message', from: 'Борис', text: 'Да' },
+    { id: 6, type: 'message', from: 'Борис', from_id: 'user42', text: 'Да' },
+    // Boris's own message that happens to start with the same icon is not a notice of the bot.
+    {
+      id: 9,
+      type: 'message',
+      from: 'Борис',
+      from_id: 'user42',
+      text: '🤖 Сара, ответь так\n\nНапишу сам завтра',
+    },
     {
       id: 7,
       type: 'message',
       from: 'Sara',
+      from_id: 'user1',
       text: '💬 Ответ клиента\nЗаказ 1001 · Сайты\n\nСколько стоит?\n\nСсылка',
     },
     { id: 8, type: 'service', action: 'pin_message', text: '' },
@@ -92,5 +106,11 @@ describe('telegram export', () => {
     const other = join(dir, 'other.json')
     await writeFile(other, JSON.stringify({ chats: [] }))
     expect(() => readTelegramV1Texts(other)).toThrow(/messages/)
+  })
+
+  it('FR-TRAIN-1: only the bot’s notices count, and the ones with Boris’s words prove his voice', () => {
+    const r = readTelegramExport(file)
+    expect([...r.v1Texts]).not.toContain(normalizeText('Напишу сам завтра'))
+    expect([...r.borisTexts]).toEqual([normalizeText('Цена 80 тысяч')])
   })
 })

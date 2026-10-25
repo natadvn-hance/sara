@@ -243,8 +243,12 @@ describe('attribution', () => {
     })
   })
 
-  it("FR-CONV-10: after the switch every specialist message that is not ours is Boris's", () => {
-    const c = ctx({ v1Writes: false, ourOutbox: [{ text: 'Наш ответ', at }] })
+  it("FR-CONV-10: after the switch every specialist message sent after it that is not ours is Boris's", () => {
+    const c = ctx({
+      v1Writes: false,
+      v1StoppedAt: '2026-09-30T00:00:00.000Z',
+      ourOutbox: [{ text: 'Наш ответ', at }],
+    })
     expect(attribute(spec('Сам напишу клиенту'), c)).toEqual({
       author: 'boris',
       basis: 'after_cutover',
@@ -258,6 +262,76 @@ describe('attribution', () => {
       basis: 'v1_or_boris',
     })
     expect(attribute(spec('Добрый вечер!'), ctx({ lead: null, v1StartedAt: null }))).toEqual({
+      author: 'unknown',
+      basis: 'v1_or_boris',
+    })
+  })
+
+  it('FR-TRAIN-1: after the switch only a message sent after it, with a real time, is Boris without proof', () => {
+    const switched = ctx({ v1Writes: false, v1StoppedAt: '2026-11-01T00:00:00.000Z' })
+    expect(attribute(spec('Сам напишу', { sentAt: '2026-11-02T10:00:00.000Z' }), switched)).toEqual(
+      {
+        author: 'boris',
+        basis: 'after_cutover',
+      },
+    )
+    // Written while v1 still wrote: no proof, so nobody's.
+    expect(attribute(spec('Сам напишу', { sentAt: '2026-10-20T10:00:00.000Z' }), switched)).toEqual(
+      {
+        author: 'unknown',
+        basis: 'v1_or_boris',
+      },
+    )
+    // Its time is the reading's, not the sending's.
+    expect(
+      attribute(
+        spec('Сам напишу', { sentAt: '2026-11-02T10:00:00.000Z', approxTime: true }),
+        switched,
+      ),
+    ).toEqual({ author: 'unknown', basis: 'v1_or_boris' })
+    // The switch with no known moment proves nothing.
+    expect(
+      attribute(
+        spec('Сам напишу', { sentAt: '2026-11-02T10:00:00.000Z' }),
+        ctx({ v1Writes: false }),
+      ),
+    ).toEqual({ author: 'unknown', basis: 'v1_or_boris' })
+  })
+
+  it('FR-TRAIN-1: a text that proves both Boris and old Sara proves neither', () => {
+    const text = 'Хорошо, тогда созвонимся в четверг.'
+    const both = ctx({ lead: lead({ borisWroteText: text, proposedReply: text }) })
+    expect(attribute(spec(text), both)).toEqual({ author: 'unknown', basis: 'v1_or_boris' })
+    const inTelegram = ctx({
+      lead: lead({ borisWroteText: text }),
+      v1Texts: new Set([text.toLowerCase().replace(/\.$/, '')]),
+    })
+    expect(attribute(spec(text), inTelegram)).toEqual({ author: 'unknown', basis: 'v1_or_boris' })
+  })
+
+  it('FR-TRAIN-1: words Boris sent through old Sara, from the Telegram export, are his', () => {
+    const c = ctx({ borisTexts: new Set(['давайте в пятницу в 11']) })
+    expect(attribute(spec('Давайте в пятницу в 11.'), c)).toEqual({
+      author: 'boris',
+      basis: 'v1_dictated',
+    })
+  })
+
+  it('FR-TRAIN-1: the meeting template is a whole word and the name goes only before a greeting', () => {
+    expect(
+      attribute(spec('Отлично, договорились! Встреча: 12 ноября в 15:00.'), ctx()).author,
+    ).toBe('sara_v1')
+    expect(attribute(spec('Отлично, договорились! Встречаемся в офисе'), ctx()).author).toBe(
+      'unknown',
+    )
+    expect(
+      attribute(spec('Ирина, да, давайте созвонимся. Во сколько вам удобно?'), ctx()).author,
+    ).toBe('unknown')
+  })
+
+  it('FR-TRAIN-1: old Sara’s placeholder for an attachment is nobody’s words', () => {
+    const c = ctx({ lead: lead({ borisWroteText: '[вложение без текста]' }) })
+    expect(attribute(spec('[вложение без текста]'), c)).toEqual({
       author: 'unknown',
       basis: 'v1_or_boris',
     })
