@@ -39,6 +39,7 @@ let cards: string[]
 let outcomes: { turnId: string; conversationId: string; outcome: string; at: string }[] = []
 let forwards: string[]
 let sends: { turnId: string; round: number }[]
+let sendExpects: (string | null | undefined)[]
 let sendAnswer: 'confirmed' | 'changed' = 'confirmed'
 let pause = 200
 let onCard: () => Promise<void> = async () => {}
@@ -115,8 +116,9 @@ beforeAll(async () => {
       forwards.push(turnId)
       if (forwardFails) throw new Error('telegram is down')
     },
-    send: async (turnId, round) => {
+    send: async (turnId, round, expectLast) => {
       sends.push({ turnId, round })
+      sendExpects.push(expectLast)
       const answer = sendAnswer
       await onSend()
       return answer
@@ -151,6 +153,7 @@ beforeEach(async () => {
   outcomes = []
   forwards = []
   sends = []
+  sendExpects = []
   sendAnswer = 'confirmed'
   pause = 200
   onCard = async () => {}
@@ -508,6 +511,14 @@ describe('the turn workflow', () => {
     expect(cards).toHaveLength(1)
     expect(sends).toHaveLength(0)
   }, 40000)
+
+  it('FR-CONV-9: the send waits for the chat as the reread saw it', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Как начнём?')
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('sent')
+    expect(sendExpects).toEqual(['m-2'])
+  }, 30000)
 
   it('FR-CONV-11: a client Boris took is forwarded to him without the model', async () => {
     await clientWrites('m-0', 'Привет')

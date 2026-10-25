@@ -160,7 +160,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     },
     forward: (id) => forwardTurn(cardDeps, id),
     // In shadow the turn never reaches a send; after the switch it goes through the message outbox.
-    send: (id, round) => sendTurnReply({ db, profi }, id, round),
+    send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
   })
   const conversationDeps: ConversationEventDeps = {

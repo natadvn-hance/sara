@@ -157,11 +157,13 @@ export async function sendTurnReply(
   d: { db: Db; profi: ProfiClient },
   turnId: string,
   round: number,
+  /** The last message of the chat the turn saw when it reread it; left out, the last one the core has. */
+  seenLast?: string | null,
 ): Promise<Delivery> {
   const [t] = await d.db.select().from(convTurn).where(eq(convTurn.id, turnId))
   const conv = t ? await getConversation(d.db, t.conversationId) : null
   if (!t?.text || !conv) return 'failed'
-  const expectLast = await lastSeen(d.db, conv.id)
+  const expectLast = seenLast !== undefined ? seenLast : await lastSeen(d.db, conv.id)
   const id = await d.db.transaction((tx) =>
     queueMessage(tx, {
       key: `${turnId}:${round}`,

@@ -76,6 +76,19 @@ describe('sending to a client', () => {
     expect(await countEvents(db, 'outbox.confirmed')).toBe(1)
   })
 
+  it('FR-CONV-9: the service is told the last message the turn’s own reread saw, not the newest the core has', async () => {
+    // A message the core stored after the reread (another sync) must make the service refuse, not pass.
+    const conv = await ensureConversation(db, {
+      accountId: 'hance-marketing',
+      chatId: CHAT,
+      orderId: CHAT,
+    })
+    profi.chat.push(chatMsg('m-3', 'client', 'И ещё вопрос', new Date().toISOString()))
+    await syncChat({ db, profi }, conv, new Date(), { v1Writes: false })
+    expect(await sendTurnReply({ db, profi }, 't-1', 1, 'm-2')).toBe('confirmed')
+    expect(sendCalls[0]?.expect_last_message_id).toBe('m-2')
+  })
+
   it('FR-CONV-9: a lost answer after sending gives no second message', async () => {
     behaviour = 'lost'
     expect(await sendTurnReply({ db, profi }, 't-1', 1)).toBe('confirmed')

@@ -23,8 +23,15 @@ export type TurnDeps = {
   card(turnId: string): Promise<void>
   /** The client's words to Boris: a client he took, a closed conversation. */
   forward(turnId: string): Promise<void>
-  /** A reply to the client after the switch (part C6); 'changed' when the chat moved on. */
-  send(turnId: string, round: number): Promise<'confirmed' | 'changed' | 'uncertain' | 'failed'>
+  /**
+   * A reply to the client after the switch (part C6); 'changed' when the chat moved on. `expectLast` is the last
+   * message of the chat the turn saw when it reread it: the service refuses when the chat has moved on from it.
+   */
+  send(
+    turnId: string,
+    round: number,
+    expectLast: string | null,
+  ): Promise<'confirmed' | 'changed' | 'uncertain' | 'failed'>
   /** The human pause; tests shorten it. */
   pauseMs?(textLength: number): number
   /** In shadow, when a turn is over: the real reply our side gave meanwhile is compared with its draft (design 5.12). */
@@ -369,20 +376,22 @@ async function reread(
   conversationId: string,
   anchor: string,
   covered: string[],
-): Promise<Seen> {
+): Promise<{ seen: Seen; lastId: string | null }> {
   const { db } = d()
   let conv = await getConversation(db, conversationId)
-  if (!conv) return 'answered'
+  if (!conv) return { seen: 'answered', lastId: null }
   const v1Writes = await getSetting(db, 'conv.v1_writes')
   const r = await syncChat(d(), conv, new Date(), { v1Writes })
   conv = await applyOwnerRule(db, conv, r.added, { v1Writes })
-  if (conv.closedAt) return 'closed'
-  if (conv.owner === 'boris' && conv.ownerReason === 'take') return 'take'
+  const lastId = r.messages.at(-1)?.platformMessageId ?? null
+  const stop = (seen: Seen) => ({ seen, lastId })
+  if (conv.closedAt) return stop('closed')
+  if (conv.owner === 'boris' && conv.ownerReason === 'take') return stop('take')
   const after = sinceAnchor(r.messages, anchor)
-  if (after.some((m) => m.side === 'unknown')) return 'unclear'
-  if (!v1Writes && after.some((m) => m.side === 'specialist')) return 'answered'
+  if (after.some((m) => m.side === 'unknown')) return stop('unclear')
+  if (!v1Writes && after.some((m) => m.side === 'specialist')) return stop('answered')
   const known = new Set(covered)
-  if (after.some((m) => m.side === 'client' && !known.has(m.platformMessageId))) return 'more'
+  if (after.some((m) => m.side === 'client' && !known.has(m.platformMessageId))) return stop('more')
   const settings = await policySettings(db, conv.accountId)
   const why = settings.v1Writes
     ? 'режим тени'
@@ -393,9 +402,9 @@ async function reread(
         : null
   if (why) {
     await stamp(turnId, 'reread', { decision: 'draft', decisionReason: why })
-    return 'held'
+    return stop('held')
   }
-  return 'same'
+  return stop('same')
 }
 
 const OUTCOME_EVENT = {
@@ -540,7 +549,7 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
         await tried(turnId, `card-${round}`, () => d().card(turnId), notifyStep())
         break
       }
-      const seen = read.value
+      const seen = read.value.seen
       if (seen === 'answered' || seen === 'unclear') {
         outcome = seen
         break
@@ -567,7 +576,9 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       }
       if (seen === 'more' && round < MAX_ROUNDS) continue
       if (seen === 'same') {
-        const sent = await tried(turnId, `send-${round}`, () => d().send(turnId, round))
+        const sent = await tried(turnId, `send-${round}`, () =>
+          d().send(turnId, round, read.value.lastId),
+        )
         if (sent.ok && sent.value === 'confirmed') {
           outcome = 'sent'
           break
