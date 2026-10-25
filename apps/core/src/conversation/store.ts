@@ -1,7 +1,7 @@
 import { newEventId } from '@sara/shared'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
-import { conversation, deal } from '../db/schema'
+import { chatMessage, conversation, deal } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { ConversationRow, StoredMessage } from './types'
 
@@ -55,7 +55,7 @@ export async function ensureConversation(
   const [d] = orderId
     ? await db.select({ id: deal.id }).from(deal).where(eq(deal.leadId, orderId))
     : []
-  await db
+  const made = await db
     .insert(conversation)
     .values({
       id: newEventId(),
@@ -66,6 +66,21 @@ export async function ensureConversation(
       origin: d ? 'sara' : 'v1',
     })
     .onConflictDoNothing()
+    .returning({ id: conversation.id })
+  // The chat's history exported before the conversation existed joins it; old Sara's copies with made-up times
+  // stay out, so a turn never reads them as the latest words (M4 design 5.1).
+  if (made[0])
+    await db
+      .update(chatMessage)
+      .set({ conversationId: made[0].id })
+      .where(
+        and(
+          eq(chatMessage.accountId, i.accountId),
+          eq(chatMessage.chatId, i.chatId),
+          eq(chatMessage.source, 'node'),
+          isNull(chatMessage.conversationId),
+        ),
+      )
   const [r] = await db
     .select()
     .from(conversation)
@@ -92,7 +107,10 @@ export async function applyOwnerRule(
   o: { v1Writes: boolean },
 ): Promise<ConversationRow> {
   if (o.v1Writes) return conv
-  const boris = added.some((m) => m.side === 'specialist' && m.author === 'boris')
+  // Only his own message from the page: a text he dictated through the new Sara leaves the owner as it was.
+  const boris = added.some(
+    (m) => m.side === 'specialist' && m.author === 'boris' && m.authorBasis === 'after_cutover',
+  )
   if (!boris || conv.owner === 'boris') return conv
   const after = await updateConversation(db, conv.id, { owner: 'boris', ownerReason: 'wrote' })
   await appendEvent(db, {

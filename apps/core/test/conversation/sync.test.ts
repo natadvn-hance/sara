@@ -97,6 +97,37 @@ describe('chat sync', () => {
   })
 })
 
+describe('Boris’s own text', () => {
+  it('FR-CONV-11: a text Boris dictated and the new Sara sent is his voice, not hers', async () => {
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    await db.insert(outbox).values({
+      id: newEventId(),
+      kind: 'message',
+      idempotencyKey: 'msg:say:1',
+      payload: {
+        chatId: CHAT,
+        accountId: ACC,
+        text: 'Анна, давайте в пятницу в 11.',
+        author: 'boris',
+      },
+      state: 'confirmed',
+    })
+    const his = chatMsg(
+      'm-6',
+      'specialist',
+      'Анна, давайте в пятницу в 11.',
+      '2026-10-20T10:05:00.000Z',
+    )
+    const r = await syncChat({ db, profi: stubProfi([bid, ask, his]) }, conv, new Date(), live)
+    expect(r.added.find((m) => m.platformMessageId === 'm-6')).toMatchObject({
+      author: 'boris',
+      authorBasis: 'say',
+    })
+    // It is ours, so it never makes the client Boris's by the owner rule.
+    expect((await applyOwnerRule(db, conv, r.added, live)).owner).toBe('sara')
+  })
+})
+
 describe('owner rule', () => {
   it('FR-CONV-10: in shadow a specialist message keeps the owner and is unknown', async () => {
     const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
@@ -151,6 +182,29 @@ describe('owner rule', () => {
 })
 
 describe('conversation', () => {
+  it('FR-TRAIN-1: history exported before the conversation joins it, old Sara’s copies stay out', async () => {
+    const row = (id: string, source: 'node' | 'v1') => ({
+      id: newEventId(),
+      accountId: ACC,
+      chatId: CHAT,
+      orderId: CHAT,
+      platformMessageId: id,
+      side: 'client',
+      author: 'client',
+      authorBasis: 'side',
+      text: 'Сколько стоит?',
+      sentAt: '2026-10-01T10:00:00.000Z',
+      source,
+    })
+    await db.insert(chatMessage).values([row('h-1', 'node'), row('v1:x:client:1', 'v1')])
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    const rows = await db.select().from(chatMessage).orderBy(chatMessage.platformMessageId)
+    expect(rows.map((r) => [r.platformMessageId, r.conversationId])).toEqual([
+      ['h-1', conv.id],
+      ['v1:x:client:1', null],
+    ])
+  })
+
   it('FR-CONV-10: a chat of a bid the new Sara made links its deal', async () => {
     await db.insert(lead).values({
       id: CHAT,
