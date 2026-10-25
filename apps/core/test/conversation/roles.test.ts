@@ -19,7 +19,7 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 /** The M4 roles: their meta (design 5.14, plan D2 and D3) and the schema each answers with. */
 const M4_ROLES = {
   interlocutor: {
-    meta: { version: 4, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
+    meta: { version: 5, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
     schema: InterlocutorOutput,
   },
   checker: {
@@ -63,6 +63,21 @@ describe('the M4 roles', () => {
     const none = role.split('\n').find((l) => /^5\. move/.test(l)) ?? ''
     expect(none).toMatch(/согласие на созвон/)
     expect(none).toMatch(/call_boris и urgent/)
+  })
+
+  it('FR-CONV-3: the Interlocutor writes a short draft for Boris when it calls him, with no price and no promise to call', async () => {
+    const role = await readFile(join(ROLES, 'interlocutor/role.md'), 'utf8')
+    const rule =
+      role.split('\n').find((l) => l.startsWith('При ходе call_boris Борис получает карточку')) ??
+      ''
+    expect(rule).toMatch(/короткий черновик/)
+    expect(rule).toMatch(/никогда не называй цену/)
+    expect(rule).toMatch(/не пиши, что кто-то позвонит, перезвонит или наберёт/i)
+    expect(rule).toMatch(/не называй время звонка/i)
+    // The field list no longer says the text of a call is empty.
+    const field = role.split('\n').find((l) => /^9\. text/.test(l)) ?? ''
+    expect(field).toMatch(/call_boris это короткий черновик для Бориса/)
+    expect(field).not.toMatch(/При ходе call_boris и none: null/)
   })
 
   it('FR-CONV-4: the Interlocutor role states what the code checks and names the input as the engine builds it', async () => {

@@ -385,6 +385,21 @@ describe('Boris’s commands', () => {
       expect(calls).toHaveLength(1)
     })
 
+    it('FR-CONV-9: the draft on a card that calls Boris goes with the key of the card, like any draft', async () => {
+      await db
+        .update(convTurn)
+        .set({ decision: 'call_boris', move: 'call_boris', decisionReason: 'тема Бориса: price' })
+        .where(eq(convTurn.id, 't-1'))
+      expect(await press()).toBe('Отправила клиенту')
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({
+        text: 'Начнём с короткого созвона.',
+        o: { key: `send:${cardTask}`, expectLast: 'm-2' },
+      })
+      expect(await press()).toMatch(/уже/)
+      expect(calls).toHaveLength(1)
+    })
+
     it('FR-CONV-9: a chat that moved on is refused by the service and Boris is told the draft is out of date', async () => {
       const conv = (await getConversation(db, convId)) as never
       const profi = stubProfi([
