@@ -276,6 +276,16 @@ function FinishCard({
           maxLength={1000}
         />
       )}
+      <a
+        className="text-accent underline"
+        href={`/accounts/${accountId}/direction/recompute?rules=draft`}
+        onClick={(e) => {
+          e.preventDefault()
+          go(`/accounts/${accountId}/direction/recompute?rules=draft`)
+        }}
+      >
+        Пересчитать на последних 50 заявках
+      </a>
       <Error_ message={a.error?.message ?? null} />
       {a.error?.code === 'stale' ? (
         <Button

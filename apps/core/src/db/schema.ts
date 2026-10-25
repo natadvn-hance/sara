@@ -472,3 +472,58 @@ export const directionOverride = core.table(
   },
   (t) => [primaryKey({ columns: [t.accountId, t.version] })],
 )
+
+/**
+ * Scores made to try rules out (a recompute, a calibration), cached by the rules' hash so the same lead under the
+ * same rules and the same scorer prompt is never paid for twice. They never act on a lead.
+ */
+export const trialScore = core.table(
+  'trial_score',
+  {
+    rulesHash: text('rules_hash').notNull(),
+    leadId: text('lead_id').notNull(),
+    /** 'plain': haiku only; 'escalated': as in work, sonnet near the threshold. */
+    mode: text('mode').notNull(),
+    roleVersion: integer('role_version').notNull(),
+    score: integer('score').notNull(),
+    decision: text('decision').notNull(),
+    stopFactor: text('stop_factor'),
+    redFlags: jsonb('red_flags').notNull(),
+    axes: jsonb('axes').notNull(),
+    reason: text('reason').notNull(),
+    confidence: real('confidence').notNull(),
+    model: text('model').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.rulesHash, t.leadId, t.mode, t.roleVersion] })],
+)
+
+/**
+ * A long job over a direction's rules that Boris watches (FR-ACC-5, FR-ACC-4): a recompute on the last leads or a
+ * calibration. Its leads are fixed at the start, its scores are in `trial_score`, so a restart continues it. One
+ * job at a time is waiting or running.
+ */
+export const directionRun = core.table('direction_run', {
+  id: uuid('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  kind: text('kind').notNull(),
+  /** The rules being tried. */
+  rules: jsonb('rules').notNull(),
+  rulesHash: text('rules_hash').notNull(),
+  /** The rules to compare with (the active ones at the start); null when nothing is compared. */
+  baseRules: jsonb('base_rules'),
+  baseHash: text('base_hash'),
+  leadIds: jsonb('lead_ids').notNull(),
+  seed: integer('seed').notNull().default(0),
+  state: text('state').notNull().default('queued'),
+  total: integer('total').notNull(),
+  done: integer('done').notNull().default(0),
+  skipped: integer('skipped').notNull().default(0),
+  stopReason: text('stop_reason'),
+  /** The scorer prompt version the run scored with; its result reads only scores of this version. */
+  scorerVersion: integer('scorer_version'),
+  /** Touched at the start and after every lead: a run nobody touched for long is a dead one. */
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  finishedAt: ts('finished_at'),
+})
