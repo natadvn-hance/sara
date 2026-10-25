@@ -1,4 +1,4 @@
-import { formatCallback, newEventId, normalizeText } from '@sara/shared'
+import { type ChatMessage, formatCallback, newEventId, normalizeText } from '@sara/shared'
 import { and, eq, gte, like, ne, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
@@ -17,8 +17,7 @@ import {
   reminderFallback,
 } from './reminderLadder'
 import { type TextStep, writeReminder } from './reminderText'
-import { applyOwnerRule, getConversation } from './store'
-import { syncChat } from './sync'
+import { getConversation } from './store'
 import { CONV_TEXTS } from './texts'
 import type { ConversationRow, MindSearch, StoredMessage } from './types'
 
@@ -181,7 +180,7 @@ export async function checkGround(
   o: { dormant: boolean },
 ): Promise<Ground> {
   const { db } = d
-  let conv = await getConversation(db, conversationId)
+  const conv = await getConversation(db, conversationId)
   if (!conv) return STOP('разговора нет')
   if (!(await getSetting(db, 'pipeline.conversations'))) return STOP('разговоры выключены')
   if (!(await getSetting(db, 'conv.reminders'))) return STOP('напоминания выключены')
@@ -194,23 +193,23 @@ export async function checkGround(
     return SKIP('не смогла узнать про встречу')
   }
   const v1Writes = await getSetting(db, 'conv.v1_writes')
-  let messages: StoredMessage[]
+  // The chat is only read here, never stored: a message nobody has heard of yet reaches the conversation through its
+  // own event or the 10-minute check, which also start the turn it needs. A reminder must not swallow a client's word.
+  let chat: ChatMessage[]
   try {
-    const r = await syncChat({ db, profi: d.profi }, conv, new Date(), { v1Writes })
-    conv = await applyOwnerRule(db, conv, r.added, { v1Writes })
-    messages = r.messages
+    chat = (await d.profi.readChat(conv.accountId, conv.chatId)).messages
   } catch (e) {
     console.error('reminder: chat unreadable', e instanceof Error ? e.message : e)
     return SKIP('не могу прочитать чат')
   }
-  if (conv.owner !== 'sara') return STOP('клиента ведёт Борис')
-  const at = messages.findIndex((m) => m.platformMessageId === anchor)
+  const at = chat.findIndex((m) => m.platform_message_id === anchor)
   if (at < 0) return STOP('нашего сообщения нет в чате')
-  const after = messages.slice(at + 1)
-  if (after.some((m) => m.side === 'client')) return STOP('клиент ответил')
-  if (after.some((m) => m.side === 'unknown')) return STOP('автор сообщения неясен')
+  const after = chat.slice(at + 1)
+  if (after.some((m) => m.author === 'client')) return STOP('клиент ответил')
+  if (after.some((m) => m.author === 'unknown')) return STOP('автор сообщения неясен')
+  // The ladder's own earlier reminders stand after the anchor too; anything else of our side is a new beginning.
   const ladder = await ladderTexts(db, conv.id)
-  if (after.some((m) => m.side === 'specialist' && !isLadderMessage(m, ladder)))
+  if (after.some((m) => m.author === 'specialist' && !ladder.has(normalizeText(m.text))))
     return STOP('наша сторона уже написала')
   const [running] = await db
     .select({ id: convTurn.id })
@@ -231,10 +230,23 @@ export async function checkGround(
       return SKIP('аккаунт на паузе')
     if (!(await getSetting(db, 'outbound.messages'))) return SKIP('пауза «Пишет клиентам»')
   }
+  // «Прочитал» is the stored mark of our last message, which only the client's read event sets (design 5.11).
+  const lastOurs = chat.findLast((m) => m.author === 'specialist')
+  const [stored] = lastOurs
+    ? await db
+        .select({ read: chatMessage.read })
+        .from(chatMessage)
+        .where(
+          and(
+            eq(chatMessage.accountId, conv.accountId),
+            eq(chatMessage.platformMessageId, lastOurs.platform_message_id),
+          ),
+        )
+    : []
   return {
     go: true,
-    read: messages.findLast((m) => m.side === 'specialist')?.read ?? false,
-    lastId: messages.at(-1)?.platformMessageId ?? null,
+    read: stored?.read ?? false,
+    lastId: chat.at(-1)?.platform_message_id ?? null,
     shadow: v1Writes,
   }
 }

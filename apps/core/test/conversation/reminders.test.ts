@@ -13,7 +13,15 @@ import {
   startReminder,
 } from '../../src/conversation/reminders'
 import { moscowHour, moscowHoursEnd } from '../../src/conversation/time'
-import { account, conversation, convTurn, deal, outbox, task } from '../../src/db/schema'
+import {
+  account,
+  chatMessage,
+  conversation,
+  convTurn,
+  deal,
+  outbox,
+  task,
+} from '../../src/db/schema'
 import { type ProfiClient, ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
 import { launchDbos, shutdownDbos } from '../../src/workflows/dbos'
@@ -239,7 +247,7 @@ describe('a reminder in shadow', () => {
     expect(unread).toContain('Клиент прочитал наше сообщение: неизвестно')
   })
 
-  it('FR-CONV-12: after 7 days the client is dormant, and in shadow the task is only in the trace', async () => {
+  it('FR-CONV-12: after 7 days in shadow the dormant client is only in the trace, with no task for Boris', async () => {
     const conv = await scene(quiet(8 * DAY), { deal: true })
     await startReminder(conv.id, 'm-1')
     await until(done(3))
@@ -322,7 +330,7 @@ describe('a reminder after the switch', () => {
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
   })
 
-  it('FR-CONV-12: the ladder goes on to the dormant day and Boris gets one task with two buttons', async () => {
+  it('FR-CONV-12: after 7 days the client is dormant and Boris gets one task', async () => {
     await live()
     const conv = await scene(quiet(8 * DAY), { deal: true })
     await startReminder(conv.id, 'm-1')
@@ -337,7 +345,7 @@ describe('a reminder after the switch', () => {
     expect(buttons[0]?.text).toMatch(/молчит 7 дней/)
     expect(buttons[0]?.text).toMatch(/Анна/)
     expect(buttons[0]?.rows.flat().map((b) => b.text)).toEqual(['Закрыть', 'Напоминать дальше'])
-    expect(buttons[0]?.text).not.toMatch(/[–—]/)
+    expect(buttons[0]?.text).not.toMatch(/[\u2013\u2014]/)
     const tasks = await db.select().from(task)
     expect(tasks).toHaveLength(1)
     expect(tasks[0]?.kind).toBe('conv_dormant')
@@ -412,7 +420,7 @@ describe('a reminder after the switch', () => {
 
   it('FR-CONV-12: a text that keeps failing the checks also ends in the ready text', async () => {
     await live()
-    await useGateway({ reminder: { ...GOOD, text: '[имя 1], здравствуйте — как дела?' } })
+    await useGateway({ reminder: { ...GOOD, text: '[имя 1], здравствуйте \u2014 как дела?' } })
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
     await until(done(1))
@@ -468,6 +476,14 @@ describe('when a reminder must not go', () => {
     })
   })
 
+  it('FR-CONV-1: a client message the reminder meets is left unstored, so the check of the chats still starts its turn', async () => {
+    await none(/клиент ответил/, async () => {
+      profi.chat.push(chatMsg('m-2', 'client', 'Добрый день, посмотрю', ago(HOUR), CHAT))
+    })
+    // The reading only looks: the message reaches the conversation through its own event or the 10-minute check.
+    expect((await db.select().from(chatMessage)).map((m) => m.platformMessageId)).toEqual(['m-1'])
+  })
+
   it('FR-CONV-12: a closed conversation gets none', async () => {
     await none(/закрыт/, async (id) => {
       await db
@@ -516,7 +532,7 @@ describe('when a reminder must not go', () => {
     expect(sends).toHaveLength(0)
   })
 
-  it('FR-CONV-12: our own message after the anchor ends the ladder, our own reminder does not', async () => {
+  it('FR-CONV-12: a message of our side after the anchor ends the ladder', async () => {
     await none(/наша сторона/, async () => {
       profi.chat.push(chatMsg('m-2', 'specialist', 'Анна, я на связи', ago(HOUR), CHAT))
     })

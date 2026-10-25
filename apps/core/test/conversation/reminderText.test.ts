@@ -105,7 +105,7 @@ describe('the text of a reminder', () => {
 
   it('FR-CONV-12: a dash in the text is written again once, with the reasons', async () => {
     const fake = await fakeGateway(db, {
-      reminder: { $sequence: [{ ...GOOD, text: '[имя 1], здравствуйте — как дела?' }, GOOD] },
+      reminder: { $sequence: [{ ...GOOD, text: '[имя 1], здравствуйте \u2014 как дела?' }, GOOD] },
     })
     const r = await write(fake)
     expect(r.text).toContain('Как у вас дела')
@@ -117,7 +117,7 @@ describe('the text of a reminder', () => {
   })
 
   it('FR-CONV-12: a text that fails the checks twice is no text', async () => {
-    const bad = { ...GOOD, text: '[имя 1], здравствуйте — как дела?' }
+    const bad = { ...GOOD, text: '[имя 1], здравствуйте \u2014 как дела?' }
     const fake = await fakeGateway(db, { reminder: bad })
     const r = await write(fake)
     expect(r.text).toBeNull()

@@ -90,7 +90,7 @@
 | | `text` | text | П | текст |
 | | `sent_at`, `approx_time`, `heard_at`, `read` | | Н | время со страницы, приблизительное ли, когда услышало ядро, прочитано |
 | | `source` | enum `node`, `v1`, `telegram_export` | Н | откуда |
-| `conv_turn` (M4) | `id` (номер процесса), `conversation_id`, `kind`, `anchor_message_id`, `message_ids`, `mind_version`, `recalled`, `understanding`, `move`, `text`, `fact_ids`, `example_ids`, `checks`, `decision`, `outcome`, `model_call_ids`, `task_id`, `card_message_id`, `boris_text`, `actual_message_id`, `actual_author`, `similarity`, `timings` | | П (`text`, `boris_text`) | трасса хода из 8 шагов (FR-OPS-4) |
+| `conv_turn` (M4) | `id` (номер процесса), `conversation_id`, `kind`, `anchor_message_id`, `message_ids`, `mind_version`, `recalled`, `understanding`, `move`, `text`, `fact_ids`, `example_ids`, `checks`, `decision`, `outcome`, `model_call_ids`, `task_id`, `card_message_id`, `boris_text`, `actual_message_id`, `actual_author`, `similarity`, `timings` | | П (`text`, `boris_text`) | трасса хода из 8 шагов (FR-OPS-4); строка вида `reminder` это шаг напоминания клиенту, номер `conv-remind:<разговор>:<сообщение>:<шаг>` (FR-CONV-12) |
 | `client_contact` | `deal_id`, `kind` (`phone`, `email`, `messenger`), `value`, `delete_after` | | К | контакт для встречи |
 
 ### 3.3 Работа и надёжность
