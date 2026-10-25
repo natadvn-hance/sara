@@ -85,12 +85,24 @@ export const AI_NAME = /(?<!\p{L})(?:claude|chat-?gpt|gpt|openai|anthropic)(?!\p
 /** Sara promising a call of her own (promise.call): only Boris calls, and she cannot say when he will. */
 export const CALL_PROMISE_PATTERNS = [
   /(?<!\p{L})(?:позвоню|перезвоню|наберу|звякну|созвонюсь|позвоним|перезвоним|наберем|звякнем)(?!\p{L})/u,
-  /(?<!\p{L})свяж(?:усь|емся)[^.!?\n]{0,30}по\s+телефону/u,
+  // Boris calling is Boris's to say, not hers: «Борис вам позвонит», «Борис перезвонит вам сегодня».
+  /(?<!\p{L})(?:позвонит|перезвонит|наберет|позвонят|перезвонят|наберут|звякнет)(?!\p{L})/u,
+  // «Свяжусь по телефону», «с вами свяжется Борис по телефону», «по телефону с вами свяжется Борис».
+  /(?<!\p{L})свяж(?:усь|емся|ется|утся)[^.!?\n]{0,40}по\s+телефон/u,
+  /(?<!\p{L})по\s+телефону[^.!?\n]{0,40}свяж(?:усь|емся|ется|утся)/u,
   /(?<!\p{L})(?:могу|можем|мог|могла)\s+(?:бы\s+)?(?:вам\s+|вас\s+)?(?:позвонить|перезвонить|набрать|звякнуть)(?!\p{L})/u,
+  // «Готова позвонить в любое время».
+  /(?<!\p{L})готов(?:а|ы)?\s+(?:бы\s+)?(?:вам\s+|вас\s+)?(?:позвонить|перезвонить|набрать|звякнуть)(?!\p{L})/u,
+  // «Сделаю звонок», «назначу встречу».
+  /(?<!\p{L})(?:сделаю|организую|устрою|назначу|запланирую|проведу)\s+(?:вам\s+)?(?:звонок|созвон|встреч)/u,
 ]
 
-/** A word of a call in a sentence: with a time in it, the sentence names a call time. */
-export const CALL_WORD = /созвон|звон|набер|набр/u
+/** A word of a call or a meeting in a sentence: with a time or a day in it, the sentence names the call's time. «Звонки» are not a call. */
+export const CALL_WORD = /созвон|звон(?!к)|набер|набр|встре[чт]/u
+
+/** A day or a part of the day: with a call word in the sentence, Sara is choosing when the call is. */
+export const CALL_DAY =
+  /(?<!\p{L})(?:завтра|сегодня|послезавтра|после\s+обеда|до\s+обеда|в\s+обед|утром|вечером|днем|на\s+этой\s+неделе|на\s+следующей\s+неделе|на\s+выходных|в\s+выходные|в\s+(?:понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье))(?!\p{L})/u
 
 /** Greetings a reply may start with (greeting.missing, greeting.extra). */
 export const GREETINGS = [
