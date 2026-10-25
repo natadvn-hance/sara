@@ -1,5 +1,5 @@
 import type { Availability, MeetingReading, Weekday, Window } from '@sara/shared'
-import { and, gt, inArray, isNotNull, ne, or, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { meeting } from '../db/schema'
 import { addDays, daysBetween, minutesOf, msk, mskToUtc } from './time'
@@ -15,8 +15,10 @@ const MIN = 60_000
 /** A pick from an offer is booked if it is at least this far ahead; the notice applies to the client's own time. */
 const BOOK_AHEAD_MS = 60 * MIN
 
+/** The windows of a day, earliest first: Boris may have added them in any order. */
 function windowsOf(av: Availability, date: string, weekday: Weekday): Window[] {
-  return av.exceptions.find((e) => e.date === date)?.windows ?? av.week[weekday]
+  const ws = av.exceptions.find((e) => e.date === date)?.windows ?? av.week[weekday]
+  return [...ws].sort((a, b) => a.from.localeCompare(b.from))
 }
 
 function clashes(av: Availability, start: number, busy: Busy[]): boolean {
@@ -83,7 +85,8 @@ export function pickOffer(
     days = days.filter((d) => (byDay.get(d) ?? []).some(inPart))
   if (days.length === 0) return []
   if (days.length === 1) {
-    const slots = (byDay.get(days[0] as string) ?? []).filter(inPart)
+    const all = byDay.get(days[0] as string) ?? []
+    const slots = all.some(inPart) ? all.filter(inPart) : all
     const first = slots[0] as string
     const second = slots.find((s) => Date.parse(s) - Date.parse(first) >= 120 * MIN)
     return second ? [first, second] : [first]
@@ -98,9 +101,13 @@ export function pickOffer(
 
 const WEEK: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
+const PART_END: Record<Part, string> = { morning: '12:00', day: '17:00', evening: '23:59' }
+
 /**
- * The client's own words about time as an instant, or as a wish for a new offer; null when nothing usable. A weekday
- * means the coming one (today only if the time is still more than an hour ahead).
+ * The client's own words about time as an instant, or as a wish for a new offer; null when nothing usable or when the
+ * date and the weekday disagree. A weekday or a bare time means today while that time (or that part of the day) is
+ * still ahead, else the next one; whether it can still be booked is fitsBooking's business, so a too-close time gets
+ * the two nearest instead of quietly moving to another day.
  */
 export function resolveOwnTime(
   t: MeetingReading['own_time'],
@@ -108,15 +115,17 @@ export function resolveOwnTime(
 ): { startsAt: string } | { prefs: Prefs } | null {
   if (!t) return null
   const today = msk(now)
-  const ahead = (date: string, hhmm: string) =>
-    mskToUtc(date, hhmm).getTime() - now.getTime() > BOOK_AHEAD_MS
+  const stillToday = () => {
+    const until = t.time ?? (t.part ? PART_END[t.part] : null)
+    return until !== null && mskToUtc(today.date, until).getTime() > now.getTime()
+  }
+  if (t.date && t.weekday && msk(mskToUtc(t.date, '12:00')).weekday !== t.weekday) return null
   let date = t.date
   if (!date && t.weekday) {
     const shift = (WEEK.indexOf(t.weekday) - WEEK.indexOf(today.weekday) + 7) % 7
-    date = addDays(today.date, shift)
-    if (shift === 0 && !(t.time && ahead(date, t.time))) date = addDays(today.date, 7)
+    date = addDays(today.date, shift === 0 && !stillToday() ? 7 : shift)
   }
-  if (!date && t.time) date = ahead(today.date, t.time) ? today.date : addDays(today.date, 1)
+  if (!date && t.time) date = stillToday() ? today.date : addDays(today.date, 1)
   if (date && daysBetween(today.date, date) < 0) return null
   if (date && t.time) return { startsAt: mskToUtc(date, t.time).toISOString() }
   const prefs: Prefs = {}
@@ -151,7 +160,8 @@ export function fitsBooking(
 }
 
 /**
- * Meetings that take Boris's time: confirming and booked ones of every account. With soft holds also the times of
+ * Meetings that take Boris's time: confirming and booked ones of every account (a reschedule moves the old meeting
+ * first, so it never clashes with itself). With soft holds also the times of
  * other deals' open offers, sent ones and those still waiting for M4's pause (younger than 2 hours).
  */
 export async function busyFrom(
@@ -165,7 +175,8 @@ export async function busyFrom(
     .from(meeting)
     .where(
       and(
-        inArray(meeting.state, ['confirming', 'booked']),
+        // A meeting that took place still took its day: done and no-show count toward the day's maximum.
+        inArray(meeting.state, ['confirming', 'booked', 'done', 'no_show']),
         isNotNull(meeting.startsAt),
         gt(meeting.startsAt, since),
       ),
@@ -173,7 +184,7 @@ export async function busyFrom(
   const busy: Busy[] = []
   const dayCount: Record<string, number> = {}
   for (const r of rows) {
-    const start = r.startsAt as string
+    const start = new Date(r.startsAt as string).toISOString()
     busy.push({
       startsAt: start,
       endsAt: new Date(Date.parse(start) + r.durationMin * MIN).toISOString(),
@@ -189,7 +200,7 @@ export async function busyFrom(
       .from(meeting)
       .where(
         and(
-          sql`${meeting.state} = 'offered'`,
+          eq(meeting.state, 'offered'),
           o.exceptDealId ? ne(meeting.dealId, o.exceptDealId) : undefined,
           or(gt(meeting.offerSentAt, sentSince), gt(meeting.createdAt, fresh)),
         ),

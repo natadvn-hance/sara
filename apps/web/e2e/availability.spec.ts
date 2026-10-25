@@ -33,7 +33,7 @@ test('FR-MEET-1: Boris sets Friday 10:00-13:00 and sees the next free times', as
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByRole('status')).toHaveText('Сохранила.')
   await expect(
-    page.getByRole('list', { name: 'Ближайшие свободные' }).getByRole('listitem'),
+    page.getByRole('list', { name: 'Так Сара предложит время' }).getByRole('listitem'),
   ).toHaveCount(3)
 
   await page.reload()
@@ -51,6 +51,34 @@ test('FR-MEET-1: a window that ends before it starts is refused with a plain rea
   await expect(page.getByRole('alert')).toHaveText(
     'Проверь окна: начало раньше конца, окна дня не пересекаются.',
   )
+})
+
+test('FR-MEET-1: Boris adds a second window, a day off, and removes them again', async ({
+  page,
+}) => {
+  await page.goto(PAGE)
+  const wednesday = page.getByRole('group', { name: 'Среда' })
+  await wednesday.getByRole('button', { name: '+ окно' }).click()
+  // The new window starts where the last one ends, so it is valid as it is.
+  await expect(wednesday.getByLabel('с').nth(1)).toHaveValue('19:00')
+  await page.getByLabel('Дата').fill('2030-01-07')
+  await page.getByRole('button', { name: 'Выходной' }).click()
+  await expect(page.getByRole('group', { name: /7 января/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status')).toHaveText('Сохранила.')
+  await page.reload()
+  await expect(page.getByRole('group', { name: 'Среда' }).getByLabel('с')).toHaveCount(2)
+  await page
+    .getByRole('group', { name: /7 января/ })
+    .getByRole('button', { name: 'Убрать день' })
+    .click()
+  await page
+    .getByRole('group', { name: 'Среда' })
+    .getByRole('button', { name: /Убрать окно 19:00/ })
+    .click()
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status')).toHaveText('Сохранила.')
+  await expect(page.getByRole('group', { name: /7 января/ })).toHaveCount(0)
 })
 
 for (const scheme of ['light', 'dark'] as const) {

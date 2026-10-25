@@ -79,6 +79,15 @@ describe('free time API', () => {
     expect(await getSetting(db, 'meet.availability')).toEqual(DEFAULT_AVAILABILITY)
   })
 
+  it('FR-MEET-1: a wrong number or a repeated day says what is wrong', async () => {
+    const zero = await save({ ...DEFAULT_AVAILABILITY, slot_min: 0 })
+    expect(zero.statusCode).toBe(400)
+    expect(zero.json().error).toMatch(/^Проверь числа/)
+    const day = { date: '2026-10-30', windows: [] }
+    const twice = await save({ ...DEFAULT_AVAILABILITY, exceptions: [day, day] })
+    expect(twice.json().error).toMatch(/^Проверь особые дни/)
+  })
+
   it('FR-MEET-1: without a session it is 401', async () => {
     expect((await t.app.inject({ method: 'GET', url: URL })).statusCode).toBe(401)
     expect((await save(DEFAULT_AVAILABILITY, false)).statusCode).toBe(401)

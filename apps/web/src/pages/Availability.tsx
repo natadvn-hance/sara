@@ -29,7 +29,23 @@ const NUMBERS: {
   { key: 'notice_h', label: 'Не раньше чем через, часов', min: 0, max: 72 },
   { key: 'horizon_days', label: 'Предлагать на дней вперёд', min: 1, max: 21 },
 ]
-const NEW_WINDOW: Window = { from: '10:00', to: '13:00' }
+/** A new window starts where the last one ends (an hour later at most until 23:59), so it is valid at once. */
+function nextWindow(windows: Window[]): Window {
+  const last = [...windows].sort((a, b) => a.from.localeCompare(b.from)).at(-1)
+  if (!last) return { from: '10:00', to: '13:00' }
+  const [h, m] = last.to.split(':').map(Number) as [number, number]
+  const end = Math.min(h * 60 + m + 60, 23 * 60 + 59)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return { from: last.to, to: `${pad(Math.floor(end / 60))}:${pad(end % 60)}` }
+}
+const DAY_LABEL = (date: string) =>
+  new Date(`${date}T12:00:00Z`).toLocaleDateString('ru-RU', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'long',
+    weekday: 'long',
+  })
+const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' })
 
 function Windows({
   name,
@@ -78,7 +94,7 @@ function Windows({
         <Button
           variant="secondary"
           className="justify-self-start"
-          onClick={() => onChange([...windows, NEW_WINDOW])}
+          onClick={() => onChange([...windows, nextWindow(windows)])}
         >
           + окно
         </Button>
@@ -93,24 +109,23 @@ export function AvailabilityPage() {
     queryKey: ['availability'],
     queryFn: () => api<AvailabilityView>('/api/meetings/availability'),
     retry: false,
+    // A background refetch must not wipe what Boris is typing.
+    refetchOnWindowFocus: false,
   })
   useEffect(() => {
     if (q.error instanceof ApiError && q.error.status === 401) go('/login')
   }, [q.error])
-  const [draft, setDraft] = useState<Availability | null>(null)
-  const [view, setView] = useState<AvailabilityView | null>(null)
+  // The draft exists only once Boris edits; until then the page shows what the server has.
+  const [edited, setEdited] = useState<Availability | null>(null)
+  const [savedView, setSavedView] = useState<AvailabilityView | null>(null)
   const [saved, setSaved] = useState(false)
   const [exceptionDate, setExceptionDate] = useState('')
   const save = useAction()
-  useEffect(() => {
-    if (q.data) {
-      setDraft(q.data.availability)
-      setView(q.data)
-    }
-  }, [q.data])
 
   if (q.isLoading) return <p className="p-4">Загружаю…</p>
-  if (q.isError || !draft || !view)
+  const view = savedView ?? q.data
+  const draft = edited ?? view?.availability
+  if (!view || !draft)
     return (
       <main className="mx-auto grid max-w-2xl gap-4 p-4">
         <p role="alert">Не получилось загрузить. Попробуй ещё раз.</p>
@@ -122,13 +137,14 @@ export function AvailabilityPage() {
 
   const set = (patch: Partial<Availability>) => {
     setSaved(false)
-    setDraft({ ...draft, ...patch })
+    save.clear()
+    setEdited({ ...draft, ...patch })
   }
   const submit = () =>
     save.run(async () => {
       const r = await api<AvailabilityView>('/api/meetings/availability', draft)
-      setDraft(r.availability)
-      setView(r)
+      setEdited(null)
+      setSavedView(r)
       setSaved(true)
     })
 
@@ -183,7 +199,7 @@ export function AvailabilityPage() {
             key={x.date}
             className="grid gap-2 border-t border-border pt-3 first-of-type:border-t-0"
           >
-            <legend className="font-medium">{x.date}</legend>
+            <legend className="font-medium">{DAY_LABEL(x.date)}</legend>
             <Windows
               name={`exception-${x.date}`}
               windows={x.windows}
@@ -207,6 +223,7 @@ export function AvailabilityPage() {
             id="exception-date"
             label="Дата"
             type="date"
+            min={today()}
             value={exceptionDate}
             onChange={(e) => setExceptionDate(e.target.value)}
           />
@@ -234,11 +251,13 @@ export function AvailabilityPage() {
         {saved ? <p role="status">Сохранила.</p> : null}
       </div>
       <Card>
-        <h2 className="font-display text-lg">Ближайшие свободные</h2>
+        <h2 className="font-display text-lg">Так Сара предложит время клиенту</h2>
         {view.preview.length === 0 ? (
-          <p>Свободного времени на ближайшие дни нет.</p>
+          <p>
+            Свободного времени на ближайшие дни нет: Сара попросит клиента назвать удобное время.
+          </p>
         ) : (
-          <ul aria-label="Ближайшие свободные" className="grid gap-1">
+          <ul aria-label="Так Сара предложит время" className="grid gap-1">
             {view.preview.map((p) => (
               <li key={p.startsAt}>{p.label}</li>
             ))}

@@ -111,6 +111,20 @@ describe('the offer', () => {
     expect(o.map(mskOf)).toEqual(['2026-10-26 10:00', '2026-10-26 12:00'])
   })
 
+  it('FR-MEET-2: one free day without the wished part still gives real times', () => {
+    const o = pickOffer(only([{ from: '10:00', to: '12:00' }]), [], {}, sun, { part: 'evening' })
+    expect(o.length).toBeGreaterThan(0)
+    for (const t of o) expect(Number.isNaN(Date.parse(t))).toBe(false)
+  })
+
+  it('FR-MEET-2: windows saved out of order are offered earliest first', () => {
+    const av = only([
+      { from: '14:00', to: '19:00' },
+      { from: '10:00', to: '13:00' },
+    ])
+    expect(pickOffer(av, [], {}, sun).map(mskOf)).toEqual(['2026-10-26 10:00', '2026-10-26 12:00'])
+  })
+
   it('FR-MEET-2: nothing free gives an empty offer', () => {
     expect(pickOffer(only([]), [], {}, sun)).toEqual([])
   })
@@ -122,12 +136,47 @@ describe('the client own time', () => {
     expect(r).toEqual({ startsAt: iso('2026-10-29', '15:00') })
   })
 
-  it('FR-MEET-2: the same weekday later today is today, earlier today is next week', () => {
+  it('FR-MEET-2: the same weekday is today while the time is ahead, else next week', () => {
     expect(resolveOwnTime({ date: null, weekday: 'sun', time: '15:00', part: null }, sun)).toEqual({
       startsAt: iso('2026-10-25', '15:00'),
     })
+    // Half an hour ahead is still today: too close to book, so the client gets the two nearest, not another day.
     expect(resolveOwnTime({ date: null, weekday: 'sun', time: '10:30', part: null }, sun)).toEqual({
-      startsAt: iso('2026-11-01', '10:30'),
+      startsAt: iso('2026-10-25', '10:30'),
+    })
+    expect(resolveOwnTime({ date: null, weekday: 'sun', time: '09:30', part: null }, sun)).toEqual({
+      startsAt: iso('2026-11-01', '09:30'),
+    })
+    expect(
+      resolveOwnTime({ date: null, weekday: 'sun', time: null, part: 'evening' }, sun),
+    ).toEqual({
+      prefs: { date: '2026-10-25', part: 'evening' },
+    })
+    expect(
+      resolveOwnTime({ date: null, weekday: 'sun', time: null, part: 'morning' }, sun),
+    ).toEqual({
+      prefs: { date: '2026-10-25', part: 'morning' },
+    })
+  })
+
+  it('FR-MEET-2: a bare time is today while ahead, else tomorrow', () => {
+    expect(resolveOwnTime({ date: null, weekday: null, time: '15:00', part: null }, sun)).toEqual({
+      startsAt: iso('2026-10-25', '15:00'),
+    })
+    expect(resolveOwnTime({ date: null, weekday: null, time: '09:00', part: null }, sun)).toEqual({
+      startsAt: iso('2026-10-26', '09:00'),
+    })
+  })
+
+  it('FR-MEET-2: a date and a weekday that disagree are nothing', () => {
+    // 29.10.2026 is a Thursday.
+    expect(
+      resolveOwnTime({ date: '2026-10-29', weekday: 'fri', time: '15:00', part: null }, sun),
+    ).toBeNull()
+    expect(
+      resolveOwnTime({ date: '2026-10-29', weekday: 'thu', time: '15:00', part: null }, sun),
+    ).toEqual({
+      startsAt: iso('2026-10-29', '15:00'),
     })
   })
 
@@ -223,6 +272,60 @@ describe('busy time from the database', () => {
     // The other client's own offer does not hold its own times.
     const own = await busyFrom(db, sun, { softHolds: true, exceptDealId: other })
     expect(own.busy).toHaveLength(0)
+  })
+
+  async function offer(
+    dealId: string,
+    at: string,
+    o: { sentAt: string | null; createdAt: string; state?: string },
+  ) {
+    await db.insert(meeting).values({
+      id: newEventId(),
+      dealId,
+      accountId: 'hance-marketing',
+      kind: 'sara',
+      state: o.state ?? 'offered',
+      durationMin: 30,
+      offered: [{ starts_at: at }],
+      offerSentAt: o.sentAt,
+      createdAt: o.createdAt,
+      createdBy: 'sara',
+    })
+  }
+
+  it('FR-MEET-2: stale offers and other states hold nothing, a fresh unsent one does', async () => {
+    const h = (n: number) => new Date(sun.getTime() - n * 3_600_000).toISOString()
+    await offer(await dealRow(), iso('2026-10-26', '10:00'), { sentAt: null, createdAt: h(3) })
+    await offer(await dealRow(), iso('2026-10-26', '11:00'), { sentAt: h(73), createdAt: h(74) })
+    await offer(await dealRow(), iso('2026-10-26', '12:00'), {
+      sentAt: h(1),
+      createdAt: h(1),
+      state: 'expired',
+    })
+    await offer(await dealRow(), iso('2026-10-26', '13:00'), { sentAt: null, createdAt: h(1) })
+    const b = await busyFrom(db, sun, { softHolds: true })
+    expect(b.busy.map((x) => mskOf(x.startsAt))).toEqual(['2026-10-26 13:00'])
+  })
+
+  it('FR-MEET-1: a confirming meeting is busy, and a meeting that took place still counts in its day', async () => {
+    for (const [state, at] of [
+      ['confirming', iso('2026-10-27', '10:00')],
+      ['done', iso('2026-10-25', '08:00')],
+      ['no_show', iso('2026-10-25', '09:00')],
+    ] as const)
+      await db.insert(meeting).values({
+        id: newEventId(),
+        dealId: await dealRow(),
+        accountId: 'hance-marketing',
+        kind: 'boris',
+        state,
+        startsAt: at,
+        durationMin: 30,
+        createdBy: 'boris',
+      })
+    const b = await busyFrom(db, sun, { softHolds: false })
+    expect(b.dayCount).toEqual({ '2026-10-27': 1, '2026-10-25': 2 })
+    expect(b.busy.some((x) => x.startsAt === iso('2026-10-27', '10:00'))).toBe(true)
   })
 
   it('FR-MEET-1: booked meetings count in their Moscow day', async () => {
