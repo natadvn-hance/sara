@@ -1,7 +1,7 @@
 import { AnalystOutput, type ClientInfo, type ProfiOrder, plural } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
 import { firstName, namesToHide } from './clientName'
-import { sorterInput } from './sorter'
+import { repostedLine, sorterInput } from './sorter'
 
 /** Profi.ru's bid form takes at most this many characters, the greeting included. */
 export const BID_TEXT_MAX = 500
@@ -12,7 +12,14 @@ export const BID_TEXT_MAX = 500
  */
 export type DraftSource = Pick<
   ProfiOrder,
-  'title' | 'category' | 'city' | 'budget_text' | 'text' | 'client_name'
+  | 'title'
+  | 'category'
+  | 'city'
+  | 'budget_text'
+  | 'text'
+  | 'client_name'
+  | 'reposted'
+  | 'repost_notice'
 > & {
   /** What the order page says about the client; absent when the page was not read. Its name is only hidden from the model, never sent (ADR-016). */
   client_info?: (Pick<ClientInfo, 'name'> & Partial<ClientInfo>) | null
@@ -156,7 +163,12 @@ function clientLine(info: DraftSource['client_info']): string | null {
  * client, and the room left for the text.
  */
 export function analystInput(o: DraftSource, maxBody: number): string {
-  return [sorterInput(o), clientLine(o.client_info), `Длина текста: не больше ${maxBody} знаков`]
+  return [
+    repostedLine(o),
+    sorterInput(o),
+    clientLine(o.client_info),
+    `Длина текста: не больше ${maxBody} знаков`,
+  ]
     .filter((l): l is string => l !== null)
     .join('\n')
 }

@@ -15,7 +15,7 @@ import { hasTag } from '../gateway/redact'
 import { appendEvent } from '../journal/journal'
 import { namesToHide } from '../leads/clientName'
 import { rulesText } from '../leads/scorer'
-import { sorterInput } from '../leads/sorter'
+import { repostedLine, sorterInput } from '../leads/sorter'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { backtest } from './backtest'
@@ -56,6 +56,8 @@ type Case = {
   city: string
   text: string
   client_name: string
+  reposted: boolean
+  repost_notice: string | null
   budget_text: string | null
   bid_price_rub: number
   seen_at: string
@@ -67,7 +69,8 @@ type Case = {
 /** Surprises Boris explained since the last proposal (or ever), newest first. */
 async function explainedSurprises(db: Db, accountId: string, limit: number): Promise<Case[]> {
   const r = await db.execute<Case>(sql`
-    select l.title, l.category, l.city, l.text, l.client_name, l.budget_text, l.bid_price_rub,
+    select l.title, l.category, l.city, l.text, l.client_name, l.reposted, l.repost_notice, l.budget_text,
+      l.bid_price_rub,
       to_char(l.seen_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as seen_at,
       b.score, b.label, q.answer
     from core.question q
@@ -94,9 +97,10 @@ const caseText = (c: Case, i: number) => {
     budget_text: c.budget_text,
     bid_price_rub: c.bid_price_rub,
     seen_at: c.seen_at,
+    ...(c.reposted && { reposted: true, repost_notice: c.repost_notice }),
   })
   const decision = c.label === 'yes' ? 'взял бы (Сара отсеяла)' : 'пропустил'
-  return `Случай ${i + 1}\n${sorterInput(order)}\nБалл Сары: ${c.score ?? 'нет'}\nБорис: ${decision}\nЕго причина: ${c.answer}`
+  return `Случай ${i + 1}\n${[repostedLine(order), sorterInput(order)].filter((x) => x !== null).join('\n')}\nБалл Сары: ${c.score ?? 'нет'}\nБорис: ${decision}\nЕго причина: ${c.answer}`
 }
 
 type Declined = { summary: string; answer: string | null }

@@ -20,6 +20,8 @@ type Row = {
   budget_text: string | null
   bid_price_rub: number
   seen_at: string
+  reposted: boolean
+  repost_notice: string | null
   label: string
 }
 
@@ -38,7 +40,7 @@ export async function backtest(
   const rows = await d.db.execute<Row>(sql`
     select l.id, l.title, l.category, l.city, l.text, l.client_name, l.budget_text, l.bid_price_rub,
       to_char(l.seen_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as seen_at,
-      b.label
+      l.reposted, l.repost_notice, b.label
     from core.lead_label b
     join core.lead l on l.id = b.lead_id
     join lateral (
@@ -61,6 +63,7 @@ export async function backtest(
       budget_text: r.budget_text,
       bid_price_rub: r.bid_price_rub,
       seen_at: r.seen_at,
+      ...(r.reposted && { reposted: true, repost_notice: r.repost_notice }),
     })
     const before = await scoreOrder(d.gateway, order, oldRules, { escalate: false })
     const s = await scoreOrder(d.gateway, order, rules, { escalate: false })

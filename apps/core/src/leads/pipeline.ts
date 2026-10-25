@@ -118,6 +118,7 @@ const sourceOf = (l: LeadRow): DraftSource => ({
   text: l.text,
   client_name: l.clientName,
   client_info: ClientInfo.safeParse(l.clientInfo).data ?? null,
+  ...(l.reposted && { reposted: true, repost_notice: l.repostNotice }),
 })
 
 /** What the order page said (the plain data of a durable step), or why it could not be read. */
@@ -323,7 +324,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     (): Promise<boolean | 'stale'> =>
       d().db.transaction(async (tx) => {
         // Decided before any model call: a stale order costs no sorting or scoring.
-        const stale = isStale(order.published_at, new Date())
+        // A raised order is not cut off (Boris, 25.10): its date is the raise, and the card says it was raised again.
+        const stale = !order.reposted && isStale(order.published_at, new Date())
         const rows = await tx
           .insert(lead)
           .values({
@@ -337,6 +339,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             budgetText: order.budget_text,
             bidPriceRub: order.bid_price_rub,
             seenAt: order.seen_at,
+            reposted: order.reposted === true,
+            repostNotice: order.reposted ? (order.repost_notice ?? null) : null,
             correlationId,
             ...(stale && { status: 'stale' }),
           })
@@ -542,6 +546,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     // What the order page added (a name or a text the board lacked) is on the card too.
     clientName: withPage.client_name,
     text: withPage.text,
+    reposted: order.reposted ? { notice: order.repost_notice ?? null } : null,
     verdict: sorted.verdict,
     reason: sorted.reason,
     bidPriceRub: withPage.bid_price_rub,
@@ -632,6 +637,7 @@ async function cardOfFound(
     clientName: l.clientName,
     text: l.text,
     clientInfo: clientInfoOf(l.clientInfo),
+    reposted: l.reposted ? { notice: l.repostNotice } : null,
     verdict: s.verdict === 'fit' || s.verdict === 'maybe' ? s.verdict : null,
     reason: s.reason ?? null,
     bidPriceRub: l.bidPriceRub,

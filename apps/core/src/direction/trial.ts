@@ -44,6 +44,7 @@ export const orderOfLead = (l: typeof lead.$inferSelect): ProfiOrder =>
     budget_text: l.budgetText,
     bid_price_rub: l.bidPriceRub,
     seen_at: new Date(l.seenAt).toISOString(),
+    ...(l.reposted && { reposted: true, repost_notice: l.repostNotice }),
   })
 
 /**

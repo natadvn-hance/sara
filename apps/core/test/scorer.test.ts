@@ -63,6 +63,25 @@ describe('scorer', () => {
     expect(text).toContain('Порог: 56')
   })
 
+  it('FR-LEAD-3: the Scorer is told as a fact that the order was raised again, and what the site says about it', async () => {
+    const o = {
+      ...(await order()),
+      reposted: true,
+      repost_notice: 'Клиент запросил ещё отклики 4 дня назад',
+    }
+    expect(scorerInput(o, RULES_V1)).toContain(
+      'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя. Сайт пишет: Клиент запросил ещё отклики 4 дня назад',
+    )
+    expect(scorerInput({ ...o, repost_notice: null }, RULES_V1)).toContain(
+      'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя.\nТема:',
+    )
+    // The site's words are cut, so a long one cannot take the whole input.
+    expect(scorerInput({ ...o, repost_notice: 'я'.repeat(5000) }, RULES_V1)).toContain(
+      `Сайт пишет: ${'я'.repeat(200)}\n`,
+    )
+    expect(scorerInput(await order(), RULES_V1)).not.toContain('поднят')
+  })
+
   it('FR-LEAD-3: a stop factor drops the order whatever the score', () => {
     expect(decide(RULES_V1, scorerAnswer(90, { stop_factor: 'direct' }))).toEqual({
       score: 90,

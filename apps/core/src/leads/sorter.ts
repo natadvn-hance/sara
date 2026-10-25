@@ -15,6 +15,17 @@ export function sorterInput(
   ].join('\n')
 }
 
+/**
+ * The Scorer and the Analyst are told as a fact that the client raised an old order again: it is no fresh order, the
+ * client has not found anyone yet, and the site may say when they asked again. The Sorter reads the board as it is.
+ */
+export function repostedLine(o: Pick<ProfiOrder, 'reposted' | 'repost_notice'>): string | null {
+  if (!o.reposted) return null
+  const base = 'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя.'
+  const notice = o.repost_notice?.replace(/\s+/g, ' ').trim().slice(0, 200)
+  return notice ? `${base} Сайт пишет: ${notice}` : base
+}
+
 export function sortOrder(
   gw: Gateway,
   o: ProfiOrder,

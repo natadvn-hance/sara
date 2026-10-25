@@ -80,6 +80,9 @@ type BoardItem = {
   price?: { value?: string | null; prefix?: string | null; suffix?: string | null } | null
   clientInfo?: { name?: string | null } | null
   lastUpdateDate?: number | null
+  /** The client raised an old order again; the card's `notice` of type BOOSTED says when they asked for more bids. */
+  isReposted?: boolean | null
+  notice?: { type?: string | null; label?: string | null } | null
   /** A CAROUSEL item: older orders among the cards, without their own type or client name. */
   snippets?: BoardItem[] | null
 }
@@ -92,6 +95,10 @@ function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
   const p = it.price
   const budget = p?.value ? [p.prefix, p.value, p.suffix].filter(Boolean).join(' ') : null
   const title = it.title ?? ''
+  const boosted = it.notice?.type === 'BOOSTED'
+  // The site's words with plain spaces (it writes «4\u00a0дня\u00a0назад»).
+  const label = it.notice?.label
+  const notice = boosted && typeof label === 'string' ? label.replace(/\u00a0/g, ' ').trim() : ''
   return {
     t: 'order',
     order: {
@@ -105,6 +112,11 @@ function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
       // The fee for a bid is shown only on the order page, which get_order reads for the orders worth it: 0 is unknown.
       bid_price_rub: 0,
       seen_at: seenAt,
+      // Raised again: its date is the raise, so only this mark tells an old order from a new one.
+      ...((it.isReposted === true || boosted) && {
+        reposted: true,
+        repost_notice: notice || null,
+      }),
     },
     published_at:
       typeof it.lastUpdateDate === 'number'

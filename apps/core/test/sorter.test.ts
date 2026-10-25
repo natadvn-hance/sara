@@ -5,7 +5,7 @@ import { ProfiOrder } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { createGateway } from '../src/gateway/gateway'
-import { sortOrder } from '../src/leads/sorter'
+import { sorterInput, sortOrder } from '../src/leads/sorter'
 import { createSecretStore } from '../src/secrets/store'
 import { openTestDb, resetDb } from './helpers/db'
 
@@ -20,6 +20,15 @@ beforeEach(async () => {
 })
 
 describe('sorter', () => {
+  it('FR-LEAD-2: the Sorter reads the order as the board gives it, without the raised-again fact', async () => {
+    const o = ProfiOrder.parse({
+      ...JSON.parse(await readFile(join(ROOT, 'tests/fixtures/orders/90000001.json'), 'utf8')),
+      reposted: true,
+      repost_notice: 'Клиент запросил ещё отклики 4 дня назад',
+    })
+    expect(sorterInput(o)).not.toContain('поднят')
+  })
+
   it('FR-LEAD-2: sends order text without client name and parses verdict', async () => {
     const order = ProfiOrder.parse(
       JSON.parse(await readFile(join(ROOT, 'tests/fixtures/orders/90000001.json'), 'utf8')),

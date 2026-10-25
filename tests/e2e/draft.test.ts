@@ -250,6 +250,93 @@ describe('the draft on the card', () => {
   })
 })
 
+describe('an order raised again', () => {
+  it('FR-LEAD-7: it is marked on the card, stored on the lead, and told to the Scorer and the Analyst but not the Sorter', async () => {
+    const id = orderId()
+    await fake.emitOrder({
+      order_id: id,
+      reposted: true,
+      repost_notice: 'Клиент запросил ещё отклики 4\u00a0дня\u00a0назад',
+    })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.text).toContain(
+      'Заказ поднят повторно: Клиент запросил ещё отклики 4 дня назад',
+    )
+    expect(await leadOf(id)).toMatchObject({
+      reposted: true,
+      repostNotice: 'Клиент запросил ещё отклики 4\u00a0дня\u00a0назад',
+    })
+    const stdins = (await readFile(claudeLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l).stdin as string)
+    const told = (stdin: string) => stdin.includes('Заказ поднят повторно')
+    const scorer = stdins.filter((x) => x.startsWith('Правила направления'))
+    const analyst = stdins.filter((x) => x.includes('Длина текста'))
+    const sorter = stdins.filter((x) => !scorer.includes(x) && !analyst.includes(x))
+    expect(scorer.length).toBeGreaterThan(0)
+    expect(analyst).toHaveLength(1)
+    expect(sorter.length).toBeGreaterThan(0)
+    expect(scorer.every(told)).toBe(true)
+    expect(analyst.every(told)).toBe(true)
+    expect(sorter.some(told)).toBe(false)
+    // The card sent again (a reminder, the one after «Изменить») carries the line too.
+    const [t] = await db.select().from(task).where(eq(task.entityId, id))
+    await app.pipeline.resendCard(t?.id ?? '')
+    await until(() => cards().length === 2)
+    expect(cards()[1]?.text).toContain(
+      'Заказ поднят повторно: Клиент запросил ещё отклики 4 дня назад',
+    )
+  })
+
+  it('FR-LEAD-10: a raised order is not cut off by its age: the raise was days ago, the card still comes; an ordinary old one is stale', async () => {
+    const old = new Date(Date.now() - 100 * 3600_000).toISOString()
+    const raised = orderId()
+    const ordinary = orderId()
+    await fake.emitOrder({
+      order_id: raised,
+      reposted: true,
+      repost_notice: null,
+      published_at: old,
+    })
+    await fake.emitOrder({ order_id: ordinary, published_at: old })
+    await until(() => cards().length === 1)
+    await until(async () => (await leadOf(ordinary))?.status === 'stale')
+    expect(cards()[0]?.text).toContain('Заказ поднят повторно')
+    expect((await leadOf(raised))?.status).toBe('queued')
+  })
+
+  it('FR-LEAD-6: the draft written when Boris wants a dropped raised order is told the same fact', async () => {
+    byRole = { ...byRole, scorer: scorerAnswer(50) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id, reposted: true, repost_notice: null })
+    await until(async () => (await leadOf(id))?.status === 'scored_out')
+    await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
+    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
+    const summary = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))
+    tg.pushPress(111, summary?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data ?? '')
+    await until(() => cards().some((m) => button(m, 'bid') !== ''))
+    const analyst = (await readFile(claudeLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l).stdin as string)
+      .filter((stdin) => stdin.includes('Длина текста'))
+    expect(analyst).toHaveLength(1)
+    expect(analyst[0]).toContain(
+      'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя.',
+    )
+    expect(cards().find((m) => button(m, 'bid') !== '')?.text).toContain('Заказ поднят повторно')
+  })
+
+  it('FR-LEAD-1: an ordinary order carries no mark', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.text).not.toContain('поднят')
+    expect(await leadOf(id)).toMatchObject({ reposted: false, repostNotice: null })
+  })
+})
+
 describe('the order page name', () => {
   it('NFR-PRIV-2: the name the order page gave is hidden from the Analyst of a «Взял бы» draft', async () => {
     byRole = { ...byRole, scorer: scorerAnswer(50) }
@@ -324,7 +411,7 @@ describe('«Изменить»', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     const ask = await pressEdit(cards()[0])
-    expect(tg.answers.at(-1)?.text).toBe('Жду новый текст отклика')
+    await until(() => tg.answers.at(-1)?.text === 'Жду новый текст отклика')
     expect(said(ASK)).toBe(true)
     tg.pushText(111, NEW, ask)
     await until(() => said(SAVED))
@@ -511,7 +598,7 @@ describe('the laid-out card', () => {
     await until(() => cards().length === 1)
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
-    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+    await until(() => tg.answers.at(-1)?.text === 'Прислала разбор')
     expect(razbor()[0]).toMatchObject({ parse_mode: 'HTML' })
     for (const part of Object.values(ANALYST.reading)) expect(razbor()[0]?.text).toContain(part)
     expect(razbor()[0]?.text).toContain(ANALYST.condition)
@@ -523,7 +610,7 @@ describe('the laid-out card', () => {
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 2)
     expect(razbor()[1]?.text).toBe(razbor()[0]?.text)
-    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+    await until(() => tg.answers.at(-1)?.text === 'Прислала разбор')
   })
 
   it('FR-LEAD-7: a long order text is cut on the card and comes whole with «Разбор»', async () => {
@@ -548,7 +635,7 @@ describe('the laid-out card', () => {
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
     expect(razbor()[0]?.text).toContain('Разбора для этой заявки нет')
-    expect(tg.answers.at(-1)?.text).toBe('Прислала разбор')
+    await until(() => tg.answers.at(-1)?.text === 'Прислала разбор')
   })
 
   it('FR-LEAD-7: the reminder card has the same layout and its «Разбор» works', async () => {

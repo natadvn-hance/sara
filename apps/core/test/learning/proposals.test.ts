@@ -158,6 +158,25 @@ describe('rule proposals', { timeout: 30000 }, () => {
     expect(await db.select().from(ruleProposal)).toHaveLength(0)
   })
 
+  it('FR-LEAD-1: the backtest scores a raised-again lead with the same fact the live Scorer was told', async () => {
+    await threeSurprises()
+    await db.execute(
+      sql`update core.lead set reposted = true, repost_notice = 'Клиент запросил ещё отклики 4 дня назад' where id = '940001'`,
+    )
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    const scorerInputs = (await readFile(join(dir, 'claude.log'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+      .filter((c) => c.args.some((a) => a.endsWith('scorer/role.md')))
+      .map((c) => c.stdin)
+    expect(scorerInputs.length).toBeGreaterThan(0)
+    expect(scorerInputs.filter((x) => x.includes('Заказ поднят повторно')).length).toBe(2)
+    // The proposer reads the same fact beside Sara's score of that case.
+    expect(await proposerInput()).toContain('Заказ поднят повторно')
+  })
+
   it('FR-MIND-3: nothing changes until «Применить»', async () => {
     await threeSurprises()
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })

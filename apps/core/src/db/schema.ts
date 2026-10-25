@@ -69,6 +69,9 @@ export const lead = core.table('lead', {
   draftAnalysis: jsonb('draft_analysis'),
   /** What the order page says about the client (contract ClientInfo), read when the order page is opened. */
   clientInfo: jsonb('client_info'),
+  /** The client raised an old order again (contract ProfiOrder.reposted); its notice says when they asked again. */
+  reposted: boolean('reposted').notNull().default(false),
+  repostNotice: text('repost_notice'),
 })
 
 export const account = core.table('account', {

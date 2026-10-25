@@ -273,6 +273,14 @@ describe('eyes', () => {
       expect(x.payload.bid_price_rub).toBe(0)
       expect(x.payload.title).toBeTruthy()
     }
+    // The raise reaches the event and the stored order (the shadow report reads body.reposted).
+    const raised = seen.find((x) => x.payload.order_id === '10000016')
+    expect(raised?.payload).toMatchObject({
+      reposted: true,
+      repost_notice: 'Клиент запросил ещё отклики 4 дня назад',
+    })
+    const [stored] = await db.select().from(rawOrder).where(eq(rawOrder.orderId, '10000016'))
+    expect((stored?.body as { reposted?: boolean } | undefined)?.reposted).toBe(true)
     // Read again the next minute: no order twice.
     await e.onRaw({
       kind: 'response',
