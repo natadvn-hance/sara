@@ -119,7 +119,8 @@ export async function compareTurn(
   conversationId: string,
   added: StoredMessage[],
 ): Promise<void> {
-  const actual = added.find((m) => m.side === 'specialist')
+  // Sara's own sent message is no one's real reply: it is her draft gone out, not the answer it is compared with.
+  const actual = added.find((m) => m.side === 'specialist' && m.author !== 'sara')
   if (!actual) return
   const since = new Date(new Date(actual.sentAt).getTime() - COMPARE_WINDOW_MS).toISOString()
   const [t] = await d.db
