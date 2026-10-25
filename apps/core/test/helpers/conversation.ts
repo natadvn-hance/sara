@@ -66,9 +66,15 @@ export const mindHit = (id: string, type: MindHit['type'], o: Partial<MindHit> =
 export const caseOf = (
   id: string,
   title: string,
-  o: Partial<CaseHit> & { role?: string } = {},
+  o: Partial<CaseHit> & { role?: string; work?: string; where?: string; period?: string } = {},
 ): CaseHit => {
-  const { role = 'Под ключ, команда из двух человек.', ...rest } = o
+  const {
+    role = 'Под ключ, команда из двух человек.',
+    work = 'Собрали сайт, настроили запись и рекламу.',
+    where = 'Tilda, Яндекс Директ',
+    period = '20 рабочих дней',
+    ...rest
+  } = o
   const summary = rest.summary ?? `Сделали для ${title} сайт и настроили рекламу.`
   const result = rest.result === undefined ? 'Заявок стало в полтора раза больше.' : rest.result
   const showRules = rest.showRules ?? ['Компанию можно называть.']
@@ -78,8 +84,11 @@ export const caseOf = (
       body: [
         `# ${title}`,
         summary,
+        `## Что делали\n${work}`,
+        `## Где\n${where}`,
         `## Роль и масштаб\n${role}`,
         ...(result ? [`## Результат\n${result}`] : []),
+        `## Срок\n${period}`,
         `## Как показывать клиенту\n${showRules.map((r) => `- ${r}`).join('\n')}`,
       ].join('\n\n'),
     }),

@@ -1,5 +1,5 @@
 import type { CheckInput, CheckIssue } from '../types'
-import { caseIssues } from './caseChecks'
+import { caseIssues, maskCaseName } from './caseChecks'
 import {
   AI_NAME,
   AI_SELF_PATTERNS,
@@ -268,7 +268,8 @@ function factIssues(i: CheckInput, text: string): CheckIssue[] {
     }
   }
   const told = new Set<string>()
-  const { rest, found } = cutOut(text, false)
+  // «7.10» of «Боулинг-клуб 7.10» is a name, not a date: blanked out when the chosen case may be named.
+  const { rest, found } = cutOut(chosen?.nameOpen ? maskCaseName(text, chosen.title) : text, false)
   for (const f of found) {
     const token = `${f.kind}:${f.key}`
     if (allowedTokens.has(token) || told.has(token)) continue

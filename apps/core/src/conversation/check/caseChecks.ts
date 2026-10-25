@@ -178,6 +178,22 @@ export function namesCase(text: string, title: string): boolean {
   return brandNames(title).some((b) => namesBrand(text, b))
 }
 
+/**
+ * The text with the numbered part of a case's name blanked out (same length): «7.10» of «Боулинг-клуб 7.10» is the
+ * club's name, not the 7th of October. The facts check reads dates and numbers in a reply, and it calls this on the
+ * case the reply tells when the show rules let that case be named.
+ */
+export function maskCaseName(text: string, title: string): string {
+  const numbered = new Set(
+    brandNames(title)
+      .flatMap((b) => b.tokens)
+      .filter((t) => /\d/.test(t))
+      .map(fold),
+  )
+  if (numbered.size === 0) return text
+  return text.replace(TOKEN, (t) => (numbered.has(fold(t)) ? ' '.repeat(t.length) : t))
+}
+
 /** The brand name of a case that a text tells, as written in the title, or null. */
 function namesCompany(text: string, title: string): string | null {
   const hit = brandNames(title).find((b) => namesBrand(text, b))
@@ -320,6 +336,12 @@ export function caseIssues(
 
   // More than one case of the library in one text.
   const named = c.offered.filter((o) => namesCase(text, o.title))
+  // A case of the list told by its name, though the answer chose none: it has no moment and no reason in the trace.
+  if (!choice?.case_id && named.length > 0)
+    issues.push({
+      id: 'case.no_moment',
+      detail: `кейс ${named[0]?.id} назван в тексте, а в ответе не выбран: повода для него нет`,
+    })
   const mentioned = new Set([...named.map((o) => o.id), ...(chosen ? [chosen.id] : [])])
   if (mentioned.size > 1) issues.push({ id: 'case.many', detail: 'в тексте больше одного кейса' })
 
