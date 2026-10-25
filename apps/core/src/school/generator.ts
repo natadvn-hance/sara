@@ -2,7 +2,7 @@ import { GeneratorOutput, newEventId, normalizeText, type Topic } from '@sara/sh
 import { and, asc, eq, isNull, like, lt } from 'drizzle-orm'
 import type { MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
-import { jobRun, mindGap, persona, simDialog } from '../db/schema'
+import { jobRun, mindGap, mindIndex, persona, simDialog } from '../db/schema'
 import { getSetting } from '../settings/store'
 import type { NightJob, SchoolDeps } from './types'
 
@@ -101,7 +101,9 @@ export async function generateDialogs(
   const size = Math.min(PER_CALL, personas.length)
   // Each night starts where the last left off, so no persona is never played.
   const start = (Math.floor(now.getTime() / DAY_MS) * calls * size) % personas.length
-  const lookForGaps = (await d.mind.version()) !== 'empty'
+  // A mind with no records answers nothing: every line would be a gap (an empty index still has a version).
+  const lookForGaps =
+    (await d.db.select({ id: mindIndex.recordId }).from(mindIndex).limit(1)).length > 0
   const scopes = d.accountIds.length > 0 ? d.accountIds : ['shared']
   const seen = new Set(
     (await d.db.select({ text: mindGap.text }).from(mindGap).where(isNull(mindGap.lessonId))).map(

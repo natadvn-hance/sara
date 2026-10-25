@@ -1,9 +1,10 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { newEventId } from '@sara/shared'
+import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { MindHit, MindSearch } from '../../src/conversation/types'
-import { mindGap, persona, simDialog } from '../../src/db/schema'
+import { mindGap, mindIndex, persona, simDialog } from '../../src/db/schema'
 import { cleanSim, generateDialogs, generatorJob } from '../../src/school/generator'
 import { setSetting } from '../../src/settings/store'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -11,9 +12,24 @@ import { fakeGateway } from '../helpers/gateway'
 
 const { db, close } = openTestDb()
 afterAll(close)
+/** One confirmed record in the index: the generator looks for gaps only in a mind with records. */
+const someRecord = () =>
+  db.insert(mindIndex).values({
+    recordId: 'k-x',
+    path: 'mind/shared/knowledge/k-x.md',
+    type: 'knowledge',
+    scope: 'shared',
+    title: 'запись',
+    body: 'текст',
+    version: 1,
+    mindVersion: 'v1',
+    tsv: sql`to_tsvector('russian', 'запись')`,
+  })
+
 beforeEach(async () => {
   await resetDb(db)
   await setSetting(db, 'school.on', true, 'boris')
+  await someRecord()
 })
 
 const NOW = new Date('2026-10-26T03:00:00+03:00')
@@ -59,13 +75,12 @@ const hit = (topic: MindHit['topic'], rank = 0.5): MindHit => ({
   rank,
 })
 
-/** A mind that answers with `hits(text, scope)`; `empty` is a mind with no records at all. */
+/** A mind that answers with `hits(text, scope)`. */
 const mind = (
   hits: (text: string, scope: string) => MindHit[] = (t) =>
     /стоит/i.test(t) ? [hit('price')] : [],
-  o: { empty?: boolean } = {},
 ): MindSearch => ({
-  version: async () => (o.empty ? 'empty' : 'v1'),
+  version: async () => 'v1',
   search: async (q) => hits(q.text, q.scope),
   byIds: async () => [],
   byStage: async () => null,
@@ -106,6 +121,7 @@ describe('the dialog generator', () => {
     expect(nights).toHaveLength(6)
     expect(nights[3]).not.toBe(nights[0])
     await resetDb(db)
+    await someRecord()
     await personas(2)
     const few = await fakeGateway(db, { 'dialog-generator': five })
     await generateDialogs(deps(few.gateway), NOW)
@@ -162,6 +178,7 @@ describe('the dialog generator', () => {
     )
     expect(await db.select().from(mindGap)).toHaveLength(2)
     await resetDb(db)
+    await someRecord()
     await personas(5)
     await setSetting(db, 'school.generator_dialogs', 5, 'boris')
     const low = mind(() => [hit('price', 0.001), hit('contract', 0.001)])
@@ -195,15 +212,18 @@ describe('the dialog generator', () => {
       })),
     }
     const gw = await fakeGateway(db, { 'dialog-generator': many })
+    // No record in the index (it may still know a version): no gaps at all.
+    await db.delete(mindIndex)
     await generateDialogs(
       deps(
         gw.gateway,
-        mind(() => [], { empty: true }),
+        mind(() => []),
       ),
       NOW,
     )
     expect(await db.select().from(simDialog)).toHaveLength(5)
     expect(await db.select().from(mindGap)).toEqual([])
+    await someRecord()
     await generateDialogs(
       deps(
         gw.gateway,
