@@ -303,6 +303,20 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 - [ ] **Step 1-4:** тест на выдуманном `result.json` (текст сообщения бывает строкой и массивом частей) → реализация → PASS; CLI один раз под `node --import tsx` на тестовой базе с выдуманным снимком.
 - [ ] **Step 5: Commit** `feat(core): history:export command with the optional Telegram export`
 
+### Task A6: Имя клиента для любого чата (просьба M5, 25.10.2026)
+
+Тренажёр M5 берёт персоны из выгруженной истории, но только когда может скрыть имя клиента от модели (ADR-016). Сейчас имя известно лишь у чатов с заявкой в ядре или со страницей заказа; имя из снимка v1 выгрузка использует только в памяти, а приветствие старой Сары («<Имя>, добрый день!») читает только ход части C (`clientNames` в `conversation/dossier.ts`, #118). Имя не уходит в журнал и тексты, оно нужно только для обезличивания.
+
+**Files:** Create `apps/core/src/conversation/clientName.ts`; Modify `apps/core/src/db/schema.ts` и одна миграция (номер следующий после последней в `main` на момент пул-реквеста, генерировать прямо перед ним), `history/exportHistory.ts` и `history/exportCli.ts` (имя из снимка v1 по заказу), `conversation/sync.ts` (имя из заявки и страницы заказа при синхронизации), `conversation/dossier.ts` (`clientNames` читает таблицу); Test `conversation/clientName.test.ts`, `history/exportHistory.test.ts`
+
+**Interfaces:**
+- Таблица `core.chat_client`: `account_id`, `chat_id` (ключ вместе), `order_id`, `name`, `source` (`lead`, `order_page`, `v1_snapshot`, `greeting`), `updated_at`. Источник надёжнее заменяет менее надёжный в этом порядке; пустое имя не пишется.
+- `rememberClientName(db, i: { accountId; chatId; orderId: string | null; name: string; source })` и `clientNamesOf(db, accountId: string, chatId: string): Promise<string[]>`: имя из таблицы, а если его нет, из приветствия в первом сообщении нашей стороны среди сохранённых сообщений чата (тот же разбор, что в `clientNames`, со списком слов, которые не имена). Работает и для чата без разговора и без заявки.
+- Выгрузка истории (часть A) пишет имя из снимка v1 для каждого выгруженного чата; синхронизация чата (часть C) пишет имя заявки или страницы заказа; `clientNames` хода и команд переходит на `clientNamesOf`.
+- [ ] **Step 1: Write the failing tests**: `NFR-PRIV-2: a chat old Sara began has its client's name for hiding, from the v1 snapshot or her greeting`; `NFR-PRIV-2: a stronger source replaces a weaker one and an empty name is never stored`; `NFR-PRIV-2: the client's name never reaches the journal`.
+- [ ] **Step 2-4:** FAIL → реализация → PASS; `history:export` один раз под `node --import tsx` на выдуманном снимке.
+- [ ] **Step 5: Commit** `feat(core): the client's name of any chat, for hiding it from the model`
+
 ---
 
 ## Часть B. Разум и поиск (FR-MIND-1..4)
