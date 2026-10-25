@@ -1,5 +1,5 @@
 import { type ChatMessage, formatCallback, newEventId, normalizeText } from '@sara/shared'
-import { and, desc, eq, gte, like, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, like, ne, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
@@ -8,7 +8,7 @@ import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
-import { clientTurnBefore, isRefusal } from './clientCues'
+import { clientTurnBefore, isRefusal, isThinking } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
 import {
@@ -66,6 +66,9 @@ export type Sent = {
 
 /** A turn that has not finished for longer than this is not running, it is stuck. */
 const TURN_ALIVE_MS = 24 * 3600_000
+
+/** The first reminder of a client who went to think it over waits this long after our message. */
+const THINKING_FIRST_MS = 48 * 3600_000
 
 /** Why the ladder of a client who said no is not run (the trace says it). */
 export const REFUSED = 'клиент отказался'
@@ -164,6 +167,13 @@ export async function planNext(
       and(eq(chatMessage.accountId, conv.accountId), eq(chatMessage.platformMessageId, anchor)),
     )
   if (!m) return null
+  // «Я подумаю»: a client who went to think it over gets two days before the first reminder, not one.
+  const stored = await d.db
+    .select({ id: chatMessage.platformMessageId, side: chatMessage.side, text: chatMessage.text })
+    .from(chatMessage)
+    .where(eq(chatMessage.conversationId, conversationId))
+    .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+  const thinking = isThinking(clientTurnBefore(stored, anchor))
   const r = nextReminder({
     lastOursAt: m.sentAt,
     sent: st.sent,
@@ -175,6 +185,7 @@ export async function planNext(
     minGapMs: d.minGapMs,
     continuedAt: st.continuedAt,
     afterPressMs: d.afterPressMs,
+    ...(thinking && { firstAfterMs: THINKING_FIRST_MS }),
   })
   return r ? { at: r.at.toISOString(), step: r.step, tone: r.tone } : null
 }

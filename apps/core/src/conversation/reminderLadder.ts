@@ -29,7 +29,8 @@ const DEFAULT_QUIET = { from: 23, to: 9 }
 const AFTER_PRESS_MS = { third: 10 * DAY_MS, fourth: 30 * DAY_MS }
 
 /**
- * The next step of the ladder (design 5.11), counted from our side's last message: a day, three days, and on the
+ * The next step of the ladder (design 5.11), counted from our side's last message: a day (two for a client who went
+ * to think it over), three days, and on the
  * seventh day the client is dormant and Boris gets one task. Only when Boris says «Напоминать дальше» the ladder goes
  * on: 10 days after his press, then 30 days after that, the last one friendly (old Sara's ladder since 12.09). A
  * ladder given no press time counts the press on the dormant day. `sent` is how many reminders of the ladder are done. A time inside the quiet hours moves to the morning, a time
@@ -51,6 +52,8 @@ export function nextReminder(i: {
   continuedAt?: string | null
   /** The waits after the press (10 and 30 days); tests shorten them. */
   afterPressMs?: { third: number; fourth: number }
+  /** The first reminder's wait: a day, but two for a client who went to think it over. */
+  firstAfterMs?: number
 }): NextReminder | null {
   const from = new Date(i.lastOursAt).getTime()
   if (Number.isNaN(from)) return null
@@ -59,7 +62,7 @@ export function nextReminder(i: {
   const wait = i.afterPressMs ?? AFTER_PRESS_MS
   const sentAt = i.lastSentAt ? new Date(i.lastSentAt).getTime() : Number.NaN
   const plan: Record<number, { step: ReminderStep; at: number; tone: ReminderTone }> = {
-    0: { step: 1, at: from + DAY_MS, tone: 'check_in' },
+    0: { step: 1, at: from + (i.firstAfterMs ?? DAY_MS), tone: 'check_in' },
     1: { step: 2, at: from + 3 * DAY_MS, tone: 'check_in' },
     2: i.continued
       ? { step: 3, at: press + wait.third, tone: 'check_in' }
