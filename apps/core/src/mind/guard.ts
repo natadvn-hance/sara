@@ -22,6 +22,18 @@ const BORIS_WORDS = ['edit:', 'say:', 'compare:', 'training:', 'history:']
 /** Lessons whose `after` is Boris's own text, so a number in it is his. */
 const BORIS_LESSONS = new Set(['edit', 'say', 'compare', 'training', 'interview'])
 
+/** Boris's own name is in headings («## Борис») and in his words: never a client's name to look for. */
+const OWNER = /^(?:борис|мноян)$/iu
+
+/** The words of the clients' names to look for, without Boris's own (one client «Борис Петров» still hides «Петров»). */
+export function clientWords(names: string[]): string[] {
+  return [
+    ...new Set(
+      names.flatMap((n) => n.split(/\s+/)).filter((w) => w.trim().length > 1 && !OWNER.test(w)),
+    ),
+  ]
+}
+
 const KIND_WORDS: Record<string, string> = {
   phone: 'телефон',
   email: 'почта',
@@ -37,13 +49,19 @@ export function guardRecord(i: GuardInput): string | null {
   const c = i.change
   if (c.sources.length === 0) return 'нет источников'
   if (c.sources.some((s) => s.startsWith('sim:'))) return 'источник из сгенерированного диалога'
+  // Nothing enters the mind without Boris's «да» on its lesson (ADR-025).
+  if (i.lesson?.state !== 'yes') return 'Борис не сказал «да»'
+  const names = clientWords(i.clientNames)
   if (c.file === 'scenario') {
     const s = ExamScenario.safeParse(c.scenario)
     if (!s.success) return `сценарий не по схеме: ${s.error.issues[0]?.message ?? ''}`
+    // The file's name is the scenario's own id, which the schema keeps to letters, digits and hyphens.
+    if (c.recordId !== s.data.id) return 'номер сценария не совпадает с файлом'
+    if (c.action === 'create' && i.existingIds.has(c.recordId))
+      return 'сценарий с таким номером уже есть'
     if (s.data.source.ref?.startsWith('sim:')) return 'сценарий из сгенерированного диалога'
-    if (s.data.client_name && i.clientNames.includes(s.data.client_name))
-      return 'в сценарии имя клиента'
-    return privacy(i.text, i.clientNames)
+    if (s.data.client_name && names.includes(s.data.client_name)) return 'в сценарии имя клиента'
+    return privacy(i.text, names)
   }
   if (!MIND_RECORD_ID.test(c.recordId)) return 'номер записи не по правилу'
   const { front, sections } = splitRecord(i.text)
@@ -61,18 +79,19 @@ export function guardRecord(i: GuardInput): string | null {
   if (c.action === 'create' && i.existingIds.has(c.recordId))
     return 'запись с таким номером уже есть'
   if (type === 'example') {
-    if (i.lesson?.sim) return 'урок из сгенерированной реплики не даёт образца'
+    if (i.lesson.sim) return 'урок из сгенерированной реплики не даёт образца'
     if (!c.sources.some((s) => BORIS_WORDS.some((w) => s.startsWith(w))))
       return 'у образца нет слов Бориса'
-  } else if (i.lesson && i.lesson.state !== 'yes') return 'Борис не сказал «да»'
+  }
+  // What a reader of the record sees: its title, tags and section texts; never the headings or the field names.
+  const said = [f.data.title, ...(f.data.tags ?? []), ...sections.map(([, t]) => t)].join('\n')
   if (type === 'knowledge' && i.lesson?.source === 'teacher') {
     const his = new Set(
       i.sourceLessons
         .filter((l) => BORIS_LESSONS.has(l.source))
         .flatMap((l) => numbersIn(l.after ?? '')),
     )
-    const body = sections.map(([, t]) => t).join('\n')
-    const foreign = numbersIn(body).find((n) => !his.has(n))
+    const foreign = numbersIn(said).find((n) => !his.has(n))
     if (foreign) return `число ${foreign} Борис не называл`
   }
   if (
@@ -82,7 +101,7 @@ export function guardRecord(i: GuardInput): string | null {
     f.data.version !== c.baseVersion + 1
   )
     return 'запись успели поменять'
-  return privacy(i.text, i.clientNames)
+  return privacy(said, names)
 }
 
 /** No phone, e-mail, link, @-name or the client's name (NFR-PRIV-2): the gateway's own patterns find them. */

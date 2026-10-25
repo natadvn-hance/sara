@@ -14,6 +14,7 @@
     "score:eval": "tsx src/leads/scoreEvalCli.ts",
     "mind": "tsx src/mind/cli.ts",
     "report:school": "tsx src/school/reportCli.ts",
+    "mind:key": "tsx src/mind/keyCli.ts",
     "mind:sync": "tsx src/mind/syncCli.ts"
   },
   "dependencies": {
