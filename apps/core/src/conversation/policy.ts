@@ -5,7 +5,13 @@ import type { CheckIssue, Decision, Dossier, PolicySettings } from './types'
 const LOCKED = new Set<Topic>(LOCKED_TOPICS)
 
 export type DecideInput = {
-  plan: { output: InterlocutorOutput | null; issues: CheckIssue[]; attempts: number }
+  plan: {
+    output: InterlocutorOutput | null
+    issues: CheckIssue[]
+    attempts: number
+    /** The Checker read the reply; without it the code checks alone decide and the reply is a draft (design 5.6). */
+    checkerRan: boolean
+  }
   dossier: Dossier
   settings: PolicySettings
   now: Date
@@ -31,6 +37,8 @@ function wouldDo(i: DecideInput): { would: Would; reason: string } {
       would: 'draft',
       reason: `не прошло проверку: ${i.plan.issues.map((x) => x.detail).join('; ')}`,
     }
+  if (out.move === 'reply' && !i.plan.checkerRan)
+    return { would: 'draft', reason: 'без Проверяющего: он не ответил' }
   if (i.dossier.owner === 'boris')
     return { would: 'draft', reason: 'клиент Бориса: отправить по его «да»' }
   if (i.dossier.owner === 'paused') return { would: 'draft', reason: 'разговор на паузе' }

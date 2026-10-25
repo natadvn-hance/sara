@@ -141,7 +141,7 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     if (issues.length === 0) break
   }
   const decision = decide({
-    plan: { output, issues, attempts },
+    plan: { output, issues, attempts, checkerRan },
     dossier: d,
     settings: input.settings,
     now: input.now,

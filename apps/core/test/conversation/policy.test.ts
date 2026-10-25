@@ -44,10 +44,12 @@ const NIGHT = new Date('2026-10-20T22:00:00.000Z')
 const plan = (
   o: Parameters<typeof interlocutorAnswer>[0] = {},
   issues: { id: 'dash'; detail: string }[] = [],
+  checkerRan = true,
 ) => ({
   output: interlocutorAnswer(o),
   issues,
   attempts: 1,
+  checkerRan,
 })
 
 describe('rules of a reply', () => {
@@ -80,6 +82,18 @@ describe('rules of a reply', () => {
         callRequest: false,
       }).action,
     ).toBe('send')
+  })
+
+  it('FR-CONV-4: a reply the Checker did not see is a draft «без Проверяющего», never sent', () => {
+    const d = decide({
+      plan: plan({}, [], false),
+      dossier: dossier(),
+      settings: settings(),
+      now: DAY,
+      callRequest: false,
+    })
+    expect(d).toMatchObject({ action: 'draft', would: 'draft' })
+    expect(d.reason).toContain('без Проверяющего')
   })
 
   it('FR-OPS-1: the «Пишет клиентам» pause and an account pause hold Sara’s own reply as a draft', () => {
@@ -206,7 +220,7 @@ describe('rules of a reply', () => {
   })
 
   it('FR-OPS-3: without the Interlocutor’s answer the turn is a draft, a call request calls Boris', () => {
-    const none = { output: null, issues: [], attempts: 1 }
+    const none = { output: null, issues: [], attempts: 1, checkerRan: false }
     expect(
       decide({ plan: none, dossier: dossier(), settings: settings(), now: DAY, callRequest: false })
         .action,

@@ -21,6 +21,10 @@ vi.mock('../../src/conversation/check/codeChecks', () => ({
   checkReplyText: () => [],
   isNewMoscowDay: () => false,
 }))
+// The Checker comes with part D too: here it read every reply and found nothing.
+vi.mock('../../src/conversation/check/checkerRole', () => ({
+  runCheckerRole: async () => ({ issues: [], ran: true, modelCallId: null }),
+}))
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
 const ACC = 'hance-marketing'
@@ -93,7 +97,8 @@ beforeAll(async () => {
   }
   setTurnDeps(deps)
   await launchDbos(testDatabaseUrl())
-})
+  // DBOS starts slowly on a loaded machine.
+}, 60000)
 afterAll(async () => {
   await shutdownDbos()
   await close()
@@ -218,6 +223,8 @@ describe('the turn workflow', () => {
     // The quiet after the client's message is 1 second here.
     expect(Date.parse(started?.occurredAt ?? '')).toBeGreaterThanOrEqual(heardAt + 900)
     expect(await countEvents(db, 'conv.turn_started')).toBe(1)
+    // The outcome step runs right after the handoff marks the turn finished.
+    for (let i = 0; i < 50 && outcomes.length === 0; i++) await sleep(100)
     expect(outcomes.map((o) => o.outcome)).toEqual(['drafted'])
   }, 30000)
 
