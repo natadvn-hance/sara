@@ -173,4 +173,94 @@ describe('mind check', () => {
       },
     ])
   })
+  it('FR-MIND-2: a case whose rules are unclear about the company name is reported, an allow or a ban of any wording passes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mind-'))
+    const rules: Record<string, string[]> = {
+      'k-case-10': ['Цифры из «Результата» можно называть как есть, не округляя в свою пользу.'],
+      'k-case-11': ['Приоритетный кейс для портфолио.', 'Цифр результата нет.'],
+      'k-case-12': ['Микро-кейс: только как дополнительный пример; компания не названа.'],
+      'k-case-13': ['Компанию называть нельзя.'],
+      'k-case-14': ['Анонимно'],
+      'k-case-15': ['Без названия компании.', 'Цифры можно называть.'],
+      'k-case-16': ['Название скрыть.'],
+      'k-case-17': ['Компанию и ссылку можно\n  называть.'],
+    }
+    for (const [id, items] of Object.entries(rules)) {
+      const list = items.map((i) => `- ${i}`).join('\n')
+      await put(
+        dir,
+        `shared/knowledge/cases/${id}.md`,
+        { id, type: 'knowledge', title: id, tags: ['кейс'] },
+        `Суть.\n\n## Как показывать клиенту\n${list}\n`,
+      )
+    }
+    const problems = await checkMind(dir)
+    expect(problems.map((p) => p.file)).toEqual(
+      ['k-case-10', 'k-case-11', 'k-case-12'].map((id) =>
+        join(dir, `shared/knowledge/cases/${id}.md`),
+      ),
+    )
+    for (const p of problems) {
+      expect(p).toMatchObject({
+        field: 'section',
+        message: expect.stringContaining('название компании'),
+      })
+    }
+  })
+
+  it('FR-MIND-2: the rules of the 28 real cases all say something about the company name', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mind-'))
+    const name = 'Компанию и ссылку можно называть.'
+    const numbers = 'Цифры из «Результата» можно называть как есть, не округляя в свою пользу.'
+    const noNumbers =
+      'Цифр результата нет: говорить о том, что сделали, не обещать и не придумывать результат.'
+    const ndaName = 'Компанию не называть: NDA. Город и сфера можно.'
+    const real: string[][] = [
+      [name, noNumbers],
+      [name, numbers, 'Приоритетный кейс для портфолио.'],
+      [name],
+      [
+        name,
+        'Это работа в найме (in-house): говорить как об опыте Бориса изнутри компании, не как о проекте агентства.',
+        noNumbers,
+      ],
+      [name, numbers, 'Можно упомянуть отзыв клиента 5★.'],
+      [name, 'Микро-кейс: только как дополнительный пример, не как главный.', numbers],
+      [
+        'Компанию не называть: NDA. Детали и название не раскрывать.',
+        numbers,
+        'Можно упомянуть отзыв клиента 5★.',
+      ],
+      [
+        name,
+        'Результаты контекстной рекламы не акцентировать: упор на исследование, сайт, SEO и систему маркетинга.',
+      ],
+      [
+        name,
+        'Подавать как разработку стратегии, аналитической модели и плана роста. Клиент не внедрял: о росте не говорить.',
+        noNumbers,
+      ],
+      [
+        'Компанию, отрасль и чувствительные детали не называть: NDA. Говорить о подходе и составе работ.',
+        noNumbers,
+      ],
+      [name, 'Отделять сделанное от планов; результаты рекламы не заявлять.'],
+      [
+        name,
+        'Проект в развитии: говорить как о текущей работе.',
+        'Приоритетный кейс для портфолио.',
+      ],
+      [ndaName, numbers],
+    ]
+    for (const [i, items] of real.entries()) {
+      const id = `k-case-${String(i + 1).padStart(2, '0')}`
+      await put(
+        dir,
+        `shared/knowledge/cases/${id}.md`,
+        { id, type: 'knowledge', title: id, tags: ['кейс'] },
+        `Суть.\n\n## Как показывать клиенту\n${items.map((r) => `- ${r}`).join('\n')}\n`,
+      )
+    }
+    expect(await checkMind(dir)).toEqual([])
+  })
 })

@@ -76,26 +76,56 @@ const clauses = (rules: string[]): string[] =>
     .map((c) => c.trim().toLowerCase())
     .filter((c) => c.length > 0)
 
-/** «не называть», «нельзя называть», «не раскрывать»…: a ban on telling something. */
-const BAN = /(?:(?<!\p{L})не|нельзя)\s+(?:называть|раскрывать|упоминать|указывать|озвучивать)/u
-const ALLOW = /можно\s+называть/u
+/** The verbs of telling a fact to a client. */
+const TELL = '(?:называть|раскрывать|разглашать|упоминать|указывать|озвучивать)'
+/** «не называть», «нельзя называть», «называть нельзя», «не называем», «не раскрывается»: a ban on telling something. */
+const BAN = new RegExp(
+  `(?:(?<!\\p{L})не|нельзя)\\s+${TELL}|${TELL}\\s+нельзя|(?<!\\p{L})не\\s+(?:называ|раскрыва|разглаш|упомина|указыва)(?:ем|йте|ется|ют)`,
+  'u',
+)
+/** «можно называть», «называть можно»: an allow to tell something. */
+const ALLOW = new RegExp(`можно\\s+${TELL}|${TELL}\\s+можно`, 'u')
+/** A clause that hides the name without a verb of telling: «Без названия компании», «Название скрыть», «Анонимно». */
+const HIDES_NAME = /без\s+назван|скры(?:ть|вать|ваем|йте|т[оаы]?)|анонимн/u
 const NDA = /(?<![a-z])nda(?![a-z])/
-const COMPANY = /компани|названи|бренд|имя/u
+const COMPANY = /компани|названи|бренд|имя|имен/u
+
+/** True for a clause that bans telling the name of the company (a ban that is only about the numbers does not). */
+const bansName = (c: string): boolean =>
+  NDA.test(c) ||
+  HIDES_NAME.test(c) ||
+  (BAN.test(c) && (!c.includes('цифр') || COMPANY.test(c))) ||
+  (c.includes('нельзя') && COMPANY.test(c))
+
+/** True for a clause that allows telling the name of the company, in words about the company itself. */
+const allowsName = (c: string): boolean => ALLOW.test(c) && COMPANY.test(c)
+
+/** True for a clause that bans the numbers of the result. */
+const bansNumbers = (c: string): boolean => BAN.test(c) || c.includes('нельзя')
 
 /**
- * What the show rules of a case allow, read from their words. The company stays open unless a clause closes it (NDA, or
- * a ban that is not only about the numbers); the numbers stay closed unless a clause allows them and none forbids them.
- * A case with no rules at all shows neither: mind:check does not let it into the mind, and here it is closed anyway.
+ * What the show rules of a case allow, read from their words. Both are closed unless a clause allows them and none
+ * forbids them: the company is open only on an explicit allow («Компанию можно называть») and stays closed on a ban
+ * (NDA, «не называть», «называть нельзя», «без названия», «скрыть», «анонимно») or on silence; the numbers are open only
+ * on an explicit allow («Цифры можно называть») and no ban on them. A case with no rules shows neither: mind:check does
+ * not let it into the mind, and here it is closed anyway.
  */
 export function readShowRules(rules: string[]): { nameOpen: boolean; numbersOpen: boolean } {
   if (rules.length === 0) return { nameOpen: false, numbersOpen: false }
   const all = clauses(rules)
-  const nameOpen = !all.some(
-    (c) => NDA.test(c) || (BAN.test(c) && (!c.includes('цифр') || COMPANY.test(c))),
-  )
+  const nameOpen = all.some(allowsName) && !all.some(bansName)
   const numbers = all.filter((c) => c.includes('цифр'))
-  const numbersOpen = numbers.some((c) => ALLOW.test(c)) && !numbers.some((c) => BAN.test(c))
+  const numbersOpen = numbers.some((c) => ALLOW.test(c)) && !numbers.some(bansNumbers)
   return { nameOpen, numbersOpen }
+}
+
+/**
+ * True when the rules say something about the company name: an allow or a ban. A case whose rules are silent about it
+ * (only the numbers, a remark about the kind of case) is unclear, and mind:check does not let it into the mind.
+ */
+export function nameRuleStated(rules: string[]): boolean {
+  const all = clauses(rules)
+  return all.some(allowsName) || all.some(bansName)
 }
 
 /** A hit of the case search with what a turn needs from the record: the gist, the result, the rules of showing. */

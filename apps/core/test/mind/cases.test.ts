@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { CaseHit } from '../../src/conversation/types'
-import { readShowRules } from '../../src/mind/cases'
+import { nameRuleStated, readShowRules } from '../../src/mind/cases'
 import { ensureMindIndex } from '../../src/mind/indexer'
 import { CASE_MIN_RANK, createMindSearch } from '../../src/mind/search'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -480,34 +480,187 @@ describe('mind case search: what is read and what is asked', () => {
 describe('show rules', () => {
   const NAME = 'Компанию и ссылку можно называть.'
   const NUMBERS = 'Цифры из «Результата» можно называть как есть, не округляя в свою пользу.'
+  const NO_NUMBERS =
+    'Цифр результата нет: говорить о том, что сделали, не обещать и не придумывать результат.'
+  const NDA_NAME = 'Компанию не называть: NDA. Город и сфера можно.'
+  const REVIEW = 'Можно упомянуть отзыв клиента 5★.'
+  const TOP = 'Приоритетный кейс для портфолио.'
 
   it.each([
     [[NAME], true, false],
     [[NAME, NUMBERS], true, true],
-    [['Компанию не называть: NDA. Город и сфера можно.'], false, false],
-    [['Компанию не называть: NDA. Город и сфера можно.', NUMBERS], false, true],
+    [[NDA_NAME], false, false],
+    [[NDA_NAME, NUMBERS], false, true],
     [
       ['Компанию, отрасль и чувствительные детали не называть: NDA. Говорить о подходе.'],
       false,
       false,
     ],
     [['Компанию не называть: NDA. Детали и название не раскрывать.'], false, false],
+    [[NO_NUMBERS, NAME], true, false],
+    [['Результат не зафиксирован, цифр не называть.', NAME], true, false],
+    [['Компанию не называть, цифры можно называть.'], false, true],
+    [['Цифры и компанию не называть.'], false, false],
+    [['Цифры можно называть.', 'Цифры нельзя называть до созвона.'], false, false],
+    [[], false, false],
+  ])('FR-MIND-2: the rules %j give name %s and numbers %s', (rules, nameOpen, numbersOpen) => {
+    expect(readShowRules(rules)).toEqual({ nameOpen, numbersOpen })
+  })
+
+  // An unsure rule never opens the name: only an explicit allow with no ban does.
+  it.each([
+    'Компанию называть нельзя.',
+    'Без названия компании.',
+    'Название скрыть.',
+    'Анонимно',
+    'Анонимный кейс.',
+    'Название компании скрываем.',
+    'Нельзя называть компанию.',
+    'Не называем компанию.',
+    'Компанию нельзя.',
+    'Имя клиента не раскрывать.',
+    'Кейс под NDA.',
+    'Приоритетный кейс для портфолио.',
+    'Микро-кейс: только как дополнительный пример; компания не названа.',
+    'Говорить о подходе и составе работ.',
+    'Ссылку можно называть.',
+  ])('FR-MIND-2: the rule «%s» alone keeps the company name closed', (rule) => {
+    expect(readShowRules([rule]).nameOpen).toBe(false)
+  })
+
+  it.each([
+    'Компанию называть нельзя.',
+    'Без названия компании.',
+    'Название скрыть.',
+    'Анонимно',
+    'Не называем компанию.',
+    'Компанию нельзя.',
+  ])('FR-MIND-2: a ban «%s» beats an allow in another item', (ban) => {
+    expect(readShowRules([NAME, ban]).nameOpen).toBe(false)
+    expect(readShowRules([ban, NAME]).nameOpen).toBe(false)
+  })
+
+  it.each([
+    'Компанию называть можно.',
+    'Можно называть компанию.',
+    'Название компании можно называть.',
+    'Компанию и ссылку можно называть.',
+  ])('FR-MIND-2: an explicit allow «%s» opens the name', (allow) => {
+    expect(readShowRules([allow]).nameOpen).toBe(true)
+  })
+
+  it('FR-MIND-2: a rule about the numbers alone says nothing about the name, and the other way round', () => {
+    expect(readShowRules([NUMBERS])).toEqual({ nameOpen: false, numbersOpen: true })
+    expect(readShowRules(['Цифры нельзя называть.', NAME])).toEqual({
+      nameOpen: true,
+      numbersOpen: false,
+    })
+    expect(readShowRules([NAME, 'Цифры можно называть.', 'Цифры нельзя.'])).toEqual({
+      nameOpen: true,
+      numbersOpen: false,
+    })
+  })
+
+  // The rule sentences of the 28 real records of sara-mind (cases 01-28), as they stand: name and numbers each.
+  const REAL_SHAPES: [string, string[], boolean, boolean][] = [
+    ['01-04, 08-10', [NAME, NO_NUMBERS], true, false],
+    ['05, 11, 26', [NAME, NUMBERS, TOP], true, true],
+    ['06, 20', [NAME], true, false],
     [
+      '07',
       [
-        'Цифр результата нет: говорить о том, что сделали, не обещать и не придумывать результат.',
         NAME,
+        'Это работа в найме (in-house): говорить как об опыте Бориса изнутри компании, не как о проекте агентства.',
+        NO_NUMBERS,
       ],
       true,
       false,
     ],
-    [['Результат не зафиксирован, цифр не называть.', NAME], true, false],
-    [['Компанию не называть, цифры можно называть.'], false, true],
-    [['Цифры и компанию не называть.'], false, false],
-    [['Цифры можно называть.', 'Цифры нельзя называть до созвона.'], true, false],
-    [['Микро-кейс: только как дополнительный пример; компания не названа.'], true, false],
-    [['Приоритетный кейс для портфолио.'], true, false],
-    [[], false, false],
-  ])('FR-MIND-2: the rules %j give name %s and numbers %s', (rules, nameOpen, numbersOpen) => {
-    expect(readShowRules(rules)).toEqual({ nameOpen, numbersOpen })
+    ['12, 16, 17', [NAME, NUMBERS, REVIEW], true, true],
+    [
+      '13',
+      [NAME, 'Микро-кейс: только как дополнительный пример, не как главный.', NUMBERS, REVIEW],
+      true,
+      true,
+    ],
+    [
+      '14',
+      [
+        NAME,
+        'Микро-кейс: только как дополнительный пример консультации по продажам.',
+        NUMBERS,
+        REVIEW,
+      ],
+      true,
+      true,
+    ],
+    [
+      '15',
+      [
+        NAME,
+        'Микро-кейс: только как дополнительный пример исследования; компания не названа.',
+        NUMBERS,
+        REVIEW,
+      ],
+      true,
+      true,
+    ],
+    [
+      '18',
+      ['Компанию не называть: NDA. Детали и название не раскрывать.', NUMBERS, REVIEW],
+      false,
+      true,
+    ],
+    [
+      '19',
+      [
+        NAME,
+        'Результаты контекстной рекламы не акцентировать: упор на исследование, сайт, SEO и систему маркетинга.',
+      ],
+      true,
+      false,
+    ],
+    [
+      '21',
+      [
+        NAME,
+        'Подавать как разработку стратегии, аналитической модели и плана роста. Клиент не внедрял: о росте не говорить.',
+        NO_NUMBERS,
+      ],
+      true,
+      false,
+    ],
+    [
+      '22',
+      [
+        'Компанию, отрасль и чувствительные детали не называть: NDA. Говорить о подходе и составе работ.',
+        NO_NUMBERS,
+      ],
+      false,
+      false,
+    ],
+    ['23', [NAME, 'Отделять сделанное от планов; результаты рекламы не заявлять.'], true, false],
+    ['24', [NAME, 'Проект в развитии: говорить как о текущей работе.', TOP], true, false],
+    ['25, 27, 28', [NDA_NAME, NUMBERS], false, true],
+  ]
+
+  it.each(REAL_SHAPES)(
+    'FR-MIND-2: the real rules of cases %s give name %s and numbers %s',
+    (_cases, rules, nameOpen, numbersOpen) => {
+      expect(readShowRules(rules)).toEqual({ nameOpen, numbersOpen })
+      // Every real record says something about the name, an allow or a ban.
+      expect(nameRuleStated(rules)).toBe(true)
+    },
+  )
+
+  it('FR-MIND-2: the name rule is stated by an allow or a ban, not by a word about something else', () => {
+    expect(nameRuleStated([NAME])).toBe(true)
+    expect(nameRuleStated([NDA_NAME])).toBe(true)
+    expect(nameRuleStated(['Анонимно'])).toBe(true)
+    expect(nameRuleStated(['Без названия компании.'])).toBe(true)
+    expect(nameRuleStated([])).toBe(false)
+    expect(nameRuleStated([NUMBERS, TOP])).toBe(false)
+    expect(nameRuleStated(['Можно упомянуть отзыв клиента 5★.', NO_NUMBERS])).toBe(false)
+    expect(nameRuleStated(['Микро-кейс: только как дополнительный пример.'])).toBe(false)
   })
 })

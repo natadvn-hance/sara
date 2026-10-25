@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { MIND_ID_PREFIX, MindFrontmatter } from '@sara/shared'
 import { parse } from 'yaml'
+import { listItems, nameRuleStated } from '../apps/core/src/mind/cases'
 
 export type MindProblem = { file: string; field: string; message: string }
 
@@ -27,7 +28,9 @@ function target(root: string, file: string): string {
 
 /**
  * A case is a knowledge record tagged «кейс» (any letter case, as apps/core/src/mind/cases.ts reads it). It must say
- * what may be shown to a client: the section «Как показывать клиенту» with at least one «- » item.
+ * what may be shown to a client: the section «Как показывать клиенту» with at least one «- » item, and the items must
+ * say whether the company may be named (an allow or a ban): the core opens the name only on an explicit allow, so a
+ * silent record would be shown without its name for no reason anyone wrote down.
  */
 function caseProblem(front: MindFrontmatter, body: string): string | null {
   const isCase =
@@ -37,6 +40,8 @@ function caseProblem(front: MindFrontmatter, body: string): string | null {
   if (!section) return 'у кейса нет раздела «Как показывать клиенту»'
   if (!/^- \S/m.test(section[1] ?? ''))
     return 'в разделе «Как показывать клиенту» нет пунктов (строк, начинающихся с «- »)'
+  if (!nameRuleStated(listItems(section[1] ?? '')))
+    return 'в разделе «Как показывать клиенту» не сказано про название компании: добавь пункт «Компанию можно называть» или «Компанию не называть»'
   return null
 }
 
