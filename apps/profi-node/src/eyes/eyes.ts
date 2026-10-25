@@ -252,21 +252,25 @@ export function createEyes(o: {
       touched.delete(chatId)
       const msgs = p.signals.filter((x): x is MessageSignal => x.t === 'message')
       const known = await o.db
-        .select({ id: rawMessage.platformMessageId })
+        .select({ id: rawMessage.platformMessageId, sentAt: rawMessage.sentAt })
         .from(rawMessage)
         .where(and(eq(rawMessage.chatId, chatId), eq(rawMessage.accountId, o.accountId)))
-        .limit(1)
       const quiet = new Set<string>()
       if (known.length === 0) {
         const lastOurs = msgs.findLastIndex((x) => x.message.author === 'specialist')
         for (const x of msgs.slice(0, lastOurs + 1)) quiet.add(x.message.platform_message_id)
       }
-      // The page shows only HH:MM; the stream's moment is the truer time of the message it named.
-      const signals = p.signals.map((x) =>
-        x.t === 'message' && touch && x.message.platform_message_id === touch.messageId
-          ? { ...x, message: { ...x.message, sent_at: touch.at } }
-          : x,
-      )
+      // The page shows only HH:MM; the stream's moment is the truer time of the message it named. A new message never
+      // gets a time before the one above it, stored or read now: the chat's order is its time order (M4 design 5.17).
+      const stored = new Set(known.map((r) => r.id))
+      let prev = Math.max(0, ...known.map((r) => Date.parse(r.sentAt)))
+      const signals = p.signals.map((x) => {
+        if (x.t !== 'message' || stored.has(x.message.platform_message_id)) return x
+        const named = touch && x.message.platform_message_id === touch.messageId
+        const at = Math.max(Date.parse(named ? touch.at : x.message.sent_at), prev + 1)
+        prev = at
+        return { ...x, message: { ...x.message, sent_at: new Date(at).toISOString() } }
+      })
       await onSignals(signals, undefined, quiet)
     },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,

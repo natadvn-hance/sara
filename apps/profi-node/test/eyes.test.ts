@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
@@ -385,6 +385,59 @@ describe('eyes', () => {
     expect((await db.select().from(rawMessage)).length).toBe(6)
   })
 
+  it('FR-CONV-2: the time the stream gave a message never puts it before the messages read with it', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const touch = (messageId: string) =>
+      e.onParsed(
+        {
+          recognized: true,
+          what: 'stream',
+          signals: [{ t: 'chat_touched', chatId: '95300011', messageId }],
+        },
+        'rtp',
+      )
+    const m = (id: string, author: 'client' | 'specialist') => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300011',
+        order_id: '95300011',
+        author,
+        // As fromChatDom does: the reading moment, 1 ms apart in page order.
+        sent_at: new Date(Date.now() + Number(id)).toISOString(),
+        text: 'x',
+        read: true,
+      },
+    })
+    const order = async () =>
+      (
+        await db
+          .select({ id: rawMessage.platformMessageId })
+          .from(rawMessage)
+          .where(eq(rawMessage.chatId, '95300011'))
+          .orderBy(asc(rawMessage.sentAt), asc(rawMessage.platformMessageId))
+      ).map((r) => r.id)
+    // The stream names the client's new word, the page is read a little later: on the first reading of the chat
+    // the named message is still the last one.
+    await touch('31')
+    await new Promise((r) => setTimeout(r, 30))
+    await e.onChatRead('95300011', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('30', 'specialist'), m('31', 'client')],
+    })
+    expect(await order()).toEqual(['30', '31'])
+    // Two new client messages, the stream named only the second: they keep the page order.
+    await touch('33')
+    await new Promise((r) => setTimeout(r, 30))
+    await e.onChatRead('95300011', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('30', 'specialist'), m('31', 'client'), m('32', 'client'), m('33', 'client')],
+    })
+    expect(await order()).toEqual(['30', '31', '32', '33'])
+  })
+
   it('FR-CONV-10: a new specialist message is shipped as an event without text', async () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
     const m = (id: string, author: 'client' | 'specialist' | 'system', text: string) => ({
@@ -426,7 +479,8 @@ describe('eyes', () => {
         chat_id: '95300010',
         order_id: '95300010',
         platform_message_id: '23',
-        sent_at: '2026-10-24T09:00:00.000Z',
+        // The page gave all four the same moment: a new one comes 1 ms after the three stored before it.
+        sent_at: '2026-10-24T09:00:00.003Z',
         author: 'specialist',
       },
     ])
