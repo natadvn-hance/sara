@@ -8,6 +8,7 @@ import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { clientTurnBefore, isRefusal } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
 import {
@@ -65,6 +66,9 @@ export type Sent = {
 
 /** A turn that has not finished for longer than this is not running, it is stuck. */
 const TURN_ALIVE_MS = 24 * 3600_000
+
+/** Why the ladder of a client who said no is not run (the trace says it). */
+export const REFUSED = 'клиент отказался'
 
 const STOP = (why: string): Ground => ({ go: false, end: true, why })
 const SKIP = (why: string): Ground => ({ go: false, end: false, why })
@@ -226,6 +230,12 @@ async function readGround(
   const ladder = await ladderTexts(d.db, conv.id)
   if (after.some((m) => m.author === 'specialist' && !ladder.has(normalizeText(m.text))))
     return STOP('наша сторона уже написала')
+  // The client said no before our last message: our polite answer to it is not a reason to write to him again.
+  const turn = clientTurnBefore(
+    chat.map((m) => ({ id: m.platform_message_id, side: m.author, text: m.text })),
+    anchor,
+  )
+  if (isRefusal(turn)) return STOP(REFUSED)
   // «Прочитал» is the stored mark of our last message, which only the client's read event sets (design 5.11).
   const lastOurs = chat.findLast((m) => m.author === 'specialist')
   const [stored] = lastOurs

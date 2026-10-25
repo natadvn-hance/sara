@@ -1,8 +1,9 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import { and, eq, like, notLike } from 'drizzle-orm'
-import { deal, task } from '../db/schema'
+import { convTurn, deal, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { getSetting } from '../settings/store'
+import { clientTurnBefore, isRefusal } from './clientCues'
 import {
   dormantStep,
   expireDormantTask,
@@ -14,6 +15,7 @@ import {
   type Planned,
   planNext,
   quietUntil,
+  REFUSED,
   type RemindDeps,
   sendStep,
   writeStep,
@@ -328,6 +330,17 @@ export async function syncReminders(
   const anchor = messages.findLast((m) => m.side === 'specialist' && !isLadderMessage(m, ladder))
   if (!anchor) return
   const wf = remindWorkflowId(conv.id, anchor.platformMessageId)
+  // The client said no: no ladder, the code decides it. Nothing waits for an older message either.
+  const turn = clientTurnBefore(
+    messages.map((m) => ({ id: m.platformMessageId, side: m.side, text: m.text })),
+    anchor.platformMessageId,
+  )
+  if (isRefusal(turn)) {
+    await cancelReminders(conv.id)
+    await resolveDormantTasks(conv.id)
+    await traceRefusal(conv.id, anchor.platformMessageId, wf)
+    return
+  }
   if ((await cancelReminders(conv.id, { keep: wf })) > 0) await resolveDormantTasks(conv.id, wf)
   await startReminder(conv.id, anchor.platformMessageId)
 }
@@ -336,6 +349,27 @@ export async function syncReminders(
 const NON_EXISTENT_WORKFLOW = 16
 const isMissingWorkflow = (e: unknown) =>
   (e as { dbosErrorCode?: number } | null)?.dbosErrorCode === NON_EXISTENT_WORKFLOW
+
+/** The only trace of a ladder that was not run: one row, whatever the shadow or the switch (a repeat adds none). */
+async function traceRefusal(conversationId: string, anchor: string, wf: string): Promise<void> {
+  const now = new Date().toISOString()
+  await d()
+    .db.insert(convTurn)
+    .values({
+      id: `${wf}:refused`,
+      conversationId,
+      kind: 'reminder',
+      anchorMessageId: anchor,
+      state: 'finished',
+      outcome: 'stopped',
+      decision: 'nothing',
+      decisionReason: REFUSED,
+      understanding: { step: 'refused' },
+      timings: { finished: now },
+      finishedAt: now,
+    })
+    .onConflictDoNothing()
+}
 
 /** Boris's answer on the dormant task reaches the process that waits for it (a process that is gone is fine). */
 export async function decideDormant(

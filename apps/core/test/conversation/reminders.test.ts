@@ -674,6 +674,28 @@ describe('when a reminder must not go', () => {
     expect((await db.select().from(chatMessage)).map((m) => m.platformMessageId)).toEqual(['m-1'])
   })
 
+  it('FR-CONV-12: after the client refused no reminder goes, also for a process that was already started', async () => {
+    await live()
+    const conv = await scene([
+      ...quiet(30 * HOUR),
+      { id: 'm-2', side: 'client', text: 'Спасибо, мы выбрали другого', at: ago(26 * HOUR) },
+      {
+        id: 'm-3',
+        side: 'specialist',
+        text: 'Понимаю, спасибо что написали.',
+        at: ago(25 * HOUR),
+      },
+    ])
+    await startReminder(conv.id, 'm-3')
+    await until(done(1))
+    const [r] = await rows()
+    expect(r?.outcome).toBe('stopped')
+    expect(r?.decisionReason).toBe('клиент отказался')
+    expect(sends).toHaveLength(0)
+    expect((await fake.calls()).length).toBe(0)
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-3'))) === 'SUCCESS')
+  })
+
   it('FR-CONV-12: a closed conversation gets none', async () => {
     await none(/закрыт/, async (id) => {
       await db
