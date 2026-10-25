@@ -1,9 +1,12 @@
+import { DirectionProfileData } from '@sara/shared'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import type { AppDeps } from '../api/deps'
 import { requireSession } from '../auth/session'
 import {
   cancelOnboarding,
+  confirmFormat,
+  confirmSpeed,
   confirmStep,
   finishOnboarding,
   getOnboarding,
@@ -12,7 +15,7 @@ import {
   startOnboarding,
   submitStep,
 } from './onboarding'
-import { getProfile } from './profile'
+import { getProfile, saveProfile } from './profile'
 import { registerRunRoutes } from './runsRoutes'
 import { activeRules, listVersions, rollbackTo } from './store'
 
@@ -26,6 +29,15 @@ const FinishBody = z.object({
   override: z.object({ reason: z.string().max(1000) }).optional(),
   state: z.enum(['on', 'shadow']).optional(),
 })
+const ConfirmFormatBody = z.object({
+  samples: z
+    .array(z.object({ lead_id: z.string(), body: z.string().max(2000) }))
+    .max(3)
+    .optional(),
+})
+const SpeedBody = z.object({ speed: z.enum(['normal', 'fast']) })
+/** The profile's own parts; the state (turning a direction on) goes through the onboarding's gate, never here. */
+const ProfileBody = DirectionProfileData.partial().strict()
 const StepParams = z.object({ accountId: z.string(), n: z.coerce.number().int() })
 
 export const DIRECTION_ERRORS = {
@@ -44,6 +56,12 @@ export const DIRECTION_ERRORS = {
   stale: 'Правила изменились, пока ты настраивал. Обнови черновик.',
   incomplete: 'Не все шаги подтверждены.',
   needsCalibration: 'Сначала проверь правила на заявках.',
+  noLeads: 'Пока нет заявок, на которых можно написать образцы. Дождись первых и вернись к шагу.',
+  hasName: 'В образце осталось имя клиента. Убери его: имена клиентов не попадают в образцы.',
+  emptySample: 'В образце не осталось текста, кроме приветствия.',
+  tooLong: 'Образец длиннее разрешённого формата. Сократи его.',
+  unknownLead: 'Такого образца в этом шаге нет.',
+  badFormat: 'Формат с такими образцами не собирается. Скажи шаг заново.',
 } as const
 
 /** The pult's direction pages (FR-ACC-2): what the direction is now, its versions, and the way back. */
@@ -79,6 +97,22 @@ export function registerDirectionRoutes(app: FastifyInstance, d: AppDeps): void 
           const o = await getOnboarding(d.db, accountId)
           return o ? { open: true, step: o.step } : null
         })(),
+      }
+    })
+
+    // The profile outside the onboarding: speed, reply format and cases are edited in place (FR-ACC-2).
+    scoped.put('/api/directions/:accountId/profile', async (req, reply) => {
+      const { accountId } = req.params as { accountId: string }
+      if (!account(accountId)) return noAccount(reply)
+      await saveProfile(d.db, accountId, ProfileBody.parse(req.body), 'boris')
+      const profile = await getProfile(d.db, accountId)
+      return {
+        profile: {
+          speed: profile.speed,
+          reply_format: profile.reply_format,
+          cases: profile.cases,
+          version: profile.version,
+        },
       }
     })
 
@@ -125,6 +159,7 @@ export function registerDirectionRoutes(app: FastifyInstance, d: AppDeps): void 
         invalid: [422, DIRECTION_ERRORS.invalid],
         limit: [503, DIRECTION_ERRORS.limit],
         broken: [409, DIRECTION_ERRORS.broken],
+        no_leads: [409, DIRECTION_ERRORS.noLeads],
       } as const
       const [status, error] = answer[r.reason]
       return reply.code(status).send({ error, reason: r.reason })
@@ -133,7 +168,26 @@ export function registerDirectionRoutes(app: FastifyInstance, d: AppDeps): void 
     scoped.post('/api/directions/:accountId/onboarding/steps/:n/confirm', async (req, reply) => {
       const { accountId, n } = StepParams.parse(req.params)
       if (!account(accountId)) return noAccount(reply)
-      const view = await confirmStep(d.db, accountId, n)
+      if (n === 5) {
+        // The samples Boris edited come with it; they become the examples only without a greeting and a name.
+        const { samples } = ConfirmFormatBody.parse(req.body ?? {})
+        const r = await confirmFormat(d.db, accountId, samples)
+        if (r.ok) return { onboarding: r.view }
+        const answer = {
+          no_proposal: [409, DIRECTION_ERRORS.nothingToConfirm],
+          unknown_lead: [422, DIRECTION_ERRORS.unknownLead],
+          empty: [422, DIRECTION_ERRORS.emptySample],
+          has_name: [422, DIRECTION_ERRORS.hasName],
+          too_long: [422, DIRECTION_ERRORS.tooLong],
+          invalid: [422, DIRECTION_ERRORS.badFormat],
+        } as const
+        const [status, error] = answer[r.error]
+        return reply.code(status).send({ error, code: r.error })
+      }
+      const view =
+        n === 7
+          ? await confirmSpeed(d.db, accountId, SpeedBody.parse(req.body).speed)
+          : await confirmStep(d.db, accountId, n)
       if (!view) return reply.code(409).send({ error: DIRECTION_ERRORS.nothingToConfirm })
       return { onboarding: view }
     })
