@@ -2,8 +2,12 @@ import cookie from '@fastify/cookie'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { startSession } from '../../src/auth/session'
+import { sendTextNow } from '../../src/conversation/outbox'
 import { registerConversationRoutes } from '../../src/conversation/routes'
 import { ensureConversation, getConversation } from '../../src/conversation/store'
+import { outbox } from '../../src/db/schema'
+import { setSetting } from '../../src/settings/store'
+import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
 
 const { db, close } = openTestDb()
@@ -67,5 +71,49 @@ describe('conversation API', () => {
       headers: { cookie: session },
     })
     expect(missing.statusCode).toBe(404)
+  })
+
+  it('FR-CONV-9: the same key of the pult sends one message, no key sends each time', async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    const profi = stubProfi([chatMsg('m-1', 'client', 'Привет', new Date().toISOString(), 'c-2')])
+    const sent: string[] = []
+    profi.sendMessage = async (i) => {
+      sent.push(i.idempotency_key)
+      return { found_on_page: true, platform_message_id: `sent-${sent.length}` }
+    }
+    const withSend = Fastify()
+    await withSend.register(cookie, { secret: 'test-secret' })
+    withSend.post('/login', async (_req, reply) => {
+      startSession(reply, false)
+      return {}
+    })
+    registerConversationRoutes(withSend, {
+      db,
+      notifier: { sendText: async () => ({ messageId: 1 }) },
+      sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
+    })
+    const login = await withSend.inject({ method: 'POST', url: '/login' })
+    const cookieHeader = String(login.headers['set-cookie']).split(';')[0] ?? ''
+    const conv = await ensureConversation(db, {
+      accountId: 'hance-marketing',
+      chatId: 'c-2',
+      orderId: null,
+    })
+    const say = (body: object) =>
+      withSend.inject({
+        method: 'POST',
+        url: `/api/conversations/${conv.id}/say`,
+        headers: { cookie: cookieHeader },
+        payload: body,
+      })
+    expect((await say({ text: 'Добрый день', key: 'pult-1' })).statusCode).toBe(200)
+    expect((await say({ text: 'Добрый день', key: 'pult-1' })).statusCode).toBe(200)
+    expect(await db.select().from(outbox)).toHaveLength(1)
+    expect(sent).toEqual(['msg:say:api:pult-1'])
+    await say({ text: 'Ещё раз' })
+    await say({ text: 'Ещё раз' })
+    expect(await db.select().from(outbox)).toHaveLength(3)
+    expect((await say({ text: 'Добрый день', key: 'x'.repeat(101) })).statusCode).toBe(400)
+    await withSend.close()
   })
 })

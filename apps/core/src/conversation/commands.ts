@@ -218,7 +218,13 @@ async function proposeBorisWords(db: Db, turnId: string, conversationId: string,
  * «Написать текст» (FR-CONV-11): Boris's own words go to the client as they are, after the switch even on the
  * «Пишет клиентам» pause; in shadow they are kept as his answer beside Sara's draft and sent by nobody.
  */
-export async function say(d: CommandDeps, conversationId: string, text: string): Promise<string> {
+export async function say(
+  d: CommandDeps,
+  conversationId: string,
+  text: string,
+  /** What makes a repeat of the same request the same message (a Telegram message, an API key). */
+  key?: string,
+): Promise<string> {
   const t = await latestTurn(d.db, conversationId)
   if (t) {
     await d.db.update(convTurn).set({ borisText: text }).where(eq(convTurn.id, t.id))
@@ -226,7 +232,7 @@ export async function say(d: CommandDeps, conversationId: string, text: string):
   }
   await journal(d.db, 'conv.said', conversationId, 'boris')
   if ((await getSetting(d.db, 'conv.v1_writes')) || !d.sendText) return COMMAND_TEXTS.shadowSay
-  return d.sendText(conversationId, text, 'boris')
+  return d.sendText(conversationId, text, 'boris', { key })
 }
 
 /** The card's task is resolved once; false when it already was. */
@@ -316,6 +322,7 @@ export async function onConvPress(
       const covered = ((turn.messageIds as string[] | null) ?? []).at(-1)
       const answer = await d.sendText(conversationId, turn.text, 'sara', {
         expectLast: covered ?? undefined,
+        key: `send:${t.id}`,
       })
       if (answer !== SEND_TEXTS.changed) return answer
       await d.db.update(task).set({ resolution: 'stale' }).where(eq(task.id, t.id))
@@ -340,7 +347,7 @@ async function startEdit(d: CommandDeps, turnId: string): Promise<void> {
 /** Boris's version after «Изменить»: kept beside the draft (in shadow), sent as his text after the switch. */
 export async function onConvEdit(
   d: CommandDeps,
-  a: { question: QuestionRow; text: string; voice: boolean; at: Date },
+  a: { question: QuestionRow; text: string; voice: boolean; at: Date; messageId?: number },
 ): Promise<string> {
   await d.db
     .update(question)
@@ -355,8 +362,12 @@ export async function onConvEdit(
     voice: a.voice,
   })
   if ((await getSetting(d.db, 'conv.v1_writes')) || !d.sendText) return COMMAND_TEXTS.editKept
-  return d.sendText(turn.conversationId, a.text, 'boris')
+  return d.sendText(turn.conversationId, a.text, 'boris', { key: telegramKey(a.messageId) })
 }
+
+/** A message of Boris's in Telegram is one message to the client however often the update is delivered. */
+const telegramKey = (messageId: number | undefined) =>
+  messageId === undefined ? undefined : `say:tg:${messageId}`
 
 export type CardCommand =
   | { cmd: 'take' }
@@ -382,7 +393,13 @@ export function parseCardReply(text: string): CardCommand | null {
 /** A reply to a conversation card: null when it is not a reply to one (the message is someone else's business). */
 export async function onConvReply(
   d: CommandDeps,
-  m: { replyToMessageId: number | null; text: string; voice?: boolean; at: Date },
+  m: {
+    replyToMessageId: number | null
+    text: string
+    voice?: boolean
+    messageId?: number
+    at: Date
+  },
 ): Promise<string | null> {
   if (m.replyToMessageId === null) return null
   const [t] = await d.db
@@ -405,7 +422,13 @@ export async function onConvReply(
         ),
       )
     if (edit)
-      return onConvEdit(d, { question: edit, text: m.text, voice: m.voice ?? false, at: m.at })
+      return onConvEdit(d, {
+        question: edit,
+        text: m.text,
+        voice: m.voice ?? false,
+        messageId: m.messageId,
+        at: m.at,
+      })
     return COMMAND_TEXTS.notUnderstood
   }
   switch (c.cmd) {
@@ -416,7 +439,7 @@ export async function onConvReply(
       await giveBack(d.db, turn.conversationId, c.note)
       return COMMAND_TEXTS.returned
     case 'say':
-      return say(d, turn.conversationId, c.text)
+      return say(d, turn.conversationId, c.text, telegramKey(m.messageId))
     case 'close':
       await close(d.db, turn.conversationId)
       return COMMAND_TEXTS.closed

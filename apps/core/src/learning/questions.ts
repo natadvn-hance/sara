@@ -25,7 +25,14 @@ import type { Notifier } from '../notify/notifier'
 export type QuestionKind = 'why_skip' | 'why_want' | 'why_decline' | 'edit_draft' | 'edit_price'
 export type QuestionRow = typeof question.$inferSelect
 /** Boris's words that answer an edit_draft or edit_price request. */
-export type DraftAnswer = { question: QuestionRow; text: string; voice: boolean; at: Date }
+export type DraftAnswer = {
+  question: QuestionRow
+  text: string
+  voice: boolean
+  /** The message's number in Telegram, when the answer came from there. */
+  messageId?: number
+  at: Date
+}
 
 const WHY_KINDS: QuestionKind[] = ['why_skip', 'why_want', 'why_decline']
 /** Sara's requests for the bid itself: an answer to one becomes the bid's text or price. */
