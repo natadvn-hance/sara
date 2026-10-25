@@ -9,10 +9,13 @@ import { rulesHash } from './hash'
 
 export type TrialMode = 'plain' | 'escalated'
 
-/** The Claude limit is not a miss: a run that meets it stops and says so, instead of skipping leads one by one. */
-export class ClaudeLimitError extends Error {
-  constructor() {
-    super('the Claude limit holds')
+/**
+ * Claude cannot answer at all, which is not a miss of one lead: a run that meets it stops and says why (the limit
+ * is spent, or no token is saved) instead of skipping every lead one by one.
+ */
+export class ClaudeStopError extends Error {
+  constructor(readonly reason: 'limit' | 'not_connected') {
+    super(`Claude does not answer: ${reason}`)
   }
 }
 
@@ -46,7 +49,7 @@ export const orderOfLead = (l: typeof lead.$inferSelect): ProfiOrder =>
 /**
  * The lead scored under `rules` to try them out (FR-ACC-5): from the cache when the same rules and the same
  * scorer prompt already scored it, else by the model at P3 and kept. A model miss is null and is not kept; the
- * Claude limit throws ClaudeLimitError.
+ * Claude limit or a missing token throws ClaudeStopError.
  * `plain` is haiku alone, so two sets of rules are compared on one model; `escalated` is as in work.
  */
 export async function trialScore(
@@ -54,11 +57,13 @@ export async function trialScore(
   leadId: string,
   rules: DirectionRules,
   mode: TrialMode,
+  /** The scorer prompt version to cache under; a run passes the one it fixed at its start. */
+  version?: number,
 ): Promise<TrialResult | null> {
   const [row] = await d.db.select().from(lead).where(eq(lead.id, leadId))
   if (!row) return null
   const hash = rulesHash(rules)
-  const roleVersion = (await loadRole(d.rolesDir, 'scorer')).meta.version
+  const roleVersion = version ?? (await loadRole(d.rolesDir, 'scorer')).meta.version
   const key = and(
     eq(trialTable.rulesHash, hash),
     eq(trialTable.leadId, leadId),
@@ -78,15 +83,16 @@ export async function trialScore(
       model: cached.model === 'sonnet' ? 'sonnet' : 'haiku',
     }
   }
-  let limited = false
+  let stop: 'limit' | 'not_connected' | null = null
   const s = await scoreOrder(d.gateway, orderOfLead(row), rules, {
     escalate: mode === 'escalated',
     priority: 'P3',
     onFailure: (errorClass) => {
-      if (errorClass === 'limit_reached') limited = true
+      if (errorClass === 'limit_reached') stop = 'limit'
+      else if (errorClass === 'not_connected') stop = 'not_connected'
     },
   })
-  if (limited) throw new ClaudeLimitError()
+  if (stop) throw new ClaudeStopError(stop)
   if (!s) return null
   const result: TrialResult = {
     score: s.score,

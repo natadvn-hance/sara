@@ -520,6 +520,10 @@ export const directionRun = core.table('direction_run', {
   done: integer('done').notNull().default(0),
   skipped: integer('skipped').notNull().default(0),
   stopReason: text('stop_reason'),
+  /** The scorer prompt version the run scored with; its result reads only scores of this version. */
+  scorerVersion: integer('scorer_version'),
+  /** Touched at the start and after every lead: a run nobody touched for long is a dead one. */
+  updatedAt: ts('updated_at').notNull().defaultNow(),
   createdAt: ts('created_at').notNull().defaultNow(),
   finishedAt: ts('finished_at'),
 })

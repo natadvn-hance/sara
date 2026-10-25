@@ -1,5 +1,5 @@
 {
-  "id": "1c75543a-bff5-491d-aa4a-a7bebc51195d",
+  "id": "f417462f-4881-435b-800a-e9c973d3792d",
   "prevId": "0044596f-c62b-4d2f-b741-4d855233e298",
   "version": "7",
   "dialect": "postgresql",
@@ -978,6 +978,19 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "scorer_version": {
+          "name": "scorer_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
         "created_at": {
           "name": "created_at",

@@ -13,6 +13,8 @@ CREATE TABLE "core"."direction_run" (
 	"done" integer DEFAULT 0 NOT NULL,
 	"skipped" integer DEFAULT 0 NOT NULL,
 	"stop_reason" text,
+	"scorer_version" integer,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"finished_at" timestamp with time zone
 );
