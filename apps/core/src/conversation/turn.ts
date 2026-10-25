@@ -7,7 +7,7 @@ import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
-import { buildDossier, clientNames, turnMessageIds } from './dossier'
+import { buildDossier, clientNames, turnMessageIds, untilOurs } from './dossier'
 import { planTurn } from './engine'
 import { applyOwnerRule, getConversation, updateConversation } from './store'
 import { storedOf, syncChat } from './sync'
@@ -27,6 +27,8 @@ export type TurnDeps = {
   send(turnId: string, round: number): Promise<'confirmed' | 'changed' | 'uncertain' | 'failed'>
   /** The human pause; tests shorten it. */
   pauseMs?(textLength: number): number
+  /** In shadow, when a turn is over: the real reply our side gave meanwhile is compared with its draft (design 5.12). */
+  compare?(turnId: string): Promise<void>
   /** Retries of the card and forward steps; tests shorten them. */
   stepRetry?: { maxAttempts: number; intervalSeconds: number; backoffRate?: number }
   /** How often and how long an unreadable chat is retried; tests shorten it. */
@@ -167,7 +169,9 @@ async function hear(
   if (conv.owner === 'boris' && conv.ownerReason === 'take') return { gate: 'take', quietLeftS: 0 }
   if (r.unclear) return { gate: 'unclear', quietLeftS: 0 }
   const at = r.messages.findIndex((m) => m.platformMessageId === anchor)
-  if (at >= 0 && r.messages.slice(at).some((m) => m.side === 'specialist'))
+  // After the switch our side's message ends the turn. In shadow it is old Sara's or Boris's answer, which the
+  // turn's draft is compared with: the turn goes on and the comparison closes it (design 5.9).
+  if (!v1Writes && at >= 0 && r.messages.slice(at).some((m) => m.side === 'specialist'))
     return { gate: 'answered', quietLeftS: 0 }
   const quietLeftS = quietLeftSeconds(
     conv,
@@ -194,16 +198,23 @@ async function policySettings(db: Db, accountId: string): Promise<PolicySettings
 }
 
 /** Steps 2-6 in one DBOS step: the model call is not repeated by a replay. Every failure becomes a draft. */
-async function planStep(turnId: string, conversationId: string): Promise<Planned> {
+async function planStep(turnId: string, conversationId: string, anchor: string): Promise<Planned> {
   const { db, gateway, mind, profi } = d()
   const now = new Date()
   const conv = await getConversation(db, conversationId)
   if (!conv) return { action: 'nothing', holdUntil: null, text: null, covered: [] }
   // Even a turn that fails to plan covers the client turn it saw, or the conversation would never get another turn.
-  const seen = turnMessageIds(await storedMessages(db, conversationId), conv.handledThrough)
+  const seen = turnMessageIds(
+    untilOurs(await storedMessages(db, conversationId), anchor),
+    conv.handledThrough,
+  )
   try {
     const settings = await policySettings(db, conv.accountId)
-    const dossier = await buildDossier(db, conversationId, now, { night: settings.night, profi })
+    const dossier = await buildDossier(db, conversationId, now, {
+      night: settings.night,
+      profi,
+      anchor,
+    })
     await stamp(turnId, 'recalled', { messageIds: dossier.turnMessageIds })
     const plan = await planTurn(
       { gateway, mind },
@@ -270,11 +281,18 @@ async function planStep(turnId: string, conversationId: string): Promise<Planned
 }
 
 /** The chat stayed unreadable: the turn is a draft with the reason, so the card tells Boris. Returns what it covers. */
-async function unreadableStep(turnId: string, conversationId: string): Promise<string[]> {
+async function unreadableStep(
+  turnId: string,
+  conversationId: string,
+  anchor: string,
+): Promise<string[]> {
   const { db } = d()
   const conv = await getConversation(db, conversationId)
   const seen = conv
-    ? turnMessageIds(await storedMessages(db, conversationId), conv.handledThrough)
+    ? turnMessageIds(
+        untilOurs(await storedMessages(db, conversationId), anchor),
+        conv.handledThrough,
+      )
     : []
   await stamp(turnId, 'decided', {
     decision: 'draft',
@@ -381,7 +399,7 @@ async function handoff(
   const through =
     covered.at(-1) ??
     (outcome !== 'answered'
-      ? messages.findLast((m) => m.side === 'client')?.platformMessageId
+      ? untilOurs(messages, anchor).findLast((m) => m.side === 'client')?.platformMessageId
       : undefined)
   // The mark only moves forward: «Вернуть» or another turn may have moved it further while this one ran.
   const at = (id: string | null | undefined) =>
@@ -452,7 +470,7 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
     }
     if (heard.gate === 'unreadable') {
       // Thirty minutes without a chat: Boris is told, the turn is over.
-      covered = await DBOS.runStep(() => unreadableStep(turnId, conversationId), {
+      covered = await DBOS.runStep(() => unreadableStep(turnId, conversationId, anchor), {
         name: 'unreadable',
         ...DB_STEP,
       })
@@ -466,7 +484,7 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
         name: 'started',
         ...DB_STEP,
       })
-    const plan = await DBOS.runStep(() => planStep(turnId, conversationId), {
+    const plan = await DBOS.runStep(() => planStep(turnId, conversationId, anchor), {
       name: `plan-${round}`,
     })
     covered = plan.covered
@@ -528,6 +546,10 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       ).catch((e) => console.error('turn outcome hook failed', e instanceof Error ? e.message : e)),
     { name: 'outcome' },
   )
+  // In shadow our side may have answered while the turn ran: its real reply is put beside the draft now that the
+  // turn is over (a message that comes later is compared by its own event). A failure here changes no outcome.
+  if (outcome === 'drafted' || outcome === 'called_boris')
+    await tried(turnId, 'compare', async () => d().compare?.(turnId), notifyStep())
   if (next)
     await DBOS.startWorkflow(convTurnWorkflow, {
       workflowID: turnWorkflowId(conversationId, next),

@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path'
 import { type EventEnvelope, newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { sendTurnCard } from '../../src/conversation/cards'
+import { compareAfterTurn } from '../../src/conversation/compare'
 import { createConversationEvents } from '../../src/conversation/events'
 import { moscowHour } from '../../src/conversation/time'
 import { pokeTurn, setTurnDeps, startTurnFor, type TurnDeps } from '../../src/conversation/turn'
@@ -42,6 +44,14 @@ let onSend: () => Promise<void> = async () => {}
 let mindFails = false
 let readsFail = false
 let forwardFails = false
+let realCards = false
+let edits: string[] = []
+const cardNotifier = {
+  sendButtons: async () => ({ messageId: 700 }),
+  editText: async (_id: number, text: string) => {
+    edits.push(text)
+  },
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 beforeAll(async () => {
@@ -95,8 +105,10 @@ beforeAll(async () => {
     },
     card: async (turnId) => {
       cards.push(turnId)
+      if (realCards) await sendTurnCard({ db, notifier: cardNotifier }, turnId)
       await onCard()
     },
+    compare: (turnId) => compareAfterTurn({ db, notifier: cardNotifier }, turnId),
     forward: async (turnId) => {
       forwards.push(turnId)
       if (forwardFails) throw new Error('telegram is down')
@@ -143,6 +155,8 @@ beforeEach(async () => {
   mindFails = false
   readsFail = false
   forwardFails = false
+  realCards = false
+  edits = []
   await setSetting(db, 'pipeline.conversations', true, 'system')
   await setSetting(db, 'conv.quiet_after_message_s', 1, 'system')
   await setSetting(db, 'conv.quiet_after_typing_s', 1, 'system')
@@ -270,6 +284,36 @@ describe('the turn workflow', () => {
     const [c] = await db.select().from(conversation)
     expect(c?.owner).toBe('boris')
   }, 30000)
+
+  it('FR-CONV-6: in shadow our side answering during the turn does not cancel it: the card goes out and gets the real reply', async () => {
+    realCards = true
+    await clientWrites('m-2', 'Как начнём?')
+    profi.chat.push(
+      chatMsg('m-3', 'specialist', 'Анна, давайте начнём с созвона', new Date().toISOString()),
+    )
+    await turnsDone(1)
+    // The comparison is the step after the outcome: it is waited for.
+    for (let i = 0; i < 100 && edits.length === 0; i++) await sleep(100)
+    const [t] = await db.select().from(convTurn)
+    expect(t).toMatchObject({
+      outcome: 'drafted',
+      messageIds: ['m-2'],
+      actualMessageId: 'm-3',
+      actualAuthor: 'unknown',
+    })
+    expect(t?.similarity).not.toBeNull()
+    expect(cards).toHaveLength(1)
+    expect(edits).toHaveLength(1)
+    expect(edits[0]).toMatch(/Ушло клиенту/)
+    expect(await countEvents(db, 'conv.compared')).toBe(1)
+    expect(await countEvents(db, 'conv.turn_cancelled')).toBe(0)
+    const [c] = await db.select().from(conversation)
+    expect(c).toMatchObject({ owner: 'sara', handledThrough: 'm-2' })
+    // What the client wrote after the real reply is a turn of its own.
+    await clientWrites('m-4', 'Хорошо, завтра')
+    const rows = await turnsDone(2)
+    expect(rows.find((r) => r.anchorMessageId === 'm-4')?.messageIds).toEqual(['m-4'])
+  }, 40000)
 
   it('FR-CONV-6: the client writing during the pause makes the turn plan again with the whole turn', async () => {
     await setSetting(db, 'conv.v1_writes', false, 'system')
