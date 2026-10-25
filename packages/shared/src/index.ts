@@ -1,6 +1,7 @@
 export * from './contracts/conversation'
 export * from './contracts/direction'
 export * from './contracts/event'
+export * from './contracts/meeting'
 export * from './contracts/eventTypes'
 export * from './contracts/mind'
 export * from './contracts/onboarding'

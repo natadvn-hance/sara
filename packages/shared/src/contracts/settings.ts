@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { LOCKED_TOPICS, TOPICS, type Topic } from './conversation'
+import { Availability, DEFAULT_AVAILABILITY } from './meeting'
 
 const hours = z.object({
   from: z.number().int().min(0).max(23),
@@ -92,6 +93,23 @@ export const SETTINGS = {
   'conv.reminders': { schema: z.boolean(), default: true },
   /** FR-MIND-2: local vectors beside the full-text search, when they proved cheap. */
   'mind.vectors': { schema: z.boolean(), default: false },
+  /** FR-MEET-1: Boris's free time for calls, Moscow time. */
+  'meet.availability': { schema: Availability, default: DEFAULT_AVAILABILITY },
+  /** FR-MEET-2: the call procedure answers clients (in shadow it only drafts). */
+  'meet.procedure': { schema: z.boolean(), default: true },
+  /** ADR-026: procedure texts go to the client by themselves (self) or as Boris's drafts (draft). */
+  'meet.autonomy': { schema: z.enum(['self', 'draft']), default: 'self' as 'self' | 'draft' },
+  /** Minutes Sara waits for Boris's «Позвоню сейчас» before she offers the client times. */
+  'meet.asap_wait_min': { schema: z.number().int().min(1).max(60), default: 10 },
+  /** One message to the client on the meeting day; off until the switch from old Sara. */
+  'meet.client_reminder': { schema: z.boolean(), default: false },
+  /** FR-ANL: the weekly report, Moscow weekday 1-7 (Monday is 1) and hour; null, none. */
+  'analytics.weekly': {
+    schema: z
+      .object({ weekday: z.number().int().min(1).max(7), hour: z.number().int().min(0).max(23) })
+      .nullable(),
+    default: { weekday: 1, hour: 10 } as { weekday: number; hour: number } | null,
+  },
 } as const
 
 export type SettingKey = keyof typeof SETTINGS

@@ -15,6 +15,20 @@ export const TASK_ACTIONS = [
   'razbor',
   'good',
   'close',
+  /** M6: meetings and outcomes (design 5.5-5.7). */
+  'meet',
+  'held',
+  'noshow',
+  'moved',
+  'won',
+  'thinking',
+  'lost',
+  'later',
+  'offer',
+  'callnow',
+  'cancel',
+  'fix',
+  'agreed',
 ] as const
 export type TaskAction = (typeof TASK_ACTIONS)[number]
 

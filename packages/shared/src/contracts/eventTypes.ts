@@ -85,6 +85,22 @@ export const EVENT_TYPES = [
   'mind.proposed',
   'history.exported',
   'exam.finished',
+  'meeting.call_asked',
+  'meeting.offered',
+  'meeting.confirming',
+  'meeting.unconfirmed',
+  'meeting.withdrawn',
+  'meeting.expired',
+  'meeting.booked',
+  'meeting.announced',
+  'meeting.moved',
+  'meeting.cancelled',
+  'meeting.reminded',
+  'meeting.held',
+  'meeting.no_show',
+  'deal.outcome_set',
+  'deal.amount_set',
+  'analytics.report_sent',
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
