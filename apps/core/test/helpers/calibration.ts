@@ -12,13 +12,22 @@ import { scorerAnswer } from './scorer'
 export const idOf = (i: number) => String(971000 + i)
 
 /** Leads with these live scores, newest first; the ids are 971000 and up (from `first` on). */
-export async function leadsWith(db: Db, scores: number[], first = 0) {
+export async function leadsWith(
+  db: Db,
+  scores: number[],
+  first = 0,
+  accountId = 'hance-marketing',
+) {
   for (const [k, score] of scores.entries()) {
     const i = first + k
     await leadWithScore(db, idOf(i), score)
     await db
       .update(lead)
-      .set({ seenAt: new Date(Date.now() - i * 60_000).toISOString(), status: 'scored_out' })
+      .set({
+        seenAt: new Date(Date.now() - i * 60_000).toISOString(),
+        status: 'scored_out',
+        accountId,
+      })
       .where(eq(lead.id, idOf(i)))
   }
 }
@@ -37,6 +46,8 @@ export async function calibrate(
   await leadsWith(
     db,
     Array.from({ length: boris.length }, () => 60),
+    0,
+    accountId,
   )
   const r = await startCalibration(db, { accountId, rules })
   if (!r.ok) throw new Error('no run')

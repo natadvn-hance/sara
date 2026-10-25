@@ -1,5 +1,6 @@
 import {
   DirectionRules,
+  type DirectionState,
   newEventId,
   OnbAbout,
   OnbIdeal,
@@ -10,13 +11,15 @@ import {
 } from '@sara/shared'
 import { and, eq, sql } from 'drizzle-orm'
 import type { ZodType } from 'zod'
-import type { Db, DbOrTx, Tx } from '../db/client'
+import type { Db, DbOrTx } from '../db/client'
 import { directionOnboarding, directionOverride } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import type { RoleName } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
 import { rulesText } from '../leads/scorer'
+import { calibrationPassed } from './calibration'
 import { rulesDiff } from './diff'
+import { saveProfileIn } from './profile'
 import { activeRules, insertVersion } from './store'
 
 export type AboutData = Omit<OnbAbout, 'understood'>
@@ -492,7 +495,8 @@ export async function finishOnboarding(
   accountId: string,
   opts: {
     override?: { reason: string }
-    calibrated?: (tx: Tx, rules: DirectionRules) => Promise<boolean>
+    /** Turn the direction on, or on in the shadow, together with the version (the profile's state). */
+    state?: DirectionState
   },
 ): Promise<FinishResult> {
   return db.transaction(async (tx): Promise<FinishResult> => {
@@ -507,12 +511,14 @@ export async function finishOnboarding(
     const draft = draftOf(row)
     const rules = draft ? assembleRules(row.mode === 'edit' ? active.rules : null, draft) : null
     if (!rules) return { ok: false, error: 'incomplete' }
-    const done = (version: number | null) =>
-      tx
+    const done = async (version: number | null) => {
+      await tx
         .update(directionOnboarding)
         .set({ state: 'finished', updatedAt: new Date().toISOString() })
         .where(eq(directionOnboarding.accountId, accountId))
-        .then(() => ({ ok: true as const, version }))
+      if (opts.state) await saveProfileIn(tx, accountId, { state: opts.state }, 'boris')
+      return { ok: true as const, version }
+    }
     const sections = rulesDiff(active.rules, rules).sections
     if (sections.length === 0) {
       await appendEvent(
@@ -522,7 +528,7 @@ export async function finishOnboarding(
       return done(null)
     }
     const reason = opts.override?.reason.trim() ?? ''
-    const passed = (await opts.calibrated?.(tx, rules)) ?? false
+    const passed = await calibrationPassed(tx, accountId, rules)
     if (!passed && !reason) return { ok: false, error: 'needs_calibration' }
     const version = await insertVersion(tx, {
       accountId,
