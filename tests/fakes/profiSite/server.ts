@@ -5,11 +5,11 @@ import type { Socket } from 'node:net'
 import { type WebSocket, WebSocketServer } from 'ws'
 import {
   type BidLook,
+  type BoardLayout,
   bannedPage,
   CHANGED_LAYOUT,
   chatPage,
   chatsPage,
-  type BoardLayout,
   feedPage,
   type Layout,
   loginPage,
