@@ -32,7 +32,9 @@ test('FR-MEET-1: Boris sets Friday 10:00-13:00 and sees the next free times', as
   await friday.getByLabel('до').fill('13:00')
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByRole('status')).toHaveText('Сохранила.')
-  await expect(page.getByRole('list', { name: 'Ближайшие свободные' }).getByRole('listitem')).toHaveCount(3)
+  await expect(
+    page.getByRole('list', { name: 'Ближайшие свободные' }).getByRole('listitem'),
+  ).toHaveCount(3)
 
   await page.reload()
   await expect(page.getByRole('group', { name: 'Пятница' }).getByLabel('до')).toHaveValue('13:00')

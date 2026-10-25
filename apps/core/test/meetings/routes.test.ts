@@ -37,7 +37,10 @@ describe('free time API', () => {
     const body = res.json()
     expect(body.availability).toEqual(DEFAULT_AVAILABILITY)
     expect(body.preview).toHaveLength(3)
-    expect(body.preview[0]).toMatchObject({ startsAt: expect.any(String), label: expect.any(String) })
+    expect(body.preview[0]).toMatchObject({
+      startsAt: expect.any(String),
+      label: expect.any(String),
+    })
   })
 
   it('FR-MEET-1: saving free time keeps the history and journals the change', async () => {
