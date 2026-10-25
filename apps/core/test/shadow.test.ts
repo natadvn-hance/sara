@@ -47,9 +47,9 @@ async function journal(
   await db.execute(sql`alter table core.event enable trigger event_append_only`)
 }
 
-async function rawOrder(id: string, publishedAt: string, seenAt = publishedAt) {
+async function rawOrder(id: string, publishedAt: string, seenAt = publishedAt, reposted = false) {
   await db.execute(
-    sql`insert into node.raw_order (order_id, account_id, seen_at, body) values (${id}, 'hance-marketing', ${seenAt}, ${JSON.stringify({ published_at: publishedAt })}::jsonb)`,
+    sql`insert into node.raw_order (order_id, account_id, seen_at, body) values (${id}, 'hance-marketing', ${seenAt}, ${JSON.stringify({ published_at: publishedAt, ...(reposted && { reposted: true }) })}::jsonb)`,
   )
 }
 async function rawMessage(id: string, sentAt: string) {
@@ -98,6 +98,27 @@ describe('shadow report', () => {
     const r = await shadowReport(db, from, to)
     expect(r.orders).toMatchObject({ count: 1, under60sShare: 1 })
     expect(r.oldOrders).toBe(1)
-    expect(formatShadowReport(r, from, to)).toContain('Старые и поднятые заказы: 1')
+    expect(formatShadowReport(r, from, to)).toContain('Старые заказы: 1')
+  })
+
+  it('FR-LEAD-1: a raised-again order is counted as such, apart from the speed and from the old ones', async () => {
+    await rawOrder('1', at(0))
+    await journal('profi.order_seen', '1', at(0, 20), {})
+    // Raised again a minute ago: its date is the raise, so it would pass for a new order without the flag.
+    await rawOrder('2', at(5), at(5, 30), true)
+    await journal('profi.order_seen', '2', at(5, 40), {})
+    // Old and raised: one count, the raised one.
+    await rawOrder('3', '2026-10-20T08:00:00.000Z', at(8), true)
+    await journal('profi.order_seen', '3', at(8, 10), {})
+    await rawOrder('4', '2026-10-20T08:00:00.000Z', at(9))
+    await journal('profi.order_seen', '4', at(9, 10), {})
+    const r = await shadowReport(db, from, to)
+    expect(r.orders).toMatchObject({ count: 1, under60sShare: 1 })
+    expect(r.repostedOrders).toBe(2)
+    expect(r.oldOrders).toBe(1)
+    const text = formatShadowReport(r, from, to)
+    expect(text).toContain('Поднятые заказы: 2')
+    expect(text).toContain('Старые заказы: 1')
+    expect(text).not.toContain(String.fromCharCode(0x2014))
   })
 })

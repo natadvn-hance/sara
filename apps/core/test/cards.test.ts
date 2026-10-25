@@ -83,6 +83,24 @@ describe('the lead card layout', () => {
     ])
   })
 
+  it("FR-LEAD-1: a raised-again order has one more line under the head, with the site's words", () => {
+    const lines = leadCardText({
+      ...card,
+      reposted: { notice: 'Клиент запросил ещё отклики 4\u00a0дня\u00a0назад <срочно>' },
+    }).split('\n')
+    expect(lines.slice(0, 4)).toEqual([
+      '<b>🔔 Сайт для клиники</b>',
+      `Краснодар · бюджет до 150 000 ₽ · отклик 210${NBSP}₽`,
+      'Заказ поднят повторно: Клиент запросил ещё отклики 4 дня назад &lt;срочно&gt;',
+      '',
+    ])
+    expect(leadCardText({ ...card, reposted: { notice: null } }).split('\n')[2]).toBe(
+      'Заказ поднят повторно',
+    )
+    expect(leadCardText({ ...card, reposted: null })).not.toContain('поднят')
+    expect(leadCardText(card)).not.toContain('поднят')
+  })
+
   it('FR-LEAD-7: the head says what the client budget and the bid fee are when they are unknown', () => {
     const lines = leadCardText({ ...card, budgetText: null, bidPriceRub: 0 }).split('\n')
     expect(lines[1]).toBe('Краснодар · бюджет не указан · цена отклика пока неизвестна')

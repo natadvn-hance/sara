@@ -12,6 +12,13 @@ export const ProfiOrder = z.object({
   seen_at: z.iso.datetime(),
   /** When the site published the order; null or absent when not known (an older node, a page without it). */
   published_at: z.iso.datetime().nullable().optional(),
+  /**
+   * The client raised an old order again (the board's `isReposted`). Then `published_at` is the raise, not the
+   * creation, and the 24-hour rule cannot see how old the order is. Absent on an ordinary order.
+   */
+  reposted: z.boolean().optional(),
+  /** What the site says about the raise («Клиент запросил ещё отклики 4 дня назад»); null when it says nothing. */
+  repost_notice: z.string().nullable().optional(),
 })
 export type ProfiOrder = z.infer<typeof ProfiOrder>
 

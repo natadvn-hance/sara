@@ -20,7 +20,7 @@ const sample = (kind: Sample['kind'], name: string): Sample =>
 const parse = (s: Sample): ParseResult =>
   s.kind === 'rtp' ? profiParsers.fromRtp(s.body) : profiParsers.fromResponse(s.url ?? '', s.body)
 
-type BoardItem = { id: string; type: string; snippets?: BoardItem[] }
+type BoardItem = { id: string; type: string; isReposted?: boolean; snippets?: BoardItem[] }
 
 describe('Profi.ru samples', () => {
   it('ST-M1-10: the board sample gives each order card, the carousel ones too, as an order with the words of the board and a fee not known yet', () => {
@@ -45,6 +45,37 @@ describe('Profi.ru samples', () => {
       expect(x).not.toHaveProperty('needsPage')
       if (x.t === 'order') expect(Date.parse(x.published_at ?? '')).toBeGreaterThan(0)
     }
+  })
+
+  it("FR-LEAD-1: an order the client raised again carries the board's word for it, the others carry nothing", () => {
+    const s = sample('response', 'board')
+    const cards = (
+      s.body as {
+        data: { boSearchBoardItems: { items: BoardItem[] } }
+      }
+    ).data.boSearchBoardItems.items.flatMap((it) =>
+      it.type === 'SNIPPET' ? [it] : it.type === 'CAROUSEL' ? (it.snippets ?? []) : [],
+    )
+    const reposted = new Set(cards.filter((c) => c.isReposted).map((c) => c.id))
+    expect(reposted.size).toBeGreaterThan(5)
+    for (const x of parse(s).signals) {
+      if (x.t !== 'order') continue
+      if (reposted.has(x.order.order_id)) expect(x.order.reposted).toBe(true)
+      else expect(x.order).not.toHaveProperty('reposted')
+    }
+    const byId = new Map(
+      parse(s).signals.flatMap((x) =>
+        x.t === 'order' ? [[x.order.order_id, x.order] as const] : [],
+      ),
+    )
+    // The boosted card says when the client asked again (the site's own words, no non-breaking spaces).
+    expect(byId.get('10000016')).toMatchObject({
+      reposted: true,
+      repost_notice: 'Клиент запросил ещё отклики 4 дня назад',
+    })
+    // A carousel card is reposted without a word of its own.
+    expect(byId.get('10000004')).toMatchObject({ reposted: true, repost_notice: null })
+    expect(byId.get('10000001')).not.toHaveProperty('repost_notice')
   })
 
   it('FR-LEAD-9: the profile sample gives the wallet balance', () => {

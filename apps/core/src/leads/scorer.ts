@@ -1,7 +1,7 @@
 import { type DirectionRules, type ProfiOrder, ScorerOutput, weightedScore } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
 import { namesToHide } from './clientName'
-import { sorterInput } from './sorter'
+import { repostedLine, sorterInput } from './sorter'
 
 export type Scored = {
   score: number
@@ -42,7 +42,9 @@ export function rulesText(r: DirectionRules): string {
 
 /** What the Scorer sees: the rules, then the order. The client's name is never put in it, and one inside the text is hidden by the gateway (ADR-016). */
 export function scorerInput(o: ProfiOrder, rules: DirectionRules): string {
-  return `${rulesText(rules)}\n\nЗаказ\n\n${sorterInput(o)}`
+  return [`${rulesText(rules)}\n\nЗаказ\n\n${sorterInput(o)}`, repostedLine(o)]
+    .filter((x) => x !== null)
+    .join('\n')
 }
 
 /** The total and the decision are the code's: weights stay data, one set of axis scores gives one result. */

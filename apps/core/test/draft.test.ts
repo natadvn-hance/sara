@@ -206,6 +206,20 @@ describe('the Analyst', () => {
     })
   })
 
+  it('FR-LEAD-1: the Analyst is told as a fact that the order was raised again', async () => {
+    const { gw, inputs } = stubGateway([answer(BODY), answer(BODY)])
+    await writeDraft(gw, {
+      ...(await order()),
+      reposted: true,
+      repost_notice: 'Клиент запросил ещё отклики 4 дня назад',
+    })
+    await writeDraft(gw, await order())
+    expect(inputs[0]).toContain(
+      'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя. Сайт пишет: Клиент запросил ещё отклики 4 дня назад',
+    )
+    expect(inputs[1]).not.toContain('поднят')
+  })
+
   it('FR-LEAD-6: a draft too long with the greeting is asked once more', async () => {
     const { gw, inputs } = stubGateway([answer('а'.repeat(600)), answer('Коротко. Когда запуск?')])
     const d = await writeDraft(gw, await order())

@@ -24,6 +24,8 @@ export type LeadCard = {
   text: string
   /** What the order page says about the client; none (an older lead, a page without it): the name alone. */
   clientInfo?: ClientInfo | null
+  /** The client raised an old order again: one line says so, with the site's words when it gave any. */
+  reposted?: { notice: string | null } | null
   verdict: 'fit' | 'maybe' | null
   reason: string | null
   /** The fee for the bid; 0 when the site did not show it yet. */
@@ -262,9 +264,14 @@ function headLines(c: LeadCard): string[] {
   const fee =
     c.bidPriceRub > 0 ? `отклик ${formatRub(c.bidPriceRub)}` : 'цена отклика пока неизвестна'
   const facts = [c.city.trim() ? clean(c.city, CAP.short) : null, budget, fee].filter(Boolean)
+  // The site writes «4\u00a0дня\u00a0назад» with non-breaking spaces; the line has plain ones.
+  const notice = c.reposted?.notice?.replace(/\s+/g, ' ').trim()
   return [
     ...(c.reminder ? [`<b>⏰ ${title}</b>`, '<i>Заявка ждёт решения</i>'] : [`<b>🔔 ${title}</b>`]),
     facts.join(' · '),
+    ...(c.reposted
+      ? [notice ? `Заказ поднят повторно: ${clean(notice, CAP.reason)}` : 'Заказ поднят повторно']
+      : []),
   ]
 }
 
