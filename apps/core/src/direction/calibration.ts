@@ -196,19 +196,29 @@ export async function markItem(
       .from(calibrationItem)
       .where(and(eq(calibrationItem.runId, runId), sql`${calibrationItem.mark} is not null`))
     const complete = n >= run.total
-    if (complete) {
-      await tx.update(directionRun).set({ state: 'queued' }).where(eq(directionRun.id, runId))
-    }
+    // Every mark is a sign of life, so a calibration marked over hours is not swept as a dead run, and the one
+    // that waits for its turn after the last mark starts that wait fresh.
+    await tx
+      .update(directionRun)
+      .set({ updatedAt: new Date().toISOString(), ...(complete ? { state: 'queued' } : {}) })
+      .where(eq(directionRun.id, runId))
     return { ok: true as const, marked: n, total: run.total, complete }
   })
 }
 
 /** Boris's words on why he decided so about a lead, kept beside the mark. */
-export async function setNote(db: Db, runId: string, leadId: string, note: string): Promise<void> {
-  await db
+export async function setNote(
+  db: Db,
+  runId: string,
+  leadId: string,
+  note: string,
+): Promise<boolean> {
+  const done = await db
     .update(calibrationItem)
     .set({ note })
     .where(and(eq(calibrationItem.runId, runId), eq(calibrationItem.leadId, leadId)))
+    .returning({ leadId: calibrationItem.leadId })
+  return done.length > 0
 }
 
 /** One lead of a calibration: scored as in work (sonnet near the threshold) under the run's rules. */
@@ -257,7 +267,10 @@ const agreementAt = (items: Scored[], threshold: number): number =>
   items.filter((i) => (!i.stopFactor && i.score >= threshold ? 'yes' : 'no') === i.mark).length /
   items.length
 
-/** The threshold that would agree with Boris the most, nearest to the current one; null without a clear gain. */
+/**
+ * The threshold that would agree with Boris the most, nearest to the current one (of two equally near, the lower);
+ * null without a clear gain.
+ */
 function hintOf(items: Scored[], current: number): ThresholdHint | null {
   if (items.length === 0) return null
   const before = agreementAt(items, current)

@@ -7,6 +7,7 @@ import { rulesText } from '../leads/scorer'
 import { sorterInput } from '../leads/sorter'
 import { calibrationResult, type Miss } from './calibration'
 import { rulesDiff } from './diff'
+import { rulesHash } from './hash'
 import { applyRulesToDraft, getOnboarding } from './onboarding'
 import { createRun, finishRun, getRun, type RunRow } from './runStore'
 import { activeRules } from './store'
@@ -119,7 +120,7 @@ async function repeatCalibration(
 
 export type ApplyResult =
   | { ok: true; runId: string }
-  | { ok: false; error: 'no_run' | 'no_advice' | 'no_hint' | 'busy' }
+  | { ok: false; error: 'no_run' | 'no_advice' | 'no_hint' | 'busy' | 'stale' | 'draft' }
 
 /**
  * «Применить к черновику»: the advice, or the better threshold the calibration found, goes into the draft (no
@@ -135,6 +136,11 @@ export async function applyAdvice(
   const run = await getRun(db, runId)
   if (!run || run.accountId !== accountId || run.kind !== 'calibration')
     return { ok: false, error: 'no_run' }
+  // The change is made to the rules this run was about. Rules Boris edited since are not those: applying would
+  // quietly put his edit back, so it is refused and he checks again.
+  const current =
+    (await getOnboarding(db, accountId))?.rules ?? (await activeRules(db, accountId)).rules
+  if (run.rulesHash !== rulesHash(current)) return { ok: false, error: 'stale' }
   let to: DirectionRules
   let understood: string
   if (source === 'advice') {
@@ -150,12 +156,19 @@ export async function applyAdvice(
   }
   const next = await repeatCalibration(db, run, to)
   if (!next.ok) return next
-  try {
-    await applyRulesToDraft(db, accountId, to, understood)
-  } catch (e) {
-    // The draft did not take it: the run made for it must not go on alone.
+  // The draft did not take it (it closed meanwhile, no longer reads, or failed): the run made for it must not
+  // go on alone, and Boris must not be told it was applied.
+  const dropRun = async () => {
     const made = await getRun(db, next.runId)
     if (made) await finishRun(db, made, 'failed', 'error')
+  }
+  try {
+    if (!(await applyRulesToDraft(db, accountId, to, understood))) {
+      await dropRun()
+      return { ok: false, error: 'draft' }
+    }
+  } catch (e) {
+    await dropRun()
     throw e
   }
   return next
@@ -169,10 +182,12 @@ export async function recalibrate(
   db: Db,
   accountId: string,
   runId: string,
-): Promise<{ ok: true; runId: string } | { ok: false; error: 'no_run' | 'busy' }> {
+): Promise<{ ok: true; runId: string } | { ok: false; error: 'no_run' | 'busy' | 'not_done' }> {
   const run = await getRun(db, runId)
   if (!run || run.accountId !== accountId || run.kind !== 'calibration')
     return { ok: false, error: 'no_run' }
+  // Only a calibration that has ended: one still waiting for marks would carry half of them into a new run.
+  if (!['done', 'stopped', 'failed'].includes(run.state)) return { ok: false, error: 'not_done' }
   const view = await getOnboarding(db, accountId)
   const rules = view?.rules ?? (await activeRules(db, accountId)).rules
   return repeatCalibration(db, run, rules)

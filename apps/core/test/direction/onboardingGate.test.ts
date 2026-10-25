@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { directionOverride, event } from '../../src/db/schema'
 import { calibrationView, markItem, startCalibration } from '../../src/direction/calibration'
@@ -143,10 +143,57 @@ describe('turning a direction on while finishing', { timeout: 120000 }, () => {
     expect((await getProfile(db, IT)).state).toBe('draft')
   })
 
-  it('FR-ACC-4: «Включить» with rules that changed nothing still turns the direction on', async () => {
+  it('FR-ACC-4: a draft direction is not turned on with rules that changed nothing and no calibration', async () => {
     await startOnboarding(db, IT, 'edit')
     for (const step of [1, 2, 3] as const) await skipStep(db, IT, step)
+    expect(await finishOnboarding(db, IT, { state: 'on' })).toEqual({
+      ok: false,
+      error: 'needs_calibration',
+    })
+    expect((await getProfile(db, IT)).state).toBe('draft')
+  })
+
+  it('FR-ACC-4: ... but with a passed calibration of those rules, or a reason, it is', async () => {
+    await startOnboarding(db, IT, 'edit')
+    for (const step of [1, 2, 3] as const) await skipStep(db, IT, step)
+    await calibrate(db, IT, [...yes(17), ...no(3)], same(20, 70), RULES_V1)
     expect(await finishOnboarding(db, IT, { state: 'on' })).toEqual({ ok: true, version: null })
     expect((await getProfile(db, IT)).state).toBe('on')
+  })
+
+  it('FR-ACC-4: turning a draft direction on with a reason and no calibration keeps the reason, not in the journal', async () => {
+    await startOnboarding(db, IT, 'edit')
+    for (const step of [1, 2, 3] as const) await skipStep(db, IT, step)
+    expect(
+      await finishOnboarding(db, IT, { state: 'shadow', override: { reason: 'сначала в тени' } }),
+    ).toEqual({ ok: true, version: null })
+    expect(await db.select().from(directionOverride)).toMatchObject([
+      { accountId: IT, reason: 'сначала в тени' },
+    ])
+    expect(JSON.stringify(await db.select().from(event))).not.toContain('сначала в тени')
+  })
+})
+
+describe('what the journal and the view say about the gate', { timeout: 120000 }, () => {
+  it('FR-ACC-4: an override says the agreement it was saved with, never the reason', async () => {
+    await draftWith(50)
+    await calibrate(db, ACC, [...yes(16), ...no(4)], same(20, 70), rulesWith(50))
+    await finishOnboarding(db, ACC, { override: { reason: 'потом проверю' } })
+    const [e] = await db.select().from(event).where(eq(event.type, 'direction.onboarding_finished'))
+    expect(e?.payload).toMatchObject({ override: true, agreement_percent: 80 })
+    expect(JSON.stringify(e)).not.toContain('потом проверю')
+  })
+
+  it('FR-ACC-4: a passed calibration stays passed for the gate while a newer repeat of it is still being scored', async () => {
+    const { getOnboarding } = await import('../../src/direction/onboarding')
+    await draftWith(50)
+    const { runId } = await calibrate(db, ACC, [...yes(17), ...no(3)], same(20, 70), rulesWith(50))
+    await db.execute(sql`
+      insert into core.direction_run (id, account_id, kind, rules, rules_hash, lead_ids, total, state)
+      select gen_random_uuid(), account_id, kind, rules, rules_hash, lead_ids, total, 'queued'
+      from core.direction_run where id = ${runId}`)
+    const view = await getOnboarding(db, ACC)
+    expect(view?.calibration?.state).toBe('queued')
+    expect(view?.gatePassed).toBe(true)
   })
 })

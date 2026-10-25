@@ -44,6 +44,10 @@ export const RUN_ERRORS = {
   noItem: 'Такой заявки в этой проверке нет.',
   noMisses: 'Расхождений нет, предлагать нечего.',
   noAdvice: 'Поправки нет: сначала нажми «Предложить поправку».',
+  stale: 'Правила изменились после этой проверки: проверь заново.',
+  draftRefused: 'Черновик не принял поправку: открой настройку заново.',
+  stillMarking: 'Эта проверка ещё ждёт отметок.',
+  stillGoing: 'Эта проверка ещё идёт.',
   noHint: 'Порог менять не нужно: лучшего значения нет.',
   adviceFailed: 'Не получилось подобрать одну поправку. Попробуй ещё раз.',
   noAnswer: 'Claude не ответил. Попробуй ещё раз.',
@@ -183,13 +187,15 @@ export function registerRunRoutes(
     const body = NoteBody.parse(req.body)
     const run = await runOf(accountId, runId)
     if (!run || run.kind !== 'calibration') return reply.code(404).send({ error: RUN_ERRORS.noRun })
-    await setNote(d.db, run.id, body.lead_id, body.note)
+    if (!(await setNote(d.db, run.id, body.lead_id, body.note)))
+      return reply.code(404).send({ error: RUN_ERRORS.noItem })
     return { ok: true }
   })
 
   scoped.post('/api/directions/:accountId/runs/:runId/advice', async (req, reply) => {
     const { accountId, runId } = req.params as { accountId: string; runId: string }
     if (!known(accountId)) return noAccount(reply)
+    if (!(await runOf(accountId, runId))) return reply.code(404).send({ error: RUN_ERRORS.noRun })
     const r = await adviseRules(
       { db: d.db, gateway: withoutLimitWait(d.gateway) },
       accountId,
@@ -212,6 +218,7 @@ export function registerRunRoutes(
     const { accountId, runId } = req.params as { accountId: string; runId: string }
     if (!known(accountId)) return noAccount(reply)
     const { source } = ApplyBody.parse(req.body)
+    if (!(await runOf(accountId, runId))) return reply.code(404).send({ error: RUN_ERRORS.noRun })
     const r = await applyAdvice(d.db, accountId, runId, source)
     if (!r.ok) {
       const answer = {
@@ -219,6 +226,8 @@ export function registerRunRoutes(
         no_advice: [409, RUN_ERRORS.noAdvice],
         no_hint: [409, RUN_ERRORS.noHint],
         busy: [409, RUN_ERRORS.busy],
+        stale: [409, RUN_ERRORS.stale],
+        draft: [409, RUN_ERRORS.draftRefused],
       } as const
       const [status, error] = answer[r.error]
       return reply.code(status).send({ error })
@@ -230,13 +239,20 @@ export function registerRunRoutes(
   scoped.post('/api/directions/:accountId/runs/:runId/recalibrate', async (req, reply) => {
     const { accountId, runId } = req.params as { accountId: string; runId: string }
     if (!known(accountId)) return noAccount(reply)
-    const r = UUID.test(runId)
-      ? await recalibrate(d.db, accountId, runId)
-      : { ok: false as const, error: 'no_run' as const }
-    if (!r.ok)
-      return reply
-        .code(r.error === 'busy' ? 409 : 404)
-        .send({ error: r.error === 'busy' ? RUN_ERRORS.busy : RUN_ERRORS.noRun })
+    const run = await runOf(accountId, runId)
+    if (!run || run.kind !== 'calibration') return reply.code(404).send({ error: RUN_ERRORS.noRun })
+    const r = await recalibrate(d.db, accountId, run.id)
+    if (!r.ok) {
+      const error =
+        r.error === 'busy'
+          ? RUN_ERRORS.busy
+          : r.error === 'not_done'
+            ? run.state === 'marking'
+              ? RUN_ERRORS.stillMarking
+              : RUN_ERRORS.stillGoing
+            : RUN_ERRORS.noRun
+      return reply.code(r.error === 'no_run' ? 404 : 409).send({ error })
+    }
     scheduleRun(deps(), r.runId)
     return { id: r.runId }
   })

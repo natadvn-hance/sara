@@ -267,4 +267,56 @@ describe('calibration over HTTP', { timeout: 120000 }, () => {
     expect((await post(`${runs}/${nope}/advice`)).statusCode).toBe(404)
     expect((await post(`${runs}/${nope}/recalibrate`)).statusCode).toBe(404)
   })
+
+  it('FR-ACC-4: advice, apply and a note with a run id that is not an id are a 404, not a crash', async () => {
+    await boot(same(1, 70))
+    expect((await post(`${runs}/not-an-id/advice`)).statusCode).toBe(404)
+    expect((await post(`${runs}/not-an-id/apply`, { source: 'advice' })).statusCode).toBe(404)
+    expect((await post(`${runs}/not-an-id/notes`, { lead_id: 'x', note: 'y' })).statusCode).toBe(
+      404,
+    )
+  })
+
+  it('FR-ACC-4: a note for a lead that is not in the run is a 404', async () => {
+    await boot(same(10, 70))
+    await leadsWith(
+      db,
+      Array.from({ length: 10 }, () => 60),
+    )
+    const { id } = await startAndMark(yes(10))
+    await done(id)
+    const r = await post(`${runs}/${id}/notes`, { lead_id: 'nope', note: 'слова' })
+    expect(r.statusCode).toBe(404)
+  })
+
+  it('FR-ACC-4: repeating a calibration that still waits for marks is a 409', async () => {
+    await boot(same(10, 70))
+    await leadsWith(
+      db,
+      Array.from({ length: 10 }, () => 60),
+    )
+    const started = (await post(runs, { kind: 'calibration', rules: 'active' })).json()
+    const r = await post(`${runs}/${started.id}/recalibrate`)
+    expect(r.statusCode).toBe(409)
+    expect(r.json().error).toBe('Эта проверка ещё ждёт отметок.')
+  })
+
+  it('FR-ACC-4: applying an advice to rules Boris has edited since is a 409 that says to check again', async () => {
+    await boot([scorerAnswer(30), ...same(30, 70)])
+    await leadsWith(
+      db,
+      Array.from({ length: 16 }, () => 60),
+    )
+    const { id } = await startAndMark(yes(16))
+    await done(id)
+    expect((await post(`${runs}/${id}/advice`)).statusCode).toBe(200)
+    await post(`/api/directions/${ACC}/onboarding`, { mode: 'edit' })
+    await post(`/api/directions/${ACC}/onboarding/steps/1/skip`, {})
+    await post(`/api/directions/${ACC}/onboarding/steps/2/skip`, {})
+    await post(`/api/directions/${ACC}/onboarding/steps/3`, { say: 'лучшие заказы' })
+    await post(`/api/directions/${ACC}/onboarding/steps/3/confirm`, {})
+    const r = await post(`${runs}/${id}/apply`, { source: 'advice' })
+    expect(r.statusCode).toBe(409)
+    expect(r.json().error).toBe('Правила изменились после этой проверки: проверь заново.')
+  })
 })

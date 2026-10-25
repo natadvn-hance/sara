@@ -7,9 +7,10 @@ import {
   calibrationSample,
   calibrationView,
   markItem,
+  setNote,
   startCalibration,
 } from '../../src/direction/calibration'
-import { getRun } from '../../src/direction/runs'
+import { createRun, getRun } from '../../src/direction/runs'
 import { seedDirection } from '../../src/direction/store'
 import { RULES_V1 } from '../../src/direction/v1'
 import { calibrate, idOf, leadsWith } from '../helpers/calibration'
@@ -278,5 +279,35 @@ describe('calibration result', { timeout: 120000 }, () => {
     const { setNote } = await import('../../src/direction/calibration')
     await setNote(db, runId, ids[0] ?? '', 'копеечный бюджет')
     expect((await calibrationResult(db, runId)).misses[0]?.note).toBe('копеечный бюджет')
+  })
+
+  it('FR-ACC-4: every mark keeps the run alive, so a calibration marked for hours is not swept as dead', async () => {
+    await leadsWith(db, MIX)
+    const r = await startCalibration(db, { accountId: ACC, rules: RULES_V1 })
+    if (!r.ok) throw new Error('no run')
+    await db.execute(
+      sql`update core.direction_run set updated_at = now() - interval '5 hours' where id = ${r.runId}`,
+    )
+    const ids = (await calibrationView(db, r.runId)).items.map((i) => i.leadId)
+    for (const id of ids) await markItem(db, r.runId, id, 'yes')
+    // It waits for its turn as «queued» with a fresh sign of life: a new run is refused, not sweeping it.
+    const other = await createRun(db, {
+      accountId: ACC,
+      kind: 'recompute',
+      rules: RULES_V1,
+      baseRules: RULES_V1,
+      leadIds: [],
+    })
+    expect(other).toEqual({ ok: false, error: 'busy' })
+    expect((await getRun(db, r.runId))?.state).toBe('queued')
+  })
+
+  it('FR-ACC-4: a note for a lead that is not in the run is not saved', async () => {
+    await leadsWith(db, MIX)
+    const r = await startCalibration(db, { accountId: ACC, rules: RULES_V1 })
+    if (!r.ok) throw new Error('no run')
+    expect(await setNote(db, r.runId, 'nope', 'слова')).toBe(false)
+    const first = (await calibrationView(db, r.runId)).items[0]?.leadId ?? ''
+    expect(await setNote(db, r.runId, first, 'слова')).toBe(true)
   })
 })

@@ -3,7 +3,14 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { calibrationItem, directionRun } from '../../src/db/schema'
 import { adviseRules, applyAdvice, recalibrate } from '../../src/direction/advice'
 import { calibrationResult, setNote } from '../../src/direction/calibration'
-import { getOnboarding, startOnboarding } from '../../src/direction/onboarding'
+import { rulesHash } from '../../src/direction/hash'
+import {
+  confirmStep,
+  getOnboarding,
+  skipStep,
+  startOnboarding,
+  submitStep,
+} from '../../src/direction/onboarding'
 import { getRun, runWorker } from '../../src/direction/runs'
 import { seedDirection } from '../../src/direction/store'
 import { RULES_V1 } from '../../src/direction/v1'
@@ -11,6 +18,7 @@ import { withoutLimitWait } from '../../src/gateway/gateway'
 import { calibrate } from '../helpers/calibration'
 import { openTestDb, resetDb } from '../helpers/db'
 import { fakeGateway } from '../helpers/gateway'
+import { STOPS } from '../helpers/onboarding'
 import { scorerAnswer } from '../helpers/scorer'
 
 const { db, close } = openTestDb()
@@ -207,5 +215,49 @@ describe('applying an advice', { timeout: 120000 }, () => {
     const run = await getRun(db, r.runId)
     expect(run?.leadIds).toEqual((await getRun(db, runId))?.leadIds)
     expect(run?.state).toBe('queued')
+  })
+
+  it('FR-ACC-4: the new run is for exactly the rules the draft now holds', async () => {
+    const { runId } = await advised()
+    const r = await applyAdvice(db, ACC, runId, 'advice')
+    if (!r.ok) throw new Error(r.error)
+    const draft = (await getOnboarding(db, ACC))?.rules
+    expect((await getRun(db, r.runId))?.rulesHash).toBe(rulesHash(draft as typeof RULES_V1))
+  })
+
+  it('FR-ACC-4: an advice for rules Boris has edited since is refused, so his edit is not undone', async () => {
+    const { runId } = await advised()
+    // Boris changes the stop factors in the draft after the calibration was made.
+    const f = await fakeGateway(db, { 'onboarding-stops': STOPS })
+    await startOnboarding(db, ACC, 'edit')
+    await skipStep(db, ACC, 1)
+    await submitStep({ db, gateway: f.gateway }, ACC, 2, { say: 'не берём директ' })
+    await confirmStep(db, ACC, 2)
+    const before = (await getOnboarding(db, ACC))?.rules
+    expect(await applyAdvice(db, ACC, runId, 'advice')).toEqual({ ok: false, error: 'stale' })
+    expect(await applyAdvice(db, ACC, runId, 'threshold')).toMatchObject({ ok: false })
+    expect((await getOnboarding(db, ACC))?.rules).toEqual(before)
+  })
+
+  it('FR-ACC-4: a draft that cannot take the change fails the run made for it and says so', async () => {
+    const { runId } = await advised()
+    await startOnboarding(db, ACC, 'edit')
+    await db.execute(sql`update core.direction_onboarding set draft = '{"steps": 5}'::jsonb`)
+    const r = await applyAdvice(db, ACC, runId, 'advice')
+    expect(r).toEqual({ ok: false, error: 'draft' })
+    const runs = await db.select().from(directionRun).where(eq(directionRun.state, 'queued'))
+    expect(runs).toEqual([])
+  })
+
+  it('FR-ACC-4: a stopped or failed calibration can be repeated on the same marks, one still waiting for marks cannot', async () => {
+    const { runId } = await withMiss()
+    await db.execute(
+      sql`update core.direction_run set state = 'stopped', stop_reason = 'limit' where id = ${runId}`,
+    )
+    const r = await recalibrate(db, ACC, runId)
+    expect(r.ok).toBe(true)
+    await db.execute(sql`update core.direction_run set state = 'marking' where id = ${runId}`)
+    await db.execute(sql`update core.direction_run set state = 'failed' where id <> ${runId}`)
+    expect(await recalibrate(db, ACC, runId)).toEqual({ ok: false, error: 'not_done' })
   })
 })

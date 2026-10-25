@@ -179,6 +179,8 @@ export type OnboardingView = {
   broken?: boolean
   /** The latest calibration of exactly these rules (the draft's, as it is now), if any. */
   calibration: CalibrationSummary | null
+  /** What the gate of finishing sees: a finished calibration of exactly these rules reached the target. */
+  gatePassed: boolean
   /** Whether the direction works, works in the shadow, or is still being set up. */
   directionState: DirectionState
 }
@@ -255,6 +257,7 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
       changed: false,
       broken: true,
       calibration: null,
+      gatePassed: false,
       directionState: (await getProfile(db, row.accountId)).state,
     }
   const active = (await activeRules(db, row.accountId)).rules
@@ -274,6 +277,8 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
     changes: diff?.lines ?? [],
     changed: (diff?.sections.length ?? 0) > 0,
     calibration: rules ? await latestCalibration(db, row.accountId, rules) : null,
+    // The gate looks at the latest finished calibration; a newer repeat still being scored does not hide it.
+    gatePassed: rules ? await calibrationPassed(db, row.accountId, rules) : false,
     directionState: (await getProfile(db, row.accountId)).state,
   }
 }
@@ -528,7 +533,11 @@ export async function finishOnboarding(
       return { ok: true as const, version }
     }
     const sections = rulesDiff(active.rules, rules).sections
-    if (sections.length === 0) {
+    // Rules that change nothing need no calibration, unless a direction that is still a draft is being turned on:
+    // its rules may be the seed of another direction, and only a calibration says they fit this one.
+    const turningOn =
+      opts.state !== undefined && (await getProfile(tx, accountId)).state === 'draft'
+    if (sections.length === 0 && !turningOn) {
       await appendEvent(
         tx,
         journal('direction.onboarding_finished', accountId, { version: null, sections }),
@@ -538,6 +547,30 @@ export async function finishOnboarding(
     const reason = opts.override?.reason.trim() ?? ''
     const passed = await calibrationPassed(tx, accountId, rules)
     if (!passed && !reason) return { ok: false, error: 'needs_calibration' }
+    // What the journal keeps of a save below the target: the fact and the agreement, never Boris's words.
+    const agreement = passed ? null : (await latestCalibration(tx, accountId, rules))?.agreement
+    const overridden = passed
+      ? {}
+      : {
+          override: true,
+          ...(agreement == null ? {} : { agreement_percent: Math.round(agreement * 100) }),
+        }
+    if (sections.length === 0) {
+      await appendEvent(
+        tx,
+        journal('direction.onboarding_finished', accountId, {
+          version: null,
+          sections,
+          ...overridden,
+        }),
+      )
+      if (!passed)
+        await tx
+          .insert(directionOverride)
+          .values({ accountId, version: active.version, reason })
+          .onConflictDoNothing()
+      return done(null)
+    }
     const version = await insertVersion(tx, {
       accountId,
       rules,
@@ -546,11 +579,7 @@ export async function finishOnboarding(
     })
     await appendEvent(
       tx,
-      journal('direction.onboarding_finished', accountId, {
-        version,
-        sections,
-        ...(passed ? {} : { override: true }),
-      }),
+      journal('direction.onboarding_finished', accountId, { version, sections, ...overridden }),
     )
     // Why Boris saved below the target stays for good, apart from the draft that the next onboarding replaces.
     if (!passed) await tx.insert(directionOverride).values({ accountId, version, reason })
