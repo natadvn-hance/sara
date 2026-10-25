@@ -599,6 +599,30 @@ describe('when a reminder must not go', () => {
 })
 
 describe('the time of a reminder', () => {
+  it('FR-CONV-12: a text that took hours to get does not go at night, it waits for 9:00 Moscow', async () => {
+    await live()
+    // The model is slow: while it works the evening turns into the quiet hours.
+    await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_DELAY_MS: '2500' })
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await rows()).length === 1)
+    const h = moscowHour(new Date())
+    const quietNow = { from: (h + 23) % 24, to: (h + 2) % 24 }
+    await setSetting(db, 'conv.reminder_quiet', quietNow, 'system')
+    const wf = remindWorkflowId(conv.id, 'm-1')
+    const stepOf = async () =>
+      ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === 'quiet-0')
+    await until(async () => (await stepOf()) !== undefined, 20000)
+    expect((await stepOf())?.output).toEqual({
+      until: moscowHoursEnd(new Date(), quietNow)?.toISOString(),
+    })
+    await sleep(600)
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    expect((await rows())[0]?.finishedAt).toBeNull()
+    expect(await statusOf(wf)).toBe('PENDING')
+  })
+
   it('FR-CONV-12: a reminder due at night waits until 9:00 Moscow, and nothing goes meanwhile', async () => {
     await live()
     // The quiet hours cover now: the day is the night of this test.
