@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import type { TaskAction } from '@sara/shared'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
 import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
@@ -26,6 +27,7 @@ import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
 import { startSchoolJobs } from './school/jobs'
+import { isSchoolTask, onSchoolPress } from './school/lessons/batches'
 import { registerSchoolRoutes } from './school/routes'
 import type { SchoolDeps } from './school/types'
 import { registerScreenProxy } from './screen/screenProxy'
@@ -67,6 +69,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
 
   let pipeline: LeadPipeline | null = null
+  let schoolPress: ((p: { taskId: string; action: TaskAction }) => Promise<string>) | null = null
   const transcriber = createTranscriber({
     ffmpegBin: config.ffmpegBin,
     whisperBin: config.whisperBin,
@@ -76,7 +79,11 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const bot = createBotControl({
     db,
     apiRoot: config.telegramApiRoot,
-    onPress: (p) => (pipeline ? pipeline.onPress(p) : Promise.resolve('Сара ещё запускается')),
+    // A press on a lesson, a batch or a mind commit is the school's; every other one is the lead pipeline's.
+    onPress: async (p) => {
+      if (schoolPress && (await isSchoolTask(db, p.taskId))) return schoolPress(p)
+      return pipeline ? pipeline.onPress(p) : 'Сара ещё запускается'
+    },
     onMessage: (m) =>
       handleBorisMessage(
         {
@@ -183,6 +190,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     publicUrl: config.publicUrl,
   }
   registerSchoolRoutes(app, school)
+  schoolPress = (p) => onSchoolPress(school, p, new Date())
   const url = await app.listen({ port: config.port, host: config.host })
 
   const token = await secrets.get('telegram_bot_token')
