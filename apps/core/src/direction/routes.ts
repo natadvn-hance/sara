@@ -13,6 +13,7 @@ import {
   submitStep,
 } from './onboarding'
 import { getProfile } from './profile'
+import { registerRunRoutes } from './runsRoutes'
 import { activeRules, listVersions, rollbackTo } from './store'
 
 const RollbackBody = z.object({ version: z.number().int().positive() })
@@ -170,5 +171,6 @@ export function registerDirectionRoutes(app: FastifyInstance, d: AppDeps): void 
       } as const
       return reply.code(409).send({ error: answer[r.error], code: r.error })
     })
+    registerRunRoutes(scoped, d, (id) => account(id) !== undefined, noAccount)
   })
 }

@@ -21,6 +21,7 @@ export const EVENT_TYPES = [
   'lead.skipped',
   'lead.labeled',
   'lead.stale',
+  'lead.page_read',
   'lead.held',
   'lead.drafted',
   'draft.edited',

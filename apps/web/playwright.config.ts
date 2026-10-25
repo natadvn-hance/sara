@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { defineConfig } from '@playwright/test'
 import { ABOUT, IDEAL, STOPS } from '../core/test/helpers/onboarding'
+import { scorerAnswer } from '../core/test/helpers/scorer'
 import { dbUrl } from './e2e/dbUrl'
 
 const ROOT = resolve(import.meta.dirname, '../..')
@@ -42,6 +43,8 @@ export default defineConfig({
             'onboarding-about': ABOUT,
             'onboarding-stops': STOPS,
             'onboarding-ideal': IDEAL,
+            // The scorer answers the same for every lead, so a real run finds no change: changes are stubbed.
+            scorer: scorerAnswer(70),
           }),
         }),
       },

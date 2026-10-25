@@ -82,3 +82,40 @@ export type OnboardingView = {
   changed: boolean
   broken?: boolean
 }
+
+export type RecomputeItem = {
+  leadId: string
+  title: string
+  city: string
+  before: { score: number; decision: 'show' | 'drop' }
+  after: {
+    score: number
+    decision: 'show' | 'drop'
+    reason: string
+    stopFactor: string | null
+    redFlags: string[]
+    axes: { id: string; score: number; why: string }[]
+  }
+  boris: 'yes' | 'no' | null
+}
+export type RecomputeResult = {
+  checked: number
+  skipped: number
+  changed: number
+  toDrop: number
+  toShow: number
+  withBoris: number
+  agreementBefore: number | null
+  agreementAfter: number | null
+  items: RecomputeItem[]
+}
+export type RunView = {
+  id: string
+  kind: 'recompute' | 'calibration'
+  state: 'queued' | 'running' | 'marking' | 'done' | 'stopped' | 'failed'
+  total: number
+  done: number
+  skipped: number
+  stop_reason: string | null
+  result: RecomputeResult | null
+}

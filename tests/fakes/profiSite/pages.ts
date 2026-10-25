@@ -52,12 +52,23 @@ export const feedPage = (rtpUrl: string, l: Layout) =>
     'Заказы',
     '<ul id="feed"></ul>',
     `${rtpScript(rtpUrl)}
-async function load() {
-  const data = await (await fetch('/api/feed')).json()
-  document.getElementById('feed').innerHTML = (data[${JSON.stringify(l.feedKey)}] || []).map((o) =>
-    '<li><a class="${l.orderLink}" data-order-id="' + o.id + '" href="/backoffice/n.php?o=' + o.id + '">' + o.subject + '</a> <span class="city">' + o.city + '</span></li>').join('')
+let cursor = null, loading = false
+const row = (o) => '<li style="min-height: 420px"><a class="${l.orderLink}" data-order-id="' + o.id + '" href="/backoffice/n.php?o=' + o.id + '">' + o.subject + '</a> <span class="city">' + o.city + '</span></li>'
+// The first page, or (more) the next one by cursor when the list is scrolled to its end, like the live board.
+async function load(more) {
+  if (loading) return
+  loading = true
+  const data = await (await fetch('/api/feed' + (more && cursor ? '?cursor=' + cursor : ''))).json()
+  const html = (data[${JSON.stringify(l.feedKey)}] || []).map(row).join('')
+  if (more) document.getElementById('feed').insertAdjacentHTML('beforeend', html)
+  else document.getElementById('feed').innerHTML = html
+  cursor = data.nextCursor || null
+  loading = false
 }
-load(); window.__RTP.addEventListener('message', load)`,
+load(false); window.__RTP.addEventListener('message', () => load(false))
+window.addEventListener('scroll', () => {
+  if (cursor && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) load(true)
+})`,
   )
 
 export type BidLook = {
@@ -79,6 +90,8 @@ export type BidLook = {
   opener: 'continue' | 'words'
   /** The amount the «Продолжить» opener shows; null shows the fee. */
   openerAmount: number | null
+  /** A widget in a frame of the page asks the backoffice API for another client first (an advert, a similar order). */
+  klientDecoy: boolean
 }
 
 // The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
@@ -90,10 +103,13 @@ export type BidLook = {
 export const orderPage = (id: string, look: BidLook) =>
   shell(
     'Заказ',
-    `<article id="order" data-order-id="${id}"></article><section id="bid"></section>`,
+    `<article id="order" data-order-id="${id}"></article><section id="bid"></section>${look.klientDecoy ? '<iframe src="/backoffice/widget.html"></iframe>' : ''}`,
     `fetch('/api/order/${id}').then((r) => r.json()).then((o) => {
-  document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>'
+  document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>' + (o.open === false ? '<p class="closed-notice">Заказ закрыт</p>' : '')
 })
+// The client card of the order page: the live page asks the backoffice API for it (getKlientInfo).
+fetch('/backoffice/api/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method: 'getKlientInfo', orderId: '${id}' }) })
+  .then((r) => r.json()).then((d) => { if (d.data) document.getElementById('order').dataset.klient = d.data.name }).catch(() => {})
 fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationName: 'orders', variables: { id: '${id}' } }) })
   .then((r) => r.json()).then((d) => {
   const s = d.data && d.data.orders && d.data.orders[0] && d.data.orders[0].boOrderScreen
@@ -130,6 +146,14 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
     else box.querySelector('.error').textContent = a.error || 'Не получилось'
   }
 })`,
+  )
+
+// A widget page that sits in a frame of the order page and asks the backoffice API for another client first.
+export const widgetPage = () =>
+  shell(
+    'Виджет',
+    '<p>Похожие заказы</p>',
+    `fetch('/backoffice/api/', { method: 'POST', body: JSON.stringify({ method: 'getKlientInfo', orderId: 'decoy' }) })`,
   )
 
 export const chatsPage = () =>

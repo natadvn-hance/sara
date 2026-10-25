@@ -195,7 +195,7 @@ describe('insurance and the account tab', () => {
     expect(types.filter((t) => t.type === 'profi.order_seen' && t.entity.id === id)).toHaveLength(1)
   }, 60000)
 
-  it('ST-M1-06: an order seen only on the board is opened once for its fee, old feed links are left alone', async () => {
+  it('FR-LEAD-1: an order seen on the board goes out at once and its page is not opened, old feed links are left alone', async () => {
     await loginStandIn(ab.page, site)
     site.muteRtp(true)
     const opened: string[] = []
@@ -207,27 +207,7 @@ describe('insurance and the account tab', () => {
       fromFeedDom: async () => ({ recognized: true, refs: [{ orderId: '94000001', snippet: '' }] }),
       async fromOrderDom(_page, orderId) {
         opened.push(orderId)
-        return {
-          recognized: true,
-          what: 'order',
-          signals: [
-            {
-              t: 'order',
-              order: {
-                order_id: orderId,
-                title: '',
-                category: '',
-                city: '',
-                text: '',
-                client_name: '',
-                budget_text: null,
-                bid_price_rub: 120,
-                seen_at: new Date().toISOString(),
-              },
-              published_at: null,
-            },
-          ],
-        }
+        return { recognized: false, what: 'order', signals: [] }
       },
     }
     const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
@@ -247,7 +227,6 @@ describe('insurance and the account tab', () => {
         signals: [
           {
             t: 'order',
-            needsPage: true,
             order: {
               order_id: '95300077',
               title: 'Лендинг для школы',
@@ -265,17 +244,22 @@ describe('insurance and the account tab', () => {
       },
       'response',
     )
+    const seenNow = (await db.select().from(outboxNode))
+      .map((r) => r.payload as { type: string; payload: { title: string; bid_price_rub: number } })
+      .filter((t) => t.type === 'profi.order_seen')
+    // Before any minute check: the order is already on its way to the core.
+    expect(seenNow.map((t) => [t.payload.title, t.payload.bid_price_rub])).toEqual([
+      ['Лендинг для школы', 0],
+    ])
     await ins.feedOnce()
     await ins.feedOnce()
     ins.stop()
     site.muteRtp(false)
-    expect(opened).toEqual(['95300077'])
-    const seen = (await db.select().from(outboxNode))
-      .map((r) => r.payload as { type: string; payload: { title: string; bid_price_rub: number } })
-      .filter((t) => t.type === 'profi.order_seen')
-    expect(seen.map((t) => [t.payload.title, t.payload.bid_price_rub])).toEqual([
-      ['Лендинг для школы', 120],
-    ])
+    expect(opened).toEqual([])
+    const seen = (await db.select().from(outboxNode)).filter(
+      (r) => (r.payload as { type: string }).type === 'profi.order_seen',
+    )
+    expect(seen).toHaveLength(1)
   }, 60000)
 
   it('FR-LEAD-8: each order page visit leaves a map of the bid form in node.raw_event, nothing clicked', async () => {
@@ -376,6 +360,8 @@ describe('insurance and the account tab', () => {
     })
     expect(await work).toBe(42)
     await feed
+    // The work's answer does not wait for the tab to go back to the feed; the next job in turn does.
+    await ins.inTab(async () => null)
     // The feed page, then the work and its page, then back to the feed.
     expect(order).toEqual(['nav', 'work', 'nav', 'nav'])
     expect(new URL(ab.page.url()).pathname).toBe('/backoffice/a.php')
@@ -395,6 +381,42 @@ describe('insurance and the account tab', () => {
       }),
     ).rejects.toThrow('boom')
     ins.stop()
+  }, 60000)
+
+  it('FR-LEAD-5: the answer of work in the tab comes before the tab goes back to the feed, and late work still runs on the page', async () => {
+    await loginStandIn(ab.page, site)
+    const log: string[] = []
+    ab.page.on('framenavigated', (f) => {
+      if (f === ab.page.mainFrame()) log.push(new URL(f.url()).pathname)
+    })
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+    })
+    const answer = await ins.inTab(async ({ go, later }) => {
+      await go('/chats')
+      later(async () => {
+        await new Promise((r) => setTimeout(r, 100))
+        log.push(`later on ${new URL(ab.page.url()).pathname}`)
+      })
+      return 'answer'
+    })
+    log.push('answered')
+    // Late work runs before the tab leaves; the answer does not wait for either.
+    await ins.inTab(async () => null)
+    ins.stop()
+    expect(answer).toBe('answer')
+    expect(log.slice(log.indexOf('/chats'))).toEqual([
+      '/chats',
+      'answered',
+      'later on /chats',
+      '/backoffice/a.php',
+    ])
   }, 60000)
 
   it('ST-M1-04: the chats list page leaves the links it showed in node.raw_event, for calibration', async () => {

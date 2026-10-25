@@ -15,8 +15,6 @@ export type Eyes = {
   balance(): number | null
   /** The order was already seen on this account (no need to open its page again). */
   knowsOrder(orderId: string): Promise<boolean>
-  /** Orders seen on the board whose page has not been read yet, oldest first. */
-  ordersWantingPage(): string[]
   /** Chats the event stream named since their page was last read. */
   chatsTouched(): string[]
   /** Chats with news seen in the last 3 days, newest first, 3 at most: what the 10-minute check rereads. */
@@ -28,8 +26,11 @@ export type Eyes = {
   onChatRead(chatId: string, p: ParseResult): Promise<void>
   /** The site's board answer was read in the last 10 minutes. */
   boardWorks(now?: number): boolean
-  /** The order's page could not be read: the order goes out with what the board showed. */
-  settleOrder(orderId: string): Promise<void>
+  /**
+   * The board answers read so far: how many (a counter, to tell a new one from the last) and whether the last one
+   * said the board has more pages. Null before the first. The minute check scrolls the board by it.
+   */
+  board(): { seq: number; more: boolean } | null
   presence(): boolean
   reset(): void
 }
@@ -52,12 +53,11 @@ export function createEyes(o: {
   let layoutReported = false
   let balance: number | null = null
   let presence = false
-  // Board orders lack the fee, which only their page shows; bounded so a stuck tab cannot grow it.
-  const waiting = new Map<string, OrderSignal>()
   const WAITING_MAX = 100
   // The fee from the order page's own answer: truer than the page text, which misses a discount.
   const fees = new Map<string, { rub: number; baseRub: number | null; hasBid: boolean | null }>()
   let boardAt = 0
+  let board: { seq: number; more: boolean } | null = null
   // chat → when the stream named it and which message, for the time the message really came.
   const touched = new Map<string, { at: string; messageId: string | null }>()
 
@@ -71,31 +71,19 @@ export function createEyes(o: {
   }
 
   /**
-   * A page reading completes the board one: the board's text and budget, the page's fee, and from the page what
-   * the board card did not show. The fee of the page's
-   * answer, when it came, wins over the one read from the page text.
+   * An order read from its page (the fallback when the board is silent) takes the fee of the page's own answer,
+   * which is truer than the page text: it counts a discount. A board order has no fee yet (0 stands for unknown):
+   * the core reads the page itself, once the order passed the Scorer (get_order).
    */
-  function withBoard(s: OrderSignal): OrderSignal {
+  function withFee(s: OrderSignal): OrderSignal {
     const id = s.order.order_id
     const fee = fees.get(id)
     fees.delete(id)
-    const b = waiting.get(id)
-    waiting.delete(id)
-    // The board's words come first; what a board card lacks (a carousel shows no client name) comes from the page.
-    const order = b
-      ? {
-          ...b.order,
-          client_name: b.order.client_name || s.order.client_name,
-          text: b.order.text || s.order.text,
-          budget_text: b.order.budget_text ?? s.order.budget_text,
-          bid_price_rub: s.order.bid_price_rub || b.order.bid_price_rub,
-        }
-      : s.order
+    if (!fee) return s
     return {
-      t: 'order',
-      order: fee ? { ...order, bid_price_rub: fee.rub } : order,
-      published_at: b?.published_at ?? s.published_at,
-      answer: fee ? { baseRub: fee.baseRub, hasBid: fee.hasBid } : s.answer,
+      ...s,
+      order: { ...s.order, bid_price_rub: fee.rub },
+      answer: { baseRub: fee.baseRub, hasBid: fee.hasBid },
     }
   }
 
@@ -112,19 +100,13 @@ export function createEyes(o: {
         continue
       }
       if (s.t === 'order_fee') {
-        // Kept until its order is completed; the oldest goes first, so a stuck tab cannot grow it.
+        // Kept until its order is read; the oldest goes first, so a stuck tab cannot grow it.
         fees.delete(s.orderId)
         if (fees.size >= WAITING_MAX) fees.delete(fees.keys().next().value ?? '')
         fees.set(s.orderId, { rub: s.rub, baseRub: s.baseRub, hasBid: s.hasBid })
         continue
       }
-      if (s.t === 'order' && s.needsPage) {
-        const id = s.order.order_id
-        if (!waiting.has(id) && waiting.size < WAITING_MAX && !(await knowsOrder(id)))
-          waiting.set(id, s)
-        continue
-      }
-      if (s.t === 'order') s = withBoard(s)
+      if (s.t === 'order') s = withFee(s)
       if (s.t === 'balance') {
         if (balance !== s.rub) {
           const first = balance === null
@@ -204,6 +186,9 @@ export function createEyes(o: {
       if (source === 'response') boardAt = lastRecognized
     }
     await onSignals(p.signals, body)
+    // Counted when its orders are stored and on their way, so a pass that saw the answer arrive leaves nothing behind.
+    if (p.recognized && p.what === 'feed' && source === 'response')
+      board = { seq: (board?.seq ?? 0) + 1, more: p.more === true }
   }
 
   return {
@@ -240,7 +225,6 @@ export function createEyes(o: {
     },
     lastRecognizedAt: () => lastRecognized,
     knowsOrder,
-    ordersWantingPage: () => [...waiting.keys()],
     chatsTouched: () => [...touched.keys()],
     async knownChats(now = Date.now()) {
       const last = max(rawMessage.sentAt)
@@ -281,12 +265,7 @@ export function createEyes(o: {
       await onSignals(signals, undefined, quiet)
     },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,
-    async settleOrder(orderId) {
-      const b = waiting.get(orderId)
-      if (!b) return
-      waiting.delete(orderId)
-      await onSignals([{ ...b, needsPage: false }], undefined)
-    },
+    board: () => board,
     balance: () => balance,
     presence: () => presence,
     reset() {

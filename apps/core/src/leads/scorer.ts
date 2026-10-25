@@ -70,16 +70,26 @@ export async function scoreOrder(
   gw: Gateway,
   o: ProfiOrder,
   rules: DirectionRules,
-  opts: { escalate?: boolean; correlationId?: string; causationId?: string } = {},
+  opts: {
+    escalate?: boolean
+    correlationId?: string
+    causationId?: string
+    /** Trial runs pass P3 so a live order is never scored behind them. */
+    priority?: 'P0' | 'P1' | 'P2' | 'P3'
+    /** Told why a model call gave no answer (for example `limit_reached`), before the score is a miss. */
+    onFailure?: (errorClass: string) => void
+  } = {},
 ): Promise<Scored | null> {
   const input = scorerInput(o, rules)
   const once = async (model: 'haiku' | 'sonnet'): Promise<Scored | null> => {
     const r = await gw.call('scorer', input, ScorerOutput, {
       model,
+      priority: opts.priority,
       correlationId: opts.correlationId,
       causationId: opts.causationId,
       redact: { names: namesToHide(o.client_name) },
     })
+    if (!r.ok) opts.onFailure?.(r.errorClass)
     if (!r.ok || !fits(rules, r.output)) return null
     return {
       ...decide(rules, r.output),
