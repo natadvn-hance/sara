@@ -17,9 +17,9 @@ import type { Gateway } from '../gateway/gateway'
 import type { RoleName } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
 import { rulesText } from '../leads/scorer'
-import { calibrationPassed } from './calibration'
+import { type CalibrationSummary, calibrationPassed, latestCalibration } from './calibration'
 import { rulesDiff } from './diff'
-import { saveProfileIn } from './profile'
+import { getProfile, saveProfileIn } from './profile'
 import { activeRules, insertVersion } from './store'
 
 export type AboutData = Omit<OnbAbout, 'understood'>
@@ -177,6 +177,10 @@ export type OnboardingView = {
   changed: boolean
   /** The stored draft no longer reads (the contract moved on): it can only be cancelled. */
   broken?: boolean
+  /** The latest calibration of exactly these rules (the draft's, as it is now), if any. */
+  calibration: CalibrationSummary | null
+  /** Whether the direction works, works in the shadow, or is still being set up. */
+  directionState: DirectionState
 }
 
 const emptyStep = (): StepState => ({
@@ -250,6 +254,8 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
       changes: [],
       changed: false,
       broken: true,
+      calibration: null,
+      directionState: (await getProfile(db, row.accountId)).state,
     }
   const active = (await activeRules(db, row.accountId)).rules
   const base = mode === 'edit' ? active : null
@@ -267,6 +273,8 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
     rules,
     changes: diff?.lines ?? [],
     changed: (diff?.sections.length ?? 0) > 0,
+    calibration: rules ? await latestCalibration(db, row.accountId, rules) : null,
+    directionState: (await getProfile(db, row.accountId)).state,
   }
 }
 

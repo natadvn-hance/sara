@@ -101,6 +101,24 @@ describe('the 85% gate of finishing', { timeout: 120000 }, () => {
   })
 })
 
+describe('the calibration in the onboarding view', { timeout: 120000 }, () => {
+  it('FR-ACC-4: the view tells the calibration of the rules as they are now, and the direction state', async () => {
+    const { getOnboarding } = await import('../../src/direction/onboarding')
+    await draftWith(50)
+    expect(await getOnboarding(db, ACC)).toMatchObject({ calibration: null, directionState: 'on' })
+    await calibrate(db, ACC, [...yes(16), ...no(4)], same(20, 70), rulesWith(50))
+    expect((await getOnboarding(db, ACC))?.calibration).toMatchObject({
+      state: 'done',
+      agreement: 0.8,
+      decisive: 20,
+      passed: false,
+    })
+    // Rules calibrated, then changed again: the old calibration is not theirs.
+    await draftWith(45)
+    expect((await getOnboarding(db, ACC))?.calibration).toBeNull()
+  })
+})
+
 describe('turning a direction on while finishing', { timeout: 120000 }, () => {
   const IT = 'hance-it'
   beforeEach(async () => {

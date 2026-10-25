@@ -361,3 +361,51 @@ export async function calibrationPassed(
     .limit(1)
   return run ? (await calibrationResult(db, run.id)).passed : false
 }
+
+export type CalibrationSummary = {
+  runId: string
+  state: string
+  agreement: number | null
+  decisive: number
+  passed: boolean
+  reliable: boolean
+}
+
+/** The latest calibration of exactly these rules, in short, for the onboarding screens; null if there is none. */
+export async function latestCalibration(
+  db: DbOrTx,
+  accountId: string,
+  rules: DirectionRules,
+): Promise<CalibrationSummary | null> {
+  const [run] = await db
+    .select({ id: directionRun.id, state: directionRun.state })
+    .from(directionRun)
+    .where(
+      and(
+        eq(directionRun.accountId, accountId),
+        eq(directionRun.kind, 'calibration'),
+        eq(directionRun.rulesHash, rulesHash(rules)),
+      ),
+    )
+    .orderBy(desc(directionRun.createdAt))
+    .limit(1)
+  if (!run) return null
+  if (run.state !== 'done')
+    return {
+      runId: run.id,
+      state: run.state,
+      agreement: null,
+      decisive: 0,
+      passed: false,
+      reliable: false,
+    }
+  const r = await calibrationResult(db, run.id)
+  return {
+    runId: run.id,
+    state: run.state,
+    agreement: r.agreement,
+    decisive: r.decisive,
+    passed: r.passed,
+    reliable: r.reliable,
+  }
+}
