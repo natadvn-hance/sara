@@ -13,8 +13,8 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Every job runs on Boris's Mac (self-hosted runner «sara-mac», 25.10.2026): the account's free Actions minutes ran
-# out, and the repository is private, so only our own branches reach the runner.
+# Every job runs on Boris's Mac (self-hosted runners «sara-mac» and «sara-mac-2», label sara-mac, 25.10.2026): the
+# account's free Actions minutes ran out, and the repository is private, so only our own branches reach the runners.
 jobs:
   # Docs and Markdown alone need no tests: «code» says whether anything else changed.
   changes:
@@ -81,9 +81,6 @@ jobs:
     runs-on: [self-hosted, sara-mac]
     # A full run takes about 10 minutes; a job stuck past this (the Mac asleep) frees the runner for the rest.
     timeout-minutes: 40
-    env:
-      # Its own port and container: the Mac runs other Postgres containers for the dev sessions.
-      DATABASE_URL: postgres://sara:sara@localhost:54529/sara
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -92,20 +89,28 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile
       # A macOS runner has no service containers: the job starts its own Postgres and removes it at the end.
+      # Each runner on the Mac has its own container and port, apart from each other and the dev sessions.
       - name: Start Postgres
         run: |
-          docker rm -f sara-ci-pg >/dev/null 2>&1 || true
-          docker run -d --name sara-ci-pg -e POSTGRES_USER=sara -e POSTGRES_PASSWORD=sara -e POSTGRES_DB=sara \
-            -p 54529:5432 pgvector/pgvector:pg16
-          for i in $(seq 1 30); do docker exec sara-ci-pg pg_isready -U sara >/dev/null 2>&1 && exit 0; sleep 2; done
+          case "$RUNNER_NAME" in sara-mac-2) port=54530 ;; *) port=54529 ;; esac
+          name="sara-ci-pg-$RUNNER_NAME"
+          echo "CI_PG=$name" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgres://sara:sara@localhost:$port/sara" >> "$GITHUB_ENV"
+          docker rm -f "$name" >/dev/null 2>&1 || true
+          docker run -d --name "$name" -e POSTGRES_USER=sara -e POSTGRES_PASSWORD=sara -e POSTGRES_DB=sara \
+            -p "$port:5432" pgvector/pgvector:pg16
+          for i in $(seq 1 30); do docker exec "$name" pg_isready -U sara >/dev/null 2>&1 && exit 0; sleep 2; done
           exit 1
       # Chromium first: the Profi-MCP tests drive a real browser too.
       - run: pnpm --filter @sara/web exec playwright install chromium
       # caffeinate keeps the Mac from idle sleep while the tests run (a closed lid still stops it).
       - run: caffeinate -i pnpm test
-      # The pult e2e uses fixed ports; a dev session running it at the same moment takes them, so one more try.
-      - run: caffeinate -i pnpm --filter @sara/web e2e || (sleep 60 && caffeinate -i pnpm --filter @sara/web e2e)
+      # The pult e2e uses fixed ports: the two runners take turns through a lock, and a dev session holding the ports
+      # gets one more try after a minute.
+      - run: |
+          e2e='caffeinate -i pnpm --filter @sara/web e2e'
+          lockf -t 1800 /tmp/sara-ci-web-e2e.lock sh -c "$e2e || (sleep 60 && $e2e)"
       - run: pnpm --filter @sara/web build
       - name: Stop Postgres
         if: always()
-        run: docker rm -f sara-ci-pg >/dev/null 2>&1 || true
+        run: docker rm -f "${CI_PG:-sara-ci-pg-$RUNNER_NAME}" >/dev/null 2>&1 || true
