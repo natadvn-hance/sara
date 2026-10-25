@@ -1,0 +1,8 @@
+{
+  "name": "teacher",
+  "version": 1,
+  "model": "opus",
+  "fallbackModel": "sonnet",
+  "priority": "P3",
+  "timeoutMs": 300000
+}

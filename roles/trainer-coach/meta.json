@@ -1,0 +1,8 @@
+{
+  "name": "trainer-coach",
+  "version": 1,
+  "model": "sonnet",
+  "fallbackModel": "opus",
+  "priority": "P1",
+  "timeoutMs": 90000
+}

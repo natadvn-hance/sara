@@ -18,10 +18,16 @@ import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
+import { ensureMindIndex } from './mind/indexer'
+import { createMindSearch } from './mind/search'
+import { createMindWriter } from './mind/writer'
 import { type BotControl, createBotControl } from './notify/botControl'
 import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
+import { startSchoolJobs } from './school/jobs'
+import { registerSchoolRoutes } from './school/routes'
+import type { SchoolDeps } from './school/types'
 import { registerScreenProxy } from './screen/screenProxy'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
@@ -49,6 +55,8 @@ export type StartOptions = {
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** How often the learning jobs run (default a minute); tests call them directly instead. */
   learningTickMs?: number
+  /** How often the school's jobs run (default a minute). */
+  schoolTickMs?: number
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -156,6 +164,25 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     scoped.addHook('preHandler', requireSession)
     scoped.get('/api/metrics/speed', async () => speedReport(db))
   })
+  const school: SchoolDeps = {
+    db,
+    // Night jobs meet a limit at once instead of standing still for hours (NFR-COST-2).
+    gateway: withoutLimitWait(gateway),
+    notifier: bot.notifier,
+    mind: createMindSearch(db),
+    writer: createMindWriter({
+      db,
+      mindDir: config.mindDir,
+      secrets,
+      reindex: async () => {
+        await ensureMindIndex(db, config.mindDir)
+      },
+    }),
+    accountIds: config.accounts.map((a) => a.id),
+    mindDir: config.mindDir,
+    publicUrl: config.publicUrl,
+  }
+  registerSchoolRoutes(app, school)
   const url = await app.listen({ port: config.port, host: config.host })
 
   const token = await secrets.get('telegram_bot_token')
@@ -171,6 +198,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     accountIds: config.accounts.map((a) => a.id),
     tickMs: o.learningTickMs,
   })
+  const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
 
   return {
     url,
@@ -181,6 +209,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     pipeline: lp,
     async close() {
       learning.stop()
+      schoolJobs.stop()
       gateway.stop()
       await bot.stop()
       await app.close()
