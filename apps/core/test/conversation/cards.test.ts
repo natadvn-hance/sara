@@ -158,6 +158,36 @@ describe('the draft card', () => {
 })
 
 describe('comparison in shadow', () => {
+  it('FR-CONV-10: Sara’s own sent message is never the real reply of an older draft', async () => {
+    await turn('t-1', {
+      state: 'finished',
+      outcome: 'drafted',
+      finishedAt: new Date().toISOString(),
+    })
+    await sendTurnCard({ db, notifier }, 't-1')
+    const [own] = await db
+      .insert(chatMessage)
+      .values({
+        id: newEventId(),
+        accountId: 'hance-marketing',
+        chatId: CHAT,
+        orderId: CHAT,
+        platformMessageId: 'm-3',
+        side: 'specialist',
+        author: 'sara',
+        authorBasis: 'outbox',
+        text: 'Анна, давайте начнём с созвона.',
+        sentAt: new Date().toISOString(),
+        source: 'node',
+        conversationId: convId,
+      })
+      .returning()
+    await compareTurn({ db, notifier }, convId, [own as never])
+    const [row] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+    expect(row?.actualMessageId).toBeNull()
+    expect(edits).toHaveLength(0)
+  })
+
   it('FR-CONV-10: the real reply edits the card silently with its author and similarity', async () => {
     await turn('t-1', {
       state: 'finished',
