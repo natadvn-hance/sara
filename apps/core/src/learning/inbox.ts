@@ -32,6 +32,7 @@ export async function handleBorisMessage(
     onCardReply?(m: {
       replyToMessageId: number | null
       text: string
+      voice: boolean
       at: Date
     }): Promise<string | null>
     /** M4: Boris's version of a reply after «Изменить» on a conversation card. */
@@ -47,7 +48,12 @@ export async function handleBorisMessage(
   }
   if (!text) return TEXTS.notAnAnswer
   const a = { text, voice: m.voicePath !== null, at: m.at }
-  const command = await d.onCardReply?.({ replyToMessageId: m.replyToMessageId, text, at: m.at })
+  const command = await d.onCardReply?.({
+    replyToMessageId: m.replyToMessageId,
+    text,
+    voice: a.voice,
+    at: m.at,
+  })
   if (command) return command
   const q = await openQuestion(d.db, { replyToMessageId: m.replyToMessageId, at: m.at })
   if (!q) return TEXTS.notAnAnswer

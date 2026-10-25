@@ -1,5 +1,17 @@
 import { newEventId } from '@sara/shared'
-import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { lead, leadLabel, question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -163,6 +175,9 @@ export async function openQuestion(
         isNotNull(question.telegramMessageId),
         gte(question.askedAt, new Date(a.at.getTime() - ANSWER_WINDOW_MS).toISOString()),
         stillWanted,
+        // Boris's version of a reply to a client is taken only as a reply to its question (or to its card):
+        // after the switch it goes to the client as it is.
+        ne(question.kind, 'conv_edit'),
       ),
     )
     .orderBy(desc(question.askedAt))
