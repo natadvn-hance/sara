@@ -1,7 +1,7 @@
 import { newEventId } from '@sara/shared'
-import { sql } from 'drizzle-orm'
-import type { Db } from '../db/client'
-import { mindIndex } from '../db/schema'
+import { desc, eq, sql } from 'drizzle-orm'
+import type { Db, DbOrTx } from '../db/client'
+import { event, mindIndex } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { loadMind, type MindRecord } from './loader'
 
@@ -45,34 +45,57 @@ function toRow(r: MindRecord, mindVersion: string) {
   }
 }
 
+/** The mind version the index was last built for, from the journal; null before the first build. */
+export async function lastIndexedVersion(db: DbOrTx): Promise<string | null> {
+  const [r] = await db
+    .select({ version: event.entityId })
+    .from(event)
+    .where(eq(event.type, 'mind.indexed'))
+    .orderBy(desc(event.recordedAt), desc(event.occurredAt))
+    .limit(1)
+  return r?.version ?? null
+}
+
+/** What the core says about a record it could not load: where and why, never the text of the record. */
+const logLoadError = (e: { path: string; message: string }) =>
+  console.error('mind: record not loaded', e.path, e.message)
+
 /**
  * Rebuilds core.mind_index from the mind folder when its version changed (FR-MIND-2), in one transaction. An empty
- * index counts as changed; so does a record that came into or went out of force since the last build.
+ * index counts as changed only when the mind version it was last built for differs; so does a record that came into
+ * or went out of force since the last build.
  *
  * Call it at startup and then periodically (the app does it every hour): a record leaves the index at the end of its
  * `valid_to` day and enters it on its `valid_from` day by Moscow, and no new commit announces that. The no-change path
  * stays cheap for this: it reads the folder, compares the ids and the version and writes nothing.
+ *
+ * The folder is read after the build lock is taken, so two callers never replace a newer index with an older reading.
+ * Each record that could not be loaded goes to `onLoadError` (by default the log, with its path and message) when the
+ * index is rebuilt.
  */
 export async function ensureMindIndex(
   db: Db,
   mindDir: string,
+  onLoadError: (e: { path: string; message: string }) => void = logLoadError,
 ): Promise<{ mindVersion: string; records: number; changed: boolean }> {
-  const mind = await loadMind(mindDir)
-  const today = moscowToday()
-  const records = mind.records.filter((r) => inForce(r, today))
-  const wanted = records.map((r) => r.front.id).sort()
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('core.mind_index'))`)
+    const mind = await loadMind(mindDir)
+    const records = mind.records.filter((r) => inForce(r, moscowToday()))
+    const wanted = records.map((r) => r.front.id).sort()
     const indexed = await tx
       .select({ id: mindIndex.recordId, mindVersion: mindIndex.mindVersion })
       .from(mindIndex)
     const ids = indexed.map((r) => r.id).sort()
+    // An index without records keeps no version of its own: the journal remembers what it was last built for.
+    const builtFor = indexed[0]?.mindVersion ?? (await lastIndexedVersion(tx))
     const same =
-      indexed.length > 0 &&
+      builtFor === mind.mindVersion &&
       indexed.every((r) => r.mindVersion === mind.mindVersion) &&
       ids.join('\n') === wanted.join('\n')
     if (same) return { mindVersion: mind.mindVersion, records: indexed.length, changed: false }
 
+    for (const e of mind.errors) onLoadError(e)
     await tx.delete(mindIndex)
     for (let i = 0; i < records.length; i += 500) {
       await tx

@@ -3,6 +3,7 @@ import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import type { MindHit, MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { mindIndex } from '../db/schema'
+import { lastIndexedVersion } from './indexer'
 import { markdownSections } from './loader'
 
 /** A long order text gives at most this many words to the query, the last ones. */
@@ -111,7 +112,8 @@ export function createMindSearch(db: Db): MindSearch {
   return {
     async version() {
       const [r] = await db.select({ v: mindIndex.mindVersion }).from(mindIndex).limit(1)
-      return r?.v ?? 'empty'
+      // An index without records still knows the version it was built for.
+      return r?.v ?? (await lastIndexedVersion(db)) ?? 'empty'
     },
 
     async search(q) {
