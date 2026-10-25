@@ -255,6 +255,16 @@ async function turnsDone(n: number, timeoutMs = 20000) {
 }
 
 describe('the turn workflow', () => {
+  it('FR-CONV-7: typing for a client message no turn waits on wakes nothing and fails nothing', async () => {
+    // Conversations off: the message is stored, no turn starts; then the client types.
+    await setSetting(db, 'pipeline.conversations', false, 'system')
+    await clientWrites('m-2', 'Как начнём?')
+    const [c] = await db.select().from(conversation)
+    expect(c).toBeDefined()
+    await expect(pokeTurn(c as never)).resolves.toBeUndefined()
+    expect(await db.select().from(convTurn)).toHaveLength(0)
+  }, 30000)
+
   it('FR-CONV-7: three client messages with typing between them get one reply', async () => {
     await clientWrites('m-2', 'Здравствуйте')
     await sleep(300)

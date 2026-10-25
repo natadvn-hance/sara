@@ -649,10 +649,14 @@ export async function pokeTurn(conv: ConversationRow): Promise<void> {
   if (anchor) await poke(turnWorkflowId(conv.id, anchor))
 }
 
+/** DBOS's code of a send to a workflow that does not exist (DBOSNonExistentWorkflowError). */
+const NON_EXISTENT_WORKFLOW = 16
+
 async function poke(workflowID: string): Promise<void> {
   try {
     await DBOS.send(workflowID, 'poke', 'poke')
   } catch (e) {
-    if ((e as Error).name !== 'DBOSNonExistentWorkflowError') throw e
+    // No turn waits on this client turn: nothing to wake. DBOS marks the error by its code, its name is plain «Error».
+    if ((e as { dbosErrorCode?: number }).dbosErrorCode !== NON_EXISTENT_WORKFLOW) throw e
   }
 }
