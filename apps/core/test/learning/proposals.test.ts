@@ -65,6 +65,9 @@ const PROPOSAL = {
   rules: { ...RULES_V1, threshold: 60 },
 }
 const NOW = new Date('2026-10-25T09:00:00Z')
+// The press asks «почему не надо?» on the day after the surprises: the day allows three questions, and at the real
+// clock (which was this very day once) the three would already be spent.
+const NEXT_DAY = () => new Date(NOW.getTime() + 24 * 3600_000)
 
 /** Three skips Sara did not expect, each with Boris's reason, and one yes. */
 async function threeSurprises() {
@@ -123,6 +126,38 @@ describe('rule proposals', { timeout: 30000 }, () => {
     expect(await countEvents(db, 'rules.proposed')).toBe(1)
   })
 
+  it("NFR-PRIV-2: a client's name inside an order text never reaches the proposer", async () => {
+    await threeSurprises()
+    await db.execute(
+      sql`update core.lead set text = 'Меня зовут Андрей, нужны федеральные каналы' where id = '940001'`,
+    )
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    const input = await proposerInput()
+    expect(input).toContain('Меня зовут [имя 1], нужны федеральные каналы')
+    expect(input).not.toContain('Андрей')
+  })
+
+  it("NFR-PRIV-2: a proposal that carries a client's tag is invalid, so no name is written into the rules", async () => {
+    await threeSurprises()
+    await db.execute(
+      sql`update core.lead set text = 'Меня зовут Андрей, нужны федеральные каналы' where id = '940001'`,
+    )
+    const leaking = {
+      ...PROPOSAL,
+      rules: {
+        ...RULES_V1,
+        stop_factors: RULES_V1.stop_factors.map((s, i) =>
+          i === 0 ? { ...s, examples: [...s.examples, 'Меня зовут [имя 1]'] } : s,
+        ),
+      },
+    }
+    const gw = await gateway({ 'rules-proposer': leaking, scorer: scorerAnswer(58) })
+    expect(await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)).toBe('invalid')
+    expect(await countEvents(db, 'rules.proposal_invalid')).toBe(1)
+    expect(await db.select().from(ruleProposal)).toHaveLength(0)
+  })
+
   it('FR-MIND-3: nothing changes until «Применить»', async () => {
     await threeSurprises()
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
@@ -141,9 +176,9 @@ describe('rule proposals', { timeout: 30000 }, () => {
     await threeSurprises()
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
     await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-25T09:30:00Z'))
-    expect(await onProposalPress({ db, notifier }, await proposalTask(), 'drop')).toBe(
-      'Хорошо, оставляю v1',
-    )
+    expect(
+      await onProposalPress({ db, notifier, now: NEXT_DAY }, await proposalTask(), 'drop'),
+    ).toBe('Хорошо, оставляю v1')
     expect((await activeRules(db, ACC)).version).toBe(1)
     expect((await db.select().from(ruleProposal))[0]?.state).toBe('declined')
     expect(sent.at(-1)?.text).toBe('Почему не надо эту поправку? Напиши или скажи голосом.')
@@ -206,13 +241,13 @@ describe('rule proposals', { timeout: 30000 }, () => {
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
     await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
     expect(await proposerInput()).not.toContain('Борис уже отказался')
-    await onProposalPress({ db, notifier }, await proposalTask(), 'drop')
+    await onProposalPress({ db, notifier, now: NEXT_DAY }, await proposalTask(), 'drop')
     const [why] = await db.select().from(question).where(eq(question.kind, 'why_decline'))
     await answerQuestion(db, {
       text: 'маленький бюджет у нас тоже берут',
       replyToMessageId: why?.telegramMessageId ?? -1,
       voice: false,
-      at: new Date(),
+      at: new Date(NEXT_DAY().getTime() + 1000),
     })
     expect(
       await maybePropose({ db, gateway: gw, notifier }, ACC, new Date('2026-10-26T09:00:00Z')),

@@ -57,6 +57,34 @@
       "when": 1792869809158,
       "tag": "0007_lead_client_info",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792873328281,
+      "tag": "0008_direction_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792875242762,
+      "tag": "0009_conversation",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792878790584,
+      "tag": "0010_direction_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792893175607,
+      "tag": "0011_trial_scores_and_runs",
+      "breakpoints": true
     }
   ]
 }

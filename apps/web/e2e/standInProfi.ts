@@ -9,6 +9,7 @@ import { openAccountBrowser } from '../../profi-node/src/browser/accountBrowser'
 import { serveMcp } from '../../profi-node/src/mcp/http'
 import { createProfiMcpServer } from '../../profi-node/src/mcp/server'
 import { registerScreenRoute } from '../../profi-node/src/screen/screenRoute'
+import { dbUrl } from './dbUrl'
 
 const site = await startProfiSite()
 const ab = await openAccountBrowser({
@@ -17,7 +18,7 @@ const ab = await openAccountBrowser({
   proxy: null,
   headless: true,
   // The lock needs only a database that always exists; sara_web is created by the core's start in parallel.
-  databaseUrl: 'postgres://sara:sara@localhost:54329/postgres',
+  databaseUrl: dbUrl('postgres'),
 })
 await ab.page.goto(`${site.url}/login`)
 const no = () => Promise.reject(new Error('not used in panel tests'))
@@ -33,6 +34,7 @@ const svc = await serveMcp(
       listChats: no,
       readChat: no,
       submitBid: no,
+      sendMessage: no,
     }),
   7171,
 )

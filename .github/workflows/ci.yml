@@ -8,65 +8,65 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR or branch replaces the run still going: only the latest code needs checking.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Every job runs on Boris's Mac (self-hosted runners «sara-mac» and «sara-mac-2», label sara-mac, 25.10.2026): the
+# account's free Actions minutes ran out, and the repository is private, so only our own branches reach the runners.
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  # Docs and Markdown alone need no tests: «code» says whether anything else changed.
+  changes:
+    runs-on: [self-hosted, sara-mac]
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE" HEAD | grep -qvE '^docs/|\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Lint, types, ports, commit messages and traceability in one checkout: on one runner, fewer jobs finish sooner.
+  check:
+    runs-on: [self-hosted, sara-mac]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Each runner keeps its own pnpm and package store: two jobs at once in one store break each other's writes.
       - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.tool_cache }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
+        env:
+          npm_config_store_dir: ${{ runner.tool_cache }}/pnpm-store
       - run: pnpm check
       - run: pnpm check:ports
-
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: sara
-          POSTGRES_PASSWORD: sara
-          POSTGRES_DB: sara
-        ports:
-          - 54329:5432
-        options: >-
-          --health-cmd "pg_isready -U sara"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgres://sara:sara@localhost:54329/sara
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - if: github.event_name == 'pull_request'
+        run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}
+      - run: pnpm trace ${{ startsWith(github.head_ref, 'release-please--') && '--strict' || '' }}
+      - uses: actions/upload-artifact@v4
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # Chromium first: the Profi-MCP tests drive a real browser too.
-      - run: pnpm --filter @sara/web exec playwright install --with-deps chromium
-      - run: pnpm test
-      - run: pnpm --filter @sara/web e2e
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @sara/web build
+          name: traceability
+          path: reports/traceability.md
+          retention-days: 7
 
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, sara-mac]
     permissions:
       contents: read
       pull-requests: read
@@ -74,37 +74,54 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # gitleaks-action downloads itself to a fixed file in TMPDIR: the runner's own temp folder, emptied after each
+      # job, keeps it apart from the other runner and from the last run.
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TMPDIR: ${{ runner.temp }}
 
-  commits:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: [self-hosted, sara-mac]
+    # A full run takes about 10 minutes; a job stuck past this (the Mac asleep) frees the runner for the rest.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # Each runner keeps its own pnpm and package store: two jobs at once in one store break each other's writes.
       - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.tool_cache }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}
-
-  trace:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm trace ${{ startsWith(github.head_ref, 'release-please--') && '--strict' || '' }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: traceability
-          path: reports/traceability.md
+        env:
+          npm_config_store_dir: ${{ runner.tool_cache }}/pnpm-store
+      # A macOS runner has no service containers: the job starts its own Postgres and removes it at the end.
+      # Each runner on the Mac has its own container and port, apart from each other and the dev sessions.
+      - name: Start Postgres
+        run: |
+          case "$RUNNER_NAME" in sara-mac-2) port=54530 ;; *) port=54529 ;; esac
+          name="sara-ci-pg-$RUNNER_NAME"
+          echo "CI_PG=$name" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgres://sara:sara@localhost:$port/sara" >> "$GITHUB_ENV"
+          docker rm -f "$name" >/dev/null 2>&1 || true
+          docker run -d --name "$name" -e POSTGRES_USER=sara -e POSTGRES_PASSWORD=sara -e POSTGRES_DB=sara \
+            -p "$port:5432" pgvector/pgvector:pg16
+          for i in $(seq 1 30); do docker exec "$name" pg_isready -U sara >/dev/null 2>&1 && exit 0; sleep 2; done
+          exit 1
+      # Chromium first: the Profi-MCP tests drive a real browser too.
+      - run: pnpm --filter @sara/web exec playwright install chromium
+      # caffeinate keeps the Mac from idle sleep while the tests run (a closed lid still stops it).
+      - run: caffeinate -i pnpm test
+      # The pult e2e uses fixed ports: the two runners take turns through a lock, and a dev session holding the ports
+      # gets one more try after a minute.
+      - run: |
+          e2e='caffeinate -i pnpm --filter @sara/web e2e'
+          lockf -t 1800 /tmp/sara-ci-web-e2e.lock sh -c "$e2e || (sleep 60 && $e2e)"
+      - run: pnpm --filter @sara/web build
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f "${CI_PG:-sara-ci-pg-$RUNNER_NAME}" >/dev/null 2>&1 || true

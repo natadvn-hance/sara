@@ -11,12 +11,36 @@ export type Insurance = {
   reconcile(since: string): Promise<void>
   /**
    * Work of its own in the account tab (a bid, an order check), in turn with the checks above; the tab goes back
-   * to the feed afterwards. The work itself asks can() before it moves the tab.
+   * to the feed afterwards. The work itself asks can() before it moves the tab. The answer is given as soon as the
+   * work is done, without waiting for the way back; `later` queues errands that still need the page (they run before
+   * the tab leaves, after the answer, and their failures are not the caller's).
    */
-  inTab<T>(f: (t: { go(path: string): Promise<boolean>; can(): boolean }) => Promise<T>): Promise<T>
+  inTab<T>(
+    f: (t: {
+      go(path: string): Promise<boolean>
+      can(): boolean
+      later(errand: () => Promise<void>): void
+    }) => Promise<T>,
+  ): Promise<T>
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+export type BoardScroll = {
+  /** Pages of the board a pass loads, the one the page opens with included. */
+  pages?: number
+  /** Every Nth pass reads far more of the board... */
+  fullEvery?: number
+  /** ...up to this many pages. */
+  fullPages?: number
+  /** Between two scrolls a person looks at the page (milliseconds, a little random). */
+  pauseMs?: number
+  /** A pass stops scrolling after this long, so the one tab is not held from the checks and bids behind it. */
+  budgetMs?: number
+}
+// The board answers about 17 orders at a time, by relevance and not by time (346 on 24.10.2026): a new order of low
+// relevance sits far down. The first pages every minute, the whole board about every 10 minutes.
+const BOARD_SCROLL = { pages: 4, fullEvery: 10, fullPages: 30, pauseMs: 1200, budgetMs: 50000 }
 
 /**
  * The minute check (FR-LEAD-1) and the 10-minute chat check (FR-CONV-1): open the feed and unread chats in the
@@ -34,11 +58,18 @@ export function startInsurance(o: {
   chatPauseMs?: number
   canNavigate?: () => boolean
   onNavigate?: (ok: boolean) => Promise<void> | void
-  /** On each order page this check opened, while the tab is still there (the form calibration, src/bid). */
-  afterOrderPage?: (orderId: string) => Promise<void>
+  /**
+   * On each order page this check opened, after the order went on and while the tab is still there (the form
+   * calibration, src/bid). It gets the tab's gate to ask again right before it presses anything.
+   */
+  afterOrderPage?: (orderId: string, may: () => boolean) => Promise<void>
+  /** How the feed pass scrolls the board for its next pages (see scrollBoard); all of it has a default. */
+  board?: BoardScroll
 }): Insurance {
   const can = o.canNavigate ?? (() => true)
   const pause = o.chatPauseMs ?? 2000
+  const scroll = { ...BOARD_SCROLL, ...o.board }
+  let passes = 0
   let busy: Promise<unknown> = Promise.resolve()
   const serial = <T>(f: () => Promise<T>): Promise<T> => {
     const run = busy.then(f, f)
@@ -64,8 +95,9 @@ export function startInsurance(o: {
   let chatsPath: string | null = null
   let onFeed = true
 
-  // Eyes 3 (old Sara's way): order numbers from the feed page and the board answer, then each new order's own
-  // page, once: only the page shows the fee for a bid.
+  // Eyes 3, the fallback while the board answer is silent (old Sara's way): the feed page links, then each new
+  // order's own page, once. A board order is never opened here: it goes to the core as the board showed it, and the
+  // core reads its page only if the order passes the Scorer (get_order).
   async function readNewOrders() {
     onFeed = true
     if (!o.parsers.fromFeedDom) return
@@ -74,13 +106,9 @@ export function startInsurance(o: {
     chatsPath = (await o.parsers.chatsUrl?.(o.ab.page)) ?? chatsPath
     const fromOrderDom = o.parsers.fromOrderDom
     const orderPath = o.parsers.paths.order
-    if (!fromOrderDom || !orderPath) {
-      for (const id of o.eyes.ordersWantingPage()) await o.eyes.settleOrder(id)
-      return
-    }
-    // The real feed page links hundreds of old orders too: while the board answers, only its orders are opened.
-    const fromPage = o.eyes.boardWorks() ? [] : feed.refs.map((r) => r.orderId)
-    const ids = [...new Set([...fromPage, ...o.eyes.ordersWantingPage()])]
+    if (!fromOrderDom || !orderPath) return
+    // The real feed page links hundreds of old orders too: while the board answers, none of them is opened.
+    const ids = o.eyes.boardWorks() ? [] : [...new Set(feed.refs.map((r) => r.orderId))]
     let opened = 0
     for (const id of ids) {
       if (opened >= 5 || !can()) break
@@ -91,10 +119,8 @@ export function startInsurance(o: {
       opened++
       const page = await fromOrderDom(o.ab.page, id)
       await keepFormMap()
-      if (o.afterOrderPage && can()) await o.afterOrderPage(id).catch(() => {})
       await o.eyes.onParsed(page, 'dom')
-      // An expired or changed page still lets a board order through, without its fee.
-      if (!page.signals.some((s) => s.t === 'order')) await o.eyes.settleOrder(id)
+      if (o.afterOrderPage && can()) await o.afterOrderPage(id, can).catch(() => {})
     }
   }
 
@@ -139,11 +165,70 @@ export function startInsurance(o: {
     onFeed = true
   }
 
+  /**
+   * Scrolls the open board like a person (the mouse over the list, the wheel, a look between), until the page itself
+   * has asked the site for its next part: each answer passes the eyes, so nothing is called by hand. Stops at the
+   * page count, the end of the board, the time budget, or when the tab may not move.
+   */
+  async function scrollBoard(pages: number) {
+    const page = o.ab.page
+    const t0 = Date.now()
+    let loaded = 1
+    let stoppedBy: 'pages' | 'end' | 'quiet' | 'time' | 'gate' = 'pages'
+    while (loaded < pages) {
+      if (!can()) {
+        stoppedBy = 'gate'
+        break
+      }
+      if (Date.now() - t0 >= scroll.budgetMs) {
+        stoppedBy = 'time'
+        break
+      }
+      const before = o.eyes.board()
+      if (!before?.more) {
+        stoppedBy = 'end'
+        break
+      }
+      const [w, h] = await page.evaluate(() => [innerWidth, innerHeight]).catch(() => [1280, 720])
+      await page.mouse.move((w ?? 1280) / 2, (h ?? 720) / 2).catch(() => {})
+      let arrived = false
+      for (let step = 0; step < 14 && !arrived && can(); step++) {
+        await page.mouse.wheel(0, 450 + Math.random() * 250).catch(() => {})
+        await sleep(120 + Math.random() * 120)
+        arrived = (o.eyes.board()?.seq ?? 0) > before.seq
+      }
+      // A slow answer: the page asked, the site is still thinking.
+      for (let wait = 0; wait < 30 && !arrived && can(); wait++) {
+        await sleep(100)
+        arrived = (o.eyes.board()?.seq ?? 0) > before.seq
+      }
+      if (!arrived) {
+        stoppedBy = can() ? 'quiet' : 'gate'
+        break
+      }
+      loaded++
+      await sleep(scroll.pauseMs * (0.7 + Math.random() * 0.6))
+    }
+    // How far the pass got and why it stopped: a note for calibrating the scroll on the live board (no order, no text).
+    await keep({
+      what: 'board_scroll',
+      pages: loaded,
+      wanted: pages,
+      more: o.eyes.board()?.more ?? null,
+      stoppedBy,
+      ms: Date.now() - t0,
+    })
+  }
+
   async function feedOnce() {
     await serial(async () => {
       if (!can()) return
       if (!(await go(o.parsers.paths.feed))) return
       await readNewOrders()
+      passes++
+      // Only on the feed page itself (the page links fallback leaves it) and only a board the eyes know.
+      if (onFeed && can() && o.eyes.boardWorks() && o.eyes.board()?.more)
+        await scrollBoard(passes % scroll.fullEvery === 0 ? scroll.fullPages : scroll.pages)
       await readTouchedChats()
       if (o.parsers.paths.feed && can()) await maybeBackToFeed()
       await o.eyes.onParsed(
@@ -209,22 +294,37 @@ export function startInsurance(o: {
     },
     feedOnce,
     chatsOnce: (onlyUnread = true) => chats((c) => !onlyUnread || c.unread > 0),
-    inTab: (f) =>
-      serial(async () => {
-        try {
-          return await f({
-            // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
-            go: async (path) => {
-              if (!can()) return false
-              onFeed = false
-              return go(path)
-            },
-            can,
-          })
-        } finally {
+    inTab<T>(
+      f: (t: {
+        go(path: string): Promise<boolean>
+        can(): boolean
+        later(errand: () => Promise<void>): void
+      }) => Promise<T>,
+    ): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        void serial(async () => {
+          const errands: (() => Promise<void>)[] = []
+          try {
+            resolve(
+              await f({
+                // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
+                go: async (path) => {
+                  if (!can()) return false
+                  onFeed = false
+                  return go(path)
+                },
+                can,
+                later: (errand) => void errands.push(errand),
+              }),
+            )
+          } catch (e) {
+            reject(e)
+          }
+          for (const errand of errands) await errand().catch(() => {})
           if (can()) await maybeBackToFeed()
-        }
-      }),
+        }).catch(() => {})
+      })
+    },
     // After a logout or an outage: the feed and the chats with messages since then, one by one (F8).
     async reconcile(since) {
       await feedOnce()

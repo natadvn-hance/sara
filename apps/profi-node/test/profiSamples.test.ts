@@ -23,11 +23,13 @@ const parse = (s: Sample): ParseResult =>
 type BoardItem = { id: string; type: string; snippets?: BoardItem[] }
 
 describe('Profi.ru samples', () => {
-  it('ST-M1-10: the board sample gives each order card, the carousel ones too, as an order that waits for its page', () => {
+  it('ST-M1-10: the board sample gives each order card, the carousel ones too, as an order with the words of the board and a fee not known yet', () => {
     const s = sample('response', 'board')
     const r = parse(s)
     expect(r.recognized).toBe(true)
     expect(r.what).toBe('feed')
+    // 346 orders on the board, the answer holds the first ones: the page loads the rest when scrolled (nextCursor).
+    expect(r.more).toBe(true)
     // The carousel of older orders sits among the cards; Boris: score them like the others (24.10.2026).
     const cards = (
       s.body as { data: { boSearchBoardItems: { items: BoardItem[] } } }
@@ -39,7 +41,8 @@ describe('Profi.ru samples', () => {
       cards.map((c) => c.id),
     )
     for (const x of r.signals) {
-      expect(x).toMatchObject({ t: 'order', needsPage: true, order: { bid_price_rub: 0 } })
+      expect(x).toMatchObject({ t: 'order', order: { bid_price_rub: 0 } })
+      expect(x).not.toHaveProperty('needsPage')
       if (x.t === 'order') expect(Date.parse(x.published_at ?? '')).toBeGreaterThan(0)
     }
   })

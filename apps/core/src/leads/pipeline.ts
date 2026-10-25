@@ -1,7 +1,9 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import {
   AnalystOutput,
+  ClientInfo,
   type EventEnvelope,
+  type GetOrderOutput,
   newEventId,
   ProfiOrder,
   type TaskAction,
@@ -21,10 +23,9 @@ import {
   type DraftAnswer,
   markAnswered,
 } from '../learning/questions'
-import type { LeadCard } from '../notify/cards'
-import { TEXTS } from '../notify/cards'
+import { analysisMessages, type LeadCard, TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
-import type { ProfiClient } from '../profi/client'
+import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
@@ -47,7 +48,7 @@ export type LeadPipelineDeps = {
   gateway: Gateway
   notifier: Notifier
   /** The wallet for the money check before a bid (FR-LEAD-9). */
-  profi: Pick<ProfiClient, 'sessionHealth'>
+  profi: Pick<ProfiClient, 'sessionHealth' | 'getOrder'>
   remindAfterMs: () => Promise<number>
   /** Card sending is retried, for example while the bot is starting (default 5 attempts from 2 s). */
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
@@ -78,6 +79,7 @@ const ev = (
     | 'lead.scored'
     | 'lead.skipped'
     | 'lead.stale'
+    | 'lead.page_read'
     | 'lead.held'
     | 'lead.drafted'
     | 'draft.edited'
@@ -113,7 +115,114 @@ const sourceOf = (l: LeadRow): DraftSource => ({
   budget_text: l.budgetText,
   text: l.text,
   client_name: l.clientName,
+  client_info: ClientInfo.safeParse(l.clientInfo).data ?? null,
 })
+
+/** What the order page said (the plain data of a durable step), or why it could not be read. */
+type PageRead = { ok: true; page: GetOrderOutput } | { ok: false; error: string }
+
+/**
+ * The order page through the node; any failure is «not read»: the card goes on with what the board showed. An answer
+ * the node gives from its store (the tab may not move, the page gave no order answer), or an older node's answer that
+ * does not say, is no read either: it would pass a closed order and an order already bid on.
+ */
+async function readPage(accountId: string, orderId: string): Promise<PageRead> {
+  try {
+    const page = await d().profi.getOrder(accountId, orderId)
+    return page.from_page === true ? { ok: true, page } : { ok: false, error: 'NOT_READ' }
+  } catch (err) {
+    const error = err instanceof ProfiError ? err.errorClass : 'INTERNAL'
+    console.error('order page not read', orderId, error)
+    return { ok: false, error }
+  }
+}
+
+/** The order with what its page added: the fee, and the client name and text only where the board gave none. */
+function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'>>(
+  o: T,
+  r: PageRead,
+): T & { client_info: ClientInfo | null } {
+  if (!r.ok) return { ...o, client_info: null }
+  const p = r.page
+  return {
+    ...o,
+    bid_price_rub: p.bid_price_rub > 0 ? p.bid_price_rub : o.bid_price_rub,
+    client_name: o.client_name || p.client_name,
+    text: o.text || p.text,
+    client_info: p.client_info ?? null,
+  }
+}
+
+/**
+ * What the page says about offering the order: already bid on (checked first: such an order may show no form),
+ * closed, or fine (also when it was not read).
+ */
+const pageVerdict = (r: PageRead): 'go' | 'closed' | 'bid_already' =>
+  !r.ok ? 'go' : r.page.has_bid === true ? 'bid_already' : !r.page.open ? 'closed' : 'go'
+
+/**
+ * The page's findings go on the lead, and into the journal as numbers and flags, never as the client's words
+ * (ADR-016). A closed order or one this account already bid on gets its status and is not offered.
+ */
+async function storePage(
+  l: { id: string; correlationId: string },
+  full: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
+    client_info: ClientInfo | null
+  },
+  r: PageRead,
+  sorted: Sorted,
+): Promise<'go' | 'closed' | 'bid_already'> {
+  const verdict = pageVerdict(r)
+  await d().db.transaction(async (tx) => {
+    if (r.ok) {
+      await tx
+        .update(lead)
+        .set({
+          bidPriceRub: full.bid_price_rub,
+          clientName: full.client_name,
+          text: full.text,
+          // A page that shows no client leaves what an earlier read stored.
+          ...(full.client_info && { clientInfo: full.client_info }),
+          ...(verdict !== 'go' && { status: verdict }),
+        })
+        .where(eq(lead.id, l.id))
+    }
+    await appendEvent(
+      tx,
+      ev(
+        'lead.page_read',
+        { kind: 'lead', id: l.id },
+        l.correlationId,
+        'sara',
+        r.ok
+          ? {
+              ok: true,
+              open: r.page.open,
+              has_bid: r.page.has_bid,
+              fee_rub: r.page.bid_price_rub > 0 ? r.page.bid_price_rub : null,
+              client_info: full.client_info !== null,
+              error: null,
+            }
+          : {
+              ok: false,
+              open: null,
+              has_bid: null,
+              fee_rub: null,
+              client_info: false,
+              error: r.error,
+            },
+      ),
+    )
+    // An order that stops here never reaches the task step, which journals the Sorter's verdict.
+    if (verdict !== 'go' && sorted.verdict) {
+      await appendEvent(
+        tx,
+        ev('lead.sorted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', sorted),
+      )
+    }
+  })
+  return verdict
+}
 
 /** The Analyst's draft, or why there is none; any failure is «no answer», the card comes anyway. */
 async function draftFor(
@@ -126,6 +235,11 @@ async function draftFor(
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
     return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
   }
+}
+
+/** The day's card cap is spent: a shown order is held for the summary (the decision itself is taken under a lock). */
+async function capSpent(): Promise<boolean> {
+  return (await cardsToday(d().db, new Date())) >= (await getSetting(d().db, 'cards.max_per_day'))
 }
 
 /** The draft goes on the lead (one there already, Boris's edit, is kept) and its outcome into the journal. */
@@ -176,12 +290,26 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
 
 const CardAnalysis = AnalystOutput.pick({ hidden_need: true, risk: true, condition: true })
 
-/** The card's two lines of the разбор, from the draft or the lead's stored reading (null: none, or unreadable). */
+/**
+ * The card's two lines of the разбор and the full reading for «Разбор», from the draft or the lead's stored
+ * analysis (null: none, or unreadable; a reading that is unreadable on its own leaves the two lines).
+ */
 function cardAnalysis(a: unknown): LeadCard['analysis'] {
   const r = CardAnalysis.safeParse(a)
-  return r.success
-    ? { hiddenNeed: r.data.hidden_need, risk: r.data.risk, condition: r.data.condition }
-    : null
+  if (!r.success) return null
+  const reading = AnalystOutput.shape.reading.safeParse((a as { reading?: unknown }).reading)
+  return {
+    hiddenNeed: r.data.hidden_need,
+    risk: r.data.risk,
+    condition: r.data.condition,
+    reading: reading.success ? reading.data : null,
+  }
+}
+
+/** What the order page said about the client, as stored on the lead; null: nothing, or not readable. */
+function clientInfoOf(stored: unknown): ClientInfo | null {
+  const r = ClientInfo.safeParse(stored)
+  return r.success ? r.data : null
 }
 
 /** One order, one durable run (workflow id lead:<order>): record, sort, card, wait for Boris. */
@@ -319,11 +447,39 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (scored.decision === 'drop') return
   }
 
-  // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.
-  const draft = (await DBOS.patch('analyst-draft'))
-    ? await DBOS.runStep(() => draftFor(order, { correlationId, causationId: e.id }), {
-        name: 'draft',
+  // Only an order that passed the Sorter and the Scorer on what the board showed costs a visit of the one tab. A run
+  // recorded before this step existed resumes along its old steps and keeps the board's data.
+  let withPage: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
+    client_info: ClientInfo | null
+  } = { ...order, client_info: null }
+  if (await DBOS.patch('order-page')) {
+    // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
+    // (with its draft, draftThenCard).
+    const held = await DBOS.runStep(() => capSpent().catch(() => false), { name: 'capBeforePage' })
+    if (!held) {
+      const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
+        name: 'orderPage',
       })
+      withPage = fuller(order, read)
+      const verdict = await DBOS.runStep(
+        () => storePage({ id: order.order_id, correlationId }, withPage, read, sorted),
+        { name: 'orderPageStored', ...DB_STEP },
+      )
+      // Closed, or already bid on: nothing to offer, no card and no model call.
+      if (verdict !== 'go') return
+    }
+  }
+
+  // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.
+  // An order the day's cap will hold goes to the summary undrafted: «Показать» writes its draft if Boris asks.
+  const draft = (await DBOS.patch('analyst-draft'))
+    ? await DBOS.runStep(
+        async () =>
+          (await capSpent().catch(() => false))
+            ? null
+            : draftFor({ ...order, ...withPage }, { correlationId, causationId: e.id }),
+        { name: 'draft' },
+      )
     : null
   if (draft) {
     await DBOS.runStep(() => storeDraft({ id: order.order_id, correlationId }, draft), {
@@ -377,11 +533,16 @@ async function processOrder(e: EventEnvelope): Promise<void> {
 
   const card: LeadCard = {
     taskId,
+    orderId: order.order_id,
     title: order.title,
     city: order.city,
+    budgetText: order.budget_text,
+    // What the order page added (a name or a text the board lacked) is on the card too.
+    clientName: withPage.client_name,
+    text: withPage.text,
     verdict: sorted.verdict,
     reason: sorted.reason,
-    bidPriceRub: order.bid_price_rub,
+    bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
     draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
@@ -392,7 +553,16 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     await DBOS.runStep(
       async () => {
         const silent = await quietNow(d().db, new Date())
-        const m = await d().notifier.sendLeadCard(card, { silent })
+        // What the order page said about the client is read here, inside the step, so a run recorded before this
+        // card kept its steps; an order whose page was not opened has none.
+        const [stored] = await d()
+          .db.select({ clientInfo: lead.clientInfo })
+          .from(lead)
+          .where(eq(lead.id, order.order_id))
+        const m = await d().notifier.sendLeadCard(
+          { ...card, clientInfo: clientInfoOf(stored?.clientInfo) },
+          { silent },
+        )
         await cardSent(taskId, correlationId, m.messageId, 'order')
       },
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
@@ -422,14 +592,16 @@ async function leadOfTask(taskId: string) {
   return l ? { task: t, lead: l } : null
 }
 
-/** The lead card for an open task, rebuilt from the lead and its last sorter verdict. */
-async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard | null> {
-  const found = await leadOfTask(taskId)
-  if (!found || found.task.state !== 'open') return null
+/** The lead card of a task in any state, rebuilt from the lead and its last sorter verdict and score. */
+async function cardOfFound(
+  found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>,
+  reminder: boolean,
+): Promise<LeadCard> {
+  const { lead: l, task: t } = found
   const [sorted] = await d()
     .db.select({ payload: event.payload })
     .from(event)
-    .where(and(eq(event.correlationId, found.lead.correlationId), eq(event.type, 'lead.sorted')))
+    .where(and(eq(event.correlationId, l.correlationId), eq(event.type, 'lead.sorted')))
     .orderBy(desc(event.id))
     .limit(1)
   const s = (sorted?.payload ?? {}) as {
@@ -439,23 +611,33 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
   const [sc] = await d()
     .db.select()
     .from(leadScore)
-    .where(and(eq(leadScore.leadId, found.lead.id), eq(leadScore.backtest, false)))
+    .where(and(eq(leadScore.leadId, l.id), eq(leadScore.backtest, false)))
     .orderBy(desc(leadScore.createdAt))
     .limit(1)
   return {
-    taskId,
-    title: found.lead.title,
-    city: found.lead.city,
+    taskId: t.id,
+    orderId: l.id,
+    title: l.title,
+    city: l.city,
+    budgetText: l.budgetText,
+    clientName: l.clientName,
+    text: l.text,
+    clientInfo: clientInfoOf(l.clientInfo),
     verdict: s.verdict === 'fit' || s.verdict === 'maybe' ? s.verdict : null,
     reason: s.reason ?? null,
-    bidPriceRub: found.lead.bidPriceRub,
+    bidPriceRub: l.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
     reminder,
-    draft: found.lead.draftText
-      ? { text: found.lead.draftText, priceRub: found.lead.draftPriceRub }
-      : null,
-    analysis: cardAnalysis(found.lead.draftAnalysis),
+    draft: l.draftText ? { text: l.draftText, priceRub: l.draftPriceRub } : null,
+    analysis: cardAnalysis(l.draftAnalysis),
   }
+}
+
+/** The lead card for an open task. */
+async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard | null> {
+  const found = await leadOfTask(taskId)
+  if (!found || found.task.state !== 'open') return null
+  return cardOfFound(found, reminder)
 }
 
 /**
@@ -487,11 +669,74 @@ async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> 
   }
 }
 
-/** A dropped order Boris wants after all: its draft first (the Scorer's drop wrote none), then its card. */
+/**
+ * A dropped order Boris wants after all: its page first (the Scorer's drop never opened it, and hours have passed),
+ * then its draft, then its card. An order closed meanwhile, or already bid on, ends its decision task with a word
+ * to Boris instead of a card.
+ */
 async function draftThenCard(l: LeadRow, taskId: string): Promise<void> {
+  const read = await readPage(l.accountId, l.id)
+  const full = fuller(
+    { bid_price_rub: l.bidPriceRub, client_name: l.clientName, text: l.text },
+    read,
+  )
+  const verdict = await storePage(l, full, read, { verdict: null, reason: null })
+  if (verdict !== 'go') {
+    const ended = await d().db.transaction(async (tx) => {
+      const rows = await tx
+        .update(task)
+        .set({ state: 'resolved', resolution: 'skip', resolvedAt: new Date().toISOString() })
+        .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+        .returning({ id: task.id })
+      // Decided meanwhile (Boris pressed something): nothing to end, nothing to say.
+      if (rows.length === 0) return false
+      await appendEvent(
+        tx,
+        ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'sara', {
+          action: 'skip',
+          reason: verdict,
+        }),
+      )
+      return true
+    })
+    if (ended) {
+      await deliverDecision(taskId, 'skip')
+      await d().notifier.sendText(
+        verdict === 'closed' ? CARD_FLOW_TEXTS.pageClosed : CARD_FLOW_TEXTS.pageBidAlready,
+      )
+    }
+    return
+  }
   if (!l.draftText)
-    await storeDraft(l, await draftFor(sourceOf(l), { correlationId: l.correlationId }))
+    await storeDraft(
+      l,
+      await draftFor(
+        { ...sourceOf(l), ...full, client_info: full.client_info ?? sourceOf(l).client_info },
+        { correlationId: l.correlationId },
+      ),
+    )
   await sendCard(taskId, 'summary')
+}
+
+/**
+ * «Разбор»: the Analyst's full reading as its own message(s). It reads only, in any state of the task, so an old
+ * card works as well as the new one, and it can be pressed again.
+ */
+async function onAnalysis(taskId: string): Promise<string> {
+  const found = await leadOfTask(taskId)
+  if (!found) return TEXTS.noTask
+  // The reminder layout of an unscored card is the longest: if any version cut the order text, this one does.
+  const card = await cardOfFound(found, true)
+  try {
+    for (const message of analysisMessages({ ...card, unscored: !card.score })) {
+      await d().notifier.sendText(message, { html: true })
+    }
+  } catch (err) {
+    // Reading is harmless to repeat: Boris presses again.
+    console.error('analysis not sent', err instanceof Error ? err.message.slice(0, 200) : err)
+    return TEXTS.analysisFailed
+  }
+  return TEXTS.analysisSent
 }
 
 /** «Изменить»: Sara asks for the new text; the card stays as it is until the text comes. */
@@ -536,7 +781,7 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   })
   if (!saved) return TEXTS.alreadyDone
   await sendCard(t.id, 'edit')
-  return TEXTS.draftSaved
+  return TEXTS.draftSaved(l.title)
 }
 
 /**
@@ -580,12 +825,12 @@ async function bringCard(
   })
   if (!resolved) return null
   await startDecisionWait(decisionId, await d().remindAfterMs())
-  if (action === 'open') {
-    // A held order got its draft before its task: the card goes at once.
+  if (action === 'open' && l.draftText) {
+    // A held order that has its draft (a race with the cap, an order held before drafts waited): the card goes at once.
     await sendCard(decisionId, 'summary')
   } else {
-    // A dropped order has no draft yet: the press is answered now, the card follows its draft (a reminder brings
-    // it back if this fails).
+    // A dropped or held order has no draft yet: the press is answered now, the card follows its draft (a reminder
+    // brings it back if this fails).
     void draftThenCard(l, decisionId).catch((err) =>
       console.error('want card failed', err instanceof Error ? err.message.slice(0, 200) : err),
     )
@@ -607,15 +852,20 @@ async function onWant(reviewId: string): Promise<string> {
 /** «Показать» from the daily summary: an order held over the card cap comes as a card; Boris has not decided yet. */
 async function onOpen(heldId: string): Promise<string> {
   const found = await leadOfTask(heldId)
-  // FR-LEAD-10 at the press, which may come days after the summary. The lead keeps no publication time; seen_at
+  const now = new Date()
+  // FR-LEAD-10 at a press that comes days after the summary. The summary offered the order while it was fresh, so a
+  // press the same day works for it, however old it has become by then. The lead keeps no publication time; seen_at
   // is never earlier, so this errs toward showing.
   if (
     found?.task.kind === 'lead_held' &&
     found.task.state === 'open' &&
-    isStale(found.lead.seenAt, new Date())
+    isStale(found.lead.seenAt, now) &&
+    isStale(found.task.createdAt, now)
   )
     return CARD_FLOW_TEXTS.staleHeld
-  return (await bringCard(heldId, 'lead_held', 'open')) ? TEXTS.cardSent : TEXTS.alreadyDone
+  const l = await bringCard(heldId, 'lead_held', 'open')
+  if (!l) return TEXTS.alreadyDone
+  return l.draftText ? TEXTS.cardSent : TEXTS.wantCard
 }
 
 /**
@@ -650,6 +900,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (action === 'want') return onWant(taskId)
       if (action === 'open') return onOpen(taskId)
       if (action === 'edit') return onEdit(taskId)
+      if (action === 'razbor') return onAnalysis(taskId)
       if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)

@@ -52,33 +52,62 @@ export const feedPage = (rtpUrl: string, l: Layout) =>
     'Заказы',
     '<ul id="feed"></ul>',
     `${rtpScript(rtpUrl)}
-async function load() {
-  const data = await (await fetch('/api/feed')).json()
-  document.getElementById('feed').innerHTML = (data[${JSON.stringify(l.feedKey)}] || []).map((o) =>
-    '<li><a class="${l.orderLink}" data-order-id="' + o.id + '" href="/backoffice/n.php?o=' + o.id + '">' + o.subject + '</a> <span class="city">' + o.city + '</span></li>').join('')
+let cursor = null, loading = false
+const row = (o) => '<li style="min-height: 420px"><a class="${l.orderLink}" data-order-id="' + o.id + '" href="/backoffice/n.php?o=' + o.id + '">' + o.subject + '</a> <span class="city">' + o.city + '</span></li>'
+// The first page, or (more) the next one by cursor when the list is scrolled to its end, like the live board.
+async function load(more) {
+  if (loading) return
+  loading = true
+  const data = await (await fetch('/api/feed' + (more && cursor ? '?cursor=' + cursor : ''))).json()
+  const html = (data[${JSON.stringify(l.feedKey)}] || []).map(row).join('')
+  if (more) document.getElementById('feed').insertAdjacentHTML('beforeend', html)
+  else document.getElementById('feed').innerHTML = html
+  cursor = data.nextCursor || null
+  loading = false
 }
-load(); window.__RTP.addEventListener('message', load)`,
+load(false); window.__RTP.addEventListener('message', () => load(false))
+window.addEventListener('scroll', () => {
+  if (cursor && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) load(true)
+})`,
   )
 
 export type BidLook = {
   payWay: 'wallet' | 'sbp'
   /** The form is closed until its opener is pressed, as on the live page. */
   behindOpener: boolean
-  /** A broken site that charges for opening the form: the top bar shows the wallet going down. */
+  /** A broken site that charges for opening the form (the top bar shows it after a reload). */
   openerCharges: number
+  /** The top bar shows that charge at once. */
+  openerChargeShown: boolean
+  /** The opener leads off the order page (to a payment page without the top bar). */
+  openerLeaves: boolean
+  /** How many openers the tariff block draws. */
+  openers: number
+  /**
+   * What opens the form: «Продолжить» with the fee beside it, a div as on the live page (maps of 24.10.2026), or the
+   * answer's own opener words (tariffsBlock.scrollButtonText).
+   */
+  opener: 'continue' | 'words'
+  /** The amount the «Продолжить» opener shows; null shows the fee. */
+  openerAmount: number | null
+  /** A widget in a frame of the page asks the backoffice API for another client first (an advert, a similar order). */
+  klientDecoy: boolean
 }
 
 // The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
-// 24.10.2026: no field and no <button> at first, a tariff block «orderCard/tariffs» with «Отклик • N ₽», and an
-// opener that is no button, with the answer's tariffsBlock.scrollButtonText («Написать клиенту»). It opens the form
-// «Комиссия за заказ»: the price, the text, the payment footer, the send button.
+// 24.10.2026: no field and no <button> at first, a tariff block «orderCard/tariffs» with the tariff card «Отклик • N ₽»,
+// «Детали» and the opener «Продолжить» with the fee beside it, all of them divs or links. It opens the form «Комиссия за
+// заказ»: the price, the text, the payment footer, the send button.
 export const orderPage = (id: string, look: BidLook) =>
   shell(
     'Заказ',
-    `<article id="order" data-order-id="${id}"></article><section id="bid"></section>`,
+    `<article id="order" data-order-id="${id}"></article><section id="bid"></section>${look.klientDecoy ? '<iframe src="/backoffice/widget.html"></iframe>' : ''}`,
     `fetch('/api/order/${id}').then((r) => r.json()).then((o) => {
-  document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>'
+  document.getElementById('order').innerHTML = '<h1>' + o.subject + '</h1><p class="text">' + o.description + '</p>' + (o.open === false ? '<p class="closed-notice">Заказ закрыт</p>' : '')
 })
+// The client card of the order page: the live page asks the backoffice API for it (getKlientInfo).
+fetch('/backoffice/api/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method: 'getKlientInfo', orderId: '${id}' }) })
+  .then((r) => r.json()).then((d) => { if (d.data) document.getElementById('order').dataset.klient = d.data.name }).catch(() => {})
 fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationName: 'orders', variables: { id: '${id}' } }) })
   .then((r) => r.json()).then((d) => {
   const s = d.data && d.data.orders && d.data.orders[0] && d.data.orders[0].boOrderScreen
@@ -88,19 +117,26 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
   if (s.disabledBidBlock) { box.innerHTML = '<p class="closed">' + s.disabledBidBlock.title + '</p>'; return }
   const hidden = ${look.behindOpener}
   const t = s.tariffsBlock
-  box.innerHTML = '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div>' +
-    (hidden ? '<a id="bid-opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>' : '') + '</div>' +
+  const amount = ${look.openerAmount === null ? 's.price.value' : `'${look.openerAmount}'`}
+  const opener = (i) => ${look.opener === 'continue'}
+    ? '<div id="bid-opener' + (i ? i : '') + '" class="opener" style="cursor: pointer"><div>Продолжить</div><div>' + amount + ' ₽</div></div>'
+    : '<a id="bid-opener' + (i ? i : '') + '" class="opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>'
+  box.innerHTML = '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div>' +
+    '<div class="tariff" style="cursor: pointer"><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div><div>Вы платите сразу за предложение услуг, но не каждый отклик приводит к заказу</div></div>' +
+    '<a href="#details">' + t.details + '</a>' +
+    (hidden ? Array.from({ length: ${look.openers} }, (_, i) => opener(i)).join('') : '') + '</div>' +
     '<form id="bid-form" data-testid="bid_form"' + (hidden ? ' hidden' : '') + '><h3>' + t.formTitle + '</h3>' +
     '<label for="bid-price">Стоимость услуги</label><input id="bid-price" name="stavka" type="text" placeholder="Сумма">' +
     '<label for="bid-text">Предложение или вопрос клиенту</label><textarea id="bid-text" name="comments4client" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea>' +
     '<div data-testid="bid_form_footer">К оплате: ' + s.price.value + ' ₽</div>' +
     '<div class="payment-methods"><span class="payment-methods__name">${look.payWay === 'sbp' ? 'СБП' : 'Кошелёк'}</span></div>' +
     '<p class="error"></p><button id="bid-send" type="submit">' + s.form.buttons.submit.text + '</button></form>'
-  const go = document.getElementById('bid-opener')
-  if (go) go.onclick = (e) => {
-    e.preventDefault(); fetch('/api/bid/open', { method: 'POST' }); document.getElementById('bid-form').hidden = false
+  for (const go of document.querySelectorAll('.opener')) go.onclick = async (e) => {
+    e.preventDefault(); await fetch('/api/bid/open', { method: 'POST' })
+    if (${look.openerLeaves}) { location.href = '/backoffice/pay.php'; return }
+    document.getElementById('bid-form').hidden = false
     const w = document.querySelector('.balance')
-    if (${look.openerCharges} && w) { const left = Number(w.dataset.rub) - ${look.openerCharges}; w.dataset.rub = String(left); w.textContent = left + ' ₽' }
+    if (${look.openerCharges} && ${look.openerChargeShown} && w) { const left = Number(w.dataset.rub) - ${look.openerCharges}; w.dataset.rub = String(left); w.textContent = left + ' ₽' }
   }
   document.getElementById('bid-form').onsubmit = async (e) => {
     e.preventDefault()
@@ -110,6 +146,14 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
     else box.querySelector('.error').textContent = a.error || 'Не получилось'
   }
 })`,
+  )
+
+// A widget page that sits in a frame of the order page and asks the backoffice API for another client first.
+export const widgetPage = () =>
+  shell(
+    'Виджет',
+    '<p>Похожие заказы</p>',
+    `fetch('/backoffice/api/', { method: 'POST', body: JSON.stringify({ method: 'getKlientInfo', orderId: 'decoy' }) })`,
   )
 
 export const chatsPage = () =>

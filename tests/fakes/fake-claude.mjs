@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake `claude` CLI for tests. Controlled by FAKE_CLAUDE_* environment variables.
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? 'ok'
 const argv = process.argv.slice(2)
@@ -8,7 +8,23 @@ const argOf = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : un
 // FAKE_CLAUDE_OUTPUT_BY_ROLE: {"<role>": output, "<role>@<model>": output}; the role comes from the prompt path.
 const role = /roles\/([^/]+)\/role\.md$/.exec(argOf('--system-prompt-file') ?? '')?.[1]
 const byRole = JSON.parse(process.env.FAKE_CLAUDE_OUTPUT_BY_ROLE ?? '{}')
-const picked = byRole[`${role}@${argOf('--model')}`] ?? byRole[role]
+const picked = nextOf(byRole[`${role}@${argOf('--model')}`] ?? byRole[role], role)
+// {"$sequence": [a, b, ...]} answers a, then b, ... and the last one for every call after (the position is kept
+// in FAKE_CLAUDE_COUNTER_FILE, so a test can have a role fail once and then answer well).
+function nextOf(picked, key) {
+  if (!picked || !Array.isArray(picked.$sequence)) return picked
+  const file = process.env.FAKE_CLAUDE_COUNTER_FILE
+  let counts = {}
+  if (file) {
+    try {
+      counts = JSON.parse(readFileSync(file, 'utf8'))
+    } catch {}
+  }
+  const n = counts[key] ?? 0
+  counts[key] = n + 1
+  if (file) writeFileSync(file, JSON.stringify(counts))
+  return picked.$sequence[Math.min(n, picked.$sequence.length - 1)]
+}
 const output =
   picked !== undefined ? JSON.stringify(picked) : (process.env.FAKE_CLAUDE_OUTPUT ?? '{"ok":true}')
 const log = process.env.FAKE_CLAUDE_ARGS_LOG

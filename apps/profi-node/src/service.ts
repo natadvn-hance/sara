@@ -138,15 +138,6 @@ export async function startProfiService(
       silenceMs: 600000,
     })
 
-    bidRuntimes.set(acc.id, {
-      watch: a.watch,
-      eyes,
-      page: () => ab.page,
-      // Until the tab is on the site from its own IP there is no tab to work in: can() is false.
-      inTab: (f) =>
-        a.insurance ? a.insurance.inTab(f) : f({ go: async () => false, can: () => false }),
-    })
-
     const guard = createConnectionGuard({
       db,
       accountId: acc.id,
@@ -173,6 +164,19 @@ export async function startProfiService(
       parsers,
     })
 
+    bidRuntimes.set(acc.id, {
+      watch: a.watch,
+      eyes,
+      page: () => ab.page,
+      // The order pages get_order opens are where the form is mapped now that the minute check opens none of the board's.
+      afterOrderPage: (id, may) => calibration.afterOrderPage(id, may),
+      // Until the tab is on the site from its own IP there is no tab to work in: can() is false.
+      inTab: (f) =>
+        a.insurance
+          ? a.insurance.inTab(f)
+          : f({ go: async () => false, can: () => false, later: () => {} }),
+    })
+
     // The site is opened only from the account's own IP; until then the tab stays away from it.
     const start = async () => {
       a.egress = await checkEgress(ab.page, c.egressEchoUrl, acc.egressIp)
@@ -186,7 +190,7 @@ export async function startProfiService(
         chatsEveryMs: timing.chatsEveryMs,
         canNavigate,
         onNavigate: (ok) => guard.report(ok),
-        afterOrderPage: (id) => calibration.afterOrderPage(id),
+        afterOrderPage: (id, may) => calibration.afterOrderPage(id, may),
       })
       await a.insurance.feedOnce()
       await a.watch.tick()

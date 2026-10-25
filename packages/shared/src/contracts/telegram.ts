@@ -11,6 +11,10 @@ export const TASK_ACTIONS = [
   'want',
   'apply',
   'drop',
+  /** «Разбор» on a lead card: the Analyst's full reading as its own message; decides nothing. */
+  'razbor',
+  'good',
+  'close',
 ] as const
 export type TaskAction = (typeof TASK_ACTIONS)[number]
 

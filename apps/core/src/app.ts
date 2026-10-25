@@ -10,6 +10,8 @@ import type { Config } from './config'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
 import { applyAmendments } from './direction/amendments'
+import { seedProfile } from './direction/profile'
+import { resumeRuns } from './direction/runs'
 import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
@@ -118,6 +120,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     gateway,
     profi,
     bot,
+    rolesDir: config.rolesDir,
     production: config.production,
     telegramApiRoot: config.telegramApiRoot,
     accounts: config.accounts,
@@ -125,9 +128,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   await seedAccounts(db, config.accounts)
   for (const a of config.accounts) {
     await seedDirection(db, a.id)
+    await seedProfile(db, a.id)
     // Rules Boris dictated to a developer become his new version, once (FR-MIND-3).
     await applyAmendments(db, a.id)
   }
+  // A check cut off by a restart goes on (its finished scores are cached), through a limit it does not wait.
+  await resumeRuns({ db, gateway: withoutLimitWait(gateway), rolesDir: config.rolesDir })
   const app = await buildServer(deps)
   await registerScreenProxy(app, {
     profiScreenUrl: config.profiScreenUrl,

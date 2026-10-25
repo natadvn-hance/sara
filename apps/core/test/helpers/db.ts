@@ -17,7 +17,19 @@ export async function resetDb(db: Db): Promise<void> {
     sql`select tablename from pg_tables where schemaname = 'core'`,
   )
   const names = rows.rows.map((r) => `core."${r.tablename}"`).join(', ')
-  if (names) await db.execute(sql.raw(`truncate ${names} restart identity cascade`))
+  if (!names) return
+  // A workflow still finishing from the test before may hold a lock the truncate needs; Postgres then picks the
+  // truncate as the deadlock victim (40P01, seen in tests/e2e/money.test.ts). It is safe to try again.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await db.execute(sql.raw(`truncate ${names} restart identity cascade`))
+      return
+    } catch (e) {
+      const code = (e as { cause?: { code?: string } }).cause?.code ?? (e as { code?: string }).code
+      if (code !== '40P01' || attempt === 5) throw e
+      await new Promise((r) => setTimeout(r, 100 * attempt))
+    }
+  }
 }
 
 /** Drizzle wraps Postgres errors; the database message is on `cause`. */

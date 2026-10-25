@@ -65,6 +65,32 @@ describe('profi client and event intake', () => {
     expect(fake.bids).toHaveLength(1)
   })
 
+  it('FR-CONV-9: the client signs a message permit and a repeat sends one message', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    const m = {
+      account_id: 'hance-marketing',
+      chat_id: '95147898',
+      text: 'Добрый день',
+      expect_last_message_id: null,
+      idempotency_key: 'msg:t:1',
+    }
+    const a = await client.sendMessage(m)
+    expect(a.found_on_page).toBe(true)
+    expect(await client.sendMessage(m)).toEqual(a)
+    expect(fake.messages).toHaveLength(1)
+  })
+
+  it('FR-CONV-1: the client reads chats through the node', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    expect(await client.listChats('hance-marketing')).toEqual({ chats: [] })
+    await expect(client.readChat('hance-marketing', 'none')).rejects.toMatchObject({
+      errorClass: 'NOT_FOUND',
+    })
+    await expect(client.getOrder('hance-marketing', 'none')).rejects.toMatchObject({
+      errorClass: 'NOT_FOUND',
+    })
+  })
+
   it('C2: tool error arrives as ProfiError with its class', async () => {
     const client = createProfiClient({ url: fake.url, permitSecret: 'wrong-secret' })
     await expect(client.submitBid(bid)).rejects.toMatchObject({ errorClass: 'INTERNAL' })
@@ -120,5 +146,48 @@ describe('profi client and event intake', () => {
       payload: { type: 'profi.order_seen' },
     })
     expect(res.statusCode).toBe(400)
+  })
+
+  it('FR-LEAD-5: get_order is read through the contract with the client info', async () => {
+    await fake.emitOrder({ order_id: '601', bid_price_rub: 0 })
+    fake.setOrderPage('601', {
+      bid_price_rub: 145,
+      client_info: {
+        name: 'Ирина',
+        on_profi_since: null,
+        phone_verified: null,
+        reviews: null,
+        review_tags: [],
+      },
+    })
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    expect(await client.getOrder('hance-marketing', '601')).toMatchObject({
+      order_id: '601',
+      open: true,
+      bid_price_rub: 145,
+      client_info: { name: 'Ирина' },
+    })
+  })
+
+  it('FR-LEAD-5: a get_order the node answers too late is UNCERTAIN', async () => {
+    await fake.emitOrder({ order_id: '602' })
+    fake.setOrderPage('602', { delayMs: 800 })
+    const client = createProfiClient({
+      url: fake.url,
+      permitSecret: 'permit',
+      getOrderTimeoutMs: 200,
+    })
+    await expect(client.getOrder('hance-marketing', '602')).rejects.toMatchObject({
+      errorClass: 'UNCERTAIN',
+    })
+  })
+
+  it('FR-LEAD-5: a get_order the node refuses arrives as ProfiError with its class', async () => {
+    await fake.emitOrder({ order_id: '603' })
+    fake.setOrderPage('603', { fail: 'LAYOUT_CHANGED' })
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    await expect(client.getOrder('hance-marketing', '603')).rejects.toMatchObject({
+      errorClass: 'LAYOUT_CHANGED',
+    })
   })
 })

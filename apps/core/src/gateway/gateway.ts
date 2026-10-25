@@ -1,10 +1,10 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MODELS, newEventId, ProbeOutput, type RoleMeta } from '@sara/shared'
-import { desc, eq, inArray, or } from 'drizzle-orm'
+import { and, desc, eq, gt, or, sql } from 'drizzle-orm'
 import { type ZodType, z } from 'zod'
 import type { Db } from '../db/client'
-import { modelCall } from '../db/schema'
+import { event, modelCall } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { SecretStore } from '../secrets/store'
@@ -36,10 +36,18 @@ export type CallOptions = {
   causationId?: string
   /** This call's model instead of the role's, with no fallback (the caller chose it). */
   model?: RoleMeta['model']
+  /** This call's priority instead of the role's: a trial run asks for P3 so live work goes first. */
+  priority?: RoleMeta['priority']
   /** How long a P1-P3 call may wait out the Claude limit (default 6 hours); 0 meets it with limit_reached at once. */
   limitWaitMs?: number
-  /** Client names to hide from the model, besides the phones, e-mails and links it never sees (ADR-016). */
-  redact?: { names?: (string | null | undefined)[] }
+  /**
+   * Client names to hide from the model, besides the phones, e-mails and links it never sees (ADR-016). A call whose
+   * input carries a client's words passes it, with the names it knows (an empty list when it knows none): without a
+   * name in it the call is not recorded as pseudonymized, because a name inside the text went through. With
+   * `restore: false` the tags stay in the answer as the model wrote them: for an answer that is kept (the rules
+   * proposal) and must never hold a client's value.
+   */
+  redact?: { names?: (string | null | undefined)[]; restore?: boolean }
 }
 
 export type Gateway = {
@@ -52,11 +60,13 @@ export type Gateway = {
 }
 
 const MINUTE_MS = 60_000
+/** How far back the journal is read for a limit: the answers of one model since its last good one. */
+const LIMIT_HISTORY = 500
 type Model = RoleMeta['model']
 
 type Outcome =
   | { ok: true; output: unknown }
-  | { ok: false; errorClass: GatewayErrorClass; message: string }
+  | { ok: false; errorClass: GatewayErrorClass; message: string; resetAt?: string }
 
 /** The subscription limit only: "Context limit reached" and the like are other failures. */
 const LIMIT_TEXT =
@@ -127,22 +137,48 @@ export function createGateway(d: {
     ]),
   ) as Record<Model, LimitGuard>
 
-  // A limit that held when the core stopped holds on: each model's last word decides. Read at once, so Boris hears of
-  // the end even when no call comes.
-  const limitRead = (async () => {
-    const rows = await d.db
-      .selectDistinctOn([modelCall.model], {
-        model: modelCall.model,
-        errorClass: modelCall.errorClass,
-      })
-      .from(modelCall)
-      .where(
-        or(eq(modelCall.ok, true), inArray(modelCall.errorClass, ['limit_reached', 'bad_output'])),
-      )
-      .orderBy(modelCall.model, desc(modelCall.startedAt))
-    const byModel: Partial<Record<string, LimitGuard>> = guards
-    for (const r of rows) if (r.errorClass === 'limit_reached') byModel[r.model]?.adopt()
-  })().catch((e) => {
+  // A limit that held when the core stopped holds on: each model's last word decides, and the journal gives back
+  // when the limit began and the last reset time it named. Read at once, so Boris hears of the end even when no
+  // call comes.
+  const limitRead = Promise.all(
+    MODELS.map(async (model) => {
+      const rows = await d.db
+        .select({
+          errorClass: modelCall.errorClass,
+          at: sql<number>`(extract(epoch from ${modelCall.startedAt}) * 1000)::float8`,
+          resetAt: sql<string | null>`${event.payload}->>'resetAt'`,
+        })
+        .from(modelCall)
+        .leftJoin(
+          event,
+          and(
+            eq(event.entityKind, 'model_call'),
+            sql`${event.entityId} = ${modelCall.id}::text`,
+            eq(event.type, 'model.failed'),
+          ),
+        )
+        .where(
+          and(
+            eq(modelCall.model, model),
+            or(
+              eq(modelCall.ok, true),
+              eq(modelCall.errorClass, 'bad_output'),
+              // A limit answer of a real run; a wait that ran out writes a stand-in row (0 ms) that says nothing.
+              and(eq(modelCall.errorClass, 'limit_reached'), gt(modelCall.durationMs, 0)),
+            ),
+          ),
+        )
+        .orderBy(desc(modelCall.startedAt))
+        .limit(LIMIT_HISTORY)
+      // The newest rows are limit answers back to the last answer: that run of them is this limit.
+      const end = rows.findIndex((r) => r.errorClass !== 'limit_reached')
+      const held = end < 0 ? rows : rows.slice(0, end)
+      const began = held.at(-1)
+      if (!began) return
+      const reset = held.find((r) => r.resetAt)?.resetAt
+      guards[model].adopt(Number(began.at), reset ? new Date(reset) : null)
+    }),
+  ).catch((e) => {
     console.error('model_call not read', e instanceof Error ? e.message : e)
   })
 
@@ -179,12 +215,19 @@ export function createGateway(d: {
         extraEnv: typeof d.extraEnv === 'function' ? d.extraEnv() : d.extraEnv,
       })
       const result = classify(run, schema, hidden.tags)
-      if (!result.ok && result.errorClass === 'limit_reached')
-        guard.hit(parseResetAt(`${run.stdout}\n${run.stderr}`, new Date()), ranAt)
-      else if (result.ok || result.errorClass === 'bad_output') guard.answered(ranAt)
+      if (!result.ok && result.errorClass === 'limit_reached') {
+        const resetAt = parseResetAt(`${run.stdout}\n${run.stderr}`, new Date())
+        guard.hit(resetAt, ranAt)
+        // The reset time goes into the journal: after a restart it is all the core has of this limit.
+        return {
+          result: { ...result, ...(resetAt && { resetAt: resetAt.toISOString() }) },
+          durationMs: run.durationMs,
+        }
+      }
+      if (result.ok || result.errorClass === 'bad_output') guard.answered(ranAt)
       return { result, durationMs: run.durationMs }
     } finally {
-      slots.release()
+      slots.release(meta.priority)
     }
   }
 
@@ -208,7 +251,8 @@ export function createGateway(d: {
       durationMs,
       ok: result.ok,
       errorClass: result.ok ? null : result.errorClass,
-      pseudonymized: true,
+      // A call without the option carries no client's words (the probe); one with it is pseudonymized only if it had a name to look for.
+      pseudonymized: opts?.redact === undefined || hidden.named,
     })
     const redacted = Object.values(hidden.counts).some((n) => n > 0)
       ? { redacted: hidden.counts }
@@ -227,13 +271,14 @@ export function createGateway(d: {
         role,
         durationMs,
         ...(result.ok ? {} : { errorClass: result.errorClass }),
+        ...(!result.ok && result.resetAt ? { resetAt: result.resetAt } : {}),
         ...(waitedMs > 0 ? { waitedMs } : {}),
         ...redacted,
       },
     })
-    return result.ok
-      ? { ok: true, output: result.output, durationMs, modelCallId: id }
-      : { ...result, durationMs, modelCallId: id }
+    if (result.ok) return { ok: true, output: result.output, durationMs, modelCallId: id }
+    const { resetAt: _, ...failure } = result
+    return { ...failure, durationMs, modelCallId: id }
   }
 
   async function call<T>(
@@ -244,13 +289,22 @@ export function createGateway(d: {
   ): Promise<RoleCallResult<T>> {
     const loaded = await loadRole(d.rolesDir, role)
     const promptPath = loaded.promptPath
-    const meta = opts?.model
-      ? { ...loaded.meta, model: opts.model, fallbackModel: undefined }
-      : loaded.meta
+    const meta: RoleMeta = {
+      ...loaded.meta,
+      ...(opts?.model ? { model: opts.model, fallbackModel: undefined } : {}),
+      ...(opts?.priority ? { priority: opts.priority } : {}),
+    }
     await limitRead
     const guard = guards[meta.model]
     // Always on: what the model sees has no phone, e-mail, link or given name of a client (ADR-016).
-    const c: Call = { role, meta, opts, hidden: redact(input, opts?.redact?.names) }
+    const hidden = redact(input, opts?.redact?.names)
+    // Tags the answer may not get back stay tags: the run restores only what its tag map knows.
+    const c: Call = {
+      role,
+      meta,
+      opts,
+      hidden: opts?.redact?.restore === false ? { ...hidden, tags: new Map() } : hidden,
+    }
     const waits = meta.priority !== 'P0'
     const calledAt = new Date()
     const deadline = calledAt.getTime() + (opts?.limitWaitMs ?? maxWaitMs)

@@ -1,6 +1,9 @@
-import type { ButtonHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, Ref } from 'react'
 
-type Props = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' }
+type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'secondary'
+  ref?: Ref<HTMLButtonElement>
+}
 
 export function Button({ variant = 'primary', className = '', ...rest }: Props) {
   const look =

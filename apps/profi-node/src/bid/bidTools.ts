@@ -1,9 +1,16 @@
-import type { GetOrderOutput, SubmitBidInput, SubmitBidOutput } from '@sara/shared'
+import type {
+  ClientInfo,
+  GetOrderOutput,
+  ProfiOrder,
+  SubmitBidInput,
+  SubmitBidOutput,
+} from '@sara/shared'
 import { verifyPermit } from '@sara/shared/permit'
 import { eq } from 'drizzle-orm'
-import type { Page } from 'playwright'
+import type { Page, Response } from 'playwright'
 import type { NodeDb } from '../db/client'
 import { bidAttempt } from '../db/schema'
+import { clientInfoFromAnswer } from '../eyes/clientInfo'
 import type { Eyes } from '../eyes/eyes'
 import { readFormMap } from '../eyes/formMap'
 import type { Insurance } from '../eyes/insurance'
@@ -22,6 +29,8 @@ export type BidRuntime = {
   /** The account tab, in turn with the feed check; can() is false while the tab may not move or is not there. */
   inTab: Insurance['inTab']
   page(): Page
+  /** On each order page get_order opened, while the tab is still there (the form calibration, src/bid). */
+  afterOrderPage?(orderId: string, may: () => boolean): Promise<void>
 }
 
 type Go = (path: string) => Promise<boolean>
@@ -41,10 +50,13 @@ export function createBidTools(o: {
   accounts: Map<string, BidRuntime>
   answerMs?: number
   closeMs?: number
+  /** How long get_order waits for the client answer once the page has loaded. */
+  clientMs?: number
 }): Pick<ProfiToolsImpl, 'getOrder' | 'submitBid'> {
   // As long as a page load may take (30 s to load, 10 s to settle): a slow page is not a changed site.
   const answerMs = o.answerMs ?? 45000
   const closeMs = o.closeMs ?? 15000
+  const clientMs = o.clientMs ?? 3000
   const orderPath = o.parsers.paths.order ?? profiParsers.paths.order ?? ((id) => id)
   const uncertain = () => fail('UNCERTAIN', 'Отклик нажат, но страница его не показала')
 
@@ -54,8 +66,51 @@ export function createBidTools(o: {
     return r
   }
 
-  /** Opens the order page and waits for its own answer about this order (null when none came). */
-  async function openOrder(page: Page, go: Go, orderId: string) {
+  /**
+   * The client answer (getKlientInfo) of the order page open now. It counts only when the page that asked is this
+   * order's own (the address of the frame that made the request), and only while this visit lasts.
+   */
+  function watchClient(page: Page, orderId: string) {
+    let found: ClientInfo | null = null
+    let arrived: (c: ClientInfo) => void = () => {}
+    const first = new Promise<ClientInfo>((r) => {
+      arrived = r
+    })
+    const onResponse = async (res: Response) => {
+      try {
+        if (found || !/\/backoffice\/api\//.test(new URL(res.url()).pathname)) return
+        const from = res.request().frame()?.url()
+        if (!from || new URL(from).searchParams.get('o') !== orderId) return
+        const info = clientInfoFromAnswer(await res.json().catch(() => null))
+        if (!info || found) return
+        found = info
+        arrived(info)
+      } catch {}
+    }
+    page.on('response', onResponse)
+    return {
+      /** The answer, waiting at most `ms` for it; null when none came. */
+      async result(ms: number): Promise<ClientInfo | null> {
+        if (found) return found
+        let timer: NodeJS.Timeout | undefined
+        const late = new Promise<null>((r) => {
+          timer = setTimeout(() => r(null), ms)
+        })
+        try {
+          return await Promise.race([first, late])
+        } finally {
+          clearTimeout(timer)
+        }
+      },
+      stop: () => void page.off('response', onResponse),
+    }
+  }
+
+  /**
+   * Opens the order page and waits for its own answer about this order (null when none came). With `client` it
+   * also takes the client answer of this visit.
+   */
+  async function openOrder(page: Page, go: Go, orderId: string, client = false) {
     const answer = page
       .waitForResponse(
         // Only GraphQL bodies are read: images and scripts of the page pass by untouched.
@@ -66,8 +121,14 @@ export function createBidTools(o: {
       )
       .then(async (res) => orderScreenFromAnswer(res.url(), await res.json(), orderId))
       .catch(() => null)
-    if (!(await go(orderPath(orderId)))) return { ok: false, screen: null }
-    return { ok: true, screen: await answer }
+    const watch = client ? watchClient(page, orderId) : null
+    try {
+      if (!(await go(orderPath(orderId)))) return { ok: false, screen: null, client: null }
+      const screen = await answer
+      return { ok: true, screen, client: (await watch?.result(clientMs)) ?? null }
+    } finally {
+      watch?.stop()
+    }
   }
 
   /** The wallet in the top bar of this page, told to the eyes too; null when the bar shows none. */
@@ -146,7 +207,7 @@ export function createBidTools(o: {
     if (s.payment === 'other')
       throw fail('UNSAFE_PAYMENT', 'Профи.ру просит оплату не с кошелька, отклик не нажат')
 
-    if (!(await openForm(page, s.openerText)))
+    if (!(await openForm(page, { words: s.openerText, feeRub: s.feeRub })).open)
       throw fail('LAYOUT_CHANGED', 'Форма отклика не открылась')
     const pay = await readPayment(page, wallet)
     const due = pay.dueRub ?? s.feeRub
@@ -189,28 +250,52 @@ export function createBidTools(o: {
     async getOrder({ account_id, order_id }): Promise<GetOrderOutput> {
       const r = runtime(account_id)
       requireAlive(r.watch)
-      const screen = await r.inTab(async ({ go, can }) => {
+      const read = await r.inTab(async ({ go, can, later }) => {
         if (!can()) return null
         const page = r.page()
-        const opened = await openOrder(page, go, order_id)
+        const opened = await openOrder(page, go, order_id, true)
         if (!opened.ok) return null
-        // An order the eyes never stored is read from its page now.
         const known = await storedOrder(o.db, account_id, order_id).then(
-          () => true,
-          () => false,
+          (x) => x,
+          () => null,
         )
-        if (!known && o.parsers.fromOrderDom)
-          await r.eyes.onParsed(await o.parsers.fromOrderDom(page, order_id), 'dom')
+        // Closed only on the site's own word: a disabled bid block in the order answer, or, when the page gave no
+        // answer, a notice on the page. A missing form can be a changed layout or a bid already made.
+        const closed = opened.screen ? opened.screen.disabled : await closedNotice(page)
+        const read = opened.screen !== null || closed
+        // The page text is read for what the board did not show (a card without the text, or without any client
+        // name), and for an order the eyes never stored; the client answer already carries a name.
+        let fromPage: ProfiOrder | null = null
+        if (
+          o.parsers.fromOrderDom &&
+          (!known || !known.text || (!known.client_name && !opened.client?.name))
+        ) {
+          const parsed = await o.parsers.fromOrderDom(page, order_id)
+          if (!known) await r.eyes.onParsed(parsed, 'dom')
+          const sig = parsed.signals.find((x) => x.t === 'order')
+          fromPage = sig?.t === 'order' ? sig.order : null
+        }
         if (opened.screen?.hasBid) await markOrderBid(o.db, account_id, order_id)
-        return opened.screen
+        // The form map and the calibration need this page, but not the caller's wait.
+        later(async () => {
+          await keepFormMap(r, page)
+          if (r.afterOrderPage && can()) await r.afterOrderPage(order_id, can)
+        })
+        return { screen: opened.screen, closed, read, client: opened.client, fromPage }
       })
       const stored = await storedOrder(o.db, account_id, order_id)
-      if (!screen) return stored
+      if (!read) return stored
+      const { screen, closed, client, fromPage } = read
       return {
         ...stored,
-        open: screen.open,
-        bid_price_rub: screen.feeRub ?? stored.bid_price_rub,
-        has_bid: screen.hasBid ?? stored.has_bid,
+        // What the board showed comes first; the page and the client answer fill what it lacked.
+        client_name: stored.client_name || fromPage?.client_name || client?.name || '',
+        text: stored.text || fromPage?.text || '',
+        open: read.read ? !closed : stored.open,
+        bid_price_rub: screen?.feeRub ?? (stored.bid_price_rub || fromPage?.bid_price_rub || 0),
+        has_bid: screen?.hasBid ?? stored.has_bid,
+        client_info: client,
+        from_page: read.read,
       }
     },
 

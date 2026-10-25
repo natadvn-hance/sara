@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { startFormCalibration } from '../src/bid/calibration'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { rawEvent } from '../src/db/schema'
+import { nodeFlag, rawEvent } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { standInParsers } from '../src/eyes/parsers'
 import { nodeTestUrl, openNodeTestDb, resetNodeDb } from './helpers/db'
@@ -49,10 +49,18 @@ const calibration = (perHour = 3) =>
     perHour,
     now: () => now,
   })
+const may = () => true
 /** The minute check opening an order page, as readNewOrders does. */
 async function visit(id: string) {
   await ab.page.goto(`${site.url}/backoffice/n.php?o=${id}`)
   await ab.page.waitForLoadState('networkidle')
+}
+/** A visit and the hook after it, with a fresh order of the stand-in. */
+async function openOne(c: ReturnType<typeof calibration>, more = {}, mayNow = may) {
+  const id = site.addOrder(more)
+  await visit(id)
+  await c.afterOrderPage(id, mayNow)
+  return id
 }
 type Opened = {
   opened: boolean
@@ -66,20 +74,20 @@ const openedMaps = async () =>
   (await db.select().from(rawEvent))
     .map((r) => r.body as Opened & { what?: string })
     .filter((b) => b.what === 'bid_form' && b.opened !== undefined)
+const stops = async () => (await db.select().from(nodeFlag)).map((f) => f.name)
 
 describe('the node opens the bid form itself to map it (Boris, 24.10.2026)', () => {
   it('FR-LEAD-8: on an open order without our bid the form is opened once and mapped, nothing filled or sent', async () => {
     const c = calibration()
-    const id = site.addOrder({ price: 216 })
-    await visit(id)
-    await c.afterOrderPage(id)
+    await openOne(c, { price: 216 })
     c.stop()
     expect(site.openerClicks).toBe(1)
     expect(site.bidPosts).toBe(0)
     const [m] = await openedMaps()
+    // The live opener of 24.10.2026: «Продолжить» with the fee beside it, a div in the tariff block.
     expect(m).toMatchObject({
       opened: true,
-      openedBy: 'Написать клиенту',
+      openedBy: 'Продолжить 216 ₽',
       walletBefore: 5000,
       walletAfter: 5000,
     })
@@ -90,67 +98,111 @@ describe('the node opens the bid form itself to map it (Boris, 24.10.2026)', () 
     expect(await ab.page.inputValue('#bid-text')).toBe('')
   }, 60000)
 
-  it('FR-LEAD-8: never on an order with our bid, a closed one, or one whose answer did not come', async () => {
+  it('FR-LEAD-8: never on an order with our bid, a closed one, one that does not say, or one without its answer', async () => {
     const c = calibration()
-    for (const id of [site.addOrder({ hasBid: true }), site.addOrder({ open: false })]) {
-      await visit(id)
-      await c.afterOrderPage(id)
-    }
+    await openOne(c, { hasBid: true })
+    await openOne(c, { open: false })
+    site.bidSettings.hasBidField = false
+    await openOne(c)
+    site.bidSettings.hasBidField = true
     site.bidSettings.answer = false
-    const silent = site.addOrder()
-    await visit(silent)
-    await c.afterOrderPage(silent)
+    await openOne(c)
     c.stop()
     expect(site.openerClicks).toBe(0)
     expect(await openedMaps()).toEqual([])
-  }, 60000)
-
-  it('FR-LEAD-8: at most the hourly number of forms is opened', async () => {
-    const c = calibration(2)
-    for (let i = 0; i < 3; i++) {
-      const id = site.addOrder()
-      await visit(id)
-      await c.afterOrderPage(id)
-    }
-    expect(site.openerClicks).toBe(2)
-    now += 3600_001
-    const later = site.addOrder()
-    await visit(later)
-    await c.afterOrderPage(later)
-    c.stop()
-    expect(site.openerClicks).toBe(3)
   }, 90000)
 
-  it('FR-LEAD-8: an opener the answer names with a paying word is never pressed', async () => {
+  it("FR-LEAD-8: only «Продолжить» with the order's own fee, or «Написать клиенту», is pressed", async () => {
     const c = calibration()
-    for (const words of ['Откликнуться', 'Оплатить отклик']) {
+    site.bidSettings.openerAmount = 999
+    await openOne(c, { price: 216 })
+    site.bidSettings.openerAmount = null
+    site.bidSettings.opener = 'words'
+    for (const words of ['Откликнуться', 'Предложить услуги', 'Продолжить', '']) {
       site.bidSettings.openerText = words
-      const id = site.addOrder()
-      await visit(id)
-      await c.afterOrderPage(id)
+      await openOne(c)
     }
+    expect(site.openerClicks).toBe(0)
+    site.bidSettings.openerText = 'Написать клиенту'
+    await openOne(c)
+    c.stop()
+    expect(site.openerClicks).toBe(1)
+  }, 90000)
+
+  it('FR-LEAD-8: nothing is pressed while the tab may not move, on a stale answer, an open form or two openers', async () => {
+    const c = calibration()
+    await openOne(c, {}, () => false)
+    const id = site.addOrder()
+    await visit(id)
+    now += 3 * 60_000
+    await c.afterOrderPage(id, may)
+    site.bidSettings.behindOpener = false
+    await openOne(c)
+    site.bidSettings.behindOpener = true
+    site.bidSettings.openers = 2
+    await openOne(c)
+    c.stop()
+    expect(site.openerClicks).toBe(0)
+  }, 90000)
+
+  it('FR-LEAD-8: a wallet the page does not show means no press', async () => {
+    site.bidSettings.showWallet = false
+    const c = calibration()
+    await openOne(c)
     c.stop()
     expect(site.openerClicks).toBe(0)
   }, 60000)
+
+  it('FR-LEAD-8: at most the hourly number of forms is opened, restarts included', async () => {
+    const c = calibration(2)
+    for (let i = 0; i < 3; i++) await openOne(c)
+    c.stop()
+    expect(site.openerClicks).toBe(2)
+    const restarted = calibration(2)
+    await openOne(restarted)
+    expect(site.openerClicks).toBe(2)
+    now += 3600_001
+    await openOne(restarted)
+    restarted.stop()
+    expect(site.openerClicks).toBe(3)
+  }, 90000)
 
   it('FR-LEAD-8: a wallet that went down after opening stops the self-opening for good', async () => {
     site.bidSettings.openerCharges = 10
     const c = calibration()
-    const first = site.addOrder()
-    await visit(first)
-    await c.afterOrderPage(first)
+    await openOne(c)
     expect((await openedMaps())[0]).toMatchObject({ walletBefore: 5000, walletAfter: 4990 })
-    const second = site.addOrder()
-    await visit(second)
-    await c.afterOrderPage(second)
+    expect(await stops()).toEqual(['form_calibration'])
+    await openOne(c)
     c.stop()
     expect(site.openerClicks).toBe(1)
     // After a restart of the node too.
     const again = calibration()
-    const third = site.addOrder()
-    await visit(third)
-    await again.afterOrderPage(third)
+    await openOne(again)
     again.stop()
     expect(site.openerClicks).toBe(1)
-  }, 60000)
+  }, 90000)
+
+  it('FR-LEAD-8: a drop the top bar shows only on the next page stops it there, before any press', async () => {
+    site.bidSettings.openerCharges = 10
+    site.bidSettings.openerChargeShown = false
+    const c = calibration()
+    await openOne(c)
+    expect((await openedMaps())[0]).toMatchObject({ walletBefore: 5000, walletAfter: 5000 })
+    await openOne(c)
+    c.stop()
+    expect(site.openerClicks).toBe(1)
+    expect(await stops()).toEqual(['form_calibration'])
+  }, 90000)
+
+  it('FR-LEAD-8: an opener that leads off the order page stops it', async () => {
+    site.bidSettings.openerLeaves = true
+    const c = calibration()
+    await openOne(c)
+    site.bidSettings.openerLeaves = false
+    await openOne(c)
+    c.stop()
+    expect(site.openerClicks).toBe(1)
+    expect(await stops()).toEqual(['form_calibration'])
+  }, 90000)
 })

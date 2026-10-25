@@ -1,15 +1,22 @@
-import { AnalystOutput, type ProfiOrder, plural } from '@sara/shared'
+import { AnalystOutput, type ClientInfo, type ProfiOrder, plural } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
+import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
 /** Profi.ru's bid form takes at most this many characters, the greeting included. */
 export const BID_TEXT_MAX = 500
 
-/** What a draft is written from; the client's name only ever reaches the greeting, never the model. */
+/**
+ * What a draft is written from; the client's name only ever reaches the greeting, never the model: the gateway
+ * hides it, the board's and the order page's, wherever the text says it.
+ */
 export type DraftSource = Pick<
   ProfiOrder,
   'title' | 'category' | 'city' | 'budget_text' | 'text' | 'client_name'
->
+> & {
+  /** What the order page says about the client; absent when the page was not read. Its name is only hidden from the model, never sent (ADR-016). */
+  client_info?: (Pick<ClientInfo, 'name'> & Partial<ClientInfo>) | null
+}
 
 /** The Analyst's reading of the order and its short разбор, kept beside the draft. */
 export type Analysis = Pick<AnalystOutput, 'reading' | 'hidden_need' | 'risk' | 'condition'>
@@ -22,7 +29,7 @@ export type Draft = {
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
   text: null
-  reason: 'no_answer' | 'too_long' | 'not_plain'
+  reason: 'no_answer' | 'too_long' | 'not_plain' | 'has_tag'
   attempts: number
   analysis: Analysis | null
 }
@@ -34,8 +41,6 @@ const analysisOf = (o: AnalystOutput): Analysis => ({
   condition: o.condition,
 })
 
-/** What Profi.ru shows instead of a name while it hides one. */
-const PLACEHOLDER = /^(клиент|заказчик|пользовател|имя|аноним|скрыт)/iu
 /**
  * A greeting counts only in the first sentence: «Добрый день!», «Анна, добрый день!», «Здравствуйте, Анна.»
  * Whole words only: «Приветливый персонал» is no greeting.
@@ -46,12 +51,11 @@ const FIRST_SENTENCE = /^[^.!?\n]*[.!?]*\s*/u
 const DASHES = /[\u2013\u2014]/g
 /** The model's own framing or JSON around the text (old Sara, 17.09 and 30.09): never typed into the form. */
 const NOT_PLAIN = /^\s*[{[]|<\/?parameter\b/i
-
-/** The leading letters of the name («Анна(Юля)» gives «Анна»), so only letters and hyphens ever reach a pattern. */
-function firstName(clientName: string): string | null {
-  const word = /^\p{L}[\p{L}-]*/u.exec(clientName.trim())?.[0] ?? ''
-  return word && !PLACEHOLDER.test(word) ? word : null
-}
+/**
+ * A word in square brackets: a tag of ADR-016 the model made up and the gateway could not put back («[имя 4]»,
+ * «[Имя]», «[ссылка на сайт]»). A bid has no use for brackets, and the client would read them.
+ */
+const BRACKETED = /\[[^\]\n]{1,40}\]/u
 
 /** «Ирина, добрый день!» when the client's name is known, else «Добрый день!» (Boris, 20.10: a missing hello is rude). */
 export function greetingOf(clientName: string): string {
@@ -92,9 +96,33 @@ export function priceWithin(price: number | null, budgetText: string | null): nu
   return sums && sums.length > 0 && price > Math.max(...sums) ? null : price
 }
 
-/** What the Analyst sees: the order as the Sorter sees it (no name, ADR-016) and the room left for the text. */
+/** The client as the order page shows them, in one line without the name (ADR-016); null when it shows nothing. */
+function clientLine(info: DraftSource['client_info']): string | null {
+  if (!info) return null
+  const parts = [
+    info.on_profi_since,
+    info.phone_verified === null || info.phone_verified === undefined
+      ? null
+      : info.phone_verified
+        ? 'номер подтверждён'
+        : 'номер не подтверждён',
+    info.reviews &&
+      `отзывы специалистов: ${info.reviews.positive} ${plural(info.reviews.positive, ['хороший', 'хороших', 'хороших'])}, ${info.reviews.negative} ${plural(info.reviews.negative, ['плохой', 'плохих', 'плохих'])}`,
+    info.review_tags &&
+      info.review_tags.length > 0 &&
+      `отметки в отзывах: ${info.review_tags.join(', ')}`,
+  ].filter((p): p is string => typeof p === 'string' && p !== '')
+  return parts.length > 0 ? `Клиент на площадке: ${parts.join('; ')}` : null
+}
+
+/**
+ * What the Analyst sees: the order as the Sorter sees it (no name, ADR-016), what the order page says about the
+ * client, and the room left for the text.
+ */
 export function analystInput(o: DraftSource, maxBody: number): string {
-  return `${sorterInput(o)}\nДлина текста: не больше ${maxBody} знаков`
+  return [sorterInput(o), clientLine(o.client_info), `Длина текста: не больше ${maxBody} знаков`]
+    .filter((l): l is string => l !== null)
+    .join('\n')
 }
 
 const chars = (n: number) => `${n} ${plural(n, ['знак', 'знака', 'знаков'])}`
@@ -114,8 +142,9 @@ export async function writeDraft(
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
   let analysis: Analysis | null = null
+  const redact = { names: namesToHide(o.client_name, o.client_info?.name) }
   for (let attempts = 1; attempts <= 2; attempts++) {
-    const r = await gw.call('analyst', input, AnalystOutput, opts)
+    const r = await gw.call('analyst', input, AnalystOutput, { ...opts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
@@ -123,6 +152,9 @@ export async function writeDraft(
     if (!body || NOT_PLAIN.test(body)) {
       reason = 'not_plain'
       input = `${base}\n\nПрошлый вариант был не простой текст. Напиши только сам текст отклика, без JSON и разметки.`
+    } else if (BRACKETED.test(body)) {
+      reason = 'has_tag'
+      input = `${base}\n\nВ прошлом варианте остались метки в квадратных скобках. Напиши текст без них, словами.`
     } else if (text.length > BID_TEXT_MAX) {
       reason = 'too_long'
       input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${BID_TEXT_MAX}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`

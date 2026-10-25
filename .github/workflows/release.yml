@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
+    # Boris's Mac, like CI: the account's free Actions minutes ran out (25.10.2026).
+    runs-on: [self-hosted, sara-mac]
     steps:
       - uses: googleapis/release-please-action@v4
         with:

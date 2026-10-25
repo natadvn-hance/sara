@@ -12,6 +12,8 @@ import {
   type ProfiToolName,
   type ReadChatInput,
   type ReadChatOutput,
+  type SendMessageInput,
+  type SendMessageOutput,
   type SessionHealthInput,
   type SessionHealthOutput,
   type SubmitBidInput,
@@ -26,6 +28,7 @@ export type ProfiToolsImpl = {
   listChats(i: ListChatsInput): Promise<ListChatsOutput>
   readChat(i: ReadChatInput): Promise<ReadChatOutput>
   submitBid(i: SubmitBidInput): Promise<SubmitBidOutput>
+  sendMessage(i: SendMessageInput): Promise<SendMessageOutput>
 }
 
 /** A tool failure the core understands (contract C2 error classes). */
@@ -45,6 +48,8 @@ const DESCRIPTIONS: Record<ProfiToolName, string> = {
   'profi.list_chats': 'Чаты аккаунта с последним сообщением и числом непрочитанных.',
   'profi.read_chat': 'Сообщения чата с номером площадки, автором, временем и отметкой «прочитано».',
   'profi.submit_bid': 'Отклик на заказ через интерфейс площадки с проверкой экраном.',
+  'profi.send_message':
+    'Сообщение клиенту через поле чата с проверкой, что чат не изменился, и поиском своего сообщения.',
 }
 
 function call(impl: ProfiToolsImpl, name: ProfiToolName, data: unknown): Promise<object> {
@@ -61,6 +66,8 @@ function call(impl: ProfiToolsImpl, name: ProfiToolName, data: unknown): Promise
       return impl.readChat(data as ReadChatInput)
     case 'profi.submit_bid':
       return impl.submitBid(data as SubmitBidInput)
+    case 'profi.send_message':
+      return impl.sendMessage(data as SendMessageInput)
   }
 }
 

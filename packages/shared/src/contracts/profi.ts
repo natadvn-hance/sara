@@ -62,6 +62,8 @@ export const PROFI_ERROR_CLASSES = [
   'RATE_LIMITED',
   'UNCERTAIN',
   'INTERNAL',
+  /** The chat got a message the core had not seen: nothing was typed, the turn plans again (FR-CONV-6). */
+  'CHAT_CHANGED',
 ] as const
 export type ProfiErrorClass = (typeof PROFI_ERROR_CLASSES)[number]
 
@@ -111,6 +113,11 @@ export const GetOrderOutput = ProfiOrder.extend({
   has_bid: z.boolean().nullable(),
   /** The client as the order page shows them; absent from a node that does not read it yet. */
   client_info: ClientInfo.nullable().optional(),
+  /**
+   * True when open, has_bid and the fee come from the order page read now. False: the node could not read the page
+   * (the tab may not move, the page gave no order answer) and answers from what it stored; absent: an older node.
+   */
+  from_page: z.boolean().optional(),
 })
 export type GetOrderOutput = z.infer<typeof GetOrderOutput>
 
@@ -136,6 +143,25 @@ export type ChatMessage = z.infer<typeof ChatMessage>
 export const ReadChatInput = z.object({ account_id: z.string().min(1), chat_id: z.string().min(1) })
 export const ReadChatOutput = z.object({ messages: z.array(ChatMessage) })
 
+/**
+ * A message to a client through the chat page (FR-CONV-9). The node reads the live page right before typing and
+ * refuses with CHAT_CHANGED when its last message is not `expect_last_message_id` (null: the chat had none).
+ */
+export const SendMessageInput = z.object({
+  account_id: z.string().min(1),
+  chat_id: z.string().min(1),
+  text: z.string().min(1).max(4000),
+  expect_last_message_id: z.string().min(1).nullable(),
+  idempotency_key: z.string().min(1),
+  permit: z.string().min(1),
+})
+export const SendMessageOutput = z.object({
+  found_on_page: z.boolean(),
+  platform_message_id: z.string().min(1).nullable(),
+})
+export type SendMessageInput = z.infer<typeof SendMessageInput>
+export type SendMessageOutput = z.infer<typeof SendMessageOutput>
+
 export type ListFeedInput = z.infer<typeof ListFeedInput>
 export type ListFeedOutput = z.infer<typeof ListFeedOutput>
 export type GetOrderInput = z.infer<typeof GetOrderInput>
@@ -152,6 +178,7 @@ export const PROFI_TOOLS = {
   'profi.list_chats': { input: ListChatsInput, output: ListChatsOutput },
   'profi.read_chat': { input: ReadChatInput, output: ReadChatOutput },
   'profi.submit_bid': { input: SubmitBidInput, output: SubmitBidOutput },
+  'profi.send_message': { input: SendMessageInput, output: SendMessageOutput },
 } as const
 
 const MessageRef = z
@@ -169,6 +196,16 @@ export const PROFI_EVENT_PAYLOADS = {
   'profi.order_seen': ProfiOrder,
   'profi.client_message': MessageRef,
   'profi.author_unclear': MessageRef,
+  /** A new message from our side of the chat: Boris's, old Sara's or new Sara's (ADR-024). */
+  'profi.specialist_message': MessageRef.extend({ author: z.literal('specialist') }).strict(),
+  'profi.client_typing': z.object({ chat_id: z.string().min(1), at: z.iso.datetime() }).strict(),
+  'profi.client_read': z
+    .object({
+      chat_id: z.string().min(1),
+      platform_message_id: z.string().min(1).nullable(),
+      at: z.iso.datetime(),
+    })
+    .strict(),
   'profi.session_dead': z.object({}).strict(),
   'profi.session_alive': z.object({ dead_since: z.iso.datetime().nullable() }).strict(),
   'profi.profile_banned': z.object({}).strict(),

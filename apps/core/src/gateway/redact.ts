@@ -8,6 +8,8 @@ export type Redacted = {
   tags: Map<string, string>
   /** How many different values of each kind were hidden. */
   counts: Record<Kind, number>
+  /** True when names were given to look for: without one, a name inside the text went through. */
+  named: boolean
 }
 
 // No backslash: inside a JSON string it starts an escape ("\n", "\""), not a part of the link.
@@ -135,8 +137,11 @@ export function redact(text: string, names: (string | null | undefined)[] = []):
   }
   const nameRe = namePattern(names)
   if (nameRe) out = out.replace(nameRe, (m) => tagFor('name', m))
-  return { text: out, tags, counts }
+  return { text: out, tags, counts, named: nameRe !== null }
 }
+
+/** A tag like `[имя 3]` is in the text: one that `restore` did not know stays as the model wrote it. */
+export const hasTag = (text: string) => /\[\s*(?:телефон|почта|ссылка|имя)\s*\d+\s*\]/iu.test(text)
 
 /** Puts the hidden values back into every string of a model's answer; a tag it does not know stays as written. */
 export function restore<T>(value: T, tags: Map<string, string>): T {
