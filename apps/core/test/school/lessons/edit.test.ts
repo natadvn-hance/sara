@@ -32,6 +32,10 @@ describe('the weight of an edit', () => {
     expect(w('Сроки скажу после созвона', 'Здравствуйте! Сроки скажу после созвона')).toBe('same')
   })
 
+  it('FR-AUTO-4: a fixed typo is minor', () => {
+    expect(w('Срки скажу после созвона', 'Сроки скажу после созвона')).toBe('minor')
+  })
+
   it('FR-TRAIN-6: the same text is an approval, another text a substantial edit', () => {
     expect(w('Сроки скажу после созвона', 'сроки скажу после созвона.')).toBe('same')
     expect(w('Сроки скажу после созвона', 'Пришлите, пожалуйста, ТЗ, посмотрю вечером')).toBe(
@@ -39,7 +43,7 @@ describe('the weight of an edit', () => {
     )
   })
 
-  it('numbers in digits and words are found, the time of day too', () => {
+  it('FR-AUTO-4: numbers in digits and words are found', () => {
     expect(numbersIn('Бюджет 50 000, срок полтора месяца, две встречи')).toEqual([
       '1.5',
       '2',
@@ -48,9 +52,15 @@ describe('the weight of an edit', () => {
     expect(numbersIn('без чисел')).toEqual([])
   })
 
-  it('similarity is 100 for the same words and 0 for unrelated ones', () => {
+  it('FR-AUTO-4: similarity is 100 for the same words and 0 for unrelated ones', () => {
     expect(similarity('Добрый день', 'добрый день!')).toBe(100)
     expect(similarity('абв', 'где')).toBe(0)
     expect(similarity('', '')).toBe(100)
+  })
+
+  it('FR-AUTO-4: two different short answers are not the same', () => {
+    expect(similarity('Да', 'Не')).toBe(0)
+    expect(similarity('Да', 'да!')).toBe(100)
+    expect(w('Да', 'Нет')).toBe('substantial')
   })
 })

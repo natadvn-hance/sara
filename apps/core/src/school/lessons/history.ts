@@ -5,7 +5,7 @@ import { and, eq, inArray, isNull, like, sql } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import { jobRun, mindProposal, task } from '../../db/schema'
 import { TEXTS } from '../../notify/cards'
-import { takeNotice } from '../notices'
+import { releaseNotice, takeNotice } from '../notices'
 import { SCHOOL_TEXTS } from '../texts'
 import type { SchoolDeps } from '../types'
 import { createLesson, decideLesson } from './store'
@@ -42,6 +42,30 @@ const blankLesson = {
   inPlace: false,
   sim: false,
   modelCallId: null,
+}
+
+/**
+ * What Boris reads of a mind file in a batch: its title and body without the front matter (M5 design 5.2: he sees
+ * every fact); for a scenario, its title and the client's last words.
+ */
+export function readable(content: string): string {
+  const t = content.trim()
+  if (t.startsWith('{')) {
+    try {
+      const s = JSON.parse(t) as { title?: string; messages?: { author?: string; text?: string }[] }
+      const client = s.messages?.filter((m) => m.author === 'client').at(-1)?.text
+      return [s.title, client ? `Клиент: ${client}` : null].filter(Boolean).join('\n') || t
+    } catch {
+      return t
+    }
+  }
+  const m = /^---\n([\s\S]*?)\n---\n?/.exec(t)
+  if (!m) return t
+  const title = /^title:\s*(.+)$/m
+    .exec(m[1] ?? '')?.[1]
+    ?.trim()
+    .replace(/^["']|["']$/g, '')
+  return [title, t.slice(m[0].length).trim()].filter(Boolean).join('\n')
 }
 
 async function link(db: Db, proposalIds: string[], lessonId: string) {
@@ -89,13 +113,14 @@ export async function importMind(d: Pick<SchoolDeps, 'db' | 'mindDir'>): Promise
       ...blankLesson,
       source: 'import',
       sourceRef: p.id,
-      after: p.content.slice(0, 4000),
+      after: readable(p.content).slice(0, 4000),
       insight: `Из стартового разума: ${p.source}`.slice(0, 240),
       kind: p.kind === 'knowledge' ? 'fact' : 'voice',
       state: 'ready',
       changes: [],
     })
-    if (l.created) await link(d.db, [p.id], l.id)
+    // Linked even when the lesson was there before: a crash between the two leaves no proposal behind.
+    await link(d.db, [p.id], l.id)
   }
   return rows.length
 }
@@ -140,7 +165,8 @@ export async function historyCards(d: Deps, now: Date): Promise<void> {
       .from(task)
       .where(and(eq(task.kind, 'history_bulk'), eq(task.entityId, bulk), eq(task.state, 'open')))
     if (open) continue
-    if (!(await takeNotice(d.db, now, 'history_card'))) return
+    const notice = await takeNotice(d.db, now, 'history_card')
+    if (!notice) return
     const taskId = newEventId()
     await d.db
       .insert(task)
@@ -156,6 +182,7 @@ export async function historyCards(d: Deps, now: Date): Promise<void> {
       ])
       .catch(async (e) => {
         await d.db.delete(task).where(eq(task.id, taskId))
+        await releaseNotice(d.db, notice)
         throw e
       })
     await d.db.update(task).set({ telegramMessageId: messageId }).where(eq(task.id, taskId))
@@ -190,13 +217,13 @@ export async function onHistoryPress(
         ...blankLesson,
         source: 'history',
         sourceRef: p.id,
-        after: p.content.slice(0, 4000),
+        after: readable(p.content).slice(0, 4000),
         insight: SCHOOL_TEXTS.historyInsight(bulk),
         kind: bulk === 'examples' ? 'voice' : 'procedure',
         state: 'ready',
         changes: [],
       })
-      if (l.created) await link(d.db, [p.id], l.id)
+      await link(d.db, [p.id], l.id)
     }
     return SCHOOL_TEXTS.historyByFive(rows.length)
   }
@@ -217,11 +244,6 @@ export async function onHistoryPress(
     l.id,
   )
   await decideLesson(d.db, l.id, { decision: 'yes' })
-  const r = await d.writer.apply(
-    rows.map((p) => p.id),
-    { lessonIds: [l.id], batchId: null },
-  )
-  return r.ok
-    ? SCHOOL_TEXTS.historyWritten(rows.length - r.refused.length)
-    : SCHOOL_TEXTS.writeWaits
+  // Written on the school's tick (writePending), which puts the result on this card.
+  return SCHOOL_TEXTS.historyWriting(rows.length)
 }

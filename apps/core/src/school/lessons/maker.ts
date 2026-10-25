@@ -50,7 +50,8 @@ export async function makeInsight(
   const r = await gw.call('lesson-maker', makerInput(i), LessonMakerOutput, {
     priority: i.priority,
     limitWaitMs: 0,
-    redact: { names: i.names },
+    // The tags stay in the answer: an insight is kept in the mind and must never hold the client's data (NFR-PRIV-2).
+    redact: { names: i.names, restore: false },
     ...(i.mode === 'interview' ? { model: 'sonnet' as const } : {}),
   })
   return r.ok ? r.output : null

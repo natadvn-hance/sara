@@ -28,10 +28,17 @@ const journal = (
 const asRow = (r: typeof lesson.$inferSelect): LessonRow => r as LessonRow
 
 /**
- * Keeps a lesson and one mind proposal per change (FR-TRAIN-6); «{n}» in a record id becomes the lesson's serial
- * number. A lesson from the same source is kept once: a second call returns the first one.
+ * Keeps a lesson and one mind proposal per change (FR-TRAIN-6), all or nothing; «{n}» in a record id becomes the
+ * lesson's serial number. A lesson from the same source is kept once: a second call returns the first one.
  */
 export async function createLesson(
+  db: DbOrTx,
+  l: NewLesson,
+): Promise<{ id: string; n: number; created: boolean }> {
+  return db.transaction((tx) => insertLesson(tx, l))
+}
+
+async function insertLesson(
   tx: DbOrTx,
   l: NewLesson,
 ): Promise<{ id: string; n: number; created: boolean }> {
