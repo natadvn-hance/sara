@@ -47,6 +47,15 @@ const calls = async (): Promise<{ args: string[]; stdin: string }[]> =>
 const modelOf = (args: string[]) => args[args.indexOf('--model') + 1]
 
 describe('scorer', () => {
+  it('NFR-PRIV-2: a name inside the order text never reaches the Scorer', async () => {
+    const gw = await gateway({ scorer: scorerAnswer(85) })
+    const o = { ...(await order()), text: 'Меня зовут Ирина, нужен сайт', client_name: 'Ирина' }
+    await scoreOrder(gw, o, RULES_V1)
+    const [c] = await calls()
+    expect(c?.stdin).not.toContain('Ирина')
+    expect(c?.stdin).toContain('Меня зовут [имя 1], нужен сайт')
+  })
+
   it("FR-LEAD-3: the Scorer never sees the client's name", async () => {
     const text = scorerInput({ ...(await order()), client_name: 'Андрей' }, RULES_V1)
     expect(text).not.toContain('Андрей')

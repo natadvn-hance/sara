@@ -126,6 +126,38 @@ describe('rule proposals', { timeout: 30000 }, () => {
     expect(await countEvents(db, 'rules.proposed')).toBe(1)
   })
 
+  it("NFR-PRIV-2: a client's name inside an order text never reaches the proposer", async () => {
+    await threeSurprises()
+    await db.execute(
+      sql`update core.lead set text = 'Меня зовут Андрей, нужны федеральные каналы' where id = '940001'`,
+    )
+    const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })
+    await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)
+    const input = await proposerInput()
+    expect(input).toContain('Меня зовут [имя 1], нужны федеральные каналы')
+    expect(input).not.toContain('Андрей')
+  })
+
+  it("NFR-PRIV-2: a proposal that carries a client's tag is invalid, so no name is written into the rules", async () => {
+    await threeSurprises()
+    await db.execute(
+      sql`update core.lead set text = 'Меня зовут Андрей, нужны федеральные каналы' where id = '940001'`,
+    )
+    const leaking = {
+      ...PROPOSAL,
+      rules: {
+        ...RULES_V1,
+        stop_factors: RULES_V1.stop_factors.map((s, i) =>
+          i === 0 ? { ...s, examples: [...s.examples, 'Меня зовут [имя 1]'] } : s,
+        ),
+      },
+    }
+    const gw = await gateway({ 'rules-proposer': leaking, scorer: scorerAnswer(58) })
+    expect(await maybePropose({ db, gateway: gw, notifier }, ACC, NOW)).toBe('invalid')
+    expect(await countEvents(db, 'rules.proposal_invalid')).toBe(1)
+    expect(await db.select().from(ruleProposal)).toHaveLength(0)
+  })
+
   it('FR-MIND-3: nothing changes until «Применить»', async () => {
     await threeSurprises()
     const gw = await gateway({ 'rules-proposer': PROPOSAL, scorer: scorerAnswer(58) })

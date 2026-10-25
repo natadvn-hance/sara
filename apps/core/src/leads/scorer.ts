@@ -1,5 +1,6 @@
 import { type DirectionRules, type ProfiOrder, ScorerOutput, weightedScore } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
+import { namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
 export type Scored = {
@@ -39,7 +40,7 @@ export function rulesText(r: DirectionRules): string {
   return lines.join('\n')
 }
 
-/** What the Scorer sees: the rules, then the order. The client's name is never sent (ADR-016). */
+/** What the Scorer sees: the rules, then the order. The client's name is never put in it, and one inside the text is hidden by the gateway (ADR-016). */
 export function scorerInput(o: ProfiOrder, rules: DirectionRules): string {
   return `${rulesText(rules)}\n\nЗаказ\n\n${sorterInput(o)}`
 }
@@ -77,6 +78,7 @@ export async function scoreOrder(
       model,
       correlationId: opts.correlationId,
       causationId: opts.causationId,
+      redact: { names: namesToHide(o.client_name) },
     })
     if (!r.ok || !fits(rules, r.output)) return null
     return {
