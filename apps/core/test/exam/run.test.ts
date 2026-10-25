@@ -169,16 +169,18 @@ describe('runExam', { timeout: 30_000 }, () => {
     expect(second.summary.passed).toBe(false)
     expect(second.summary.comparedTo).toBe(first.summary.runId)
     expect(second.summary.previousScore).toBe(1)
-    // The same run again is as good as the last one, not worse.
+    // The failed run is no baseline: the same bad run again still fails against the run that passed.
     const third = await exam(
       { interlocutor: { $sequence: [CALL_BORIS, CALL_BORIS] } },
       { only: TWO },
     )
-    expect(third.summary).toMatchObject({ score: 0.75, passed: true })
-    expect(third.summary.comparedTo).toBe(second.summary.runId)
-    // And a better one passes.
+    expect(third.summary).toMatchObject({ score: 0.75, passed: false })
+    expect(third.summary.comparedTo).toBe(first.summary.runId)
+    expect(third.summary.previousScore).toBe(1)
+    // A run as good as the one that passed passes, and is compared with it, not with the failed ones.
     const fourth = await exam({ interlocutor: { $sequence: [CALL_BORIS, NONE] } }, { only: TWO })
     expect(fourth.summary).toMatchObject({ score: 1, passed: true })
+    expect(fourth.summary.comparedTo).toBe(first.summary.runId)
     const stored = await db.select().from(examRun).where(eq(examRun.id, second.summary.runId))
     expect(stored[0]).toMatchObject({ passed: false, comparedTo: first.summary.runId, s2: 1 })
   })

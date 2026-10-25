@@ -42,7 +42,7 @@ export const EXAM_SETTINGS: PolicySettings = {
 const SAME = 1e-6
 
 /**
- * The deploy guard (FR-TRAIN-8): no S1, and a score not worse than the last run of the same set. A run in which the
+ * The deploy guard (FR-TRAIN-8): no S1, and a score not worse than the last run of the same set that passed. A run in which the
  * Interlocutor did not answer somewhere does not pass whatever its score (see `unanswered`).
  */
 export function examVerdict(
@@ -264,6 +264,9 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
       and(
         eq(examRun.scenarioSet, setKey),
         ne(examRun.id, runId),
+        // Only a run that passed is a baseline: a failed one (an S1, an unanswered scenario, a worse score) is the
+        // very thing the next run must not be allowed to match.
+        eq(examRun.passed, true),
         isNotNull(examRun.finishedAt),
         isNotNull(examRun.score),
       ),
