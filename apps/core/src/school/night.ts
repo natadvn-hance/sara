@@ -5,6 +5,7 @@ import { jobRun, modelCall } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { getSetting } from '../settings/store'
 import type { ModelName, NightJob, SchoolDeps } from './types'
+import { withPriority } from './wrappers'
 
 /** Moscow keeps UTC+3 all year (no daylight saving since 2014), so its wall clock is a fixed shift. */
 const MSK_MS = 3 * 60 * 60_000
@@ -48,7 +49,14 @@ export async function nightUnitsUsed(db: Db, now: Date): Promise<number> {
   const rows = await db
     .select({ model: modelCall.model, n: sql<number>`count(*)::int` })
     .from(modelCall)
-    .where(and(sql`${modelCall.priority} = 'P3'`, gte(modelCall.startedAt, start.toISOString())))
+    .where(
+      and(
+        sql`${modelCall.priority} = 'P3'`,
+        gte(modelCall.startedAt, start.toISOString()),
+        // A call that met the limit before it ran (a 0 ms stand-in row) spent nothing.
+        sql`not (${modelCall.errorClass} = 'limit_reached' and ${modelCall.durationMs} = 0)`,
+      ),
+    )
     .groupBy(modelCall.model)
   return rows.reduce((sum, r) => sum + (MODEL_UNITS[r.model as ModelName] ?? 0) * r.n, 0)
 }
@@ -97,10 +105,34 @@ async function journal(
   })
 }
 
+/** Whether the night that opened at `start` is the weekly one: it ends on the weekly day (Saturday to Sunday by default). */
+export function isWeeklyNight(start: Date, w: Window, weeklyDay: number): boolean {
+  const day = mskDate(start.getTime())
+  const endDay = w.from > w.to ? mskDate(start.getTime() + DAY_MS) : day
+  return new Date(`${endDay}T12:00:00Z`).getUTCDay() === weeklyDay
+}
+
+/** Why a job must not run tonight, or null: a limit on one of its models, or not enough units left. */
+async function whySkip(d: SchoolDeps, job: NightJob, now: Date): Promise<string | null> {
+  const limited = await limitedModels(d.db, now)
+  const hit = job.models.find((m) => limited.has(m))
+  if (hit) return `лимит Claude у ${hit} за последние 12 часов`
+  const units =
+    (await getSetting(d.db, 'school.night_units')) +
+    (job.weekly ? await getSetting(d.db, 'school.weekly_units') : 0)
+  const used = await nightUnitsUsed(d.db, now)
+  const want = await job.estimate(d, now)
+  return used + want > units ? `бюджет: потрачено ${used}, нужно ${want}, можно ${units}` : null
+}
+
+const errorName = (e: unknown) => (e instanceof Error ? e.name : 'unknown')
+
 /**
  * Runs the night jobs whose time has come, each once a night (M5 design 5.12): only while the school is on, never on
- * a model that met the limit in the last 12 hours, never past the night's units. A skipped job takes its night too,
- * so it does not try again every minute; a free job (the mind exchange) skips all the checks.
+ * a model that met the limit in the last 12 hours, never past the night's units. A skipped or failed job takes its
+ * night too, so it does not try again every minute, and never stops the jobs after it. Every call of a non-free job
+ * goes as P3, so it stays behind clients and inside the counted units. The journal gets codes, never an error's text
+ * (it may carry a query's values, ADR-022); a free job (the mind exchange) skips all the checks.
  */
 export async function runNight(
   d: SchoolDeps,
@@ -112,30 +144,31 @@ export async function runNight(
   const start = nightStart(now, w)
   if (!start) return out
   const day = mskDate(start.getTime())
-  // The weekly night is the one that ends on the weekly day (from Saturday to Sunday by default).
-  const endDay = w.from > w.to ? mskDate(start.getTime() + DAY_MS) : day
-  const weeklyNight =
-    new Date(`${endDay}T12:00:00Z`).getUTCDay() === (await getSetting(d.db, 'school.weekly_day'))
+  const weeklyNight = isWeeklyNight(start, w, await getSetting(d.db, 'school.weekly_day'))
   const on = await getSetting(d.db, 'school.on')
+  const taken = new Set(
+    (
+      await d.db.execute<{ name: string }>(
+        sql`select name from core.job_run where day = ${day} and name like 'school:%'`,
+      )
+    ).rows.map((r) => r.name),
+  )
   const due = jobs
     .filter((j) => jobInstant(start, w, j.atMsk) <= now.getTime())
-    .filter((j) => !j.weekly || weeklyNight)
+    .filter((j) => (j.weekly ? weeklyNight : !(j.notWeekly && weeklyNight)))
     .filter((j) => j.free || on)
+    .filter((j) => !taken.has(`school:${j.name}`))
     .sort((a, b) => jobInstant(start, w, a.atMsk) - jobInstant(start, w, b.atMsk))
 
   for (const job of due) {
+    const jd = job.free ? d : { ...d, gateway: withPriority(d.gateway, 'P3') }
     let reason: string | null = null
     if (!job.free) {
-      const limited = await limitedModels(d.db, now)
-      const hit = job.models.find((m) => limited.has(m))
-      if (hit) reason = `limit: ${hit} met the Claude limit in the last 12 hours`
-      else {
-        const units =
-          (await getSetting(d.db, 'school.night_units')) +
-          (job.weekly ? await getSetting(d.db, 'school.weekly_units') : 0)
-        const used = await nightUnitsUsed(d.db, now)
-        const want = await job.estimate(d, now)
-        if (used + want > units) reason = `budget: ${used} used + ${want} wanted > ${units}`
+      try {
+        reason = await whySkip(jd, job, now)
+      } catch (e) {
+        console.error(`school night check ${job.name} failed`, e instanceof Error ? e.message : e)
+        reason = 'сбой проверки'
       }
     }
     if (!(await take(d.db, job.name, day))) continue
@@ -145,13 +178,16 @@ export async function runNight(
       continue
     }
     try {
-      const result = await job.run(d, now)
+      const result = await job.run(jd, now)
       out.ran.push(job.name)
       await journal(d.db, 'school.night_ran', job.name, { result })
     } catch (e) {
-      const why = `failed: ${e instanceof Error ? e.message : String(e)}`
-      out.skipped.push({ name: job.name, reason: why })
-      await journal(d.db, 'school.night_skipped', job.name, { reason: why.slice(0, 300) })
+      console.error(`school night job ${job.name} failed`, e instanceof Error ? e.message : e)
+      out.skipped.push({ name: job.name, reason: 'сбой задачи' })
+      await journal(d.db, 'school.night_skipped', job.name, {
+        reason: 'сбой задачи',
+        error: errorName(e),
+      })
     }
   }
   return out

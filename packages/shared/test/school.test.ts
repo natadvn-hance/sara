@@ -63,6 +63,7 @@ describe('M5 contracts', () => {
       CoachOutput.parse({ answer: 'Опиралась на образец', insight: null, kind: null }).answer,
     ).toBe('Опиралась на образец')
     expect(CoachOutput.safeParse({ answer: 'x', insight: 'y', kind: 'bulk' }).success).toBe(false)
+    expect(CoachOutput.safeParse({ answer: 'x', insight: 'y', kind: null }).success).toBe(false)
   })
 
   it('FR-TRAIN-6: the lesson maker gives one insight, a topic, a tone and maybe a fact', () => {
@@ -90,6 +91,7 @@ describe('M5 contracts', () => {
     expect(TeacherProposal.safeParse({ ...proposal, sources: [] }).success).toBe(false)
     expect(TeacherProposal.safeParse({ ...proposal, record_id: '../x' }).success).toBe(false)
     expect(TeacherProposal.safeParse({ ...proposal, record_id: 'u-A' }).success).toBe(false)
+    expect(TeacherProposal.safeParse({ ...proposal, record_id: 'k-timeline' }).success).toBe(false)
     expect(MIND_RECORD_ID.test('k-i-17')).toBe(true)
     expect(MIND_RECORD_ID.test('x-golden-1')).toBe(false)
   })
@@ -178,6 +180,7 @@ describe('M5 contracts', () => {
       'auto.from_understanding': true,
     })
     expect(SETTINGS['school.weekly_day'].schema.safeParse(7).success).toBe(false)
+    expect(SETTINGS['school.night'].schema.safeParse({ from: 3, to: 3 }).success).toBe(false)
     expect(SETTINGS['auto.substantial_below'].schema.safeParse(101).success).toBe(false)
   })
 
