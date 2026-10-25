@@ -399,6 +399,8 @@ export const mindGap = core.table('mind_gap', {
   topic: text('topic'),
   questionId: uuid('question_id'),
   createdAt: ts('created_at').notNull().defaultNow(),
+  /** M5: the interview lesson that closed the gap. */
+  lessonId: uuid('lesson_id'),
 })
 
 /** A file Sara proposes for the mind; it reaches sara-mind only through a developer and Boris's «да». */
@@ -411,6 +413,17 @@ export const mindProposal = core.table('mind_proposal', {
   state: text('state').notNull().default('new'),
   createdAt: ts('created_at').notNull().defaultNow(),
   exportedAt: ts('exported_at'),
+  // M5 (ADR-025): the lesson Boris says «да» to, and what the mind writer builds from it.
+  lessonId: uuid('lesson_id'),
+  action: text('action').notNull().default('create'),
+  recordId: text('record_id'),
+  section: text('section'),
+  baseVersion: integer('base_version'),
+  /** The fields and sections the writer builds the file from; empty on M4's rows, which carry `content` whole. */
+  change: jsonb('change'),
+  decidedAt: ts('decided_at'),
+  commitId: uuid('commit_id'),
+  rejectReason: text('reject_reason'),
 })
 
 /** One exam run (FR-TRAIN-8). */
@@ -427,6 +440,10 @@ export const examRun = core.table('exam_run', {
   s3: integer('s3').notNull().default(0),
   passed: boolean('passed'),
   comparedTo: uuid('compared_to'),
+  /** M5: before a deploy, the weekly run or the golden run after a day of lessons. */
+  kind: text('kind').notNull().default('deploy'),
+  /** M5: the mind commit or version that started the run. */
+  trigger: text('trigger'),
 })
 
 export const examResult = core.table(
@@ -544,4 +561,178 @@ export const calibrationItem = core.table(
     markedAt: ts('marked_at'),
   },
   (t) => [primaryKey({ columns: [t.runId, t.leadId] })],
+)
+
+// M5: lessons, mind commits, the trainer and the school (M5 design 5.19).
+
+/** One thing Boris taught Sara (FR-TRAIN-6): was, became, the insight; its proposals wait for his «да». */
+export const lesson = core.table(
+  'lesson',
+  {
+    id: uuid('id').primaryKey(),
+    /** The serial number: record ids `e-l-<n>` and `k-i-<n>` come from it (a uuid v7 starts with the minute). */
+    n: bigserial('n', { mode: 'number' }).notNull().unique(),
+    source: text('source').notNull(),
+    sourceRef: text('source_ref').notNull(),
+    scope: text('scope').notNull().default('shared'),
+    topic: text('topic'),
+    tone: text('tone'),
+    questionType: text('question_type'),
+    /** The client's line, without the name and contacts. */
+    clientText: text('client_text'),
+    before: text('before'),
+    after: text('after'),
+    insight: text('insight').notNull().default(''),
+    kind: text('kind').notNull(),
+    state: text('state').notNull().default('new'),
+    /** Decided where Boris was (trainer, interview), not in a batch. */
+    inPlace: boolean('in_place').notNull().default(false),
+    /** Made from a generated client line: it never gives an example (FR-TRAIN-9). */
+    sim: boolean('sim').notNull().default(false),
+    attempts: integer('attempts').notNull().default(0),
+    batchId: uuid('batch_id'),
+    taskId: uuid('task_id'),
+    reason: text('reason'),
+    modelCallId: uuid('model_call_id'),
+    commitId: uuid('commit_id'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    decidedAt: ts('decided_at'),
+  },
+  (t) => [
+    uniqueIndex('lesson_source_ref').on(t.source, t.sourceRef),
+    index('lesson_state').on(t.state, t.createdAt),
+  ],
+)
+
+/** Lessons sent to Boris in one Telegram message (FR-TRAIN-6). */
+export const lessonBatch = core.table('lesson_batch', {
+  id: uuid('id').primaryKey(),
+  lessonIds: jsonb('lesson_ids').notNull().default([]),
+  taskId: uuid('task_id'),
+  telegramMessageId: bigint('telegram_message_id', { mode: 'number' }),
+  sentAt: ts('sent_at').notNull().defaultNow(),
+  closedAt: ts('closed_at'),
+  commitId: uuid('commit_id'),
+})
+
+/** A commit the mind writer made in sara-mind (ADR-025); its id is the commit's `Sara-Commit:` line. */
+export const mindCommit = core.table('mind_commit', {
+  id: uuid('id').primaryKey(),
+  sha: text('sha').notNull(),
+  kind: text('kind').notNull(),
+  proposalIds: jsonb('proposal_ids').notNull().default([]),
+  lessonIds: jsonb('lesson_ids').notNull().default([]),
+  mindVersionBefore: text('mind_version_before'),
+  revertsId: uuid('reverts_id'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  pushedAt: ts('pushed_at'),
+})
+
+/** A made-up client for the trainer, built from real Profi.ru chats without their words (FR-TRAIN-2). */
+export const persona = core.table(
+  'persona',
+  {
+    id: text('id').primaryKey(),
+    archetype: text('archetype').notNull(),
+    niche: text('niche').notNull(),
+    task: text('task').notNull(),
+    mood: text('mood').notNull(),
+    style: text('style').notNull().default(''),
+    questions: jsonb('questions').notNull().default([]),
+    topics: jsonb('topics').notNull().default([]),
+    order: jsonb('order').notNull(),
+    difficulty: integer('difficulty').notNull(),
+    hard: boolean('hard').notNull().default(false),
+    sourceRefs: jsonb('source_refs').notNull(),
+    handmade: boolean('handmade').notNull().default(false),
+    active: boolean('active').notNull().default(true),
+    builtAt: ts('built_at').notNull().defaultNow(),
+    runId: uuid('run_id'),
+  },
+  (t) => [check('persona_sources', sql`jsonb_array_length(${t.sourceRefs}) > 0`)],
+)
+
+/** One training of Boris's in the trainer (FR-TRAIN-3), or the week's blind test (mode `blind`). */
+export const trainingSession = core.table('training_session', {
+  id: uuid('id').primaryKey(),
+  mode: text('mode').notNull(),
+  personaId: text('persona_id'),
+  via: text('via').notNull().default('miniapp'),
+  startedAt: ts('started_at').notNull().defaultNow(),
+  finishedAt: ts('finished_at'),
+  endedBy: text('ended_by'),
+  itemsCount: integer('items_count').notNull().default(0),
+  avgSimilarity: real('avg_similarity'),
+  lessonsYes: integer('lessons_yes').notNull().default(0),
+  mindVersion: text('mind_version'),
+})
+
+/** One card of a training: the client's line, Sara's variant, Boris's answer or verdict (FR-TRAIN-4). */
+export const trainingItem = core.table(
+  'training_item',
+  {
+    id: uuid('id').primaryKey(),
+    /** Empty while the card waits, prepared at night. */
+    sessionId: uuid('session_id').references(() => trainingSession.id),
+    mode: text('mode').notNull(),
+    state: text('state').notNull().default('prepared'),
+    personaId: text('persona_id'),
+    /** The real chat behind the card: guess, blind and golden keep apart pools of chats. */
+    chatId: text('chat_id'),
+    sourceRef: text('source_ref'),
+    dialog: jsonb('dialog').notNull().default([]),
+    clientText: text('client_text'),
+    saraText: text('sara_text'),
+    saraPlan: jsonb('sara_plan'),
+    borisText: text('boris_text'),
+    realBorisText: text('real_boris_text'),
+    similarity: integer('similarity'),
+    verdict: text('verdict'),
+    topic: text('topic'),
+    tone: text('tone'),
+    questionType: text('question_type'),
+    blindWeek: date('blind_week', { mode: 'string' }),
+    blindFlip: boolean('blind_flip'),
+    judge: jsonb('judge'),
+    lessonId: uuid('lesson_id'),
+    modelCallIds: jsonb('model_call_ids').notNull().default([]),
+    mindVersion: text('mind_version'),
+    preparedAt: ts('prepared_at').notNull().defaultNow(),
+    answeredAt: ts('answered_at'),
+  },
+  (t) => [
+    index('training_item_mode').on(t.mode, t.state, t.preparedAt),
+    index('training_item_chat').on(t.chatId),
+  ],
+)
+
+/** The client lines of a made-up dialog (FR-TRAIN-9): kept 30 days, never knowledge. */
+export const simDialog = core.table('sim_dialog', {
+  id: uuid('id').primaryKey(),
+  runId: uuid('run_id'),
+  personaId: text('persona_id'),
+  clientMessages: jsonb('client_messages').notNull(),
+  gaps: jsonb('gaps').notNull().default([]),
+  createdAt: ts('created_at').notNull().defaultNow(),
+})
+
+/** Approvals in a row and the last edit of a topic (FR-AUTO-3, FR-AUTO-4); the level itself is conv.autonomy. */
+export const autonomyCounter = core.table(
+  'autonomy_counter',
+  {
+    topic: text('topic').notNull(),
+    scope: text('scope').notNull(),
+    streak: integer('streak').notNull().default(0),
+    lastEditAt: ts('last_edit_at'),
+    lastSubstantialAt: ts('last_substantial_at'),
+    lastReason: text('last_reason'),
+    lastTurnId: text('last_turn_id'),
+    trainerGood: integer('trainer_good').notNull().default(0),
+    trainerTotal: integer('trainer_total').notNull().default(0),
+    proposedAt: ts('proposed_at'),
+    proposalTaskId: uuid('proposal_task_id'),
+    snoozedUntil: ts('snoozed_until'),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.topic, t.scope] })],
 )
