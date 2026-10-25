@@ -373,6 +373,8 @@ describe('a reminder after the switch', () => {
 
   it('FR-CONV-12: «Напоминать дальше» brings the 10-day and the 30-day reminders, the last one friendly', async () => {
     await live()
+    // The 10 and 30 days after the press are a moment here.
+    deps.afterPressMs = { third: 0, fourth: 0 }
     const conv = await scene(quiet(48 * DAY))
     await startReminder(conv.id, 'm-1')
     await until(async () => (await db.select().from(task)).length === 1)
@@ -394,6 +396,29 @@ describe('a reminder after the switch', () => {
     expect(inputs[3]).toContain('Тон: дружеский')
     expect((await db.select().from(task))[0]?.resolution).toBe('remind')
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
+  })
+
+  it('FR-CONV-12: the 10 days of «Напоминать дальше» count from the press, not from the anchor', async () => {
+    await live()
+    const conv = await scene(quiet(8 * DAY))
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await db.select().from(task)).length === 1)
+    const pressedAt = Date.now()
+    const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) }, decideDormant }
+    await onConvPress(press, {
+      taskId: (await db.select().from(task))[0]?.id ?? '',
+      action: 'remind',
+    })
+    const wf = remindWorkflowId(conv.id, 'm-1')
+    const planOf = async () =>
+      ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === 'plan-3')
+    await until(async () => (await planOf()) !== undefined)
+    const at = Date.parse(String(((await planOf())?.output as { at?: string } | undefined)?.at))
+    // About ten days from now (the quiet hours may move it to the next morning), long after the anchor's 17th day.
+    expect(at - pressedAt).toBeGreaterThanOrEqual(10 * DAY - 5000)
+    expect(at - pressedAt).toBeLessThan(10 * DAY + 10 * HOUR)
+    await sleep(300)
+    expect((await rows()).filter((r) => r.id.endsWith(':3'))).toHaveLength(0)
   })
 
   it('FR-CONV-12: «Закрыть» on the dormant task closes the conversation and ends the ladder', async () => {

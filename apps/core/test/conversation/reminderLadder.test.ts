@@ -20,6 +20,38 @@ describe('the reminder ladder', () => {
     expect(nextReminder({ ...go, sent: 3 })).toMatchObject({ at: at(47 * DAY), step: 4 })
   })
 
+  it('FR-CONV-12: «через 10 суток» counts from the press of «Напоминать дальше», and the 30 days from the 10-day reminder', () => {
+    // Boris presses on day 9 after our message, two days after the dormant day.
+    const pressed = new Date(lastMs + 9 * DAY).toISOString()
+    const go = { ...base, continued: true, continuedAt: pressed, now: new Date(pressed) }
+    expect(nextReminder({ ...go, sent: 2 })).toMatchObject({ at: at(19 * DAY), step: 3 })
+    // The 10-day reminder went a bit late, in the evening of day 19: the 30 days count from it.
+    const third = new Date(lastMs + 19.25 * DAY).toISOString()
+    expect(nextReminder({ ...go, sent: 3, lastSentAt: third })?.at).toEqual(at(49.25 * DAY))
+    // Without a sending time the 30 days follow the planned 10-day time.
+    expect(nextReminder({ ...go, sent: 3 })?.at).toEqual(at(49 * DAY))
+    // A press that came after the dormant day long past: the 10 days still count from it, not from the anchor.
+    const late = new Date(lastMs + 40 * DAY).toISOString()
+    expect(nextReminder({ ...go, continuedAt: late, now: new Date(late), sent: 2 })?.at).toEqual(
+      at(50 * DAY),
+    )
+  })
+
+  it('FR-CONV-12: the waits after the press can be shortened, for the tests of the process', () => {
+    const go = { ...base, continued: true, continuedAt: last, now: new Date(last) }
+    const short = { third: 1000, fourth: 2000 }
+    expect(nextReminder({ ...go, sent: 2, afterPressMs: short })?.at).toEqual(at(1000))
+    expect(
+      nextReminder({
+        ...go,
+        sent: 3,
+        lastSentAt: new Date(lastMs + 1000).toISOString(),
+        afterPressMs: short,
+        minGapMs: 0,
+      })?.at,
+    ).toEqual(at(3000))
+  })
+
   it('FR-CONV-12: after the last reminder, or without Boris saying to go on, there is nothing more', () => {
     expect(nextReminder({ ...base, continued: true, sent: 4 })).toBeNull()
     expect(nextReminder({ ...base, sent: 3 })).toBeNull()
