@@ -45,6 +45,8 @@ export type RemindDeps = {
   dormantStepRetryMs?: number
   /** How many tries the dormant day gets before it is given up (default 24, a day). */
   dormantTries?: number
+  /** The waits after «Напоминать дальше» (default 10 and 30 days); tests shorten them. */
+  afterPressMs?: { third: number; fourth: number }
 }
 
 /** The step the ladder is at: when it is due, which reminder and in what tone. */
@@ -141,7 +143,13 @@ export async function planNext(
   d: RemindDeps,
   conversationId: string,
   anchor: string,
-  st: { sent: number; continued: boolean; lastSentAt: string | null },
+  st: {
+    sent: number
+    continued: boolean
+    lastSentAt: string | null
+    /** When Boris pressed «Напоминать дальше»: the 10 and the 30 days count from there. */
+    continuedAt: string | null
+  },
 ): Promise<Planned | null> {
   const conv = await getConversation(d.db, conversationId)
   if (!conv) return null
@@ -161,6 +169,8 @@ export async function planNext(
     lastSentAt: st.lastSentAt,
     quiet: await getSetting(d.db, 'conv.reminder_quiet'),
     minGapMs: d.minGapMs,
+    continuedAt: st.continuedAt,
+    afterPressMs: d.afterPressMs,
   })
   return r ? { at: r.at.toISOString(), step: r.step, tone: r.tone } : null
 }

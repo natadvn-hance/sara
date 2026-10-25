@@ -138,9 +138,10 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
   let sent = 0
   let continued = false
   let lastSentAt: string | null = null
+  let continuedAt: string | null = null
   for (let k = 0; k < MAX_PLANS; k++) {
     const next = await DBOS.runStep(
-      () => planNext(d(), conversationId, anchor, { sent, continued, lastSentAt }),
+      () => planNext(d(), conversationId, anchor, { sent, continued, lastSentAt, continuedAt }),
       { name: `plan-${k}`, ...DB_STEP },
     )
     if (!next) return
@@ -163,6 +164,8 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
         return
       }
       continued = true
+      // «Через 10 суток» is true from the moment he pressed, not from the dormant day.
+      continuedAt = new Date(await DBOS.now()).toISOString()
       continue
     }
     const g = await DBOS.runStep(() => groundStep(d(), rowId, conversationId, anchor, next), {
