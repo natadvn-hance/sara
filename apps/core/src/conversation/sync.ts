@@ -46,19 +46,29 @@ export function storedOf(r: typeof chatMessage.$inferSelect): StoredMessage {
   }
 }
 
-/** The texts the new Sara herself sent to this chat: her messages and her bid (ADR-024). */
-async function ourTexts(db: Db, conv: ConversationRow): Promise<Set<string>> {
+/** The texts the new Sara sent to this chat, with whose words they were: her own, or Boris's dictated (ADR-024). */
+async function ourTexts(db: Db, conv: ConversationRow): Promise<Map<string, 'sara' | 'boris'>> {
   const rows = await db
     .select({ kind: outbox.kind, payload: outbox.payload })
     .from(outbox)
     .where(inArray(outbox.kind, ['message', 'bid']))
-  const texts = new Set<string>()
+  const texts = new Map<string, 'sara' | 'boris'>()
   for (const r of rows) {
-    const p = r.payload as { chatId?: string; accountId?: string; leadId?: string; text?: string }
+    const p = r.payload as {
+      chatId?: string
+      accountId?: string
+      leadId?: string
+      text?: string
+      author?: string
+    }
     const mine =
       p.accountId === conv.accountId &&
       (r.kind === 'message' ? p.chatId === conv.chatId : p.leadId === conv.orderId)
-    if (mine && typeof p.text === 'string') texts.add(normalizeText(p.text))
+    if (mine && typeof p.text === 'string')
+      texts.set(
+        normalizeText(p.text),
+        r.kind === 'message' && p.author === 'boris' ? 'boris' : 'sara',
+      )
   }
   return texts
 }
@@ -70,14 +80,17 @@ async function ourTexts(db: Db, conv: ConversationRow): Promise<Set<string>> {
  */
 export function liveAuthor(
   m: Pick<ChatMessage, 'author' | 'text'>,
-  ours: Set<string>,
+  ours: Map<string, 'sara' | 'boris'>,
   v1Writes: boolean,
   approx = false,
 ): { author: ChatAuthor; basis: AuthorBasis } {
   if (m.author === 'client') return { author: 'client', basis: 'side' }
   if (m.author === 'system') return { author: 'system', basis: 'side' }
   if (m.author === 'unknown') return { author: 'unknown', basis: 'side' }
-  if (ours.has(normalizeText(m.text))) return { author: 'sara', basis: 'outbox' }
+  const sent = ours.get(normalizeText(m.text))
+  // Boris's text the new Sara sent for him («Написать текст») is his voice.
+  if (sent === 'boris') return { author: 'boris', basis: 'say' }
+  if (sent === 'sara') return { author: 'sara', basis: 'outbox' }
   // A message older than the first reading of its chat may be from before the switch, when old Sara still wrote.
   if (!v1Writes && !approx) return { author: 'boris', basis: 'after_cutover' }
   return { author: 'unknown', basis: 'v1_or_boris' }
@@ -103,7 +116,7 @@ export async function syncChat(
   const fresh = chat.filter((m) => !byId.has(m.platform_message_id))
   const ours = fresh.some((m) => m.author === 'specialist')
     ? await ourTexts(d.db, conv)
-    : new Set<string>()
+    : new Map<string, 'sara' | 'boris'>()
   const added: StoredMessage[] = []
   for (const m of fresh) {
     const approx = first && heardAt.getTime() - new Date(m.sent_at).getTime() > FRESH_MS
