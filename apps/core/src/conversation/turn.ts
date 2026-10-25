@@ -27,6 +27,10 @@ export type TurnDeps = {
   send(turnId: string, round: number): Promise<'confirmed' | 'changed' | 'uncertain' | 'failed'>
   /** The human pause; tests shorten it. */
   pauseMs?(textLength: number): number
+  /** Retries of the card and forward steps; tests shorten them. */
+  stepRetry?: { maxAttempts: number; intervalSeconds: number; backoffRate?: number }
+  /** How often and how long an unreadable chat is retried; tests shorten it. */
+  unreadableRetry?: { tries: number; everyMs: number }
   /** Every finished turn's fate, for whoever follows turns (M6 meetings); its failure never stops the turn. */
   onOutcome?(o: {
     turnId: string
@@ -58,6 +62,8 @@ const MAX_WAKES = 200
 /** An unreadable chat is retried every minute for half an hour. */
 const UNREADABLE_TRIES = 30
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
+/** The card and forward steps talk to Telegram: the same retries, and a failure that ends the turn as failed. */
+const notifyStep = () => ({ ...DB_STEP, ...d().stepRetry })
 
 type Gate = 'go' | 'closed' | 'take' | 'answered' | 'unclear' | 'unreadable'
 type Heard = { gate: Gate; quietLeftS: number }
@@ -193,6 +199,8 @@ async function planStep(turnId: string, conversationId: string): Promise<Planned
   const now = new Date()
   const conv = await getConversation(db, conversationId)
   if (!conv) return { action: 'nothing', holdUntil: null, text: null, covered: [] }
+  // Even a turn that fails to plan covers the client turn it saw, or the conversation would never get another turn.
+  const seen = turnMessageIds(await storedMessages(db, conversationId), conv.handledThrough)
   try {
     const settings = await policySettings(db, conv.accountId)
     const dossier = await buildDossier(db, conversationId, now, { night: settings.night, profi })
@@ -255,8 +263,72 @@ async function planStep(turnId: string, conversationId: string): Promise<Planned
       decision: 'draft',
       decisionReason: 'не смогла подготовить ответ',
       state: 'decided',
+      messageIds: seen,
     })
-    return { action: 'draft', holdUntil: null, text: null, covered: [] }
+    return { action: 'draft', holdUntil: null, text: null, covered: seen }
+  }
+}
+
+/** The chat stayed unreadable: the turn is a draft with the reason, so the card tells Boris. Returns what it covers. */
+async function unreadableStep(turnId: string, conversationId: string): Promise<string[]> {
+  const { db } = d()
+  const conv = await getConversation(db, conversationId)
+  const seen = conv
+    ? turnMessageIds(await storedMessages(db, conversationId), conv.handledThrough)
+    : []
+  await stamp(turnId, 'decided', {
+    decision: 'draft',
+    decisionReason: 'не могу прочитать чат',
+    state: 'decided',
+    messageIds: seen,
+  })
+  return seen
+}
+
+/**
+ * A step that talks to Telegram or the service: its failure after the retries ends the turn as failed and the
+ * workflow goes on to the handoff, so the conversation is never left without a turn (a thrown step error replays
+ * the same way). The journal gets the step name and the error class, never the text.
+ */
+async function tried<T>(
+  turnId: string,
+  name: string,
+  run: () => Promise<T>,
+  retry: Record<string, unknown> = {},
+): Promise<{ ok: true; value: T } | { ok: false }> {
+  try {
+    return { ok: true, value: await DBOS.runStep(run, { name, ...retry }) }
+  } catch (e) {
+    console.error(`turn: step ${name} failed`, e instanceof Error ? e.message : e)
+    const reason = `${name}: ${e instanceof Error ? e.name : 'error'}`
+    await DBOS.runStep(() => journalStepFailed(turnId, reason), {
+      name: `${name}-failed`,
+      ...DB_STEP,
+    })
+    return { ok: false }
+  }
+}
+
+async function journalStepFailed(turnId: string, reason: string): Promise<void> {
+  try {
+    const [t] = await d().db.select().from(convTurn).where(eq(convTurn.id, turnId))
+    const conv = t ? await getConversation(d().db, t.conversationId) : null
+    if (!conv) return
+    await appendEvent(d().db, {
+      type: 'notify.failed',
+      v: 1,
+      entity: { kind: 'conv_turn', id: turnId },
+      account_id: conv.accountId,
+      actor: 'sara',
+      occurred_at: new Date().toISOString(),
+      causation_id: null,
+      correlation_id: conv.id,
+      reason,
+      payload: { channel: 'telegram', what: 'conv_turn' },
+    })
+  } catch (e) {
+    // A lost diagnostic never stops the handoff.
+    console.error('turn: step failure not journaled', e instanceof Error ? e.message : e)
   }
 }
 
@@ -304,20 +376,25 @@ async function handoff(
   let conv = await getConversation(db, conversationId)
   if (!conv) return null
   const messages = await storedMessages(db, conversationId)
-  // A turn that answered nothing on purpose (Boris's client, an unclear author) still covers what it saw.
+  // A turn that covered nothing (Boris's client, an unclear author, a failure) still covers what it saw; only a
+  // turn that our side's message cancelled does not, that message already ends the client turn.
   const through =
     covered.at(-1) ??
-    (outcome === 'forwarded' || outcome === 'unclear' || outcome === 'closed'
+    (outcome !== 'answered'
       ? messages.findLast((m) => m.side === 'client')?.platformMessageId
       : undefined)
-  if (through) conv = await updateConversation(db, conversationId, { handledThrough: through })
+  // The mark only moves forward: «Вернуть» or another turn may have moved it further while this one ran.
+  const at = (id: string | null | undefined) =>
+    id ? messages.findIndex((m) => m.platformMessageId === id) : -1
+  if (through && at(through) > at(conv.handledThrough))
+    conv = await updateConversation(db, conversationId, { handledThrough: through })
   await stamp(turnId, 'finished', {
     state: 'finished',
     outcome,
     finishedAt: new Date().toISOString(),
   })
   await journal(OUTCOME_EVENT[outcome], conv, turnId, { outcome })
-  const next = turnMessageIds(messages, conv.handledThrough)[0] ?? null
+  const next = turnMessageIds(await storedMessages(db, conversationId), conv.handledThrough)[0]
   return next && next !== anchor ? next : null
 }
 
@@ -354,16 +431,19 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
         ...DB_STEP,
       })
       wakes++
-      if (heard.gate === 'unreadable' && unreadable++ < UNREADABLE_TRIES) {
-        await DBOS.sleep(60_000)
+      if (
+        heard.gate === 'unreadable' &&
+        unreadable++ < (d().unreadableRetry?.tries ?? UNREADABLE_TRIES)
+      ) {
+        await DBOS.sleep(d().unreadableRetry?.everyMs ?? 60_000)
         continue
       }
       if (heard.gate !== 'go' || heard.quietLeftS <= 0 || wakes >= MAX_WAKES) break
       await DBOS.recv<string>('poke', { timeoutSeconds: heard.quietLeftS })
     }
     if (heard.gate === 'closed' || heard.gate === 'take') {
-      await DBOS.runStep(() => d().forward(turnId), { name: `forward-${round}`, ...DB_STEP })
-      outcome = heard.gate === 'take' ? 'forwarded' : 'closed'
+      const fwd = await tried(turnId, `forward-${round}`, () => d().forward(turnId), notifyStep())
+      outcome = !fwd.ok ? 'failed' : heard.gate === 'take' ? 'forwarded' : 'closed'
       break
     }
     if (heard.gate === 'answered' || heard.gate === 'unclear') {
@@ -371,6 +451,12 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       break
     }
     if (heard.gate === 'unreadable') {
+      // Thirty minutes without a chat: Boris is told, the turn is over.
+      covered = await DBOS.runStep(() => unreadableStep(turnId, conversationId), {
+        name: 'unreadable',
+        ...DB_STEP,
+      })
+      await tried(turnId, 'card-unreadable', () => d().card(turnId), notifyStep())
       outcome = 'failed'
       break
     }
@@ -405,14 +491,14 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       }
       if (seen === 'more' && round < MAX_ROUNDS) continue
       if (seen === 'same') {
-        const sent = await DBOS.runStep(() => d().send(turnId, round), { name: `send-${round}` })
-        if (sent === 'confirmed') {
+        const sent = await tried(turnId, `send-${round}`, () => d().send(turnId, round))
+        if (sent.ok && sent.value === 'confirmed') {
           outcome = 'sent'
           break
         }
-        if (sent === 'changed' && round < MAX_ROUNDS) continue
+        if (sent.ok && sent.value === 'changed' && round < MAX_ROUNDS) continue
         outcome = 'failed'
-        await DBOS.runStep(() => d().card(turnId), { name: `card-${round}`, ...DB_STEP })
+        await tried(turnId, `card-${round}`, () => d().card(turnId), notifyStep())
         break
       }
     }
@@ -420,9 +506,10 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       outcome = 'no_reply'
       break
     }
-    await DBOS.runStep(() => d().card(turnId), { name: `card-${round}`, ...DB_STEP })
-    outcome =
-      plan.action === 'call_boris'
+    const card = await tried(turnId, `card-${round}`, () => d().card(turnId), notifyStep())
+    outcome = !card.ok
+      ? 'failed'
+      : plan.action === 'call_boris'
         ? 'called_boris'
         : plan.action === 'forward'
           ? 'forwarded'
