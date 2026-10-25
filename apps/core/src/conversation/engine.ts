@@ -39,15 +39,53 @@ const CASES_OFFERED = 3
 const CASES_FETCHED = 8
 
 /**
+ * The most words the case query holds. The case search (mind/search.ts MAX_WORDS) keeps this many distinct words of
+ * three letters or more: the first ones for a case search, the last ones for the fact search. The query is cut to the
+ * cap here, with the client's words first, so whichever end the search keeps the client's turn is in it.
+ */
+const CASE_QUERY_WORDS = 32
+
+/**
+ * The start of `text` that adds at most `room` words the query does not have yet (a word of three letters or more,
+ * the same as the search counts), as written. The words it takes are added to `seen`.
+ */
+function withinWords(text: string, seen: Set<string>, room: number): string {
+  let end = text.length
+  let added = 0
+  for (const m of text.matchAll(/[\p{L}\p{N}]+/gu)) {
+    const w = m[0].toLowerCase()
+    if (w.length < 3 || seen.has(w)) continue
+    if (added >= room) {
+      end = m.index
+      break
+    }
+    seen.add(w)
+    added++
+  }
+  return text.slice(0, end).trim()
+}
+
+/** The text of the case query: the client's turn first, then the order's title and text in the room that is left. */
+export function caseQuery(said: string, order: Dossier['order']): string {
+  const seen = new Set<string>()
+  const parts = [withinWords(said, seen, CASE_QUERY_WORDS)]
+  for (const part of [order?.title, order?.text]) {
+    const kept = part ? withinWords(part, seen, CASE_QUERY_WORDS - seen.size) : ''
+    if (kept) parts.push(kept)
+  }
+  return parts.filter(Boolean).join('\n')
+}
+
+/**
  * The cases of Hance for a turn (cases in a conversation): found by the client's words and the order, never one the
- * chat already heard, by its trace or because a message of our side names it. Without the case search (the stub mind)
- * there are none, and a search that fails costs the turn only its cases.
+ * chat already heard, by its trace or because a message of our side names it by its brand. Without the case search
+ * (the stub mind) there are none, and a search that fails costs the turn only its cases.
  */
 async function casesFor(mind: MindSearch, d: Dossier, said: string): Promise<CaseHit[]> {
   if (!mind.cases) return []
   const toldIds = (d.toldCases ?? []).map((c) => c.id)
   const ours = d.messages.filter((m) => m.side === 'specialist').map((m) => m.text)
-  const text = [said, d.order?.title, d.order?.text].filter(Boolean).join('\n')
+  const text = caseQuery(said, d.order)
   try {
     const found = await mind.cases({
       text,

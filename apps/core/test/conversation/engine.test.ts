@@ -468,6 +468,45 @@ describe('cases in a turn', () => {
     expect((await recall({ ...mind, cases: undefined }, d)).cases).toEqual([])
   })
 
+  it('FR-CONV-3: the case query puts the client first and caps the words, a long order text cannot push the client out', async () => {
+    const seen: string[] = []
+    const mind = fakeMind()
+    const watched = {
+      ...mind,
+      cases: async (q: { text: string; scope: string; limit: number; exclude?: string[] }) => {
+        seen.push(q.text)
+        return (mind.cases ? mind.cases(q) : []) ?? []
+      },
+    }
+    const distinct = (text: string) =>
+      new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3))
+    const filler = (n: number, tag: string) =>
+      Array.from({ length: n }, (_, i) => `${tag}${i}`).join(' ')
+
+    // A long order: the client's words stay whole and first, the order words fill what is left of 32.
+    const d = await chatOf(ASK)
+    d.order = {
+      ...(d.order as NonNullable<Dossier['order']>),
+      text: `Нужен сайт ${filler(150, 'заказ')}`,
+    }
+    await recall(watched, d)
+    const query = seen.at(-1) ?? ''
+    expect(query.startsWith(ASK)).toBe(true)
+    expect(query).toContain('Сайт для клиники')
+    expect(query).toContain('заказ0')
+    expect(distinct(query).size).toBeLessThanOrEqual(32)
+    expect(query).not.toContain('заказ149')
+
+    // A long client turn alone fills the query: no word of the order is added, and the cap cuts nothing later.
+    const long = await chatOf(`Есть примеры работ? ${filler(60, 'слово')}`)
+    await recall(watched, long)
+    const longQuery = seen.at(-1) ?? ''
+    expect(longQuery).toContain('слово0')
+    expect(longQuery).not.toContain('Сайт для клиники')
+    expect(longQuery).not.toContain('заказ')
+    expect(distinct(longQuery).size).toBeLessThanOrEqual(32)
+  })
+
   it('FR-CONV-3: a message of ours with the words of a descriptive title drops no case, a brand name does', async () => {
     const d = await chatOf(ASK, { toldCases: [] })
     d.messages = [
