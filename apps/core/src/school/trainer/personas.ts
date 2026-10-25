@@ -8,10 +8,10 @@ import {
   PersonaOutput,
   type Topic,
 } from '@sara/shared'
-import { and, eq, inArray, sql } from 'drizzle-orm'
-import type { Db } from '../../db/client'
-import { jobRun, lead, persona } from '../../db/schema'
-import { redact } from '../../gateway/redact'
+import { and, eq, sql } from 'drizzle-orm'
+import type { Db, DbOrTx } from '../../db/client'
+import { jobRun, persona } from '../../db/schema'
+import { hasTag, redact } from '../../gateway/redact'
 import { namesToHide } from '../../leads/clientName'
 import type { NightJob, SchoolDeps } from '../types'
 
@@ -35,42 +35,53 @@ const SONNET_UNITS = 4
 
 const mskDay = (t: number) => new Date(t + MSK_MS).toISOString().slice(0, 10)
 
-type Chat = { ref: string; text: string; orderIds: string[] }
+type Chat = { ref: string; text: string; names: string[] }
 
-/** The conversations a client wrote in, newest first: the platform's (node) and old Sara's (v1) messages. */
+/**
+ * The conversations a client wrote in, newest first: the platform's (node) and old Sara's (v1) messages, the client's
+ * words only. Only chats whose client the core knows (an order with its lead) are read: without the name there is no
+ * way to hide it, so such a chat is left out (NFR-PRIV-2). Each text is hidden first and cut after, at a word.
+ */
 async function historyChats(db: Db): Promise<Chat[]> {
-  const rows = await db.execute<{ chat_id: string; text: string; orders: string[] }>(sql`
-    select chat_id, string_agg(text, ${'\n'} order by sent_at) as text,
-      array_remove(array_agg(distinct order_id), null) as orders
-    from core.chat_message
-    where source in ('node', 'v1') and author = 'client'
-    group by account_id, chat_id
-    order by max(sent_at) desc
+  const rows = await db.execute<{ chat_id: string; text: string; names: string[] }>(sql`
+    select m.chat_id, string_agg(m.text, ${'\n'} order by m.sent_at) as text,
+      array_remove(array_agg(distinct l.client_name), null) as names
+    from core.chat_message m left join core.lead l on l.id = m.order_id
+    where m.source in ('node', 'v1') and m.author = 'client'
+    group by m.account_id, m.chat_id
+    having bool_or(l.id is not null)
+    order by max(m.sent_at) desc
     limit ${MAX_CHATS}`)
-  return rows.rows.map((r) => ({
-    ref: r.chat_id,
-    text: r.text.slice(0, CHAT_CHARS),
-    orderIds: r.orders ?? [],
-  }))
+  return rows.rows.map((r) => {
+    const names = namesToHide(...(r.names ?? []))
+    return { ref: r.chat_id, text: cutAtWord(redact(r.text, names).text, CHAT_CHARS), names }
+  })
 }
 
-/** How many conversations have a client's words, all of them or only those he wrote in since `since`. */
+/** At most `max` characters, ending at a word: a cut never leaves half a phone or half a name. */
+function cutAtWord(text: string, max: number): string {
+  if (text.length <= max) return text
+  return text.slice(0, max + 1).replace(/\s+\S*$/, '')
+}
+
+/** How many conversations of known clients have a client's words, all of them or those he wrote in since `since`. */
 async function chatCount(db: Db, since?: Date): Promise<number> {
   const rows = await db.execute<{ n: number }>(sql`
     select count(*)::int as n from (
-      select 1 from core.chat_message
-      where source in ('node', 'v1') and author = 'client'
-      group by account_id, chat_id
-      having ${since ? sql`max(sent_at) > ${since.toISOString()}` : sql`true`}) c`)
+      select 1 from core.chat_message m left join core.lead l on l.id = m.order_id
+      where m.source in ('node', 'v1') and m.author = 'client'
+      group by m.account_id, m.chat_id
+      having bool_or(l.id is not null)
+        and ${since ? sql`max(m.sent_at) > ${since.toISOString()}` : sql`true`}) c`)
   return rows.rows[0]?.n ?? 0
 }
 
-/** The words of a text, in a row, without case and punctuation. */
+/** The words of a text, in a row, without case and punctuation; a lone dash is no word. */
 const words = (text: string) =>
   normalizeText(text)
     .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
     .split(/\s+/)
-    .filter(Boolean)
+    .filter((w) => /[\p{L}\p{N}]/u.test(w))
 
 function grams(text: string): Set<string> {
   const w = words(text)
@@ -80,7 +91,7 @@ function grams(text: string): Set<string> {
 }
 
 /** Every text of a persona the trainer shows or plays. */
-const personaText = (p: PersonaOutput['personas'][number]) =>
+const personaText = (p: Omit<Persona, 'id' | 'source_refs' | 'handmade'>) =>
   [
     p.archetype,
     p.niche,
@@ -93,26 +104,30 @@ const personaText = (p: PersonaOutput['personas'][number]) =>
   ].join('\n')
 
 /**
- * Why a persona is too close to a real client (NFR-PRIV-2, M5 design 5.7), or null: six words in a row from its
- * sources, a long number, a link, an e-mail, a phone, or a gateway tag (a tag stands for a real person's data).
+ * Why a persona is too close to a real client (NFR-PRIV-2, M5 design 5.7), or null: six words in a row from any chat
+ * the builder read, a number of seven digits and more, a link, an e-mail, a phone, a client's name, or a gateway tag
+ * (a tag stands for a real person's data).
  */
-function privacyProblem(text: string, sources: string[]): string | null {
+function privacyProblem(text: string, read: string[], names: string[]): string | null {
   const own = grams(text)
-  for (const s of sources) for (const g of grams(s)) if (own.has(g)) return 'copy'
-  if (/\d(?:[\s.-]?\d){6,}/.test(text)) return 'number'
-  const hidden = redact(text, []).counts
-  if (hidden.link + hidden.email + hidden.phone > 0) return 'contact'
-  if (/\[(?:имя|телефон|почта|ссылка) \d+\]/u.test(text)) return 'tag'
+  for (const s of read) for (const g of grams(s)) if (own.has(g)) return 'copy'
+  if (/\d{7,}/.test(text)) return 'number'
+  if (hasTag(text)) return 'tag'
+  const hidden = redact(text, names).counts
+  if (hidden.link + hidden.email + hidden.phone + hidden.name > 0) return 'contact'
   return null
 }
 
-/** The handmade exam scenarios as personas, marked so on the trainer's card (M5 design 5.7). */
+/**
+ * The handmade exam scenarios as personas, marked so on the trainer's card (M5 design 5.7). A scenario that does not
+ * make a valid persona, or carries a contact (the exam's trap scenarios do), is left out.
+ */
 export function handmadePersonas(scenarios: ExamScenario[]): Persona[] {
-  return scenarios.map((s) =>
-    Persona.parse({
+  return scenarios.flatMap((s) => {
+    const p = Persona.safeParse({
       id: `p-h-${s.id.slice(2)}`,
-      archetype: (s.tags.archetype ?? s.title).slice(0, 120),
-      niche: (s.order.category || s.order.title).slice(0, 120),
+      archetype: (s.tags.archetype || s.title).slice(0, 120),
+      niche: (s.order.category || s.order.title || s.title).slice(0, 120),
       task: s.title.slice(0, 200),
       mood: s.tags.tone,
       style: '',
@@ -122,7 +137,7 @@ export function handmadePersonas(scenarios: ExamScenario[]): Persona[] {
         .slice(0, 6),
       topics: s.expect.topic ? [s.expect.topic] : [],
       order: {
-        title: s.order.title.slice(0, 200),
+        title: (s.order.title || s.title).slice(0, 200),
         text: s.order.text.slice(0, 1500),
         budget_text: s.order.budget_text?.slice(0, 100) ?? null,
       },
@@ -130,8 +145,9 @@ export function handmadePersonas(scenarios: ExamScenario[]): Persona[] {
       hard: s.tags.hard,
       source_refs: [`handmade:${s.id}`],
       handmade: true,
-    }),
-  )
+    })
+    return p.success && !privacyProblem(personaText(p.data), [], []) ? [p.data] : []
+  })
 }
 
 /** M4's handmade scenarios from the repository; a file that does not parse is left out. */
@@ -139,9 +155,13 @@ async function readHandmade(dir = HANDMADE_DIR): Promise<ExamScenario[]> {
   const files = (await readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith('.json'))
   const out: ExamScenario[] = []
   for (const f of files) {
-    const parsed = ExamScenario.safeParse(
-      JSON.parse(await readFile(join(dir, f), 'utf8').catch(() => 'null')),
-    )
+    let raw: unknown
+    try {
+      raw = JSON.parse(await readFile(join(dir, f), 'utf8'))
+    } catch {
+      continue
+    }
+    const parsed = ExamScenario.safeParse(raw)
     if (parsed.success && parsed.data.source.kind === 'handmade') out.push(parsed.data)
   }
   return out
@@ -166,36 +186,43 @@ const toRow = (p: Persona, runId: string | null, now: Date) => ({
   runId,
 })
 
+/** The night's build is marked only when it gave personas: a failed or empty one is tried again the next night. */
+const markBuilt = (db: DbOrTx, now: Date) =>
+  db
+    .insert(jobRun)
+    .values({ name: 'personas_run', day: mskDay(now.getTime()) })
+    .onConflictDoNothing()
+
 /**
- * Builds the trainer's personas (FR-TRAIN-2, M5 design 5.7). With fewer than 10 conversations the handmade exam
- * scenarios are the personas. Otherwise one call of `persona-builder` reads up to 40 numbered conversations, the
- * client's words only, with names and contacts hidden by the gateway; every persona names the chats it came from
- * (two at least), and one too close to a real client is refused. New personas switch off the handmade ones and those
- * older than 60 days.
+ * Builds the trainer's personas (FR-TRAIN-2, M5 design 5.7). With fewer than 10 conversations of known clients the
+ * handmade exam scenarios are the personas. Otherwise one call of `persona-builder` reads up to 40 numbered
+ * conversations, the client's words only, each hidden (names, phones, e-mails, links) before it is cut; every persona
+ * names the chats it came from (two at least), and one too close to a real client is refused. New personas switch
+ * off the handmade ones and those older than 60 days.
  */
 export async function buildPersonas(
   d: Pick<SchoolDeps, 'db' | 'gateway'>,
   now: Date,
   o: { handmade?: () => Promise<ExamScenario[]> } = {},
 ): Promise<'done' | 'nothing'> {
-  await d.db
-    .insert(jobRun)
-    .values({ name: 'personas_run', day: mskDay(now.getTime()) })
-    .onConflictDoNothing()
   if ((await chatCount(d.db)) < MIN_HISTORY) {
     const made = handmadePersonas(await (o.handmade ?? readHandmade)())
-    for (const p of made)
-      await d.db
-        .insert(persona)
-        .values(toRow(p, null, now))
-        .onConflictDoUpdate({
-          target: persona.id,
-          set: { ...toRow(p, null, now), builtAt: undefined },
-        })
-    return made.length > 0 ? 'done' : 'nothing'
+    if (made.length === 0) return 'nothing'
+    await d.db.transaction(async (tx) => {
+      for (const p of made)
+        await tx
+          .insert(persona)
+          .values(toRow(p, null, now))
+          .onConflictDoUpdate({
+            target: persona.id,
+            set: { ...toRow(p, null, now), builtAt: undefined },
+          })
+      await markBuilt(tx, now)
+    })
+    return 'done'
   }
   const chats = await historyChats(d.db)
-  const names = await clientNames(d.db, chats)
+  const names = [...new Set(chats.flatMap((c) => c.names))]
   const input = chats.map((c, i) => `Разговор ${i + 1}:\n<<<\n${c.text}\n>>>`).join('\n\n')
   const r = await d.gateway.call('persona-builder', input, PersonaOutput, {
     priority: 'P3',
@@ -205,23 +232,17 @@ export async function buildPersonas(
   })
   if (!r.ok) throw Object.assign(new Error('persona builder failed'), { name: r.errorClass })
   const runId = newEventId()
+  const read = chats.map((c) => c.text)
   const kept: Persona[] = []
   for (const p of r.output.personas) {
     const sources = [...new Set(p.from)].map((n) => chats[n - 1]).filter((c) => !!c)
     if (sources.length < 2) continue
-    const text = personaText(p)
-    if (
-      privacyProblem(
-        text,
-        sources.map((c) => c.text),
-      )
-    )
-      continue
     const { from: _from, ...fields } = p
+    if (privacyProblem(personaText(fields), read, names)) continue
     kept.push(
       Persona.parse({
         ...fields,
-        id: `p-${runId.slice(0, 8)}-${kept.length + 1}`,
+        id: `p-${runId}-${kept.length + 1}`,
         source_refs: sources.map((c) => c.ref),
         handmade: false,
       }),
@@ -229,7 +250,6 @@ export async function buildPersonas(
   }
   if (kept.length === 0) return 'nothing'
   await d.db.transaction(async (tx) => {
-    await tx.insert(persona).values(kept.map((p) => toRow(p, runId, now)))
     await tx
       .update(persona)
       .set({ active: false })
@@ -239,22 +259,16 @@ export async function buildPersonas(
           sql`(${persona.handmade} or ${persona.builtAt} < ${new Date(now.getTime() - OLD_DAYS * DAY_MS).toISOString()})`,
         ),
       )
+    await tx.insert(persona).values(kept.map((p) => toRow(p, runId, now)))
+    await markBuilt(tx, now)
   })
   return 'done'
-}
-
-/** The names of the clients of these chats, from their orders, to hide from the builder (ADR-016). */
-async function clientNames(db: Db, chats: Chat[]): Promise<string[]> {
-  const ids = [...new Set(chats.flatMap((c) => c.orderIds))]
-  if (ids.length === 0) return []
-  const rows = await db.select({ name: lead.clientName }).from(lead).where(inArray(lead.id, ids))
-  return namesToHide(...rows.map((r) => r.name))
 }
 
 /** Whether the personas are due: never built, a week since the last build, or 20 new conversations since. */
 async function due(db: Db, now: Date): Promise<boolean> {
   const [last] = (
-    await db.execute<{ day: string }>(
+    await db.execute<{ day: string | null }>(
       sql`select max(day)::text as day from core.job_run where name = 'personas_run'`,
     )
   ).rows
@@ -277,28 +291,35 @@ export const personasJob: NightJob = {
 }
 
 /**
- * A persona for a training (FR-TRAIN-3): active ones only, the topics Boris trains first, then the hardness asked
- * for, and the one used least in the last week; null when there are none.
+ * A persona for a training (FR-TRAIN-3): active ones only; the topics Boris trains first, then the hardness asked
+ * for, then the one used least in the week before `now`; null when there are none.
  */
 export async function pickPersona(
   db: Db,
-  o: { preferTopics: Topic[]; hard: boolean },
+  o: { preferTopics: Topic[]; hard: boolean; now?: Date },
 ): Promise<Persona | null> {
   const rows = await db.select().from(persona).where(eq(persona.active, true))
   if (rows.length === 0) return null
+  const now = o.now ?? new Date()
   const uses = new Map(
     (
       await db.execute<{ persona_id: string; n: number }>(sql`
         select persona_id, count(*)::int as n from core.training_session
-        where persona_id is not null and started_at > now() - interval '7 days'
+        where persona_id is not null
+          and started_at > ${new Date(now.getTime() - 7 * DAY_MS).toISOString()}
+          and started_at <= ${now.toISOString()}
         group by persona_id`)
     ).rows.map((r) => [r.persona_id, r.n]),
   )
-  const score = (p: (typeof rows)[number]) =>
-    10 * (p.topics as Topic[]).filter((t) => o.preferTopics.includes(t)).length +
-    (p.hard === o.hard ? 3 : 0) -
-    2 * (uses.get(p.id) ?? 0)
-  const best = [...rows].sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id))[0]
+  const topics = (p: (typeof rows)[number]) =>
+    (p.topics as Topic[]).filter((t) => o.preferTopics.includes(t)).length
+  const best = [...rows].sort(
+    (a, b) =>
+      topics(b) - topics(a) ||
+      Number(b.hard === o.hard) - Number(a.hard === o.hard) ||
+      (uses.get(a.id) ?? 0) - (uses.get(b.id) ?? 0) ||
+      a.id.localeCompare(b.id),
+  )[0]
   if (!best) return null
   return Persona.parse({
     id: best.id,

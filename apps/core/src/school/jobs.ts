@@ -1,4 +1,4 @@
-import { generatorJob } from './generator'
+import { cleanSimStep, generatorJob } from './generator'
 import { runNight } from './night'
 import { personasJob } from './trainer/personas'
 import type { NightJob, SchoolDeps } from './types'
@@ -11,6 +11,8 @@ export const NIGHT_JOBS: NightJob[] = [personasJob, generatorJob]
 /** The school's jobs, in order on every tick; the parts add theirs. */
 export const SCHOOL_STEPS: Step[] = [
   { name: 'night', run: (d, now) => runNight(d, NIGHT_JOBS, now) },
+  // Generated lines go after 30 days even on nights the generator does not run.
+  { name: 'simCleanup', run: (d, now) => cleanSimStep(d.db, now) },
 ]
 
 /** Runs the school's jobs once a minute; one failing job never stops the others (as learning/jobs.ts). */
