@@ -11,3 +11,72 @@ export function detectCallRequest(text: string): { phone: string | null; keyword
   if (!phone && !keyword) return null
   return { phone, keyword }
 }
+
+/** A message of ours that proposes a call or a meeting: «Удобно созвониться?», «Давайте обсудим по телефону». */
+const CALL_PROPOSAL = /созвон|позвон|звонок|звонить|встреч|по\s+телефону/
+
+/** The words of a bare «yes»; a reply made only of these, with at least one of the core, is an agreement. */
+const AGREEING = new Set([
+  'да',
+  'ага',
+  'угу',
+  'хорошо',
+  'ок',
+  'окей',
+  'ok',
+  'okay',
+  'давайте',
+  'давай',
+  'удобно',
+  'согласен',
+  'согласна',
+  'конечно',
+  'отлично',
+  'договорились',
+  'можно',
+  'вполне',
+  'пожалуйста',
+  'спасибо',
+  'созвонимся',
+  'созвон',
+  'созвониться',
+  'звоните',
+  'позвоните',
+])
+const CORE_AGREEMENT = new Set([
+  'да',
+  'ага',
+  'угу',
+  'хорошо',
+  'ок',
+  'окей',
+  'ok',
+  'okay',
+  'давайте',
+  'давай',
+  'удобно',
+  'согласен',
+  'согласна',
+  'конечно',
+  'договорились',
+])
+const MAX_AGREEMENT_WORDS = 6
+
+const wordsOf = (s: string) => s.toLowerCase().replace(/ё/g, 'е').match(/[\p{L}\p{N}]+/gu) ?? []
+
+/**
+ * «Да», «хорошо», «давайте», «ок», «удобно» right after our message that proposed a call: the client agrees to the
+ * call, which is a call request even though the words have no call word in them. The model is told the same
+ * (roles/interlocutor/role.md); the code does not wait for it, as with a phone. A longer answer («Да, но сначала
+ * цена») is the Interlocutor's to read.
+ */
+export function agreesToCallProposal(clientTurn: string, ourLast: string | null): boolean {
+  if (!ourLast || !CALL_PROPOSAL.test(ourLast.toLowerCase().replace(/ё/g, 'е'))) return false
+  const words = wordsOf(clientTurn)
+  return (
+    words.length > 0 &&
+    words.length <= MAX_AGREEMENT_WORDS &&
+    words.every((w) => AGREEING.has(w)) &&
+    words.some((w) => CORE_AGREEMENT.has(w))
+  )
+}

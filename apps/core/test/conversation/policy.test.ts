@@ -1,6 +1,6 @@
 import { SETTINGS } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
-import { detectCallRequest } from '../../src/conversation/callDetector'
+import { agreesToCallProposal, detectCallRequest } from '../../src/conversation/callDetector'
 import { decide } from '../../src/conversation/policy'
 import { inMoscowHours, moscowHoursEnd } from '../../src/conversation/time'
 import type { Dossier, PolicySettings } from '../../src/conversation/types'
@@ -252,6 +252,44 @@ describe('call request', () => {
     expect(detectCallRequest('номер заказа 891812345678901')).toBeNull()
     expect(detectCallRequest('счёт 12348918123456789')).toBeNull()
     expect(detectCallRequest('звоните 89181234567.')?.phone).toBe('89181234567')
+  })
+})
+
+describe('agreement to a call', () => {
+  const proposal = 'Понимаю задачу. Удобно созвониться и обсудить детали?'
+
+  it('FR-CONV-5: a short agreement right after our call proposal is a call request', () => {
+    for (const said of [
+      'Да',
+      'Хорошо',
+      'ок',
+      'Давайте',
+      'Удобно',
+      'Да, удобно!',
+      'Да, давайте.',
+      'Хорошо, давайте созвонимся',
+      'Согласна\nДа, удобно',
+    ])
+      expect(agreesToCallProposal(said, proposal), said).toBe(true)
+  })
+
+  it('FR-CONV-5: the same words are not a call request when our message proposed no call', () => {
+    for (const said of ['Да', 'Хорошо', 'ок', 'Давайте'])
+      expect(agreesToCallProposal(said, 'Лендинг делаем за 2-3 недели.'), said).toBe(false)
+    expect(agreesToCallProposal('Да', null)).toBe(false)
+  })
+
+  it('FR-CONV-5: an answer with more than an agreement is left to the Interlocutor', () => {
+    for (const said of [
+      'Да, но сначала скажите цену',
+      'Хорошо, а какой срок?',
+      'Удобно в 15:00',
+      'Нет',
+      'Нет, давайте напишем',
+      'Спасибо',
+      'Подумаю',
+    ])
+      expect(agreesToCallProposal(said, proposal), said).toBe(false)
   })
 })
 
