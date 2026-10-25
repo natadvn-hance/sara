@@ -5,10 +5,6 @@ import { guardRecord } from '../../src/mind/guard'
 import { renderRecord } from '../../src/mind/render'
 import { createMindWriter } from '../../src/mind/writer'
 import { topicStreaks } from '../../src/school/autonomy/streak'
-import { editWeight } from '../../src/school/lessons/edit'
-import { makeInsight } from '../../src/school/lessons/maker'
-import { createLesson, decideLesson } from '../../src/school/lessons/store'
-import { deferredNotices, takeNotice } from '../../src/school/notices'
 import { saraVariant } from '../../src/school/trainer/variant'
 
 const ROLES = resolve(import.meta.dirname, '../../../../roles')
@@ -16,8 +12,6 @@ const db = {} as never
 
 describe('M5 stubs at their paths', () => {
   it('FR-TRAIN-6: stub bodies answer as the interface map says until their parts are built', async () => {
-    expect(await takeNotice(db, new Date(), 'batch')).toBe(true)
-    expect(await deferredNotices(db, '2026-10-25')).toEqual([])
     expect(() => renderRecord({} as never, null, '2026-10-25')).toThrow(/render is not built/)
     expect(guardRecord({} as never)).toBeNull()
     const writer = createMindWriter({ db, mindDir: '/nowhere', reindex: async () => {} })
@@ -27,12 +21,6 @@ describe('M5 stubs at their paths', () => {
     })
     expect(await writer.revert('x')).toMatchObject({ ok: false, reason: 'no_git' })
     expect(await writer.sync()).toEqual({ pushed: false, pulled: 0, error: 'not built' })
-    await expect(createLesson(db, {} as never)).rejects.toThrow(/lessons are not built/)
-    await expect(decideLesson(db, 'x', { decision: 'yes' })).rejects.toThrow(
-      /lessons are not built/,
-    )
-    expect(await makeInsight({} as never, {} as never)).toBeNull()
-    expect(editWeight('a', 'b', { substantialBelow: 70, names: [] })).toBe('minor')
     await expect(saraVariant({} as never, {} as never)).rejects.toThrow(/not built/)
     expect(topicStreaks([]).size).toBe(0)
   })

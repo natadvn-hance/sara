@@ -1,3 +1,6 @@
+import { getSetting } from '../settings/store'
+import { batchesStep } from './lessons/batches'
+import { historyCards, importMind } from './lessons/history'
 import { runNight } from './night'
 import type { NightJob, SchoolDeps } from './types'
 
@@ -9,6 +12,15 @@ export const NIGHT_JOBS: NightJob[] = []
 /** The school's jobs, in order on every tick; the parts add theirs. */
 export const SCHOOL_STEPS: Step[] = [
   { name: 'night', run: (d, now) => runNight(d, NIGHT_JOBS, now) },
+  {
+    name: 'lessons',
+    async run(d, now) {
+      if (!(await getSetting(d.db, 'school.on'))) return
+      await importMind(d)
+      await historyCards(d, now)
+      await batchesStep(d, now)
+    },
+  },
 ]
 
 /** Runs the school's jobs once a minute; one failing job never stops the others (as learning/jobs.ts). */

@@ -10,6 +10,7 @@ const { db, close } = openTestDb()
 afterAll(close)
 let sent: string[] = []
 const notifier: Notifier = {
+  editText: async () => {},
   sendLeadCard: async () => ({ messageId: 1 }),
   sendText: async (t) => {
     sent.push(t)
