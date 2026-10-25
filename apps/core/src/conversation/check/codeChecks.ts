@@ -23,30 +23,94 @@ const plain = (s: string) =>
     .trim()} `
 const words = (s: string) => fold(s).match(/[\p{L}\p{N}]+/gu) ?? []
 
-// Digit runs that are not facts: phones, times, dates and list numbers. They are masked before numbers are read.
+// Digit runs that are not plain counts: phones, times, dates and list numbers. They are cut out before numbers are
+// read. In the client's words and in the records they are facts to be repeated; in Sara's reply a phone, a time or a
+// date is allowed only when the client named it in this turn or the cited records hold it.
+type Kind = 'phone' | 'time' | 'date'
+type Mask = { kind: Kind | 'list'; re: RegExp; key: (m: string) => string }
+
 const SEP = '[ \\u00a0\\-]?'
-const NOT_FACTS = [
-  // +7 (918) 123-45-67, 8 918 123 45 67, 89181234567.
-  new RegExp(
-    `(?<![\\d+])(?:\\+7|8|7)${SEP}\\(?\\d{3,5}\\)?${SEP}\\d{1,3}${SEP}\\d{2}${SEP}\\d{2}(?!\\d)`,
-    'g',
-  ),
-  // Another country: +375 29 123-45-67.
-  new RegExp(
-    `\\+(?!7)\\d{1,3}${SEP}\\(?\\d{2,4}\\)?${SEP}\\d{2,4}${SEP}\\d{2,4}(?:${SEP}\\d{2,4})?(?!\\d)`,
-    'g',
-  ),
-  // 918 123-45-67 without the code, 123-45-67 in a city.
-  new RegExp(`(?<!\\d)\\d{3}${SEP}\\d{3}${SEP}\\d{2}${SEP}\\d{2}(?!\\d)`, 'g'),
-  /(?<![\d-])\d{2,3}-\d{2}-\d{2}(?![\d-])/g,
-  /(?<!\d)\d{10,11}(?!\d)/g,
-  /(?<!\d)\d{1,2}:\d{2}(?!\d)/g,
-  // 25.10, 25.10.2026: a day and a month of two digits, so «2.5» stays a number.
-  /(?<![\d.,])(?:0?[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])(?:\.(?:\d{4}|\d{2}))?(?![\d]|[.,]\d)/g,
-  /(?<![\p{L}\d])в\s+\d{1,2}\s+(?:час(?:а|ов)?|утра|дня|вечера|ночи)(?!\p{L})/giu,
-  // The number of a list line («1. Сайт»): robotic.list catches the list itself.
-  /^[ \t]*\d{1,2}[.)](?=\s)/gm,
-]
+/** A word that says a number after it is a phone: a city number alone («10-15-20%» is a discount, not a phone). */
+const PHONE_CONTEXT =
+  '(?:тел\\p{L}*|т\\.|номер\\p{L}*|звон\\p{L}*|whatsapp|ватсап\\p{L}*|вотсап\\p{L}*|viber|вайбер\\p{L}*|telegram|телеграм\\p{L}*|моб\\p{L}*|сот\\p{L}*)'
+
+/** A phone as 7 and ten digits, however its brackets and dashes stand. */
+const phoneKey = (m: string) => {
+  const d = m.replace(/\D/g, '')
+  return d.length === 11 && d.startsWith('8') ? `7${d.slice(1)}` : d.length === 10 ? `7${d}` : d
+}
+const timeKey = (m: string) => m.replace(/^0/, '')
+const dateKey = (m: string) => {
+  const [d, mo] = m.split('.')
+  return `${Number(d)}.${Number(mo)}`
+}
+const clockKey = (m: string) => `${Number(/\d+/.exec(m)?.[0])}:00`
+
+/** The masks in order; `lenient` (the client's words, the records) also takes a bare city number as a phone. */
+function masks(lenient: boolean): Mask[] {
+  const cityPhone = lenient
+    ? '(?<![\\d-])\\d{2,3}-\\d{2}-\\d{2}(?![\\d-])'
+    : `(?<=${PHONE_CONTEXT}[^\\d\\n]{0,12})\\d{2,3}-\\d{2}-\\d{2}(?![\\d-])`
+  return [
+    // +7 (918) 123-45-67, 8 918 123 45 67, 89181234567.
+    {
+      kind: 'phone',
+      re: new RegExp(
+        `(?<![\\d+])(?:\\+7|8|7)${SEP}\\(?\\d{3,5}\\)?${SEP}\\d{1,3}${SEP}\\d{2}${SEP}\\d{2}(?!\\d)`,
+        'g',
+      ),
+      key: phoneKey,
+    },
+    // Another country: +375 29 123-45-67.
+    {
+      kind: 'phone',
+      re: new RegExp(
+        `\\+(?!7)\\d{1,3}${SEP}\\(?\\d{2,4}\\)?${SEP}\\d{2,4}${SEP}\\d{2,4}(?:${SEP}\\d{2,4})?(?!\\d)`,
+        'g',
+      ),
+      key: phoneKey,
+    },
+    // 918 123-45-67 without the code.
+    {
+      kind: 'phone',
+      re: new RegExp(`(?<!\\d)\\d{3}${SEP}\\d{3}${SEP}\\d{2}${SEP}\\d{2}(?!\\d)`, 'g'),
+      key: phoneKey,
+    },
+    { kind: 'phone', re: /(?<!\d)\d{10,11}(?!\d)/g, key: phoneKey },
+    // 123-45-67 in a city: a phone only after a word about phones in a reply.
+    { kind: 'phone', re: new RegExp(cityPhone, 'giu'), key: phoneKey },
+    { kind: 'time', re: /(?<!\d)\d{1,2}:\d{2}(?!\d)/g, key: timeKey },
+    // 25.10, 25.10.2026: a day and a month of two digits, so «2.5» stays a number.
+    {
+      kind: 'date',
+      re: /(?<![\d.,])(?:0?[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])(?:\.(?:\d{4}|\d{2}))?(?![\d]|[.,]\d)/g,
+      key: dateKey,
+    },
+    // «в 3 часа», «в 9 утра»; «в 3 дня» is also «за 3 дня» in a promise, so it is a plain number.
+    {
+      kind: 'time',
+      re: /(?<![\p{L}\d])в\s+\d{1,2}\s+(?:час(?:а|ов)?|утра|вечера|ночи)(?!\p{L})/giu,
+      key: clockKey,
+    },
+    // The number of a list line («1. Сайт»): robotic.list catches the list itself.
+    { kind: 'list', re: /^[ \t]*\d{1,2}[.)](?=\s)/gm, key: () => '' },
+  ]
+}
+
+type Found = { kind: Kind; shown: string; key: string }
+const KIND_NAME: Record<Kind, string> = { phone: 'телефон', time: 'время', date: 'дата' }
+
+/** The phones, times and dates of a text, and the text without them (their places left blank). */
+function cutOut(text: string, lenient: boolean): { rest: string; found: Found[] } {
+  let rest = text
+  const found: Found[] = []
+  for (const mask of masks(lenient))
+    rest = rest.replace(mask.re, (m) => {
+      if (mask.kind !== 'list') found.push({ kind: mask.kind, shown: m.trim(), key: mask.key(m) })
+      return ' '.repeat(m.length)
+    })
+  return { rest, found }
+}
 
 const NUMBER =
   /(?<![\p{L}\d.,])(?<!\p{L}-)(?:\d{1,3}(?:[ \u00a0\u202f\u2009]\d{3})+(?!\d)|\d+)(?:[.,]\d+)?%?/gu
@@ -57,9 +121,7 @@ const MILLIONS = /^\s*(?:млн|миллион)/iu
 type Num = { shown: string; keys: string[] }
 
 /** The numbers of a text that may be facts, each with the values it may stand for («50 тысяч» is 50 and 50000). */
-function numbersIn(text: string): Num[] {
-  let masked = text
-  for (const re of NOT_FACTS) masked = masked.replace(re, (m) => ' '.repeat(m.length))
+function numbersIn(masked: string): Num[] {
   const out: Num[] = []
   for (const m of masked.matchAll(NUMBER)) {
     const shown = m[0]
@@ -76,7 +138,7 @@ function numbersIn(text: string): Num[] {
 
 /** The numbers of a text as written: «50 000», «1,5», «30%»; never a phone, a clock time or a date. */
 export function extractNumbers(text: string): string[] {
-  return numbersIn(text).map((n) => n.shown)
+  return numbersIn(cutOut(text, true).rest).map((n) => n.shown)
 }
 
 const NAME = '(?:\\[имя \\d+\\]|[\\p{L}-]+(?:\\s+[\\p{L}-]+)?)'
@@ -124,11 +186,29 @@ function factIssues(i: CheckInput, text: string): CheckIssue[] {
   if (i.factIds.length === 0)
     issues.push({ id: 'facts.none', detail: 'в ответе нет ни одного номера записи разума' })
 
+  // What the reply may say: the numbers, phones, times and dates of the cited records and of the client's turn.
   const allowed = new Set<string>()
+  const allowedTokens = new Set<string>()
   const sources = [...i.factIds.map((id) => i.knowledgeTexts[id] ?? ''), i.clientTurnText]
-  for (const s of sources) for (const n of numbersIn(s)) for (const k of n.keys) allowed.add(k)
+  for (const s of sources) {
+    const { rest, found } = cutOut(s, true)
+    for (const n of numbersIn(rest)) for (const k of n.keys) allowed.add(k)
+    for (const f of found) {
+      allowedTokens.add(`${f.kind}:${f.key}`)
+      // «9:00» in a record also lets «с 9 до 18» through; «27.10» lets «27 октября».
+      for (const part of f.kind === 'phone' ? [] : f.key.split(/[.:]/))
+        if (Number(part) > 0) allowed.add(String(Number(part)))
+    }
+  }
   const told = new Set<string>()
-  for (const n of numbersIn(text)) {
+  const { rest, found } = cutOut(text, false)
+  for (const f of found) {
+    const token = `${f.kind}:${f.key}`
+    if (allowedTokens.has(token) || told.has(token)) continue
+    told.add(token)
+    issues.push({ id: 'facts.numbers', detail: `${KIND_NAME[f.kind]} ${f.shown} не из разума` })
+  }
+  for (const n of numbersIn(rest)) {
     if (n.keys.some((k) => allowed.has(k)) || told.has(n.keys[0] ?? '')) continue
     told.add(n.keys[0] ?? '')
     issues.push({ id: 'facts.numbers', detail: `число ${n.shown} не из разума` })
@@ -185,7 +265,8 @@ function roboticIssues(i: CheckInput, text: string): CheckIssue[] {
 
 const CALL_TIMES = [
   /(?<!\d)\d{1,2}:\d{2}(?!\d)/u,
-  /(?<![\p{L}\d])в\s+\d{1,2}\s+(?:час(?:а|ов)?|утра|дня|вечера|ночи)(?!\p{L})/u,
+  // Not «в 3 дня»: «сделаем в 3 дня» is a term, and a sentence about a call may name one.
+  /(?<![\p{L}\d])в\s+\d{1,2}\s+(?:час(?:а|ов)?|утра|вечера|ночи)(?!\p{L})/u,
 ]
 
 function promiseIssues(text: string): CheckIssue[] {
