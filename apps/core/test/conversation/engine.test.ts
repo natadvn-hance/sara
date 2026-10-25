@@ -568,6 +568,34 @@ describe('cases in a turn', () => {
     expect(checker?.stdin).toContain('[k-case-01]')
   })
 
+  it('FR-CONV-4: the plan returns the case the final reply tells, and none when the reply has no valid case', async () => {
+    const good = interlocutorAnswer({
+      text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+      case: choose('k-case-01'),
+    })
+    expect((await plan(await chatOf(ASK), good)).case?.id).toBe('k-case-01')
+    // No case in the answer.
+    const none = interlocutorAnswer({ case: choose(null), text: 'Понимаю. Удобно созвониться?' })
+    expect((await plan(await chatOf(ASK), none)).case).toBeUndefined()
+    // A case named without a moment, then a rewrite that still names it: the id is no case of the plan.
+    const stubborn = interlocutorAnswer({
+      text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+      case: { moment: null, case_id: 'k-case-01', why: 'Клиент спросил про примеры' },
+    })
+    const refused = await plan(await chatOf(ASK), stubborn)
+    expect(refused.output?.case?.case_id).toBe('k-case-01')
+    expect(refused.issues.map((x) => x.id)).toContain('case.unknown')
+    expect(refused.case).toBeUndefined()
+    // A rewrite after another fault that tells the case well keeps it.
+    const dash = interlocutorAnswer({
+      text: `Делали для Лиса-Клиник ${String.fromCharCode(0x2014)} запись стала онлайн. Удобно созвониться?`,
+      case: choose('k-case-01'),
+    })
+    const fixed = await plan(await chatOf(ASK), { $sequence: [dash, good] })
+    expect(fixed.attempts).toBe(2)
+    expect(fixed.case?.id).toBe('k-case-01')
+  }, 30000)
+
   it('FR-CONV-4: a failed case check rewrites the reply without a case', async () => {
     const first = interlocutorAnswer({
       text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
@@ -691,20 +719,34 @@ describe('cases in a turn', () => {
     })
   })
 
-  it('FR-CONV-3: the dossier knows the cases told earlier from the traces of the other turns', async () => {
+  it('FR-CONV-3: the dossier counts a case as told only when the reply that told it went to the client', async () => {
     const d = await dossierOf()
-    const told = (id: string, case_id: string | null, title = 'Лиса-Клиник: онлайн-запись') =>
+    const told = (
+      id: string,
+      case_id: string | null,
+      outcome: string | null,
+      title = 'Лиса-Клиник: онлайн-запись',
+    ) =>
       db.insert(convTurn).values({
         id,
         conversationId: d.conversationId,
         anchorMessageId: 'm-1',
+        outcome,
         understanding: case_id ? { case: { moment: 'asked', case_id, why: 'x', title } } : null,
       })
-    await told('t-1', 'k-case-01')
-    await told('t-2', null)
-    await told('t-3', 'k-case-02', 'Сеть кофеен: реклама, Сочи')
-    await told('t-4', 'k-case-01')
-    await told('t-now', 'k-case-03', 'Окна-Мастер: сайт и заявки, Москва')
+    await told('t-1', 'k-case-01', 'sent')
+    await told('t-2', null, 'sent')
+    await told('t-3', 'k-case-02', 'sent', 'Сеть кофеен: реклама, Сочи')
+    await told('t-4', 'k-case-01', 'sent')
+    // A shadow draft, a call to Boris, a failed turn, a turn our side's message cancelled and a turn still running
+    // told nothing to the client.
+    await told('t-5', 'k-case-05', 'drafted', 'Школа танцев: стратегия маркетинга, Казань')
+    await told('t-6', 'k-case-06', 'called_boris')
+    await told('t-7', 'k-case-07', 'failed')
+    await told('t-8', 'k-case-08', 'answered')
+    await told('t-9', 'k-case-09', 'closed')
+    await told('t-10', 'k-case-10', null)
+    await told('t-now', 'k-case-03', 'sent', 'Окна-Мастер: сайт и заявки, Москва')
     const again = await buildDossier(db, d.conversationId, new Date(), {
       night: settings.night,
       turnId: 't-now',

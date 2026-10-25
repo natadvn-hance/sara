@@ -218,11 +218,13 @@ async function policySettings(db: Db, accountId: string): Promise<PolicySettings
   }
 }
 
-/** The case of a reply for the trace: its moment, id, why and title; null when the reply tells none of the offered. */
-function caseTrace(choice: CaseChoice | undefined, offered: CaseHit[]) {
-  const hit = choice?.case_id ? offered.find((c) => c.id === choice.case_id) : undefined
-  return hit && choice
-    ? { moment: choice.moment, case_id: hit.id, why: choice.why, title: hit.title }
+/**
+ * The case of a reply for the trace: its moment, id, why and title. `told` is the case the plan returned, one the final
+ * reply was offered and no check refused; an id the checks rejected, or one from an earlier attempt, is not traced.
+ */
+function caseTrace(choice: CaseChoice | undefined, told: CaseHit | undefined) {
+  return told && choice
+    ? { moment: choice.moment, case_id: told.id, why: choice.why, title: told.title }
     : null
 }
 
@@ -268,8 +270,8 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
             topic: out.topic,
             tone: out.tone,
             why: out.why,
-            // The case the reply tells (only one the turn was offered), with why and its title for the card.
-            case: caseTrace(out.case, plan.recall.cases),
+            // The case the reply tells (one it was offered that no check refused), with why and its title for the card.
+            case: caseTrace(out.case, plan.case),
           }
         : null,
       move: out?.move ?? null,
