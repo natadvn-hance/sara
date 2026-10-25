@@ -1,10 +1,11 @@
 import { runNight } from './night'
+import { personasJob } from './trainer/personas'
 import type { NightJob, SchoolDeps } from './types'
 
 type Step = { name: string; run(d: SchoolDeps, now: Date): Promise<unknown> }
 
 /** The night school's jobs (M5 design 5.12); the parts add theirs. */
-export const NIGHT_JOBS: NightJob[] = []
+export const NIGHT_JOBS: NightJob[] = [personasJob]
 
 /** The school's jobs, in order on every tick; the parts add theirs. */
 export const SCHOOL_STEPS: Step[] = [
