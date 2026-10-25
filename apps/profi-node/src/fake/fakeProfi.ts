@@ -1,6 +1,6 @@
 import {
   type ChatMessage,
-  type EventEnvelope,
+  EventEnvelope,
   type GetOrderOutput,
   type MessageAuthor,
   newEventId,
@@ -15,6 +15,7 @@ import {
   type SubmitBidOutput,
 } from '@sara/shared'
 import { verifyMessagePermit, verifyPermit } from '@sara/shared/permit'
+import { z } from 'zod'
 import { type ExtraRoute, serveMcp } from '../mcp/http'
 import { createProfiMcpServer, ProfiToolError } from '../mcp/server'
 import { sampleOrders } from './sampleOrders'
@@ -114,19 +115,25 @@ export async function createFakeProfi(o: {
       sentAt?: string
     },
   ): { message: ChatMessage; orderId: string | null } {
-    let chat = chats.get(chatId)
-    if (!chat) {
-      chat = { orderId: null, messages: [] }
-      chats.set(chatId, chat)
+    const known = chats.get(chatId)
+    const last = known?.messages.at(-1)
+    const lastAt = last ? Date.parse(last.sent_at) : 0
+    // As the live node: the chat's page order is its time order, so a time is checked before anything is kept.
+    if (m.sentAt !== undefined) {
+      const given = Date.parse(m.sentAt)
+      if (!Number.isFinite(given) || !z.iso.datetime().safeParse(m.sentAt).success)
+        throw new Error(`sentAt ${m.sentAt} is not a time`)
+      if (given <= lastAt) throw new Error(`sentAt ${m.sentAt} is before the chat's last message`)
     }
+    // The live node sends the chat number as the order number.
+    const chat = known ?? { orderId: chatId, messages: [] }
+    chats.set(chatId, chat)
     if (m.orderId !== undefined) chat.orderId = m.orderId
-    const last = chat.messages.at(-1)
-    const at = Math.max(Date.now(), last ? Date.parse(last.sent_at) + 1 : 0)
     const message: ChatMessage = {
       platform_message_id: `fake-${++lastMessageNo}`,
       chat_id: chatId,
       author: m.author,
-      sent_at: m.sentAt ?? new Date(at).toISOString(),
+      sent_at: m.sentAt ?? new Date(Math.max(Date.now(), lastAt + 1)).toISOString(),
       text: m.text,
       read: m.read,
     }
@@ -252,7 +259,8 @@ export async function createFakeProfi(o: {
     payload: (at: string) => unknown,
   ): Promise<string> {
     const at = new Date().toISOString()
-    const e: EventEnvelope = {
+    // Checked as the live node's queue checks it (src/ship/outbox.ts): a broken envelope never leaves.
+    const e: EventEnvelope = EventEnvelope.parse({
       id: newEventId(),
       type,
       v: 1,
@@ -264,7 +272,7 @@ export async function createFakeProfi(o: {
       correlation_id: newEventId(),
       reason: null,
       payload: PROFI_EVENT_PAYLOADS[type].parse(payload(at)),
-    }
+    })
     sent.set(e.id, e)
     await deliver(e)
     return e.id

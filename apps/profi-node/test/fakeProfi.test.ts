@@ -404,6 +404,39 @@ describe('fake Profi-MCP', () => {
     await c.close()
   })
 
+  it('FR-CONV-2: the fake keeps page order as time order and refuses a time that would break it', async () => {
+    await fake.addChatMessage({ chatId: '95300030', author: 'client', text: 'первое' })
+    await expect(
+      fake.addChatMessage({
+        chatId: '95300030',
+        author: 'client',
+        text: 'раньше',
+        sentAt: '2020-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toThrow(/before/)
+    await expect(
+      fake.addChatMessage({
+        chatId: '95300030',
+        author: 'client',
+        text: 'не время',
+        sentAt: 'вчера',
+      }),
+    ).rejects.toThrow(/time/)
+    const c = await mcp()
+    const r = await c.callTool({
+      name: 'profi.read_chat',
+      arguments: { account_id: 'hance-marketing', chat_id: '95300030' },
+    })
+    expect((r.structuredContent as { messages: unknown[] }).messages).toHaveLength(1)
+    await c.close()
+  })
+
+  it('FR-CONV-1: a chat without an order number takes the chat number, as the live node does', async () => {
+    await fake.addChatMessage({ chatId: '95300031', author: 'client', text: 'привет' })
+    const e = received.at(-1) as { body: { payload: { order_id: string | null } } }
+    expect(e.body.payload.order_id).toBe('95300031')
+  })
+
   it('C8: emitOrder delivers a profi.order_seen envelope with the node token', async () => {
     const id = await fake.emitOrder({ order_id: '777' })
     expect(received).toHaveLength(1)

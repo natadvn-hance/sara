@@ -424,7 +424,7 @@ it('FR-CONV-5: conversation settings have the design defaults', () => {
 
 ### Task G1b: Порядок сообщений одного чтения
 
-**Files:** Modify `apps/profi-node/src/eyes/profiParsers.ts` (`fromChatDom`: время сообщения `i` из `n` в одном чтении = момент чтения минус `(n - 1 - i)` мс; время, пришедшее из потока, по-прежнему побеждает в `eyes.onChatRead`), `apps/profi-node/src/tools/readTools.ts` (`readChat` сортирует по `sent_at`, затем по `platform_message_id`); Test тесты разбора и инструментов чтения
+**Files:** Modify `apps/profi-node/src/eyes/profiParsers.ts` (`fromChatDom`: время сообщения `i` из `n` в одном чтении = момент чтения минус `(n - 1 - i)` мс), `apps/profi-node/src/eyes/eyes.ts` (`onChatRead`: новое сообщение ниже сохранённых никогда не получает время раньше сообщения над ним, время из потока берётся, только если не ломает порядок; новое сообщение выше последнего сохранённого это история, без события, со временем чуть раньше следующего сохранённого; сломанное время не останавливает остальное чтение; уточнено при сборке и проверке части G), `apps/profi-node/src/tools/readTools.ts` (`readChat` сортирует по `sent_at`, затем по `platform_message_id`); Test тесты разбора, глаз и инструментов чтения
 
 - [ ] **Step 1-4:** тест `FR-CONV-2: messages of one chat reading keep the page order` (страница с тремя сообщениями, `readChat` отдаёт их в порядке страницы) → реализация → PASS.
 - [ ] **Step 5: Commit** `fix(profi-node): keep the page order of messages read together`
