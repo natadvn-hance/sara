@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { newEventId } from '@sara/shared'
 import { and, asc, eq } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
@@ -53,14 +53,36 @@ function exportPath(root: string, path: string): string {
   return resolve(root, rel)
 }
 
+/** The folder must exist and be a clone (its `.git` is a folder, or a file in a linked work tree). */
+async function assertClone(root: string): Promise<void> {
+  const isDir = await stat(root).then(
+    (s) => s.isDirectory(),
+    () => false,
+  )
+  const hasMarker =
+    isDir &&
+    (await stat(join(root, '.git')).then(
+      () => true,
+      () => false,
+    ))
+  if (!hasMarker)
+    throw new Error(`${root}: это не папка с клоном sara-mind (нет .git), выкладывать некуда`)
+}
+
 /**
  * Writes the new proposals as files under `toDir` (a developer's sara-mind clone) and marks them exported, so the next
- * export skips them. Only `mind/proposals/` and `exam/` are written: a path into `mind/shared/`, `mind/directions/`,
- * `.git/` or out of the clone stops the export before anything is written (the confirmed mind changes only by
- * `mind accept`).
+ * export skips them. `toDir` must be an existing folder with `.git`. Only `mind/proposals/` and `exam/` are written: a
+ * path into `mind/shared/`, `mind/directions/`, `.git/` or out of the clone stops the export before anything is written
+ * (the confirmed mind changes only by `mind accept`). A file that is already there is never overwritten: its path goes
+ * to `report.existing`, the proposal stays `new`, the others are still written.
  */
-export async function exportProposals(db: Db, toDir: string): Promise<number> {
+export async function exportProposals(
+  db: Db,
+  toDir: string,
+  report: { existing: string[] } = { existing: [] },
+): Promise<number> {
   const root = resolve(toDir)
+  await assertClone(root)
   const rows = await db
     .select()
     .from(mindProposal)
@@ -71,7 +93,13 @@ export async function exportProposals(db: Db, toDir: string): Promise<number> {
   for (const [i, r] of rows.entries()) {
     const file = files[i] as string
     await mkdir(dirname(file), { recursive: true })
-    await writeFile(file, r.content)
+    try {
+      await writeFile(file, r.content, { flag: 'wx' })
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+      report.existing.push(r.path)
+      continue
+    }
     const done = await db
       .update(mindProposal)
       .set({ state: 'exported', exportedAt: new Date().toISOString() })

@@ -1,14 +1,21 @@
-import { readFile, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { mindProposal } from '../../src/db/schema'
 import { exportProposals, proposeMind } from '../../src/mind/proposals'
 import { openTestDb, resetDb } from '../helpers/db'
-import { tempMind } from '../helpers/mind'
+import { git, tempMind } from '../helpers/mind'
 
 const { db, close } = openTestDb()
 afterAll(close)
 beforeEach(() => resetDb(db))
+
+/** An empty folder that is a git clone, as the export wants it. */
+async function cloneMind(): Promise<string> {
+  const dir = await tempMind()
+  await git(dir, 'init', '-q')
+  return dir
+}
 
 const EXAMPLE = 'mind/proposals/shared/speech/examples/e-h-1.md'
 const KNOWLEDGE = 'mind/proposals/shared/knowledge/k-interview-1.md'
@@ -27,7 +34,7 @@ describe('mind proposals export', () => {
       kind: 'knowledge',
       source: 'interview:1',
     })
-    const clone = await tempMind()
+    const clone = await cloneMind()
     expect(await exportProposals(db, clone)).toBe(2)
     expect(await readFile(join(clone, EXAMPLE), 'utf8')).toBe('---\nid: e-h-1\n---\nобразец\n')
     expect(await readFile(join(clone, KNOWLEDGE), 'utf8')).toBe(
@@ -48,8 +55,8 @@ describe('mind proposals export', () => {
 
   it('FR-MIND-3: a proposal path that leaves the clone is refused', async () => {
     await proposeMind(db, { path: '../escape.md', content: 'x', kind: 'other', source: 'test' })
-    const clone = await tempMind()
-    await expect(exportProposals(db, join(clone, 'inner'))).rejects.toThrow(/escape\.md/)
+    const clone = await cloneMind()
+    await expect(exportProposals(db, clone)).rejects.toThrow(/escape\.md/)
     await expect(stat(join(clone, 'escape.md'))).rejects.toThrow()
     expect((await db.select().from(mindProposal))[0]?.state).toBe('new')
   })
@@ -65,24 +72,58 @@ describe('mind proposals export', () => {
       'README.md',
       '/tmp/absolute.md',
     ]
+    const clone = await cloneMind()
     for (const path of refused) {
       await resetDb(db)
       await proposeMind(db, { path, content: 'x', kind: 'other', source: 'test' })
       await proposeMind(db, { path: EXAMPLE, content: 'ok', kind: 'example', source: 'test' })
-      const clone = await tempMind()
       await expect(exportProposals(db, clone), path).rejects.toThrow(/Путь предложения/)
       await expect(stat(join(clone, 'mind')), path).rejects.toThrow()
       expect((await db.select().from(mindProposal)).map((r) => r.state)).toEqual(['new', 'new'])
     }
-  })
+  }, 30_000)
 
   it('FR-MIND-3: proposals and exam scenarios are the paths an export writes', async () => {
     const scenario = 'exam/scenarios/x-h-1.json'
     await proposeMind(db, { path: EXAMPLE, content: 'a', kind: 'example', source: 'test' })
     await proposeMind(db, { path: scenario, content: '{}', kind: 'scenario', source: 'test' })
-    const clone = await tempMind()
+    const clone = await cloneMind()
     expect(await exportProposals(db, clone)).toBe(2)
     expect(await readFile(join(clone, scenario), 'utf8')).toBe('{}')
     expect(await readFile(join(clone, EXAMPLE), 'utf8')).toBe('a')
+  })
+
+  it('FR-MIND-3: an export goes only into an existing folder that is a git clone', async () => {
+    await proposeMind(db, { path: EXAMPLE, content: 'a', kind: 'example', source: 'test' })
+    const plain = await tempMind()
+    await expect(exportProposals(db, plain)).rejects.toThrow(/\.git/)
+    await expect(exportProposals(db, join(plain, 'missing'))).rejects.toThrow(/\.git/)
+    await expect(stat(join(plain, 'mind'))).rejects.toThrow()
+    await expect(stat(join(plain, 'missing'))).rejects.toThrow()
+    expect((await db.select().from(mindProposal))[0]?.state).toBe('new')
+
+    const file = join(plain, 'a-file')
+    await writeFile(file, 'x')
+    await expect(exportProposals(db, file)).rejects.toThrow(/\.git/)
+  })
+
+  it('FR-MIND-3: a file that already exists is reported and kept, the other proposals are written', async () => {
+    const second = 'mind/proposals/shared/speech/examples/e-h-2.md'
+    await proposeMind(db, { path: EXAMPLE, content: 'new text', kind: 'example', source: 'test' })
+    await proposeMind(db, { path: second, content: 'second', kind: 'example', source: 'test' })
+    const clone = await cloneMind()
+    await mkdir(join(clone, dirname(EXAMPLE)), { recursive: true })
+    await writeFile(join(clone, EXAMPLE), 'developer text')
+
+    const report = { existing: [] as string[] }
+    expect(await exportProposals(db, clone, report)).toBe(1)
+    expect(report.existing).toEqual([EXAMPLE])
+    expect(await readFile(join(clone, EXAMPLE), 'utf8')).toBe('developer text')
+    expect(await readFile(join(clone, second), 'utf8')).toBe('second')
+    const rows = await db.select().from(mindProposal)
+    expect(Object.fromEntries(rows.map((r) => [r.path, r.state]))).toEqual({
+      [EXAMPLE]: 'new',
+      [second]: 'exported',
+    })
   })
 })

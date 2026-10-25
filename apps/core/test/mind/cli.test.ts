@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mindIndex } from '../../src/db/schema'
 import { acceptProposals, main } from '../../src/mind/cli'
 import { loadMind } from '../../src/mind/loader'
+import { proposeMind } from '../../src/mind/proposals'
 import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
 import { git, gitCommitAll, putFile, putRecord, tempMind } from '../helpers/mind'
 
@@ -214,6 +215,29 @@ describe('mind command line', () => {
     expect(await main(['nope'], {}, out)).toBe(1)
     expect(out.error).toHaveBeenCalledTimes(4)
     expect(out.log).not.toHaveBeenCalled()
+  })
+
+  it('FR-MIND-3: mind proposals exports into a clone and exits 1 when a file was already there', async () => {
+    const clone = await tempMind()
+    await git(clone, 'init', '-q')
+    const path = 'mind/proposals/shared/knowledge/k-interview-1.md'
+    await proposeMind(db, { path, content: 'знание\n', kind: 'knowledge', source: 'interview:1' })
+    const env = { DATABASE_URL: testDatabaseUrl() }
+    const out = io()
+    expect(await main(['proposals', '--to', clone], env, out)).toBe(0)
+    expect(out.log).toHaveBeenCalledWith(expect.stringContaining('Выложено предложений: 1'))
+    expect(await readFile(join(clone, path), 'utf8')).toBe('знание\n')
+
+    await resetDb(db)
+    await proposeMind(db, { path, content: 'другое\n', kind: 'knowledge', source: 'interview:2' })
+    const again = io()
+    expect(await main(['proposals', '--to', clone], env, again)).toBe(1)
+    expect(again.error).toHaveBeenCalledWith(expect.stringContaining(path))
+    expect(await readFile(join(clone, path), 'utf8')).toBe('знание\n')
+
+    const notClone = io()
+    expect(await main(['proposals', '--to', await tempMind()], env, notClone)).toBe(1)
+    expect(notClone.error).toHaveBeenCalledWith(expect.stringContaining('.git'))
   })
 
   it('FR-MIND-2: mind index builds the index and exits 1 when a record failed to load', async () => {

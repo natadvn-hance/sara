@@ -162,8 +162,10 @@ async function runCommand(argv: string[], env: NodeJS.ProcessEnv, io: Io): Promi
   try {
     if (command === 'proposals') {
       const to = here(values.to ?? '')
-      io.log(`Выложено предложений: ${await exportProposals(db, to)} в ${to}`)
-      return 0
+      const report = { existing: [] as string[] }
+      io.log(`Выложено предложений: ${await exportProposals(db, to, report)} в ${to}`)
+      for (const path of report.existing) io.error(`Файл уже есть, не перезаписан: ${path}`)
+      return report.existing.length > 0 ? 1 : 0
     }
     const { errors } = await loadMind(config.mindDir)
     for (const e of errors) io.error(`Не загружено: ${e.path}: ${e.message}`)
