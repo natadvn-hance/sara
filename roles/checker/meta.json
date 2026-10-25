@@ -1,6 +1,6 @@
 {
   "name": "checker",
-  "version": 3,
+  "version": 4,
   "model": "haiku",
   "fallbackModel": "sonnet",
   "priority": "P0",

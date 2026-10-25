@@ -874,6 +874,43 @@ describe('cases in a reply', () => {
     ).toEqual(['case.many'])
   })
 
+  it('FR-CONV-4: «7.10» in the name of a chosen open case is no date, another date still is', () => {
+    const BOWLING = caseHit({
+      id: 'k-case-21',
+      title: 'Боулинг-клуб 7.10',
+      summary: 'Разработали стратегию и план роста для боулинг-клуба.',
+      showRules: ['Компанию и ссылку можно называть.'],
+    })
+    const text = 'Делали стратегию для боулинг-клуба 7.10, внедрять они не стали.'
+    expect(withCases(text, { offered: [BOWLING], choice: choose(BOWLING) })).toEqual([])
+    // The same words with no case chosen: «7.10» is a date no record has.
+    expect(withCases(text, { offered: [BOWLING] })).toContain('facts.numbers')
+    // A closed name is not told at all, and a date beside the name is still a date.
+    const other = checkReplyText(
+      input({
+        text: 'Делали стратегию для боулинг-клуба 7.10, созвонимся 8.10 в удобное время.',
+        cases: { offered: [BOWLING], told: [], choice: choose(BOWLING) },
+      }),
+    )
+    expect(other.filter((x) => x.id === 'facts.numbers').map((x) => x.detail)).toEqual([
+      expect.stringContaining('8.10'),
+    ])
+  })
+
+  it('FR-CONV-4: an offered case named in the text but not chosen has no moment', () => {
+    expect(withCases('Как у Потолок-Арт, там заявки через сайт.', { offered: [CEILINGS] })).toEqual(
+      ['case.no_moment'],
+    )
+    // Chosen, it has a moment; not named, it is not told.
+    expect(
+      withCases('Как у Потолок-Арт, там заявки через сайт.', {
+        offered: [CEILINGS],
+        choice: choose(CEILINGS),
+      }),
+    ).toEqual([])
+    expect(withCases('Понимаю, сайт нужен к запуску.', { offered: [CEILINGS] })).toEqual([])
+  })
+
   it('FR-CONV-4: «взгляните на наш кейс» is robotic', () => {
     for (const text of [
       'Взгляните на наш кейс!',

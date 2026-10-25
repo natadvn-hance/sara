@@ -4,7 +4,8 @@ import type { CaseHit } from './types'
 /**
  * The link of a case is put in the reply by the code, never by the model (cases in a conversation, section 4): only
  * when the record has a public link, its show rules allow it, the company is not closed, and the client asked for
- * examples (the moment is `asked` or `order_asks`). The records hold no links yet, so until they do, there is none.
+ * examples (the moment is `asked` or `order_asks`). Some records hold links in «Материалы» (7 of the 28 at the time of
+ * writing), a record without one gets none.
  */
 
 const URL_IN_BODY = /https?:\/\/[^\s<>()[\]«»"]+/gu
@@ -15,10 +16,15 @@ const NOT_PUBLIC =
 /** The moments at which a client has asked to see the work. */
 const ASKED: readonly (CaseMoment | null)[] = ['asked', 'order_asks']
 
-/** Whether the show rules let the link be given: a clause about the link that allows it and none that forbids it. */
+/**
+ * Whether the show rules let the link be given: a sentence about the link that allows it and none that forbids it. A
+ * rule is cut at its sentences only, never at a comma or a semicolon: «Ссылку на сайт можно давать, на презентацию
+ * нельзя» is one statement that forbids as well as allows, and the link is not given (the code cannot tell which of
+ * the links in the record is the site).
+ */
 function linkAllowed(rules: string[]): boolean {
   const clauses = rules
-    .flatMap((r) => r.split(/[.!?;:,]+/))
+    .flatMap((r) => r.split(/[.!?]+|\n/))
     .map((c) => c.trim().toLowerCase().replace(/ё/g, 'е'))
     .filter((c) => c.includes('ссылк'))
   const forbids = (c: string) =>

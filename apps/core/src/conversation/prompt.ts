@@ -52,16 +52,27 @@ function section(body: string, name: string): string {
   return found ? found.slice(found.indexOf('\n') + 1).trim() : ''
 }
 
+/** The stock text of a field the record has not filled in yet. */
+const NOT_RECORDED = /^пока не зафиксировано/i
+
+/** «Название: текст» for a section of a case record, none when the record has no such section. */
+function caseField(c: CaseHit, name: string): string[] {
+  const text = section(c.body, name)
+  return text ? [`${name}: ${NOT_RECORDED.test(text) ? 'не зафиксировано' : text}`] : []
+}
+
 /**
- * A case of Hance as the models read it: the number, the gist, the role and scale, the result and the rules of
- * showing it to a client, written as they stand in the record (cases in a conversation).
+ * A case of Hance as the models read it: the number, the gist, what was done and where, the role and scale, the term,
+ * the result and the rules of showing it to a client, written as they stand in the record (cases in a conversation).
  */
 export function formatCase(c: CaseHit): string {
-  const role = section(c.body, 'Роль и масштаб')
   return [
     `[${c.id}] ${c.title}`,
     `Суть: ${c.summary}`,
-    ...(role ? [`Роль и масштаб: ${role}`] : []),
+    ...caseField(c, 'Что делали'),
+    ...caseField(c, 'Где'),
+    ...caseField(c, 'Роль и масштаб'),
+    ...caseField(c, 'Срок'),
     `Результат: ${c.result ?? 'не зафиксирован'}`,
     'Как показывать клиенту:',
     ...(c.showRules.length

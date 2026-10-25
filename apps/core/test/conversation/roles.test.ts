@@ -23,7 +23,7 @@ const M4_ROLES = {
     schema: InterlocutorOutput,
   },
   checker: {
-    meta: { version: 3, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
+    meta: { version: 4, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
     schema: CheckerOutput,
   },
   reminder: {
@@ -50,6 +50,11 @@ describe('the M4 roles', () => {
       expect(meta, name).toEqual({ name, ...M4_ROLES[name].meta })
       expect(await readFile(promptPath, 'utf8'), name).not.toMatch(/[\u2013\u2014]/)
     }
+  })
+
+  it('FR-CONV-4: the Checker takes any story of a project as unsupported when Sara chose no case', async () => {
+    const role = await readFile(join(ROLES, 'checker/role.md'), 'utf8')
+    expect(role).toContain('Сара не выбрала кейс: любой рассказ о проекте это unsupported')
   })
 
   it('FR-CONV-5: the Interlocutor takes «хорошо» after a call proposal as agreement, not as the end', async () => {
