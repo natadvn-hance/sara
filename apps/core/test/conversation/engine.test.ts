@@ -344,6 +344,33 @@ describe('turn engine', () => {
     expect(plan.decision.action).toBe('draft')
   })
 
+  it('FR-CONV-5: a «хорошо» to our call proposal calls Boris even when the model says none', async () => {
+    const d = await dossierOf()
+    const chat = (ours: string, said: string): Dossier => ({
+      ...d,
+      messages: [
+        { ...d.messages[0], text: ours } as Dossier['messages'][number],
+        { ...d.messages[1], text: said, platformMessageId: 'm-9' } as Dossier['messages'][number],
+      ],
+      turnMessageIds: ['m-9'],
+    })
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({ move: 'none', text: null, fact_ids: [], topic: 'smalltalk' }),
+    })
+    const run = (dossier: Dossier) =>
+      planTurn(
+        { gateway: gw, mind: fakeMind() },
+        { dossier, names: ['Анна'], settings, now: new Date() },
+      )
+    expect((await run(chat('Удобно созвониться и обсудить детали?', 'Хорошо'))).decision.would).toBe(
+      'call_boris',
+    )
+    // The same word after a message that proposed no call is nothing to answer.
+    expect((await run(chat('Лендинг делаем за 2-3 недели.', 'Хорошо'))).decision.would).toBe(
+      'nothing',
+    )
+  })
+
   it('FR-CONV-5: a call request calls Boris without waiting for the model to agree', async () => {
     const d = await dossierOf()
     const gw = await gateway({ interlocutor: interlocutorAnswer() })

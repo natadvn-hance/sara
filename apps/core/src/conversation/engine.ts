@@ -1,5 +1,5 @@
 import { InterlocutorOutput } from '@sara/shared'
-import { detectCallRequest } from './callDetector'
+import { agreesToCallProposal, detectCallRequest } from './callDetector'
 import { runCheckerRole } from './check/checkerRole'
 import { checkReplyText } from './check/codeChecks'
 import { decide } from './policy'
@@ -81,7 +81,12 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
   const d = input.dossier
   const r = await recall(deps.mind, d)
   const said = clientTurn(d)
-  const callRequest = detectCallRequest(said) !== null
+  // A phone or a word of a call, or a bare «да» to our message that proposed a call.
+  const firstOfTurn = d.messages.findIndex((m) => d.turnMessageIds.includes(m.platformMessageId))
+  const before = firstOfTurn > 0 ? d.messages[firstOfTurn - 1] : undefined
+  const callRequest =
+    detectCallRequest(said) !== null ||
+    agreesToCallProposal(said, before?.side === 'specialist' ? before.text : null)
   const banned = await deps.mind.bannedPhrases()
   const ids = recalledIds(r)
   const knowledgeTexts = Object.fromEntries(r.knowledge.map((k) => [k.id, k.body]))

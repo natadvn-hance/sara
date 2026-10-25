@@ -16,7 +16,7 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 /** The M4 roles: their meta (design 5.14, plan D2 and D3) and the schema each answers with. */
 const M4_ROLES = {
   interlocutor: {
-    meta: { version: 1, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
+    meta: { version: 2, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
     schema: InterlocutorOutput,
   },
   checker: {
@@ -47,6 +47,14 @@ describe('the M4 roles', () => {
       expect(meta, name).toEqual({ name, ...M4_ROLES[name].meta })
       expect(await readFile(promptPath, 'utf8'), name).not.toMatch(/[\u2013\u2014]/)
     }
+  })
+
+  it('FR-CONV-5: the Interlocutor takes «хорошо» after a call proposal as agreement, not as the end', async () => {
+    const role = await readFile(join(ROLES, 'interlocutor/role.md'), 'utf8')
+    // The rule for «none» names the exception, so the two places that mention «ок» and «хорошо» agree.
+    const none = role.split('\n').find((l) => /^5\. move/.test(l)) ?? ''
+    expect(none).toMatch(/согласие на созвон/)
+    expect(none).toMatch(/call_boris и urgent/)
   })
 
   it('FR-CONV-3: every M4 role explains each output field in the schema order', async () => {
