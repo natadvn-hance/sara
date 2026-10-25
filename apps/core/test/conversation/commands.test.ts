@@ -378,7 +378,7 @@ describe('Boris’s commands', () => {
 
     it('FR-CONV-9: the reply is sent once per card with the turn’s own last client message as the one to expect', async () => {
       expect(await press()).toBe('Отправила клиенту')
-      expect(calls[0]?.o).toMatchObject({ expectLast: 'm-2' })
+      expect(calls[0]?.o).toMatchObject({ expectLast: 'm-2', key: `send:${cardTask}` })
       const [t] = await db.select().from(task).where(eq(task.id, cardTask))
       expect(t).toMatchObject({ state: 'resolved', resolution: 'send' })
       expect(await press()).toMatch(/уже/)
@@ -409,6 +409,66 @@ describe('Boris’s commands', () => {
       expect(answer).toMatch(/устарел/)
       const [row] = await db.select().from(outbox)
       expect(row?.state).toBe('changed')
+    })
+  })
+
+  describe('Boris’s text after the switch is sent once', () => {
+    let messageCalls: string[]
+    const stack = () => {
+      const profi = stubProfi([
+        chatMsg('m-1', 'specialist', 'Отклик', new Date(Date.now() - 3600_000).toISOString()),
+        chatMsg('m-2', 'client', 'Как начнём?', new Date().toISOString()),
+      ])
+      profi.sendMessage = async (i) => {
+        messageCalls.push(i.idempotency_key)
+        return { found_on_page: true, platform_message_id: `sent-${messageCalls.length}` }
+      }
+      return {
+        db,
+        transcriber: { transcribe: async () => null },
+        onCardReply: (m: {
+          replyToMessageId: number | null
+          text: string
+          voice: boolean
+          at: Date
+          messageId?: number
+        }) =>
+          onConvReply(
+            {
+              db,
+              notifier,
+              sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
+            },
+            m,
+          ),
+      }
+    }
+    beforeEach(async () => {
+      messageCalls = []
+      await setSetting(db, 'conv.v1_writes', false, 'system')
+    })
+
+    it('FR-CONV-9: the same Telegram message handled twice queues and sends one message', async () => {
+      const inbox = stack()
+      const m = {
+        text: 'напиши: Анна, давайте в пятницу',
+        voicePath: null,
+        replyToMessageId: cardMessage,
+        messageId: 4711,
+        at: new Date(),
+      }
+      expect(await handleBorisMessage(inbox, m)).toBe('Отправила клиенту.')
+      expect(await handleBorisMessage(inbox, m)).toBe('Отправила клиенту.')
+      expect(await db.select().from(outbox)).toHaveLength(1)
+      expect(messageCalls).toEqual(['msg:say:tg:4711'])
+    })
+
+    it('FR-CONV-9: two different Telegram messages are two messages', async () => {
+      const inbox = stack()
+      const base = { voicePath: null, replyToMessageId: cardMessage, at: new Date() }
+      await handleBorisMessage(inbox, { ...base, text: 'напиши: Анна, в пятницу', messageId: 1 })
+      await handleBorisMessage(inbox, { ...base, text: 'напиши: Анна, в субботу', messageId: 2 })
+      expect(await db.select().from(outbox)).toHaveLength(2)
     })
   })
 })

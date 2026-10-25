@@ -82,7 +82,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const commandDeps = (): Parameters<typeof onConvPress>[0] => ({
     db,
     notifier: bot.notifier,
-    sendText: (c, text, author) => sendTextNow({ db, profi }, c, text, author),
+    sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
   })
   // A press on a conversation card goes to the conversation, every other press to the lead pipeline.
   const onPress = async (p: { taskId: string; action: TaskAction }) => {

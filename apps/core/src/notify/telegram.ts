@@ -113,6 +113,7 @@ export function createTelegramRuntime(d: {
         text: ctx.message.text,
         voicePath: null,
         replyToMessageId: ctx.message.reply_to_message?.message_id ?? null,
+        messageId: ctx.message.message_id,
         at: new Date(),
       }),
     )
@@ -123,6 +124,7 @@ export function createTelegramRuntime(d: {
     if (!onMessage) return
     const fileId = ctx.message.voice.file_id
     const replyTo = ctx.message.reply_to_message?.message_id ?? null
+    const messageId = ctx.message.message_id
     // Recognition takes seconds: it runs on its own, so the bot keeps answering presses meanwhile.
     void (async () => {
       const base = d.voiceDir ?? tmpdir()
@@ -142,6 +144,7 @@ export function createTelegramRuntime(d: {
             text: null,
             voicePath: path,
             replyToMessageId: replyTo,
+            messageId,
             at: new Date(),
           }),
         )

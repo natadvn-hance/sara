@@ -185,8 +185,12 @@ export const SEND_TEXTS = {
   uncertain: 'Не уверена, что сообщение дошло. Проверь чат в Профи.ру, повторно не отправляю.',
 }
 
-/** What a text sent now may be told: the last message of the chat it was written for (the service refuses a chat that moved on). */
-export type SendOptions = { expectLast?: string | null }
+/**
+ * What a text sent now may be told: the last message of the chat it was written for (the service refuses a chat that
+ * moved on), and the key that makes a repeat of the same request (a Telegram update delivered twice, a retried API
+ * call) one message; left out, every call is a new message.
+ */
+export type SendOptions = { expectLast?: string | null; key?: string }
 
 /** A text from Boris or his «Отправить» on a draft, sent now after the switch; the answer is for Boris. */
 export async function sendTextNow(
@@ -202,7 +206,7 @@ export async function sendTextNow(
     o.expectLast !== undefined ? o.expectLast : await lastSeen(d.db, conversationId)
   const id = await d.db.transaction((tx) =>
     queueMessage(tx, {
-      key: `say:${newEventId()}`,
+      key: o.key ?? `say:${newEventId()}`,
       accountId: conv.accountId,
       chatId: conv.chatId,
       text,

@@ -15,6 +15,8 @@ export type BorisMessage = {
   /** A voice message saved on disk, recognized here. */
   voicePath: string | null
   replyToMessageId: number | null
+  /** The message's number in Telegram: a repeat of the same update is the same message. */
+  messageId?: number
   at: Date
 }
 
@@ -33,6 +35,7 @@ export async function handleBorisMessage(
       replyToMessageId: number | null
       text: string
       voice: boolean
+      messageId?: number
       at: Date
     }): Promise<string | null>
     /** M4: Boris's version of a reply after «Изменить» on a conversation card. */
@@ -47,11 +50,12 @@ export async function handleBorisMessage(
     text = heard
   }
   if (!text) return TEXTS.notAnAnswer
-  const a = { text, voice: m.voicePath !== null, at: m.at }
+  const a = { text, voice: m.voicePath !== null, messageId: m.messageId, at: m.at }
   const command = await d.onCardReply?.({
     replyToMessageId: m.replyToMessageId,
     text,
     voice: a.voice,
+    messageId: m.messageId,
     at: m.at,
   })
   if (command) return command

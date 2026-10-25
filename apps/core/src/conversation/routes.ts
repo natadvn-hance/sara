@@ -5,7 +5,11 @@ import { COMMAND_TEXTS, type CommandDeps, close, giveBack, say, take } from './c
 import { getConversation } from './store'
 
 const ReturnBody = z.object({ note: z.string().trim().min(1).max(1000).optional() })
-const SayBody = z.object({ text: z.string().trim().min(1).max(4000) })
+const SayBody = z.object({
+  text: z.string().trim().min(1).max(4000),
+  /** A repeat of the same call with the same key is one message to the client. */
+  key: z.string().min(1).max(100).optional(),
+})
 
 export const ROUTE_ERRORS = {
   noConversation: 'Такого разговора нет.',
@@ -42,7 +46,8 @@ export function registerConversationRoutes(app: FastifyInstance, d: CommandDeps)
       if (!(await known(id))) return reply.code(404).send({ error: ROUTE_ERRORS.noConversation })
       const body = SayBody.safeParse(req.body ?? {})
       if (!body.success) return reply.code(400).send({ error: ROUTE_ERRORS.badText })
-      return { message: await say(d, id, body.data.text) }
+      const key = body.data.key ? `say:api:${body.data.key}` : undefined
+      return { message: await say(d, id, body.data.text, key) }
     })
 
     scoped.post('/api/conversations/:id/close', async (req, reply) => {
