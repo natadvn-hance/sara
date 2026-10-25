@@ -45,6 +45,21 @@ describe('read tools', () => {
     ])
   })
 
+  it('FR-CONV-2: read_chat breaks a tie of times by the message number', async () => {
+    for (const id of ['m6', 'm5']) {
+      await upsertMessage(db, {
+        accountId: 'hance-marketing',
+        message: msg(id, 'client', '2026-10-23T08:00:00.000Z'),
+      })
+    }
+    await upsertMessage(db, {
+      accountId: 'hance-marketing',
+      message: msg('m4', 'client', '2026-10-23T08:00:00.001Z'),
+    })
+    const r = await tools().readChat({ account_id: 'hance-marketing', chat_id: 'c-1' })
+    expect(r.messages.map((m) => m.platform_message_id)).toEqual(['m5', 'm6', 'm4'])
+  })
+
   it('FR-CONV-2: read_chat never returns a message without an author class', async () => {
     await upsertMessage(db, {
       accountId: 'hance-marketing',

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
@@ -383,6 +383,225 @@ describe('eyes', () => {
       (await events('profi.client_message')).map((x) => x.payload.platform_message_id),
     ).toEqual(['12', '13', '15'])
     expect((await db.select().from(rawMessage)).length).toBe(6)
+  })
+
+  it('FR-CONV-2: the time the stream gave a message never puts it before the messages read with it', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const touch = (messageId: string) =>
+      e.onParsed(
+        {
+          recognized: true,
+          what: 'stream',
+          signals: [{ t: 'chat_touched', chatId: '95300011', messageId }],
+        },
+        'rtp',
+      )
+    const m = (id: string, author: 'client' | 'specialist') => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300011',
+        order_id: '95300011',
+        author,
+        // As fromChatDom does: the reading moment, 1 ms apart in page order.
+        sent_at: new Date(Date.now() + Number(id)).toISOString(),
+        text: 'x',
+        read: true,
+      },
+    })
+    const order = async () =>
+      (
+        await db
+          .select({ id: rawMessage.platformMessageId })
+          .from(rawMessage)
+          .where(eq(rawMessage.chatId, '95300011'))
+          .orderBy(asc(rawMessage.sentAt), asc(rawMessage.platformMessageId))
+      ).map((r) => r.id)
+    // The stream names the client's new word, the page is read a little later: on the first reading of the chat
+    // the named message is still the last one.
+    await touch('31')
+    await new Promise((r) => setTimeout(r, 30))
+    await e.onChatRead('95300011', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('30', 'specialist'), m('31', 'client')],
+    })
+    expect(await order()).toEqual(['30', '31'])
+    // Two new client messages, the stream named only the second: they keep the page order.
+    await touch('33')
+    await new Promise((r) => setTimeout(r, 30))
+    await e.onChatRead('95300011', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('30', 'specialist'), m('31', 'client'), m('32', 'client'), m('33', 'client')],
+    })
+    expect(await order()).toEqual(['30', '31', '32', '33'])
+  })
+
+  it('FR-CONV-2: messages found above the stored ones are history: no event, kept before them', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const at = (ms: number) => new Date(Date.parse('2026-10-24T09:00:00.000Z') + ms).toISOString()
+    const m = (id: string, author: 'client' | 'specialist', ms: number) => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300012',
+        order_id: '95300012',
+        author,
+        sent_at: at(ms),
+        text: 'x',
+        read: true,
+      },
+    })
+    const read = (signals: ReturnType<typeof m>[]) =>
+      e.onChatRead('95300012', { recognized: true, what: 'chat', signals })
+    // The first reading caught only the last bubbles.
+    await read([m('42', 'specialist', 0), m('43', 'client', 1)])
+    const before = (await db.select().from(outboxNode)).length
+    // A later reading shows the older history above them, and one new message below.
+    await read([
+      m('40', 'client', 5000),
+      m('41', 'specialist', 5001),
+      m('42', 'specialist', 5002),
+      m('43', 'client', 5003),
+      m('44', 'client', 5004),
+    ])
+    const shipped = (await db.select().from(outboxNode))
+      .slice(before)
+      .map((r) => r.payload as { payload: { platform_message_id: string } })
+    expect(shipped.map((x) => x.payload.platform_message_id)).toEqual(['44'])
+    const order = (
+      await db
+        .select({ id: rawMessage.platformMessageId, history: rawMessage.history })
+        .from(rawMessage)
+        .where(eq(rawMessage.chatId, '95300012'))
+        .orderBy(asc(rawMessage.sentAt), asc(rawMessage.platformMessageId))
+    ).map((r) => `${r.id}${r.history ? 'h' : ''}`)
+    expect(order).toEqual(['40h', '41h', '42h', '43', '44'])
+  })
+
+  it('FR-CONV-1: the stream’s moment stays the named message’s time when it keeps the order', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const m = (id: string, author: 'client' | 'specialist', sent_at: string) => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300013',
+        order_id: '95300013',
+        author,
+        sent_at,
+        text: 'x',
+        read: true,
+      },
+    })
+    const old = new Date(Date.now() - 60_000).toISOString()
+    await e.onChatRead('95300013', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('50', 'specialist', old)],
+    })
+    await e.onParsed(
+      {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: '95300013', messageId: '51' }],
+      },
+      'rtp',
+    )
+    const touchedAt = Date.now()
+    await new Promise((r) => setTimeout(r, 30))
+    await e.onChatRead('95300013', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('50', 'specialist', old), m('51', 'client', new Date().toISOString())],
+    })
+    const [x] = await db.select().from(rawMessage).where(eq(rawMessage.platformMessageId, '51'))
+    // The stream's moment, not the later reading's.
+    expect(Date.parse(x?.sentAt ?? '')).toBeLessThanOrEqual(touchedAt)
+    expect(Date.parse(x?.sentAt ?? '')).toBeGreaterThan(Date.parse(old))
+  })
+
+  it('FR-CONV-2: a message with a broken time does not stop the rest of the reading', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const m = (id: string, sent_at: string) => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300014',
+        order_id: '95300014',
+        author: 'client' as const,
+        sent_at,
+        text: 'x',
+        read: true,
+      },
+    })
+    await e.onChatRead('95300014', {
+      recognized: true,
+      what: 'chat',
+      signals: [m('60', new Date().toISOString()), m('61', ''), m('62', new Date().toISOString())],
+    })
+    const ids = (await db.select().from(rawMessage).where(eq(rawMessage.chatId, '95300014'))).map(
+      (r) => r.platformMessageId,
+    )
+    expect(ids.sort()).toEqual(['60', '62'])
+  })
+
+  it('FR-CONV-10: a new specialist message is shipped as an event without text', async () => {
+    const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const m = (id: string, author: 'client' | 'specialist' | 'system', text: string) => ({
+      t: 'message' as const,
+      message: {
+        platform_message_id: id,
+        chat_id: '95300010',
+        order_id: '95300010',
+        author,
+        sent_at: '2026-10-24T09:00:00.000Z',
+        text,
+        read: true,
+      },
+    })
+    const read = (signals: ReturnType<typeof m>[]) =>
+      e.onChatRead('95300010', { recognized: true, what: 'chat', signals })
+    // The first reading: our answer before the client's last word is history, no event.
+    const first = [
+      m('20', 'client', 'Нужен лендинг'),
+      m('21', 'specialist', 'Добрый день, расскажите подробнее'),
+      m('22', 'client', 'Для кофейни'),
+    ]
+    await read(first)
+    expect(await events('profi.specialist_message')).toHaveLength(0)
+    await read([
+      ...first,
+      m('23', 'specialist', 'Понял, пришлю варианты'),
+      m('24', 'system', 'Вы обменялись контактами'),
+    ])
+    // The same page again: a repeat gives no second event.
+    await read([
+      ...first,
+      m('23', 'specialist', 'Понял, пришлю варианты'),
+      m('24', 'system', 'Вы обменялись контактами'),
+    ])
+    const ours = await events('profi.specialist_message')
+    expect(ours.map((x) => x.payload)).toEqual([
+      {
+        chat_id: '95300010',
+        order_id: '95300010',
+        platform_message_id: '23',
+        // The page gave all four the same moment: a new one comes 1 ms after the three stored before it.
+        sent_at: '2026-10-24T09:00:00.003Z',
+        author: 'specialist',
+      },
+    ])
+    expect(JSON.stringify(ours)).not.toContain('пришлю')
+    const [envelope] = (await db.select().from(outboxNode))
+      .map((r) => r.payload as { type: string; entity: unknown })
+      .filter((x) => x.type === 'profi.specialist_message')
+    expect(envelope?.entity).toEqual({ kind: 'chat', id: '95300010' })
+    // The system notice stays without an event, the client's words go out as before.
+    const all = (await db.select().from(outboxNode)).map(
+      (r) => (r.payload as { type: string }).type,
+    )
+    expect(all.sort()).toEqual(['profi.client_message', 'profi.specialist_message'])
   })
 
   it('FR-CONV-1: the chats Sara knows are those with news in the last 3 days, newest first, 3 at most', async () => {

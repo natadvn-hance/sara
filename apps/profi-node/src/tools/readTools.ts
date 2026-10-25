@@ -131,7 +131,8 @@ export function createReadTools(o: {
         .select()
         .from(rawMessage)
         .where(and(eq(rawMessage.accountId, account_id), eq(rawMessage.chatId, chat_id)))
-        .orderBy(asc(rawMessage.sentAt))
+        // Messages of one reading are 1 ms apart in page order; the number settles an equal time.
+        .orderBy(asc(rawMessage.sentAt), asc(rawMessage.platformMessageId))
       const messages: ChatMessage[] = rows.map((m) => ({
         platform_message_id: m.platformMessageId,
         chat_id: m.chatId,

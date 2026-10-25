@@ -154,9 +154,14 @@ export function createEyes(o: {
           const m = s.message
           const history = quiet.has(m.platform_message_id)
           const isNew = await upsertMessage(tx, { accountId: o.accountId, message: m, history })
-          if (!isNew || history || m.author === 'specialist' || m.author === 'system') return
+          if (!isNew || history || m.author === 'system') return
           await queueEvent(tx, {
-            type: m.author === 'client' ? 'profi.client_message' : 'profi.author_unclear',
+            type:
+              m.author === 'client'
+                ? 'profi.client_message'
+                : m.author === 'specialist'
+                  ? 'profi.specialist_message'
+                  : 'profi.author_unclear',
             accountId: o.accountId,
             entity: { kind: 'chat', id: m.chat_id },
             payload: {
@@ -247,21 +252,47 @@ export function createEyes(o: {
       touched.delete(chatId)
       const msgs = p.signals.filter((x): x is MessageSignal => x.t === 'message')
       const known = await o.db
-        .select({ id: rawMessage.platformMessageId })
+        .select({ id: rawMessage.platformMessageId, sentAt: rawMessage.sentAt })
         .from(rawMessage)
         .where(and(eq(rawMessage.chatId, chatId), eq(rawMessage.accountId, o.accountId)))
-        .limit(1)
+      const stored = new Map(known.map((r) => [r.id, Date.parse(r.sentAt)]))
       const quiet = new Set<string>()
       if (known.length === 0) {
         const lastOurs = msgs.findLastIndex((x) => x.message.author === 'specialist')
         for (const x of msgs.slice(0, lastOurs + 1)) quiet.add(x.message.platform_message_id)
       }
-      // The page shows only HH:MM; the stream's moment is the truer time of the message it named.
-      const signals = p.signals.map((x) =>
-        x.t === 'message' && touch && x.message.platform_message_id === touch.messageId
-          ? { ...x, message: { ...x.message, sent_at: touch.at } }
-          : x,
-      )
+      // A message above the last stored one was there before (the page drew it later): history, never news.
+      const lastStored = msgs.findLastIndex((x) => stored.has(x.message.platform_message_id))
+      for (const x of msgs.slice(0, Math.max(lastStored, 0)))
+        if (!stored.has(x.message.platform_message_id)) quiet.add(x.message.platform_message_id)
+      // The page shows only HH:MM; the stream's moment is the truer time of the message it named. The chat's order is
+      // its time order (M4 design 5.17): history above stored messages goes just before the next stored one, a new
+      // message below them never gets a time before the one above it.
+      const timeOf = new Map<string, number>()
+      msgs.forEach((x, i) => {
+        const id = x.message.platform_message_id
+        if (stored.has(id) || i >= lastStored) return
+        const next = msgs.findIndex((y, j) => j > i && stored.has(y.message.platform_message_id))
+        const nextAt = stored.get(msgs[next]?.message.platform_message_id ?? '')
+        if (nextAt !== undefined && Number.isFinite(nextAt)) timeOf.set(id, nextAt - (next - i))
+      })
+      let prev = Math.max(0, ...[...stored.values()].filter(Number.isFinite))
+      for (const x of msgs.slice(lastStored + 1)) {
+        const id = x.message.platform_message_id
+        const named = touch && id === touch.messageId
+        const seen = Date.parse(named ? touch.at : x.message.sent_at)
+        // A broken time stays as it was: that one message fails on its own, the rest of the reading goes on.
+        if (!Number.isFinite(seen)) continue
+        const at = Math.max(seen, prev + 1)
+        prev = at
+        timeOf.set(id, at)
+      }
+      const signals = p.signals.map((x) => {
+        const at = x.t === 'message' ? timeOf.get(x.message.platform_message_id) : undefined
+        return x.t === 'message' && at !== undefined
+          ? { ...x, message: { ...x.message, sent_at: new Date(at).toISOString() } }
+          : x
+      })
       await onSignals(signals, undefined, quiet)
     },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,
