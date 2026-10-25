@@ -22,9 +22,9 @@ beforeEach(async () => {
 afterEach(() => t.close())
 
 const URL = '/api/meetings/availability'
-const put = (payload: unknown, cookie = true) =>
+const save = (payload: unknown, cookie = true) =>
   t.app.inject({
-    method: 'PUT',
+    method: 'POST',
     url: URL,
     payload: payload as object,
     headers: cookie ? { cookie: t.cookie() } : {},
@@ -48,7 +48,7 @@ describe('free time API', () => {
       ...DEFAULT_AVAILABILITY,
       week: { ...DEFAULT_AVAILABILITY.week, fri: [{ from: '10:00', to: '13:00' }] },
     }
-    const res = await put(friday)
+    const res = await save(friday)
     expect(res.statusCode).toBe(200)
     expect(res.json().availability.week.fri).toEqual([{ from: '10:00', to: '13:00' }])
     expect(await getSetting(db, 'meet.availability')).toEqual(friday)
@@ -73,7 +73,7 @@ describe('free time API', () => {
         ],
       },
     }
-    const res = await put(bad)
+    const res = await save(bad)
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toBe('Проверь окна: начало раньше конца, окна дня не пересекаются.')
     expect(await getSetting(db, 'meet.availability')).toEqual(DEFAULT_AVAILABILITY)
@@ -81,6 +81,6 @@ describe('free time API', () => {
 
   it('FR-MEET-1: without a session it is 401', async () => {
     expect((await t.app.inject({ method: 'GET', url: URL })).statusCode).toBe(401)
-    expect((await put(DEFAULT_AVAILABILITY, false)).statusCode).toBe(401)
+    expect((await save(DEFAULT_AVAILABILITY, false)).statusCode).toBe(401)
   })
 })
