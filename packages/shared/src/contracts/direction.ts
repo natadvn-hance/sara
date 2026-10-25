@@ -59,7 +59,7 @@ export const DirectionState = z.enum(['draft', 'shadow', 'on'])
 export type DirectionState = z.infer<typeof DirectionState>
 
 /** The profi.ru bid form takes at most this many characters, the greeting included. */
-const BID_CHARS_MAX = 500
+export const BID_CHARS_MAX = 500
 
 /** How a bid of this direction is built; the greeting is always the program's and always first. */
 export const ReplyFormat = z
