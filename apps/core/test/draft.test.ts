@@ -206,7 +206,7 @@ describe('the Analyst', () => {
     })
   })
 
-  it('FR-LEAD-1: the Analyst is told as a fact that the order was raised again', async () => {
+  it('FR-LEAD-6: the Analyst is told as a fact that the order was raised again', async () => {
     const { gw, inputs } = stubGateway([answer(BODY), answer(BODY)])
     await writeDraft(gw, {
       ...(await order()),

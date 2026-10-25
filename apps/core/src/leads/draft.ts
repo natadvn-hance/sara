@@ -164,8 +164,8 @@ function clientLine(info: DraftSource['client_info']): string | null {
  */
 export function analystInput(o: DraftSource, maxBody: number): string {
   return [
-    sorterInput(o),
     repostedLine(o),
+    sorterInput(o),
     clientLine(o.client_info),
     `Длина текста: не больше ${maxBody} знаков`,
   ]

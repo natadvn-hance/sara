@@ -78,6 +78,29 @@ describe('Profi.ru samples', () => {
     expect(byId.get('10000001')).not.toHaveProperty('repost_notice')
   })
 
+  it('FR-LEAD-1: a card with an odd notice is still read, and the others of the answer with it', () => {
+    const s = sample('response', 'board')
+    const body = JSON.parse(JSON.stringify(s.body)) as {
+      data: { boSearchBoardItems: { items: (BoardItem & { notice?: unknown })[] } }
+    }
+    const first = body.data.boSearchBoardItems.items.find((it) => it.type === 'SNIPPET')
+    if (!first) throw new Error('no card in the sample')
+    first.notice = { type: 'BOOSTED', label: 5 }
+    const r = parse({ ...s, body })
+    expect(r.recognized).toBe(true)
+    const byId = new Map(
+      r.signals.flatMap((x) => (x.t === 'order' ? [[x.order.order_id, x.order] as const] : [])),
+    )
+    expect(byId.size).toBe(parse(s).signals.length)
+    // Boosted without a word of its own: marked, with no notice.
+    expect(byId.get(first.id)).toMatchObject({ reposted: true, repost_notice: null })
+    // A notice of another kind on a card that was not raised: nothing.
+    first.notice = { type: 'INFO', label: 'Что-то другое' }
+    first.isReposted = false
+    const other = parse({ ...s, body }).signals.flatMap((x) => (x.t === 'order' ? [x.order] : []))
+    expect(other.find((o) => o.order_id === first.id)).not.toHaveProperty('reposted')
+  })
+
   it('FR-LEAD-9: the profile sample gives the wallet balance', () => {
     expect(parse(sample('response', 'profile'))).toEqual({
       recognized: true,

@@ -22,7 +22,7 @@ export function sorterInput(
 export function repostedLine(o: Pick<ProfiOrder, 'reposted' | 'repost_notice'>): string | null {
   if (!o.reposted) return null
   const base = 'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя.'
-  const notice = o.repost_notice?.replace(/\s+/g, ' ').trim()
+  const notice = o.repost_notice?.replace(/\s+/g, ' ').trim().slice(0, 200)
   return notice ? `${base} Сайт пишет: ${notice}` : base
 }
 

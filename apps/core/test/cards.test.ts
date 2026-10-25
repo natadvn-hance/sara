@@ -83,7 +83,7 @@ describe('the lead card layout', () => {
     ])
   })
 
-  it("FR-LEAD-1: a raised-again order has one more line under the head, with the site's words", () => {
+  it("FR-LEAD-7: a raised-again order has one more line under the head, with the site's words", () => {
     const lines = leadCardText({
       ...card,
       reposted: { notice: 'Клиент запросил ещё отклики 4\u00a0дня\u00a0назад <срочно>' },
@@ -361,9 +361,22 @@ describe('the lead card length', () => {
       draft: { text: huge, priceRub: 1 },
       analysis: { ...ANALYSIS, hiddenNeed: huge, risk: huge, condition: huge },
       clientInfo: { ...CLIENT, on_profi_since: huge, review_tags: [huge, huge, huge] },
+      reposted: { notice: huge },
     })
     expect(telegramTextLength(r.html)).toBeLessThanOrEqual(4096)
     expect(r.html.endsWith(LINK)).toBe(true)
+    // A reminder has one more line in its head.
+    const again = renderLeadCard({
+      ...full,
+      title: huge,
+      city: huge,
+      budgetText: huge,
+      clientName: huge,
+      text: long(9000),
+      reposted: { notice: huge },
+      reminder: true,
+    })
+    expect(telegramTextLength(again.html)).toBeLessThanOrEqual(4096)
   })
 })
 

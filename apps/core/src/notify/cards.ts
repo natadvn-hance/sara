@@ -188,6 +188,8 @@ const CAP = {
   short: 120,
   reason: 400,
   tag: 80,
+  /** The site's words about a raise: the card's fixed part has room for about this much beside a full order text. */
+  notice: 80,
   draft: 1000,
   reading: 1500,
 } as const
@@ -270,7 +272,7 @@ function headLines(c: LeadCard): string[] {
     ...(c.reminder ? [`<b>⏰ ${title}</b>`, '<i>Заявка ждёт решения</i>'] : [`<b>🔔 ${title}</b>`]),
     facts.join(' · '),
     ...(c.reposted
-      ? [notice ? `Заказ поднят повторно: ${clean(notice, CAP.reason)}` : 'Заказ поднят повторно']
+      ? [notice ? `Заказ поднят повторно: ${clean(notice, CAP.notice)}` : 'Заказ поднят повторно']
       : []),
   ]
 }

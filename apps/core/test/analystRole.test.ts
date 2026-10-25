@@ -17,4 +17,23 @@ describe('the Analyst role reads the client line of the order page', () => {
     const meta = JSON.parse(await readFile(join(ROLE, 'meta.json'), 'utf8')) as { version: number }
     expect(meta.version).toBeGreaterThanOrEqual(2)
   })
+
+  it('FR-LEAD-6: the role says what «Заказ поднят повторно» is and keeps it out of the text', async () => {
+    const text = await readFile(join(ROLE, 'role.md'), 'utf8')
+    expect(text).toContain('Заказ поднят повторно')
+    expect(text).toMatch(/Не пиши в text, что заказ поднят повторно/)
+    const meta = JSON.parse(await readFile(join(ROLE, 'meta.json'), 'utf8')) as { version: number }
+    expect(meta.version).toBeGreaterThanOrEqual(3)
+  })
+
+  it('FR-LEAD-3: the Scorer role says the raise is a fact, not a reason for a lower score', async () => {
+    const scorer = resolve(import.meta.dirname, '../../../roles/scorer')
+    const text = await readFile(join(scorer, 'role.md'), 'utf8')
+    expect(text).toContain('Заказ поднят повторно')
+    expect(text).toMatch(/Не снижай балл за одно это/)
+    const meta = JSON.parse(await readFile(join(scorer, 'meta.json'), 'utf8')) as {
+      version: number
+    }
+    expect(meta.version).toBeGreaterThanOrEqual(2)
+  })
 })

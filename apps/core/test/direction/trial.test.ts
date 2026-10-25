@@ -107,6 +107,23 @@ describe('trial scores', { timeout: 30000 }, () => {
     expect((await f.calls())[0]?.stdin).not.toContain('Андрей')
   })
 
+  it('FR-LEAD-1: a raised-again lead is scored in a trial with the same fact as live', async () => {
+    const f = await fakeGateway(db, { scorer: scorerAnswer(70) })
+    await db
+      .update(lead)
+      .set({ reposted: true, repostNotice: 'Клиент запросил ещё отклики 4 дня назад' })
+      .where(eq(lead.id, '950001'))
+    const [row] = await db.select().from(lead).where(eq(lead.id, '950001'))
+    expect(orderOfLead(row as typeof lead.$inferSelect)).toMatchObject({
+      reposted: true,
+      repost_notice: 'Клиент запросил ещё отклики 4 дня назад',
+    })
+    await trialScore({ db, ...f }, '950001', RULES_V1, 'plain')
+    expect((await f.calls())[0]?.stdin).toContain(
+      'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя. Сайт пишет: Клиент запросил ещё отклики 4 дня назад',
+    )
+  })
+
   it('FR-ACC-5: a lead that does not exist is no trial', async () => {
     const f = await fakeGateway(db, { scorer: scorerAnswer(70) })
     expect(await trialScore({ db, ...f }, 'nope', RULES_V1, 'plain')).toBeNull()

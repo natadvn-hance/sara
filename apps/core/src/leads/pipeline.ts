@@ -324,7 +324,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     (): Promise<boolean | 'stale'> =>
       d().db.transaction(async (tx) => {
         // Decided before any model call: a stale order costs no sorting or scoring.
-        const stale = isStale(order.published_at, new Date())
+        // A raised order is not cut off (Boris, 25.10): its date is the raise, and the card says it was raised again.
+        const stale = !order.reposted && isStale(order.published_at, new Date())
         const rows = await tx
           .insert(lead)
           .values({

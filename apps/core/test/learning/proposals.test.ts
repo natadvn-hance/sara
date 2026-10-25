@@ -173,6 +173,8 @@ describe('rule proposals', { timeout: 30000 }, () => {
       .map((c) => c.stdin)
     expect(scorerInputs.length).toBeGreaterThan(0)
     expect(scorerInputs.filter((x) => x.includes('Заказ поднят повторно')).length).toBe(2)
+    // The proposer reads the same fact beside Sara's score of that case.
+    expect(await proposerInput()).toContain('Заказ поднят повторно')
   })
 
   it('FR-MIND-3: nothing changes until «Применить»', async () => {

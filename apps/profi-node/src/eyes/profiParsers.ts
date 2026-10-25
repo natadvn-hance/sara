@@ -97,7 +97,8 @@ function boardOrder(it: BoardItem, seenAt: string): OrderSignal | null {
   const title = it.title ?? ''
   const boosted = it.notice?.type === 'BOOSTED'
   // The site's words with plain spaces (it writes «4\u00a0дня\u00a0назад»).
-  const notice = boosted ? (it.notice?.label?.replace(/\u00a0/g, ' ').trim() ?? '') : ''
+  const label = it.notice?.label
+  const notice = boosted && typeof label === 'string' ? label.replace(/\u00a0/g, ' ').trim() : ''
   return {
     t: 'order',
     order: {

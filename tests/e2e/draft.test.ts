@@ -251,7 +251,7 @@ describe('the draft on the card', () => {
 })
 
 describe('an order raised again', () => {
-  it('FR-LEAD-1: it is marked on the card, stored on the lead, and told to the Scorer and the Analyst but not the Sorter', async () => {
+  it('FR-LEAD-7: it is marked on the card, stored on the lead, and told to the Scorer and the Analyst but not the Sorter', async () => {
     const id = orderId()
     await fake.emitOrder({
       order_id: id,
@@ -280,6 +280,52 @@ describe('an order raised again', () => {
     expect(scorer.every(told)).toBe(true)
     expect(analyst.every(told)).toBe(true)
     expect(sorter.some(told)).toBe(false)
+    // The card sent again (a reminder, the one after «Изменить») carries the line too.
+    const [t] = await db.select().from(task).where(eq(task.entityId, id))
+    await app.pipeline.resendCard(t?.id ?? '')
+    await until(() => cards().length === 2)
+    expect(cards()[1]?.text).toContain(
+      'Заказ поднят повторно: Клиент запросил ещё отклики 4 дня назад',
+    )
+  })
+
+  it('FR-LEAD-10: a raised order is not cut off by its age: the raise was days ago, the card still comes; an ordinary old one is stale', async () => {
+    const old = new Date(Date.now() - 100 * 3600_000).toISOString()
+    const raised = orderId()
+    const ordinary = orderId()
+    await fake.emitOrder({
+      order_id: raised,
+      reposted: true,
+      repost_notice: null,
+      published_at: old,
+    })
+    await fake.emitOrder({ order_id: ordinary, published_at: old })
+    await until(() => cards().length === 1)
+    await until(async () => (await leadOf(ordinary))?.status === 'stale')
+    expect(cards()[0]?.text).toContain('Заказ поднят повторно')
+    expect((await leadOf(raised))?.status).toBe('queued')
+  })
+
+  it('FR-LEAD-6: the draft written when Boris wants a dropped raised order is told the same fact', async () => {
+    byRole = { ...byRole, scorer: scorerAnswer(50) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id, reposted: true, repost_notice: null })
+    await until(async () => (await leadOf(id))?.status === 'scored_out')
+    await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
+    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
+    const summary = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))
+    tg.pushPress(111, summary?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data ?? '')
+    await until(() => cards().some((m) => button(m, 'bid') !== ''))
+    const analyst = (await readFile(claudeLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l).stdin as string)
+      .filter((stdin) => stdin.includes('Длина текста'))
+    expect(analyst).toHaveLength(1)
+    expect(analyst[0]).toContain(
+      'Заказ поднят повторно: старый заказ, клиент ещё не нашёл исполнителя.',
+    )
+    expect(cards().find((m) => button(m, 'bid') !== '')?.text).toContain('Заказ поднят повторно')
   })
 
   it('FR-LEAD-1: an ordinary order carries no mark', async () => {
