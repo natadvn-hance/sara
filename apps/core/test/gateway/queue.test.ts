@@ -10,7 +10,7 @@ describe('gateway slots', () => {
       slots.acquire(name.slice(0, 2) as 'P0' | 'P1' | 'P2' | 'P3').then(() => order.push(name)),
     )
     for (let i = 0; i < 5; i++) {
-      slots.release()
+      slots.release('P2')
       await new Promise((r) => setImmediate(r))
     }
     await Promise.all(queued)
@@ -28,12 +28,12 @@ describe('gateway slots', () => {
     })
     await new Promise((r) => setImmediate(r))
     expect(held).toBe(2)
-    slots.release()
+    slots.release('P2')
     held--
     await third
     expect(held).toBe(2)
   })
-  it('FR-ACC-5: P3 calls never take the last free slot', async () => {
+  it('FR-ACC-5: with two slots at most one P3 call holds one, so the other stays for live work', async () => {
     const slots = createSlots(2)
     const started: string[] = []
     const take = (name: string, p: 'P0' | 'P1' | 'P2' | 'P3') =>

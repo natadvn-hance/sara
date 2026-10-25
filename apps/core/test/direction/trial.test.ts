@@ -1,10 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { lead } from '../../src/db/schema'
 import { rulesHash } from '../../src/direction/hash'
 import { seedDirection } from '../../src/direction/store'
-import { ClaudeLimitError, trialScore } from '../../src/direction/trial'
+import { ClaudeStopError, orderOfLead, trialScore } from '../../src/direction/trial'
 import { RULES_V1 } from '../../src/direction/v1'
 import { withoutLimitWait } from '../../src/gateway/gateway'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -73,9 +74,7 @@ describe('trial scores', { timeout: 30000 }, () => {
   it('FR-ACC-5: the Claude limit is an error, not a miss, and is not cached', async () => {
     const f = await fakeGateway(db, { scorer: scorerAnswer(70) }, { FAKE_CLAUDE_MODE: 'limit' })
     const d = { db, gateway: withoutLimitWait(f.gateway), rolesDir: f.rolesDir }
-    await expect(trialScore(d, '950001', RULES_V1, 'plain')).rejects.toBeInstanceOf(
-      ClaudeLimitError,
-    )
+    await expect(trialScore(d, '950001', RULES_V1, 'plain')).rejects.toBeInstanceOf(ClaudeStopError)
     expect(await trialRows()).toHaveLength(0)
   })
 
@@ -99,8 +98,11 @@ describe('trial scores', { timeout: 30000 }, () => {
     expect(rows.rows.map((r) => r.priority)).toEqual(['P3'])
   })
 
-  it('FR-ACC-5: the model never gets the client name', async () => {
+  it('FR-ACC-5: the order a trial scores has no client name, and the model never gets it', async () => {
     const f = await fakeGateway(db, { scorer: scorerAnswer(70) })
+    const [row] = await db.select().from(lead).where(eq(lead.id, '950001'))
+    expect(row?.clientName).toBe('Андрей')
+    expect(orderOfLead(row as typeof lead.$inferSelect).client_name).toBe('')
     await trialScore({ db, ...f }, '950001', RULES_V1, 'plain')
     expect((await f.calls())[0]?.stdin).not.toContain('Андрей')
   })

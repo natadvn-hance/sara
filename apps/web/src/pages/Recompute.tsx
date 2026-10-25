@@ -19,10 +19,19 @@ import { useAction } from '../hooks'
 
 const DECISION = { show: 'показать', drop: 'отсеять' } as const
 const BORIS = { yes: 'ты: взял бы', no: 'ты: не взял бы' } as const
+const STOPPED: Record<string, string> = {
+  limit: 'Подожди, лимит Claude кончился. Попробуй позже.',
+  not_connected: 'Claude не подключён: вставь токен в мастере настройки.',
+}
+const FAILED: Record<string, string> = {
+  nothing_scored:
+    'Не получилось оценить ни одной заявки. Проверь, что Claude подключён, и попробуй ещё раз.',
+  stale: 'Проверка зависла и закрыта. Запусти заново.',
+}
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const base = (accountId: string) => `/api/directions/${encodeURIComponent(accountId)}`
 
-function Item({ i }: { i: RecomputeItem }) {
+function Item({ i, titles }: { i: RecomputeItem; titles: Map<string, string> }) {
   return (
     <li className="grid gap-1 border-t border-border py-3 first:border-t-0">
       <p className="font-medium break-words">{`${i.title}, ${i.city}`}</p>
@@ -37,7 +46,7 @@ function Item({ i }: { i: RecomputeItem }) {
         ) : null}
         <ul className="grid gap-0.5">
           {i.after.axes.map((a) => (
-            <li key={a.id}>{`${a.id}: ${a.score}, ${a.why}`}</li>
+            <li key={a.id}>{`${titles.get(a.id) ?? a.id}: ${a.score}, ${a.why}`}</li>
           ))}
         </ul>
       </WhyBox>
@@ -45,13 +54,17 @@ function Item({ i }: { i: RecomputeItem }) {
   )
 }
 
-function Result({ r }: { r: RecomputeResult }) {
+function Result({ r, titles }: { r: RecomputeResult; titles: Map<string, string> }) {
   const orders = (n: number) => plural(n, ['заявки', 'заявок', 'заявок'])
   return (
     <Card>
       <h2 className="font-display text-lg">Что изменится</h2>
       <p>{`Проверено заявок: ${r.checked}${r.skipped > 0 ? `, не получилось оценить: ${r.skipped}` : ''}`}</p>
-      {r.changed === 0 ? (
+      {r.checked === 0 ? (
+        <p role="alert">
+          Не получилось оценить ни одной заявки. Проверь, что Claude подключён, и попробуй ещё раз.
+        </p>
+      ) : r.changed === 0 ? (
         <p>Решения не изменились ни у одной заявки.</p>
       ) : (
         <>
@@ -65,7 +78,7 @@ function Result({ r }: { r: RecomputeResult }) {
       {r.items.length > 0 ? (
         <ul aria-label="Заявки, у которых изменилось решение">
           {r.items.map((i) => (
-            <Item key={i.leadId} i={i} />
+            <Item key={i.leadId} i={i} titles={titles} />
           ))}
         </ul>
       ) : null}
@@ -91,6 +104,12 @@ export function RecomputePage({ accountId }: { accountId: string }) {
     new URLSearchParams(window.location.search).get('run'),
   )
   const start = useAction()
+  // A link to a run that is not there (an old one) is dropped with a word, and the page is usable again.
+  const [gone, setGone] = useState(false)
+  const forget = () => {
+    setRunId(null)
+    window.history.replaceState(null, '', window.location.pathname)
+  }
   const run = useQuery({
     queryKey: ['run', accountId, runId],
     queryFn: () => api<RunView>(`${base(accountId)}/runs/${runId}`),
@@ -100,6 +119,12 @@ export function RecomputePage({ accountId }: { accountId: string }) {
     refetchInterval: (q) =>
       q.state.data && ['queued', 'running'].includes(q.state.data.state) ? 2000 : false,
   })
+  useEffect(() => {
+    if (run.error instanceof ApiError && run.error.status === 404) {
+      setGone(true)
+      forget()
+    }
+  }, [run.error])
   useEffect(() => {
     for (const q of [direction, onboarding, run])
       if (q.error instanceof ApiError && q.error.status === 401) go('/login')
@@ -129,14 +154,21 @@ export function RecomputePage({ accountId }: { accountId: string }) {
   )
   if (direction.isPending || onboarding.isPending)
     return <main className="mx-auto max-w-2xl px-4 py-6">Загружаю…</main>
-  if (direction.error instanceof ApiError && direction.error.status === 404)
+  if (!direction.data)
     return (
-      <main className="mx-auto grid max-w-2xl gap-4 px-4 py-6">
-        <p>{direction.error.message}</p>
+      <main className="mx-auto grid max-w-2xl justify-items-start gap-4 px-4 py-6">
+        <p role="alert">
+          {direction.error instanceof ApiError && direction.error.status === 404
+            ? direction.error.message
+            : 'Не получилось загрузить. Попробуй ещё раз.'}
+        </p>
+        <Button onClick={() => direction.refetch()}>Повторить</Button>
+        {back}
       </main>
     )
 
   const state = run.data?.state
+  const titles = new Map((direction.data?.active.rules.axes ?? []).map((a) => [a.id, a.title]))
   return (
     <main className="mx-auto grid max-w-2xl gap-4 px-4 py-6">
       {back}
@@ -154,7 +186,11 @@ export function RecomputePage({ accountId }: { accountId: string }) {
             id="rules-source"
             className="min-h-11 w-full min-w-0 rounded-md border border-border bg-surface px-3 text-text"
             value={chosen}
-            onChange={(e) => setSource(e.target.value)}
+            onChange={(e) => {
+              setSource(e.target.value)
+              setGone(false)
+              forget()
+            }}
           >
             {options.length === 0 ? <option value="">Нет других правил</option> : null}
             {options.map((o) => (
@@ -171,7 +207,13 @@ export function RecomputePage({ accountId }: { accountId: string }) {
         ) : null}
         <div>
           <Button
-            disabled={start.busy || chosen === '' || state === 'queued' || state === 'running'}
+            disabled={
+              start.busy ||
+              chosen === '' ||
+              state === 'queued' ||
+              state === 'running' ||
+              (runId !== null && run.isPending)
+            }
             onClick={() =>
               start.run(async () => {
                 const rules = chosen === 'draft' ? 'draft' : { version: Number(chosen.slice(1)) }
@@ -179,6 +221,7 @@ export function RecomputePage({ accountId }: { accountId: string }) {
                   kind: 'recompute',
                   rules,
                 })
+                setGone(false)
                 setRunId(r.id)
                 window.history.replaceState(null, '', `?rules=${chosen}&run=${r.id}`)
               })
@@ -190,7 +233,9 @@ export function RecomputePage({ accountId }: { accountId: string }) {
       </Card>
 
       {run.isPending && runId !== null ? <p>Загружаю…</p> : null}
-      {run.error && !(run.error instanceof ApiError && run.error.status === 401) ? (
+      {gone ? (
+        <p role="alert">Такой проверки нет.</p>
+      ) : run.error && !(run.error instanceof ApiError && run.error.status === 401) ? (
         <p role="alert">Не получилось узнать, как идёт проверка. Обнови страницу.</p>
       ) : null}
       {run.data && (state === 'queued' || state === 'running') ? (
@@ -201,13 +246,15 @@ export function RecomputePage({ accountId }: { accountId: string }) {
       ) : null}
       {state === 'stopped' ? (
         <p role="status">
-          {run.data?.stop_reason === 'limit'
-            ? 'Подожди, лимит Claude кончился. Попробуй позже.'
-            : 'Проверка остановлена. Попробуй ещё раз.'}
+          {STOPPED[run.data?.stop_reason ?? ''] ?? 'Проверка остановлена. Попробуй ещё раз.'}
         </p>
       ) : null}
-      {state === 'failed' ? <p role="alert">Проверка сломалась. Попробуй ещё раз.</p> : null}
-      {state === 'done' && run.data?.result ? <Result r={run.data.result} /> : null}
+      {state === 'failed' ? (
+        <p role="alert">
+          {FAILED[run.data?.stop_reason ?? ''] ?? 'Проверка сломалась. Попробуй ещё раз.'}
+        </p>
+      ) : null}
+      {state === 'done' && run.data?.result ? <Result r={run.data.result} titles={titles} /> : null}
     </main>
   )
 }

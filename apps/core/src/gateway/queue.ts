@@ -4,12 +4,13 @@ export type Priority = RoleMeta['priority']
 
 /**
  * At most `limit` holders at once; a freed slot goes to the highest priority waiting, P0 first, in arrival order.
- * P3 only orders the queue, so it also keeps one slot free: P3 holders never exceed `max(1, limit - 1)`, and the
- * work Boris waits for (P0-P2) never finds every slot taken by a background run.
+ * P3 only orders the queue, so it also holds back: P3 holders never exceed `max(1, limit - 1)`, which with two slots
+ * is one, so the work Boris waits for (P0-P2) never finds every slot taken by background runs. Whoever releases a
+ * slot says which priority held it.
  */
 export function createSlots(limit: number): {
   acquire(p: Priority): Promise<void>
-  release(p?: Priority): void
+  release(p: Priority): void
 } {
   const p3Max = Math.max(1, limit - 1)
   let held = 0

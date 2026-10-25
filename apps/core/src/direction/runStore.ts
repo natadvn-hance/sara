@@ -5,6 +5,10 @@ import { directionRun } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { rulesHash } from './hash'
 
+/** How long a run may go without a sign of life before the next one may start anyway. */
+export const STALE_RUNNING_MIN = 30
+export const STALE_QUEUED_HOURS = 3
+
 export type RunKind = 'recompute' | 'calibration'
 export type RunRow = typeof directionRun.$inferSelect
 
@@ -24,6 +28,12 @@ export async function createRun(
 ): Promise<{ ok: true; id: string } | { ok: false; error: 'busy' }> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('direction_run'))`)
+    // A run whose worker died (a crash, a failed write) must not block every later one: running ones are given
+    // half an hour without a sign of life, ones waiting for their turn a few hours.
+    await tx.execute(sql`
+      update core.direction_run set state = 'failed', stop_reason = 'stale', finished_at = now()
+      where (state = 'running' and updated_at < now() - make_interval(mins => ${STALE_RUNNING_MIN}))
+         or (state = 'queued' and updated_at < now() - make_interval(hours => ${STALE_QUEUED_HOURS}))`)
     const [busy] = await tx
       .select({ id: directionRun.id })
       .from(directionRun)

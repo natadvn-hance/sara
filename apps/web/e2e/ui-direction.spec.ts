@@ -341,6 +341,74 @@ test('FR-ACC-5: the Claude limit shows "Подожди, лимит Claude" and n
   await expect(page.getByRole('progressbar')).toHaveCount(0)
 })
 
+test('FR-ACC-5: a run that could not score anything is not shown as "nothing changed"', async ({
+  page,
+}) => {
+  await stubRuns(page, {
+    ...doneRun,
+    state: 'failed',
+    done: 2,
+    stop_reason: 'nothing_scored',
+    result: null,
+  })
+  await page.goto(RECOMPUTE)
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await expect(page.getByRole('alert')).toContainText('Не получилось оценить ни одной заявки')
+  await expect(page.getByText('Решения не изменились')).toHaveCount(0)
+})
+
+test('FR-ACC-5: a done run with no scored lead says so too', async ({ page }) => {
+  await stubRuns(page, {
+    ...doneRun,
+    result: { ...doneRun.result, checked: 0, skipped: 2, changed: 0, items: [] },
+  })
+  await page.goto(RECOMPUTE)
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await expect(page.getByText('Не получилось оценить ни одной заявки')).toBeVisible()
+  await expect(page.getByText('Решения не изменились')).toHaveCount(0)
+})
+
+test('FR-ACC-5: no Claude token and a dead run each have their own words', async ({ page }) => {
+  await stubRuns(page, { ...doneRun, state: 'stopped', stop_reason: 'not_connected', result: null })
+  await page.goto(RECOMPUTE)
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await expect(
+    page.getByText('Claude не подключён: вставь токен в мастере настройки.'),
+  ).toBeVisible()
+  await page.unroute(`${RUNS}/${RUN_ID}`)
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({ json: { ...doneRun, state: 'failed', stop_reason: 'stale', result: null } }),
+  )
+  await page.reload()
+  await expect(page.getByText('Проверка зависла и закрыта. Запусти заново.')).toBeVisible()
+})
+
+test('FR-ACC-5: a run id that does not exist is dropped with a plain message, and the button is free', async ({
+  page,
+}) => {
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({ status: 404, json: { error: 'Такой проверки нет.' } }),
+  )
+  await page.goto(`${RECOMPUTE}?run=${RUN_ID}`)
+  await expect(page.getByText('Такой проверки нет.')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }),
+  ).toBeEnabled()
+  expect(page.url()).not.toContain('run=')
+})
+
+test('FR-ACC-5: the changed lead shows the axes by their names and the old result goes when other rules are chosen', async ({
+  page,
+}) => {
+  await stubRuns(page, doneRun)
+  await page.goto(RECOMPUTE)
+  await page.getByRole('button', { name: 'Пересчитать на последних 50 заявках' }).click()
+  await page.getByText('Почему так').click()
+  await expect(page.getByText('Качество клиента: 30, Мелкий клиент')).toBeVisible()
+  await page.getByLabel('Какие правила попробовать').selectOption({ index: 1 })
+  await expect(page.getByText('Заявка про сайт')).toHaveCount(0)
+})
+
 test('FR-UI-3: the recompute screen says so when there are no leads or another check is running', async ({
   page,
 }) => {

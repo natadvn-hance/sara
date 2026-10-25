@@ -33,9 +33,12 @@ export async function recomputeProcess(
   run: RunRow,
   leadId: string,
 ): Promise<'ok' | 'miss'> {
-  const base = await trialScore(d, leadId, run.baseRules as DirectionRules, 'plain')
-  const next = await trialScore(d, leadId, run.rules as DirectionRules, 'plain')
-  return base && next ? 'ok' : 'miss'
+  const version = run.scorerVersion ?? undefined
+  const base = await trialScore(d, leadId, run.baseRules as DirectionRules, 'plain', version)
+  // Without the old score there is nothing to compare with: the new rules are not paid for.
+  if (!base) return 'miss'
+  const next = await trialScore(d, leadId, run.rules as DirectionRules, 'plain', version)
+  return next ? 'ok' : 'miss'
 }
 
 type Side = { score: number; decision: 'show' | 'drop' }
@@ -90,6 +93,8 @@ export async function recomputeResult(db: Db, runId: string): Promise<RecomputeR
         inArray(trialTable.rulesHash, [run.baseHash, run.rulesHash]),
         inArray(trialTable.leadId, ids),
         eq(trialTable.mode, 'plain'),
+        // Only the scores of the prompt version this run used: an older prompt's are another judge's.
+        ...(run.scorerVersion === null ? [] : [eq(trialTable.roleVersion, run.scorerVersion)]),
       ),
     )
     .orderBy(trialTable.rulesHash, trialTable.leadId, desc(trialTable.createdAt))
