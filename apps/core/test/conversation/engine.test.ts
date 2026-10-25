@@ -468,6 +468,23 @@ describe('cases in a turn', () => {
     expect((await recall({ ...mind, cases: undefined }, d)).cases).toEqual([])
   })
 
+  it('FR-CONV-3: a message of ours with the words of a descriptive title drops no case, a brand name does', async () => {
+    const d = await chatOf(ASK, { toldCases: [] })
+    d.messages = [
+      {
+        ...(d.messages[0] as Dossier['messages'][number]),
+        // «Сеть кофеен» is what the client of k-case-02 is, «Лиса-Клиник» is the name of k-case-01.
+        text: 'Делали для Лиса-Клиник, а у сети кофеен свой разговор.',
+      },
+      ...d.messages.slice(1),
+    ]
+    expect((await recall(fakeMind(), d)).cases.map((c) => c.id)).toEqual([
+      'k-case-02',
+      'k-case-03',
+      'k-case-04',
+    ])
+  })
+
   it('FR-CONV-3: the Interlocutor input has a «Кейсы» section with each case, or says there is none', async () => {
     const d = await chatOf(ASK)
     const r = await recall(fakeMind(), d)
