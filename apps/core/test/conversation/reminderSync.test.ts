@@ -7,7 +7,7 @@ import { remindWorkflowId, setRemindDeps, syncReminders } from '../../src/conver
 import { getConversation } from '../../src/conversation/store'
 import { storedOf } from '../../src/conversation/sync'
 import type { ConversationRow } from '../../src/conversation/types'
-import { chatMessage, conversation, deal, outbox, task } from '../../src/db/schema'
+import { chatMessage, conversation, convTurn, deal, outbox, task } from '../../src/db/schema'
 import { setSetting } from '../../src/settings/store'
 import { launchDbos, shutdownDbos } from '../../src/workflows/dbos'
 import { chatMsg, fakeMind, stubProfi } from '../helpers/conversation'
@@ -30,10 +30,10 @@ const ours = (id: string, ms: number, text = 'Анна, добрый день! �
   text,
   at: ago(ms),
 })
-const client = (id: string, ms: number): SeedMessage => ({
+const client = (id: string, ms: number, text = 'Спасибо, посмотрю'): SeedMessage => ({
   id,
   side: 'client',
-  text: 'Спасибо, посмотрю',
+  text,
   at: ago(ms),
 })
 
@@ -157,6 +157,59 @@ describe('what the chat as read says about reminders', () => {
     const conv = await seedChat(db, CHAT, [ours('m-1', 2 * HOUR)])
     await sync(conv)
     expect(await statusOf(wf(conv, 'm-1'))).toBeNull()
+  })
+
+  it('FR-CONV-12: after a refusal no process starts, in shadow too, and the trace says why', async () => {
+    for (const refusal of [
+      'Мы выбрали другого исполнителя',
+      'Спасибо, не надо',
+      'Уже не актуально',
+    ]) {
+      await resetDb(db)
+      await setSetting(db, 'pipeline.conversations', true, 'system')
+      const conv = await seedChat(db, CHAT, [
+        ours('m-1', 30 * HOUR),
+        client('m-2', 26 * HOUR, refusal),
+        ours('m-3', 25 * HOUR, 'Понимаю, спасибо что написали. Будем рады помочь в другой раз.'),
+      ])
+      await sync(conv)
+      expect(await statusOf(wf(conv, 'm-3')), refusal).toBeNull()
+      const [t] = await db.select().from(convTurn)
+      expect(t).toMatchObject({
+        id: `${wf(conv, 'm-3')}:refused`,
+        kind: 'reminder',
+        outcome: 'stopped',
+        decisionReason: 'клиент отказался',
+      })
+      // The same chat read again leaves one trace.
+      await sync(conv)
+      expect(await db.select().from(convTurn)).toHaveLength(1)
+      expect((await db.select().from(outbox)).filter((o) => o.kind === 'message')).toHaveLength(0)
+    }
+  })
+
+  it('FR-CONV-12: a refusal also ends the process of an older message of ours', async () => {
+    const conv = await seedChat(db, CHAT, [ours('m-1', 30 * HOUR)])
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-1'))).toBe('PENDING')
+    await addMessages(db, conv.id, CHAT, [
+      client('m-2', 26 * HOUR, 'Мы нашли исполнителя'),
+      ours('m-3', 25 * HOUR, 'Понимаю, всего доброго'),
+    ])
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-1'))).toBe('CANCELLED')
+    expect(await statusOf(wf(conv, 'm-3'))).toBeNull()
+  })
+
+  it('FR-CONV-12: an ordinary thanks of the client is no refusal, the process starts', async () => {
+    const conv = await seedChat(db, CHAT, [
+      ours('m-1', 30 * HOUR),
+      client('m-2', 26 * HOUR, 'Спасибо'),
+      ours('m-3', 25 * HOUR, 'Пожалуйста, на связи'),
+    ])
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-3'))).toBe('PENDING')
+    expect(await db.select().from(convTurn)).toHaveLength(0)
   })
 
   it('FR-CONV-12: turning reminders or conversations off keeps the waiting process, which goes on when they are back', async () => {
