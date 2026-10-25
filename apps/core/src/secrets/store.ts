@@ -1,7 +1,12 @@
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-export type SecretName = 'telegram_bot_token' | 'claude_oauth_token' | 'session_secret'
+export type SecretName =
+  | 'telegram_bot_token'
+  | 'claude_oauth_token'
+  | 'session_secret'
+  /** M5 (ADR-025): the deploy key that may write only to sara-mind. */
+  | 'mind_push_key'
 
 export type SecretStore = {
   get(name: SecretName): Promise<string | null>
