@@ -233,6 +233,8 @@ export async function maybePropose(
       backtest: bt,
       state: 'asked',
       taskId,
+      // The caller's clock, like the day's place above: the next proposal counts surprises explained after this.
+      createdAt: now.toISOString(),
     })
     await tx
       .insert(task)
@@ -269,12 +271,13 @@ export async function onProposalPress(
   taskId: string,
   action: 'apply' | 'drop',
 ): Promise<string> {
+  const now = d.now?.() ?? new Date()
   // All or nothing: the press, the new version and the proposal's state commit together, so a failed write
   // leaves the buttons working.
   const done = await d.db.transaction(async (tx) => {
     const resolved = await tx
       .update(task)
-      .set({ state: 'resolved', resolution: action, resolvedAt: new Date().toISOString() })
+      .set({ state: 'resolved', resolution: action, resolvedAt: now.toISOString() })
       .where(and(eq(task.id, taskId), eq(task.kind, 'rule_proposal'), eq(task.state, 'open')))
       .returning({ proposalId: task.entityId })
     const proposalId = resolved[0]?.proposalId
@@ -284,7 +287,7 @@ export async function onProposalPress(
     const decided = (state: 'applied' | 'declined') =>
       tx
         .update(ruleProposal)
-        .set({ state, decidedAt: new Date().toISOString() })
+        .set({ state, decidedAt: now.toISOString() })
         .where(eq(ruleProposal.id, p.id))
     if (action === 'drop') {
       await decided('declined')
@@ -308,10 +311,6 @@ export async function onProposalPress(
   })
   if (!done) return TEXTS.alreadyDone
   if (done.ask)
-    await askWhy(
-      d,
-      { kind: 'why_decline', entityId: done.p.id, title: done.p.summary },
-      d.now?.() ?? new Date(),
-    )
+    await askWhy(d, { kind: 'why_decline', entityId: done.p.id, title: done.p.summary }, now)
   return done.reply
 }
