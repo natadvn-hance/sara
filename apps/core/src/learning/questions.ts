@@ -195,9 +195,10 @@ export async function openQuestion(
   const edits = recent.filter((q) => (DRAFT_KINDS as string[]).includes(q.kind))
   const whys = recent.filter((q) => !(DRAFT_KINDS as string[]).includes(q.kind))
   if (edits.length === 0) {
-    // «Почему нет?» on two lessons, or on a lesson and a lead: a plain answer is never put on one of them by a guess.
-    const aboutLesson = whys.some((q) => q.kind === 'why_lesson')
-    if (aboutLesson && new Set(whys.map((q) => `${q.kind}:${q.entityId}`)).size > 1)
+    // «Почему нет?» on two lessons, the interview's question and a lead's «почему?», and the like: a plain answer is
+    // never put on one of them by a guess. Lead «почему?» alone keep M2's rule (the latest takes it).
+    const school = whys.some((q) => q.kind === 'why_lesson' || q.kind.startsWith('interview'))
+    if (school && new Set(whys.map((q) => `${q.kind}:${q.entityId}`)).size > 1)
       return { ambiguous: [...whys].reverse() }
     return whys[0] ?? null
   }

@@ -68,4 +68,18 @@ describe('the mind commit routes', () => {
     expect(r.statusCode).toBe(409)
     expect(r.json().error).toContain('потом меняли')
   })
+
+  it('FR-MIND-4: the app decides only interview records, by a real id', async () => {
+    const { app, owner } = await appWith(async () => ({ ok: true, commitId: 'x' }))
+    const post = (id: string, decision: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/interview/lessons/${id}`,
+        headers: { cookie: owner },
+        payload: { decision },
+      })
+    expect((await post('not-an-id', 'yes')).statusCode).toBe(404)
+    expect((await post(newEventId(), 'yes')).statusCode).toBe(404)
+    expect((await post(newEventId(), 'maybe')).statusCode).toBe(400)
+  })
 })

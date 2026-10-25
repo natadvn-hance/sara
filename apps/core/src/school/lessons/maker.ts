@@ -30,23 +30,29 @@ export function makerInput(i: {
   ].join('\n\n')
 }
 
+type MakerInput = {
+  mode: 'edit' | 'interview'
+  clientText: string | null
+  before: string | null
+  after: string
+  question: string | null
+  why: string | null
+  names: string[]
+  priority: Priority
+}
+
+/** A model that did not answer this time (the limit, a timeout, the CLI): the same input may be tried again later. */
+const TRANSIENT = new Set(['limit_reached', 'timeout', 'not_connected', 'cli_failed'])
+
 /**
- * One insight from Boris's edit (haiku), or a knowledge record from his interview answer (sonnet): one call, through
- * the gateway with the client's name hidden, never waiting out a limit. Null on any failure: the caller tries again.
+ * One call of the lesson maker with what went wrong: `retry` when the model did not answer this time, not when it
+ * answered something that does not fit the schema. Haiku for an edit, sonnet for an interview answer; through the
+ * gateway with the client's name hidden, never waiting out a limit.
  */
-export async function makeInsight(
+export async function callMaker(
   gw: Gateway,
-  i: {
-    mode: 'edit' | 'interview'
-    clientText: string | null
-    before: string | null
-    after: string
-    question: string | null
-    why: string | null
-    names: string[]
-    priority: Priority
-  },
-): Promise<LessonMakerOutput | null> {
+  i: MakerInput,
+): Promise<{ ok: true; output: LessonMakerOutput } | { ok: false; retry: boolean }> {
   const r = await gw.call('lesson-maker', makerInput(i), LessonMakerOutput, {
     priority: i.priority,
     limitWaitMs: 0,
@@ -54,5 +60,11 @@ export async function makeInsight(
     redact: { names: i.names, restore: false },
     ...(i.mode === 'interview' ? { model: 'sonnet' as const } : {}),
   })
+  return r.ok ? { ok: true, output: r.output } : { ok: false, retry: TRANSIENT.has(r.errorClass) }
+}
+
+/** One insight from Boris's edit, or null on any failure: the caller tries again. */
+export async function makeInsight(gw: Gateway, i: MakerInput): Promise<LessonMakerOutput | null> {
+  const r = await callMaker(gw, i)
   return r.ok ? r.output : null
 }

@@ -108,6 +108,11 @@ export const SCHOOL_TEXTS = {
   interviewFixAsked: 'Жду поправку',
   interviewClosed: 'На этот вопрос уже есть ответ',
   interviewNotUnderstood: 'Не поняла ответ, скажи, пожалуйста, иначе',
+  interviewAskAgain: (q: string) =>
+    `❓ Не поняла ответ. Скажи, пожалуйста, иначе:\n${q}\nОтветь на это сообщение текстом или голосом.`,
+  interviewFixAgain: 'Не поняла поправку. Что поправить? Ответь на это сообщение.',
+  interviewFixFailed: 'Не получилось спросить, нажми «Поправить» ещё раз',
+  interviewTaken: 'На этот вопрос ответ уже записывается',
   byFiveButton: 'Посмотреть по 5',
   notNowButton: 'Не сейчас',
   historyLater: 'Хорошо, спрошу через неделю',
