@@ -122,7 +122,7 @@ export function RecomputePage({ accountId }: { accountId: string }) {
       if (q.error instanceof ApiError && q.error.status === 401) go('/login')
   }, [direction.error, onboarding.error, run.error, direction, onboarding, run])
 
-  const draft = onboarding.data?.onboarding?.rules ? true : false
+  const draft = !!onboarding.data?.onboarding?.rules
   const versions = (direction.data?.versions ?? []).filter((v) => !v.active)
   const options = [
     ...(draft ? [{ value: 'draft', label: 'Черновик настройки' }] : []),
