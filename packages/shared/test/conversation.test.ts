@@ -91,6 +91,7 @@ describe('M4 contracts', () => {
       'move',
       'urgent',
       'why',
+      'case',
       'text',
       'fact_ids',
       'example_ids',
@@ -101,6 +102,49 @@ describe('M4 contracts', () => {
       InterlocutorOutput.safeParse({ ...answer, fact_ids: Array(13).fill('k-a') }).success,
     ).toBe(false)
     expect(InterlocutorOutput.safeParse({ ...answer, tone: 'sad' }).success).toBe(false)
+  })
+
+  it('FR-CONV-4: the case of an answer is optional, one of four moments, and an old answer still reads', () => {
+    // An answer from before cases has no `case`.
+    expect(InterlocutorOutput.safeParse(answer).data?.case).toBeUndefined()
+    const chosen = { moment: 'asked', case_id: 'k-case-01', why: 'Клиент спросил о примерах' }
+    expect(InterlocutorOutput.safeParse({ ...answer, case: chosen }).success).toBe(true)
+    expect(
+      InterlocutorOutput.safeParse({
+        ...answer,
+        case: { moment: null, case_id: null, why: null },
+      }).success,
+    ).toBe(true)
+    for (const moment of ['asked', 'order_asks', 'doubt', 'same_problem'])
+      expect(InterlocutorOutput.safeParse({ ...answer, case: { ...chosen, moment } }).success).toBe(
+        true,
+      )
+    expect(
+      InterlocutorOutput.safeParse({ ...answer, case: { ...chosen, moment: 'always' } }).success,
+    ).toBe(false)
+    expect(
+      InterlocutorOutput.safeParse({ ...answer, case: { ...chosen, why: 'x'.repeat(301) } })
+        .success,
+    ).toBe(false)
+    // The Checker's case notes default to none.
+    expect(
+      CheckerOutput.parse({ unsupported: [], contradicts_boris: null, robotic: [], promises: [] })
+        .case,
+    ).toEqual([])
+    expect(
+      CheckerOutput.safeParse({
+        unsupported: [],
+        contradicts_boris: null,
+        robotic: [],
+        promises: [],
+        case: Array(6).fill('x'),
+      }).success,
+    ).toBe(false)
+    for (const id of ['case.unknown', 'case.closed'])
+      expect(CHECK_SEVERITY[id as 'case.unknown']).toBe('S1')
+    for (const id of ['case.no_moment', 'case.repeat', 'case.many', 'checker.case'])
+      expect(CHECK_SEVERITY[id as 'case.repeat']).toBe('S2')
+    for (const id of ['case.ad', 'case.link']) expect(CHECK_SEVERITY[id as 'case.ad']).toBe('S3')
   })
 
   it('FR-CONV-4: the Checker, reminder and judge answers have their shapes', () => {

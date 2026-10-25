@@ -1,5 +1,5 @@
 import type { ChatMessage, InterlocutorOutput } from '@sara/shared'
-import type { MindHit, MindSearch } from '../../src/conversation/types'
+import type { CaseHit, MindHit, MindSearch } from '../../src/conversation/types'
 import type { ProfiClient } from '../../src/profi/client'
 
 /** A Profi client whose chat is an array the test changes between reads. */
@@ -62,10 +62,56 @@ export const mindHit = (id: string, type: MindHit['type'], o: Partial<MindHit> =
   ...o,
 })
 
+/** An invented case of Hance, in the format the case search returns it. */
+export const caseOf = (
+  id: string,
+  title: string,
+  o: Partial<CaseHit> & { role?: string } = {},
+): CaseHit => {
+  const { role = 'Под ключ, команда из двух человек.', ...rest } = o
+  const summary = rest.summary ?? `Сделали для ${title} сайт и настроили рекламу.`
+  const result = rest.result === undefined ? 'Заявок стало в полтора раза больше.' : rest.result
+  const showRules = rest.showRules ?? ['Компанию можно называть.']
+  return {
+    ...mindHit(id, 'knowledge', {
+      title,
+      body: [
+        `# ${title}`,
+        summary,
+        `## Роль и масштаб\n${role}`,
+        ...(result ? [`## Результат\n${result}`] : []),
+        `## Как показывать клиенту\n${showRules.map((r) => `- ${r}`).join('\n')}`,
+      ].join('\n\n'),
+    }),
+    summary,
+    result,
+    showRules,
+    nameOpen: true,
+    numbersOpen: false,
+    ...rest,
+  }
+}
+
+/** Invented cases of the fake mind: the first fits a clinic, the others do not. */
+export const INVENTED_CASES: CaseHit[] = [
+  caseOf('k-case-01', 'Лиса-Клиник: онлайн-запись, Краснодар'),
+  caseOf('k-case-02', 'Сеть кофеен: реклама, Сочи', {
+    showRules: ['Компанию не называть: NDA.'],
+    nameOpen: false,
+  }),
+  caseOf('k-case-03', 'Окна-Мастер: сайт и заявки, Москва', {
+    result: '120 заявок за первый месяц.',
+    showRules: ['Компанию можно называть.', 'Цифры из «Результата» можно называть как есть.'],
+    numbersOpen: true,
+  }),
+  caseOf('k-case-04', 'Школа танцев: стратегия маркетинга, Казань'),
+]
+
 /** A small mind in memory: one understanding, one fact, two examples (one not Boris's), a stage procedure. */
 export function fakeMind(): MindSearch {
   return {
     version: async () => 'mind-v1',
+    cases: async (q) => INVENTED_CASES.filter((c) => !q.exclude?.includes(c.id)).slice(0, q.limit),
     search: async (q) => {
       if (q.types.includes('understanding')) return [mindHit('u-process', 'understanding')]
       if (q.types.includes('knowledge'))

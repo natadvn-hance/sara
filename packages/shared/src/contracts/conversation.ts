@@ -80,8 +80,25 @@ export const CONV_STAGES = [
 export type ConvStage = (typeof CONV_STAGES)[number]
 
 /**
+ * The four signals that call for a case of Hance (docs/product/cases-in-negotiation.md, section 2): the client asked
+ * for examples, the order asks for cases, a doubt or objection (price, term, «will it work for us»), the client
+ * described a problem that matches a case.
+ */
+export const CASE_MOMENTS = ['asked', 'order_asks', 'doubt', 'same_problem'] as const
+export type CaseMoment = (typeof CASE_MOMENTS)[number]
+
+/** The case the Interlocutor chose for this reply: none (all null), or an id from the turn's «Кейсы» with its moment. */
+export const CaseChoice = z.object({
+  moment: z.enum(CASE_MOMENTS).nullable(),
+  case_id: z.string().nullable(),
+  why: z.string().max(300).nullable(),
+})
+export type CaseChoice = z.infer<typeof CaseChoice>
+
+/**
  * The Interlocutor's answer (FR-CONV-3, steps 3 and 4 in one call). The fields come in the order the model thinks:
- * what was heard, the type of question, topic and tone, the move and why, the text, and the mind ids it rests on.
+ * what was heard, the type of question, topic and tone, the move and why, the case, the text, and the mind ids it
+ * rests on.
  */
 export const InterlocutorOutput = z.object({
   heard: z.object({ said: z.string().max(600), behind: z.string().max(600) }),
@@ -91,6 +108,8 @@ export const InterlocutorOutput = z.object({
   move: z.enum(MOVES),
   urgent: z.boolean(),
   why: z.string().max(300),
+  /** A case of Hance told in the text, with the moment that called for it (cases in a conversation). */
+  case: CaseChoice.optional(),
   text: z.string().max(1500).nullable(),
   fact_ids: z.array(z.string()).max(12),
   example_ids: z.array(z.string()).max(8),
@@ -106,6 +125,8 @@ export const CheckerOutput = z.object({
   contradicts_boris: z.string().max(300).nullable(),
   robotic: notes,
   promises: notes,
+  /** Notes on the case told in the draft: not by the situation, sounds like an ad, not tied to the client's task. */
+  case: notes.default([]),
 })
 export type CheckerOutput = z.infer<typeof CheckerOutput>
 
@@ -146,6 +167,15 @@ export const CHECK_SEVERITY = {
   'checker.contradicts': 'S1',
   'checker.robotic': 'S3',
   'checker.promises': 'S1',
+  // Cases in a conversation: an invented case or a closed name or number is a lie or a leak (S1).
+  'case.unknown': 'S1',
+  'case.no_moment': 'S2',
+  'case.repeat': 'S2',
+  'case.many': 'S2',
+  'case.closed': 'S1',
+  'case.ad': 'S3',
+  'case.link': 'S3',
+  'checker.case': 'S2',
 } as const satisfies Record<string, 'S1' | 'S2' | 'S3'>
 export type CheckId = keyof typeof CHECK_SEVERITY
 export const CHECK_IDS = Object.keys(CHECK_SEVERITY) as CheckId[]

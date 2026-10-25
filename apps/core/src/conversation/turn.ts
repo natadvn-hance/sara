@@ -1,5 +1,5 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { newEventId, type Topic } from '@sara/shared'
+import { type CaseChoice, newEventId, type Topic } from '@sara/shared'
 import { asc, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account, chatMessage, convTurn, mindGap } from '../db/schema'
@@ -12,7 +12,14 @@ import { planTurn } from './engine'
 import { applyOwnerRule, getConversation, updateConversation } from './store'
 import { storedOf, syncChat } from './sync'
 import { humanPauseMs, quietLeftSeconds } from './timing'
-import type { ConversationRow, Decision, MindSearch, PolicySettings, StoredMessage } from './types'
+import type {
+  CaseHit,
+  ConversationRow,
+  Decision,
+  MindSearch,
+  PolicySettings,
+  StoredMessage,
+} from './types'
 
 export type TurnDeps = {
   db: Db
@@ -211,6 +218,14 @@ async function policySettings(db: Db, accountId: string): Promise<PolicySettings
   }
 }
 
+/** The case of a reply for the trace: its moment, id, why and title; null when the reply tells none of the offered. */
+function caseTrace(choice: CaseChoice | undefined, offered: CaseHit[]) {
+  const hit = choice?.case_id ? offered.find((c) => c.id === choice.case_id) : undefined
+  return hit && choice
+    ? { moment: choice.moment, case_id: hit.id, why: choice.why, title: hit.title }
+    : null
+}
+
 /** Steps 2-6 in one DBOS step: the model call is not repeated by a replay. Every failure becomes a draft. */
 async function planStep(turnId: string, conversationId: string, anchor: string): Promise<Planned> {
   const { db, gateway, mind, profi } = d()
@@ -228,6 +243,7 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
       night: settings.night,
       profi,
       anchor,
+      turnId,
     })
     await stamp(turnId, 'recalled', { messageIds: dossier.turnMessageIds })
     const plan = await planTurn(
@@ -243,6 +259,7 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
         examples: plan.recall.examples.map((h) => h.id),
         procedure: plan.recall.procedure?.id ?? null,
         always: plan.recall.always.map((h) => h.id),
+        cases: plan.recall.cases.map((h) => h.id),
       },
       understanding: out
         ? {
@@ -251,6 +268,8 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
             topic: out.topic,
             tone: out.tone,
             why: out.why,
+            // The case the reply tells (only one the turn was offered), with why and its title for the card.
+            case: caseTrace(out.case, plan.recall.cases),
           }
         : null,
       move: out?.move ?? null,

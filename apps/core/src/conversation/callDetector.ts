@@ -62,7 +62,11 @@ const CORE_AGREEMENT = new Set([
 ])
 const MAX_AGREEMENT_WORDS = 6
 
-const wordsOf = (s: string) => s.toLowerCase().replace(/ё/g, 'е').match(/[\p{L}\p{N}]+/gu) ?? []
+const wordsOf = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .match(/[\p{L}\p{N}]+/gu) ?? []
 
 /**
  * «Да», «хорошо», «давайте», «ок», «удобно» right after our message that proposed a call: the client agrees to the

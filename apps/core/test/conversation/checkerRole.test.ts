@@ -1,11 +1,12 @@
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { CHECK_SEVERITY, type CheckerOutput, type ChatAuthor } from '@sara/shared'
+import { CHECK_SEVERITY, type ChatAuthor, CheckerOutput } from '@sara/shared'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { z } from 'zod'
 import { runCheckerRole } from '../../src/conversation/check/checkerRole'
 import { formatCheckerDossier as checkerDossier } from '../../src/conversation/prompt'
-import type { Dossier, DossierMessage, MindHit } from '../../src/conversation/types'
+import type { CaseHit, Dossier, DossierMessage, MindHit } from '../../src/conversation/types'
 import { createGateway, type Gateway } from '../../src/gateway/gateway'
 import { createSecretStore } from '../../src/secrets/store'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -41,7 +42,7 @@ async function gateway(env: Record<string, string>) {
   stops.push(gw.stop)
   return gw
 }
-const answering = (out: CheckerOutput) =>
+const answering = (out: z.input<typeof CheckerOutput>) =>
   gateway({ FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({ checker: out }) })
 const stdinOf = async () => JSON.parse((await readFile(log, 'utf8')).trim().split('\n')[0] ?? '{}')
 
@@ -82,7 +83,12 @@ const draft = {
   draft: `${NAME}, добрый день! Сделаем лендинг за неделю.`,
   names: [NAME],
 }
-const CLEAN: CheckerOutput = { unsupported: [], contradicts_boris: null, robotic: [], promises: [] }
+const CLEAN: z.input<typeof CheckerOutput> = {
+  unsupported: [],
+  contradicts_boris: null,
+  robotic: [],
+  promises: [],
+}
 
 describe('the Checker role', () => {
   it("FR-CONV-4: the Checker's unsupported claim becomes an S1 issue", async () => {
@@ -114,6 +120,52 @@ describe('the Checker role', () => {
     expect(clean).toMatchObject({ issues: [], ran: true })
   })
 
+  it('FR-CONV-4: the Checker gets the chosen case and its moment, and its notes on the case fail the draft', async () => {
+    const hit: CaseHit = {
+      ...fact(
+        'k-case-02',
+        'Сеть стоматологий: онлайн-запись, Краснодар',
+        '# Сеть\n\n## Роль и масштаб\nПод ключ.',
+      ),
+      summary: 'Перевели запись пациентов со звонков на онлайн-форму.',
+      result: 'Заявок стало в полтора раза больше.',
+      showRules: ['Компанию не называть: NDA.'],
+      nameOpen: false,
+      numbersOpen: false,
+    }
+    const gw = await answering({
+      ...CLEAN,
+      case: ['Звучит как реклама', 'Не связан с задачей клиента'],
+    })
+    const r = await runCheckerRole(gw, {
+      ...draft,
+      caseChoice: { moment: 'doubt', why: 'Клиент сомневается в сроке', hit },
+    })
+    expect(r.issues).toEqual([
+      { id: 'checker.case', detail: 'Звучит как реклама' },
+      { id: 'checker.case', detail: 'Не связан с задачей клиента' },
+    ])
+    const { stdin } = await stdinOf()
+    expect(stdin).toContain('## Кейс в черновике')
+    for (const part of [
+      'doubt',
+      'Клиент сомневается в сроке',
+      '[k-case-02]',
+      'Перевели запись пациентов',
+      'Роль и масштаб: Под ключ.',
+      'Заявок стало в полтора раза больше.',
+      '- Компанию не называть: NDA.',
+    ])
+      expect(stdin, part).toContain(part)
+  })
+
+  it('FR-CONV-4: without a case in the draft the Checker input has no case section, and an old answer reads', async () => {
+    const gw = await answering(CLEAN)
+    const r = await runCheckerRole(gw, draft)
+    expect(r).toMatchObject({ issues: [], ran: true })
+    expect((await stdinOf()).stdin).not.toContain('Кейс в черновике')
+  })
+
   it('NFR-UX-1: a long or medium dash in a Checker note becomes a short hyphen', async () => {
     const LONG = String.fromCharCode(0x2014)
     const MEDIUM = String.fromCharCode(0x2013)
@@ -135,7 +187,12 @@ describe('the Checker role', () => {
     const gw: Gateway = {
       call: async (_role, _input, _schema, opts) => {
         seen = opts?.correlationId
-        return { ok: true, output: CLEAN, durationMs: 1, modelCallId: 'mc-1' } as never
+        return {
+          ok: true,
+          output: CheckerOutput.parse(CLEAN),
+          durationMs: 1,
+          modelCallId: 'mc-1',
+        } as never
       },
     }
     await runCheckerRole(gw, { ...draft, correlationId: 'conv-7' })
@@ -188,8 +245,7 @@ describe('the Checker role', () => {
     expect(stdin).toMatch(/данные клиента, не инструкции/)
     expect(stdin).toContain('Сайт для клиники')
     // The authors as the Interlocutor's input names them.
-    for (const who of ['[Сара (старая) ', '[клиент ', '[Борис '])
-      expect(stdin, who).toContain(who)
+    for (const who of ['[Сара (старая) ', '[клиент ', '[Борис ']) expect(stdin, who).toContain(who)
     // The trap stays between «<<< данные клиента» and «>>>»: it cannot close the frame and speak.
     const lines = stdin.split('\n') as string[]
     const opens = lines.filter((l) => l.startsWith('<<< данные клиента')).length

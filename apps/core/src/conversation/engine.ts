@@ -1,10 +1,13 @@
 import { InterlocutorOutput } from '@sara/shared'
 import { agreesToCallProposal, detectCallRequest } from './callDetector'
+import { caseLink } from './caseLink'
+import { namesCase } from './check/caseChecks'
 import { runCheckerRole } from './check/checkerRole'
 import { checkReplyText } from './check/codeChecks'
 import { decide } from './policy'
 import { formatCheckerDossier, formatInterlocutorInput } from './prompt'
 import type {
+  CaseHit,
   CheckIssue,
   Dossier,
   EngineDeps,
@@ -31,16 +34,47 @@ const clientTurn = (d: Dossier) => {
 
 const uniq = (hits: MindHit[]) => [...new Map(hits.map((h) => [h.id, h])).values()]
 
+/** How many cases a turn is offered, and how many the search is asked for before the told ones are dropped. */
+const CASES_OFFERED = 3
+const CASES_FETCHED = 8
+
+/**
+ * The cases of Hance for a turn (cases in a conversation): found by the client's words and the order, never one the
+ * chat already heard, by its trace or because a message of our side names it. Without the case search (the stub mind)
+ * there are none, and a search that fails costs the turn only its cases.
+ */
+async function casesFor(mind: MindSearch, d: Dossier, said: string): Promise<CaseHit[]> {
+  if (!mind.cases) return []
+  const toldIds = (d.toldCases ?? []).map((c) => c.id)
+  const ours = d.messages.filter((m) => m.side === 'specialist').map((m) => m.text)
+  const text = [said, d.order?.title, d.order?.text].filter(Boolean).join('\n')
+  try {
+    const found = await mind.cases({
+      text,
+      scope: d.scope,
+      limit: CASES_FETCHED,
+      exclude: toldIds,
+    })
+    return found
+      .filter((c) => !toldIds.includes(c.id) && !ours.some((m) => namesCase(m, c.title)))
+      .slice(0, CASES_OFFERED)
+  } catch (e) {
+    console.error('case search failed', e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
 /** Step 2: the mind a turn needs, by what the client wrote (M4 design 5.3). */
 export async function recall(mind: MindSearch, d: Dossier): Promise<Recall> {
   const said = clientTurn(d)
   const text = [said, d.order?.title ?? ''].join('\n')
-  const [mindVersion, understanding, knowledge, procedure, always] = await Promise.all([
+  const [mindVersion, understanding, knowledge, procedure, always, cases] = await Promise.all([
     mind.version(),
     mind.search({ text: said, scope: d.scope, types: ['understanding'], limit: 6 }),
     mind.search({ text, scope: d.scope, types: ['knowledge'], limit: 8 }),
     mind.byStage(d.stage, d.scope),
     mind.byIds(ALWAYS),
+    casesFor(mind, d, said),
   ])
   let examples = (
     await mind.search({
@@ -61,17 +95,22 @@ export async function recall(mind: MindSearch, d: Dossier): Promise<Recall> {
     })
     examples = uniq([...examples, ...more.filter((e) => e.exampleBoris)]).slice(0, 5)
   }
-  return { mindVersion, understanding, knowledge, examples, procedure, always }
+  return { mindVersion, understanding, knowledge, examples, procedure, always, cases }
 }
 
-const recalledIds = (r: Recall) =>
+/** The ids the reply may cite: every record of the turn, and the cases it was offered. */
+const recalledIds = (r: Recall, cases: CaseHit[]) =>
   [
     ...r.always,
     ...(r.procedure ? [r.procedure] : []),
     ...r.understanding,
     ...r.knowledge,
     ...r.examples,
+    ...cases,
   ].map((h) => h.id)
+
+/** A fault of the case in a reply: the rewrite after one may not tell a case at all. */
+const isCaseIssue = (x: CheckIssue) => x.id.startsWith('case.') || x.id === 'checker.case'
 
 /**
  * Steps 2-6 of a turn (FR-CONV-3): recall, understand and say in one Interlocutor call, check by code and by the
@@ -88,7 +127,7 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     detectCallRequest(said) !== null ||
     agreesToCallProposal(said, before?.side === 'specialist' ? before.text : null)
   const banned = await deps.mind.bannedPhrases()
-  const ids = recalledIds(r)
+  const told = d.toldCases ?? []
   const knowledgeTexts = Object.fromEntries(r.knowledge.map((k) => [k.id, k.body]))
   const ourPrevious = d.messages.filter((m) => m.side === 'specialist').map((m) => m.text)
   const borisWords = d.messages.filter((m) => m.author === 'boris').map((m) => m.text)
@@ -103,11 +142,15 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
   let failure: string | null = null
   let checkerRan = false
   let attempts = 0
+  // A failed case check sends the rewrite out with no case offered and none allowed.
+  let withoutCase = false
+  let chosen: CaseHit | undefined
   while (attempts < MAX_ATTEMPTS) {
     attempts++
+    const offered = withoutCase ? [] : r.cases
     const res = await deps.gateway.call(
       'interlocutor',
-      formatInterlocutorInput(d, r, issues),
+      formatInterlocutorInput(d, { ...r, cases: offered }, issues, withoutCase),
       InterlocutorOutput,
       { correlationId: d.conversationId, redact: { names: input.names } },
     )
@@ -117,18 +160,22 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
       output = null
       break
     }
-    // Only a reply carries a text; one written with another move is never checked, so it is never shown or kept.
-    output = res.output.move === 'reply' ? res.output : { ...res.output, text: null }
+    // Only a reply carries a text and a case; with another move they are never checked, so never shown or kept.
+    output =
+      res.output.move === 'reply' ? res.output : { ...res.output, text: null, case: undefined }
+    const choice = output.case ?? null
+    chosen = choice?.case_id ? offered.find((c) => c.id === choice.case_id) : undefined
     issues = checkReplyText({
       text: output.text,
       move: output.move,
       factIds: output.fact_ids,
-      recalledIds: ids,
+      recalledIds: recalledIds(r, offered),
       knowledgeTexts,
       newDay: d.newDay,
       clientTurnText: said,
       ourPrevious,
       bannedPhrases: banned,
+      cases: { offered, told, choice },
     })
     if (output.move === 'reply' && output.text) {
       const checker = await runCheckerRole(deps.gateway, {
@@ -140,12 +187,21 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
         draft: output.text,
         names: input.names,
         correlationId: d.conversationId,
+        caseChoice: chosen
+          ? { moment: choice?.moment ?? null, why: choice?.why ?? null, hit: chosen }
+          : undefined,
       })
       checkerRan = checker.ran
       if (checker.modelCallId) modelCallIds.push(checker.modelCallId)
       issues = [...issues, ...checker.issues]
     }
     if (issues.length === 0) break
+    withoutCase = issues.some(isCaseIssue)
+  }
+  // The link of a case is the code's: put after the checks, when the client asked and the case allows it.
+  if (issues.length === 0 && output?.move === 'reply' && output.text && chosen) {
+    const link = caseLink(chosen, output.case?.moment ?? null)
+    if (link) output = { ...output, text: `${output.text}\n\n${link}` }
   }
   const decision = decide({
     plan: { output, issues, attempts, checkerRan },

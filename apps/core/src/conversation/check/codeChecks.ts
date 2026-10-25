@@ -1,4 +1,5 @@
 import type { CheckInput, CheckIssue } from '../types'
+import { caseIssues } from './caseChecks'
 import {
   AI_NAME,
   AI_SELF_PATTERNS,
@@ -251,6 +252,11 @@ function factIssues(i: CheckInput, text: string): CheckIssue[] {
   const allowed = new Set<string>()
   const allowedTokens = new Set<string>()
   const sources = [...i.factIds.map((id) => i.knowledgeTexts[id] ?? ''), i.clientTurnText]
+  // The numbers of the case the reply tells are its own, when the show rules open them (case.closed checks the rest).
+  const chosen = i.cases?.choice?.case_id
+    ? i.cases.offered.find((o) => o.id === i.cases?.choice?.case_id)
+    : undefined
+  if (chosen?.numbersOpen) sources.push(`${chosen.summary}\n${chosen.result ?? ''}`)
   for (const s of sources) {
     const { rest, found } = cutOut(s, true)
     for (const n of numbersIn(rest)) allowed.add(n.key)
@@ -348,6 +354,10 @@ function promiseIssues(text: string): CheckIssue[] {
   return []
 }
 
+/** The numbers of a text as keys («50 тысяч» is 50000), phones, times and dates left out. */
+const numberKeys = (s: string): Set<string> =>
+  new Set(numbersIn(cutOut(s, true).rest).map((n) => n.key))
+
 /** The code checks of a reply (FR-CONV-4, M4 design 5.6): every problem found, each with a reason Boris can read. */
 export function checkReplyText(i: CheckInput): CheckIssue[] {
   const text = i.text?.trim() ?? ''
@@ -360,5 +370,6 @@ export function checkReplyText(i: CheckInput): CheckIssue[] {
     ...(DASHES.test(text) ? [{ id: 'dash' as const, detail: 'длинное или среднее тире' }] : []),
     ...roboticIssues(i, text),
     ...promiseIssues(text),
+    ...caseIssues(i, text, numberKeys),
   ]
 }

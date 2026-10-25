@@ -38,7 +38,12 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
         )
     : []
   const byId = new Map(words.map((w) => [w.id, w.text]))
-  const understanding = (t.understanding as { tone?: Tone } | null) ?? null
+  const understanding =
+    (t.understanding as {
+      tone?: Tone
+      case?: { case_id?: string | null; why?: string | null; title?: string } | null
+    } | null) ?? null
+  const told = understanding?.case
   return {
     name: l?.clientName || null,
     orderTitle: l?.title ?? null,
@@ -53,6 +58,7 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
     tone: understanding?.tone ?? null,
     factIds: (t.factIds as string[]) ?? [],
     examples: ((t.exampleIds as string[]) ?? []).length,
+    caseUsed: told?.case_id ? { title: told.title || told.case_id, why: told.why ?? null } : null,
   }
 }
 

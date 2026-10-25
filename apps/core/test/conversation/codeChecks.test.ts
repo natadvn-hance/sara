@@ -1,4 +1,4 @@
-import { CHECK_IDS } from '@sara/shared'
+import { type CaseChoice, CHECK_IDS } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
 import {
   checkReplyText,
@@ -6,7 +6,7 @@ import {
   isNewMoscowDay,
   startsWithGreeting,
 } from '../../src/conversation/check/codeChecks'
-import type { CheckInput } from '../../src/conversation/types'
+import type { CaseHit, CheckInput } from '../../src/conversation/types'
 
 const LONG = String.fromCharCode(0x2014)
 const MEDIUM = String.fromCharCode(0x2013)
@@ -416,7 +416,11 @@ describe('the code checks of a reply', () => {
   it('FR-CONV-4: only a markdown heading, bold or code is markup, a hashtag is not', () => {
     for (const text of ['# Итог', 'Тема:\n## Итог\nТекст', 'Это **важно**.', 'Поле `title`.'])
       expect(ids({ text }), text).toEqual(['robotic.markup'])
-    for (const text of ['Хештег #кофейня подойдёт.', 'Подпишем #кофейня и #чай.', 'Знак # в конце #'])
+    for (const text of [
+      'Хештег #кофейня подойдёт.',
+      'Подпишем #кофейня и #чай.',
+      'Знак # в конце #',
+    ])
       expect(ids({ text }), text).toEqual([])
   })
 
@@ -464,5 +468,196 @@ describe('the code checks of a reply', () => {
       ['dash', 'facts.none', 'facts.numbers', 'greeting.missing', 'robotic.phrase'].sort(),
     )
     for (const x of issues) expect(CHECK_IDS).toContain(x.id)
+  })
+})
+
+describe('cases in a reply', () => {
+  const caseHit = (o: Partial<CaseHit> & Pick<CaseHit, 'id' | 'title'>): CaseHit => ({
+    type: 'knowledge',
+    scope: 'shared',
+    body: '',
+    topic: null,
+    tones: [],
+    stages: [],
+    exampleClient: null,
+    exampleBoris: null,
+    rank: 1,
+    summary: '',
+    result: null,
+    showRules: [],
+    nameOpen: true,
+    numbersOpen: false,
+    ...o,
+  })
+  // Invented cases in the format of the mind's case records.
+  const CEILINGS = caseHit({
+    id: 'k-case-01',
+    title: 'Потолок-Арт: подвесные потолки, Санкт-Петербург',
+    summary: 'Построили для Потолок-Арт поток заявок через сайт и Яндекс Директ.',
+    result: '90 заявок за первый месяц при бюджете рекламы 40 000 ₽.',
+    showRules: ['Компанию и ссылку можно называть.', 'Цифры из «Результата» можно называть.'],
+    numbersOpen: true,
+  })
+  const CLINIC = caseHit({
+    id: 'k-case-02',
+    title: 'Сеть стоматологий: онлайн-запись, Краснодар',
+    summary: 'Перевели запись пациентов со звонков на онлайн-форму.',
+    result: 'Заявок стало в полтора раза больше, 150 записей за два месяца.',
+    showRules: ['Компанию не называть: NDA.'],
+    nameOpen: false,
+  })
+  const SKYROOM = caseHit({
+    id: 'k-case-03',
+    title: 'SkyRoom: аренда студий, Москва',
+    summary: 'Собрали сайт аренды студий.',
+    showRules: ['Компанию не называть: NDA.'],
+    nameOpen: false,
+  })
+  const DANCE = caseHit({
+    id: 'k-case-04',
+    title: 'Школа танцев: стратегия маркетинга',
+    summary: 'Разработали стратегию маркетинга для школы танцев.',
+    showRules: ['Компанию можно называть.'],
+  })
+  const ASKED = { moment: 'asked', case_id: null, why: 'Клиент спросил о примерах' } as const
+  const choose = (hit: CaseHit, moment: CaseChoice['moment'] = 'asked'): CaseChoice => ({
+    moment,
+    case_id: hit.id,
+    why: 'Клиент спросил о примерах',
+  })
+  const withCases = (
+    text: string,
+    c: { offered?: CaseHit[]; told?: { id: string; title: string }[]; choice?: CaseChoice | null },
+    over: Partial<CheckInput> = {},
+  ) =>
+    ids({
+      text,
+      cases: { offered: c.offered ?? [], told: c.told ?? [], choice: c.choice ?? null },
+      ...over,
+    })
+
+  it('FR-CONV-4: a case not in the library fails as an invented case', () => {
+    // An id that is not among the cases of this turn.
+    expect(
+      withCases('Делали похожее для клиники.', {
+        offered: [CEILINGS],
+        choice: { ...ASKED, case_id: 'k-case-99' },
+      }),
+    ).toEqual(['case.unknown'])
+    // A story of a past project with no case chosen, or none offered at all.
+    for (const text of [
+      'Да, мы делали сайт для трёх студий йоги, у одной запись выросла вдвое.',
+      'У нас был похожий проект для клиники.',
+      'Один из наших клиентов тоже начинал с директа.',
+      'Работали с похожей школой, всё получилось.',
+    ])
+      expect(withCases(text, { offered: [CEILINGS] }), text).toEqual(['case.unknown'])
+    // A real one chosen, and work talk that tells no case, pass.
+    expect(
+      withCases('Делали для Потолок-Арт, заявки пошли через сайт.', {
+        offered: [CEILINGS],
+        choice: choose(CEILINGS),
+      }),
+    ).toEqual([])
+    for (const text of [
+      'Лендинг делаем за 2-3 недели.',
+      'Делаем сайты и настраиваем рекламу.',
+      'Понимаю, сайт нужен к запуску.',
+    ])
+      expect(withCases(text, { offered: [CEILINGS] }), text).toEqual([])
+  })
+
+  it('FR-CONV-4: a case without a moment, a second case and a repeated case fail', () => {
+    expect(
+      withCases('Делали для Потолок-Арт, заявки пошли.', {
+        offered: [CEILINGS],
+        choice: choose(CEILINGS, null),
+      }),
+    ).toEqual(['case.no_moment'])
+    // Two cases of the library in one text.
+    expect(
+      withCases('Делали для Потолок-Арт и для школы танцев.', {
+        offered: [CEILINGS, DANCE],
+        choice: choose(CEILINGS),
+      }),
+    ).toEqual(['case.many'])
+    // Already told: the id again, its name in the text, or its name in what our side wrote before.
+    const told = [{ id: CEILINGS.id, title: CEILINGS.title }]
+    expect(withCases('Делали для Потолок-Арт.', { told, choice: choose(CEILINGS) })).toEqual([
+      'case.repeat',
+    ])
+    expect(withCases('Как у Потолок-Арт, заявки пошли.', { told })).toContain('case.repeat')
+    expect(
+      withCases(
+        'Делали для Потолок-Арт, заявки пошли через сайт.',
+        { offered: [CEILINGS], choice: choose(CEILINGS) },
+        { ourPrevious: ['Делали похожее для Потолок-Арт, помню.'] },
+      ),
+    ).toEqual(['case.repeat'])
+  })
+
+  it('FR-CONV-4: numbers of a case not open to clients and the name of a closed company fail', () => {
+    // 150 records: the case does not allow numbers (and the facts check also knows it is not a source).
+    const closedNumbers = withCases('Делали для сети стоматологий: 150 записей за два месяца.', {
+      offered: [CLINIC],
+      choice: choose(CLINIC),
+    })
+    expect(closedNumbers).toContain('case.closed')
+    // A descriptor is not a name: «сети стоматологий» is what the case is called and may be told.
+    expect(
+      withCases('Делали для сети стоматологий: запись перевели на онлайн.', {
+        offered: [CLINIC],
+        choice: choose(CLINIC),
+      }),
+    ).toEqual([])
+    // A brand under NDA.
+    expect(
+      withCases('Делали для SkyRoom, там аренда студий.', {
+        offered: [SKYROOM],
+        choice: choose(SKYROOM),
+      }),
+    ).toContain('case.closed')
+    expect(
+      withCases('Делали для студии аренды, собрали сайт.', {
+        offered: [SKYROOM],
+        choice: choose(SKYROOM),
+      }),
+    ).toEqual([])
+    // Numbers of an open case are the case's own: the facts check takes them from it.
+    expect(
+      withCases('Делали для Потолок-Арт: 90 заявок за первый месяц.', {
+        offered: [CEILINGS],
+        choice: choose(CEILINGS),
+      }),
+    ).toEqual([])
+    // But an open case does not make other numbers facts.
+    expect(
+      withCases('Делали для Потолок-Арт: 900 заявок за первый месяц.', {
+        offered: [CEILINGS],
+        choice: choose(CEILINGS),
+      }),
+    ).toEqual(['facts.numbers'])
+  })
+
+  it('FR-CONV-4: «взгляните на наш кейс» is robotic', () => {
+    for (const text of [
+      'Взгляните на наш кейс!',
+      'Посмотрите наше портфолио.',
+      'У нас богатый опыт в таких проектах.',
+      'Посмотрите наши кейсы.',
+    ]) {
+      expect(ids({ text }), text).toEqual(['case.ad'])
+      expect(withCases(text, { offered: [CEILINGS] }), text).toContain('case.ad')
+    }
+  })
+
+  it('FR-CONV-4: the model writes no link', () => {
+    for (const text of [
+      'Кейс тут: https://potolok-art.example/case',
+      'Смотрите www.potolok-art.example',
+      'Сайт potolok-art.ru, там всё видно.',
+    ])
+      expect(ids({ text }), text).toContain('case.link')
+    expect(ids({ text: 'Сайт делаем за 2-3 недели.' })).toEqual([])
   })
 })

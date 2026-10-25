@@ -1,5 +1,5 @@
 import type { ChatAuthor } from '@sara/shared'
-import type { CheckIssue, Dossier, DossierMessage, MindHit, Recall } from './types'
+import type { CaseHit, CheckIssue, Dossier, DossierMessage, MindHit, Recall } from './types'
 
 const WHO: Record<ChatAuthor, string> = {
   client: 'клиент',
@@ -46,11 +46,47 @@ const chatLine = (m: DossierMessage) =>
 
 const record = (h: MindHit) => `[${h.id}] (${TYPE[h.type]}) ${h.title}\n${h.body.trim()}`
 
+/** The text of the `## Name` section of a record's body; empty when it has none. */
+function section(body: string, name: string): string {
+  const found = body.split(/^## /m).find((part) => part.split('\n')[0]?.trim() === name)
+  return found ? found.slice(found.indexOf('\n') + 1).trim() : ''
+}
+
+/**
+ * A case of Hance as the models read it: the number, the gist, the role and scale, the result and the rules of
+ * showing it to a client, written as they stand in the record (cases in a conversation).
+ */
+export function formatCase(c: CaseHit): string {
+  const role = section(c.body, 'Роль и масштаб')
+  return [
+    `[${c.id}] ${c.title}`,
+    `Суть: ${c.summary}`,
+    ...(role ? [`Роль и масштаб: ${role}`] : []),
+    `Результат: ${c.result ?? 'не зафиксирован'}`,
+    'Как показывать клиенту:',
+    ...(c.showRules.length
+      ? c.showRules.map((r) => `- ${r}`)
+      : ['- правил нет: компанию и цифры не называть']),
+  ].join('\n')
+}
+
+/** What «Кейсы» says when the turn has no case to offer. */
+const NO_CASES = 'Подходящих кейсов нет, не выдумывай'
+/** What it says on the rewrite after a failed case check: no case at all in the second answer. */
+const NO_CASE_NOW =
+  'Кейс в этом ответе нельзя: перепиши без кейса, case_id равен null, историй о проектах не рассказывай'
+
 /**
  * The Interlocutor's input, by the headings its role reads (plan, task D2). «Переделать» appears only on the rewrite
- * after failed checks and lists exactly what to fix.
+ * after failed checks and lists exactly what to fix; `withoutCase` is the rewrite after a failed case check, which may
+ * not tell a case at all.
  */
-export function formatInterlocutorInput(d: Dossier, r: Recall, retry: CheckIssue[]): string {
+export function formatInterlocutorInput(
+  d: Dossier,
+  r: Recall,
+  retry: CheckIssue[],
+  withoutCase = false,
+): string {
   const turn = new Set(d.turnMessageIds)
   const parts: string[] = [FRAME_NOTE]
   parts.push(
@@ -87,10 +123,7 @@ export function formatInterlocutorInput(d: Dossier, r: Recall, retry: CheckIssue
   )
   const history = d.messages.filter((m) => !turn.has(m.platformMessageId))
   parts.push(
-    [
-      '## Переписка',
-      ...(history.length ? history.map(chatLine) : ['Пока ничего.']),
-    ].join('\n'),
+    ['## Переписка', ...(history.length ? history.map(chatLine) : ['Пока ничего.'])].join('\n'),
   )
   const said = d.messages.filter((m) => turn.has(m.platformMessageId)).map((m) => m.text)
   parts.push(['## Реплика клиента', framed(said.join('\n\n'))].join('\n'))
@@ -112,6 +145,12 @@ export function formatInterlocutorInput(d: Dossier, r: Recall, retry: CheckIssue
   ]
   parts.push(
     ['## Записи разума', ...(records.length ? records.map(record) : ['Записей нет.'])].join('\n\n'),
+  )
+  parts.push(
+    [
+      '## Кейсы',
+      ...(withoutCase ? [NO_CASE_NOW] : r.cases.length ? r.cases.map(formatCase) : [NO_CASES]),
+    ].join('\n\n'),
   )
   parts.push(
     [
@@ -143,7 +182,10 @@ export function formatCheckerDossier(d: Dossier): string {
     FRAME_NOTE,
     d.order ? `Заказ, название написал клиент:\n${framed(d.order.title)}` : 'Заказ не известен.',
     `Этап: ${d.stage}`,
-    ['Последние сообщения до реплики клиента:', ...(history.length ? history.map(chatLine) : ['Пока ничего.'])].join('\n'),
+    [
+      'Последние сообщения до реплики клиента:',
+      ...(history.length ? history.map(chatLine) : ['Пока ничего.']),
+    ].join('\n'),
     ['Реплика клиента, на которую отвечает черновик:', framed(said.join('\n\n'))].join('\n'),
   ].join('\n\n')
 }

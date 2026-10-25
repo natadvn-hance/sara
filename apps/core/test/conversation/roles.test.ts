@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import {
+  CASE_MOMENTS,
   CheckerOutput,
   CONV_STAGES,
   ExaminerOutput,
@@ -18,11 +19,11 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 /** The M4 roles: their meta (design 5.14, plan D2 and D3) and the schema each answers with. */
 const M4_ROLES = {
   interlocutor: {
-    meta: { version: 3, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
+    meta: { version: 4, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
     schema: InterlocutorOutput,
   },
   checker: {
-    meta: { version: 2, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
+    meta: { version: 3, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
     schema: CheckerOutput,
   },
   reminder: {
@@ -65,7 +66,13 @@ describe('the M4 roles', () => {
     expect(role).toMatch(/длиннее 40 знаков, ответ не длиннее четырёх её длин/)
     expect(role).toMatch(/числа, цены и сроки из образцов в свой текст не переноси/i)
     // The authors, the flags and the stages as prompt.ts prints them.
-    for (const word of ['Сара (старая)', 'Профи.ру', 'наша сторона', 'Новый день', 'Ночь по Москве'])
+    for (const word of [
+      'Сара (старая)',
+      'Профи.ру',
+      'наша сторона',
+      'Новый день',
+      'Ночь по Москве',
+    ])
       expect(role, word).toContain(word)
     for (const stage of CONV_STAGES) expect(role, stage).toContain(stage)
     expect(role).not.toContain('Сара v1')
@@ -109,14 +116,13 @@ describe('the M4 roles', () => {
         for (const s of list) s[field] = build(s.scene as Scene)
         await writeFile(file, `${JSON.stringify(list, null, 2)}\n`)
       }
-      for (const s of list)
-        expect(s[field], `${role}: ${s.title}`).toBe(build(s.scene as Scene))
+      for (const s of list) expect(s[field], `${role}: ${s.title}`).toBe(build(s.scene as Scene))
     }
   })
 
   it('FR-CONV-3: the Interlocutor samples expect a move and a topic, the Checker samples a verdict per field', async () => {
     const talk = await samples('interlocutor')
-    expect(talk).toHaveLength(8)
+    expect(talk).toHaveLength(11)
     for (const s of talk) {
       const expected = s.expected as { move: string; topic: string }
       expect(MOVES).toContain(expected.move)
@@ -125,10 +131,44 @@ describe('the M4 roles', () => {
       for (const n of s.names as string[]) expect(s.input).toContain(n)
     }
     const checks = await samples('checker')
-    expect(checks).toHaveLength(8)
+    expect(checks).toHaveLength(11)
     for (const s of checks)
       expect(Object.keys(s.expected as object).sort()).toEqual(
         Object.keys(CheckerOutput.shape).sort(),
       )
+  })
+
+  it('FR-CONV-4: the case samples cover a case that is needed, one that is not, and none to offer', async () => {
+    const offered = (s: Record<string, unknown>) =>
+      ((s.scene as Scene).recall?.cases ?? []).map((c) => c.id)
+    const talk = (await samples('interlocutor')).slice(8)
+    expect(
+      talk.map((s) => (s.expected as { case: { case_id: string | null } }).case.case_id),
+    ).toEqual(['k-case-21', null, null])
+    for (const s of talk) {
+      const want = (s.expected as { case: { case_id: string | null; moment: string | null } }).case
+      // A case that is expected is among those the sample offers, with one of the four moments.
+      if (want.case_id) {
+        expect(offered(s)).toContain(want.case_id)
+        expect(CASE_MOMENTS).toContain(want.moment)
+      } else expect(want.moment).toBeNull()
+      expect(s.input as string).toContain('## Кейсы')
+    }
+    // The last offers none, and its input says so.
+    expect(offered(talk[2] ?? {})).toEqual([])
+    expect(talk[2]?.input).toContain('Подходящих кейсов нет, не выдумывай')
+    // The Checker samples: a case that fits passes, a needless one is noted, an invented one is unsupported.
+    const checks = (await samples('checker')).slice(8)
+    const verdicts = checks.map((s) => s.expected as { case: boolean; unsupported: boolean })
+    expect(verdicts.map((v) => [v.case, v.unsupported])).toEqual([
+      [false, false],
+      [true, false],
+      [false, true],
+    ])
+    for (const s of checks) {
+      const choice = s.caseChoice as { case_id: string; moment: string } | null
+      if (choice) expect(offered(s)).toContain(choice.case_id)
+    }
+    expect(checks[2]?.caseChoice).toBeNull()
   })
 })
