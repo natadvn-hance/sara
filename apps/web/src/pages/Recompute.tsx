@@ -122,7 +122,8 @@ export function RecomputePage({ accountId }: { accountId: string }) {
   useEffect(() => {
     if (run.error instanceof ApiError && run.error.status === 404) {
       setGone(true)
-      forget()
+      setRunId(null)
+      window.history.replaceState(null, '', window.location.pathname)
     }
   }, [run.error])
   useEffect(() => {

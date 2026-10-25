@@ -1,7 +1,7 @@
 import type { DirectionRules } from '@sara/shared'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { lead, leadLabel, leadScore, trialScore as trialTable } from '../db/schema'
+import { lead, leadLabel, trialScore as trialTable } from '../db/schema'
 import { getRun, type RunRow } from './runStore'
 import { type TrialDeps, trialScore } from './trial'
 
