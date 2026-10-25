@@ -49,7 +49,8 @@ async function isClone(root: string): Promise<boolean> {
 
 /**
  * Boris said yes (FR-MIND-3): each proposal moves from `mind/proposals/` to the same place in the mind as confirmed,
- * one commit per record when the clone is a git work tree. Every file is checked first, so a bad one moves nothing.
+ * one commit per record when the clone is a git work tree. Every file is checked first, so a bad one moves nothing:
+ * the rewrite must leave `status: confirmed`, and the place must be free or hold the record with the same id.
  */
 export async function acceptProposals(mindDir: string, paths: string[]): Promise<Accepted[]> {
   const root = resolve(mindDir)
@@ -65,7 +66,19 @@ export async function acceptProposals(mindDir: string, paths: string[]): Promise
     const text = confirm(original)
     const r = parseRecord(to, text)
     if ('error' in r) throw new Error(`${from}: ${r.error}`)
+    if (r.record.front.status !== 'confirmed')
+      throw new Error(`${from}: после правки поле status не стало confirmed, файл не принят`)
     const id = r.record.front.id
+    const there = await readFile(join(root, to), 'utf8').catch(() => null)
+    if (there !== null) {
+      // A proposal replaces the record with its own id; a different record at that path is not overwritten.
+      const held = parseRecord(to, there)
+      const heldId = 'record' in held ? held.record.front.id : null
+      if (heldId !== id)
+        throw new Error(
+          `${from}: на месте ${to} уже лежит ${heldId ? `запись ${heldId}` : 'файл, который разум не читает'}`,
+        )
+    }
     const other =
       mind.records.find((x) => x.front.id === id && x.path !== to)?.path ??
       plans.find((x) => x.id === id)?.from

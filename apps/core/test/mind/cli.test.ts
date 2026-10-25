@@ -104,4 +104,62 @@ describe('mind accept', () => {
     expect(await gone(join(root, 'mind/shared/knowledge/k-bad.md'))).toBe(true)
     expect(await gone(join(root, 'mind/shared/knowledge/k-about-2.md'))).toBe(true)
   })
+
+  it('FR-MIND-3: accept refuses paths that leave proposals: ../x, an absolute path outside, proposals/../shared', async () => {
+    const root = await proposalMind()
+    const outside = await tempMind()
+    await putRecord(
+      outside,
+      'mind/proposals/shared/knowledge/k-out.md',
+      { id: 'k-out', type: 'knowledge', status: 'proposal' },
+      'Чужая папка.',
+    )
+    for (const p of [
+      '../x',
+      '../mind/proposals/shared/knowledge/k-price.md',
+      join(outside, 'mind/proposals/shared/knowledge/k-out.md'),
+      '/etc/hosts',
+      'mind/proposals/../shared/knowledge/k-about.md',
+      'mind/proposals/../../x',
+    ]) {
+      await expect(acceptProposals(root, [p]), p).rejects.toThrow(/proposals/)
+    }
+    expect(await gone(join(root, TO))).toBe(true)
+    expect(await gone(join(root, FROM))).toBe(false)
+  })
+
+  it('FR-MIND-3: accept refuses a target that holds another record, and replaces the one with the same id', async () => {
+    const root = await proposalMind()
+    await putRecord(
+      root,
+      TO,
+      { id: 'k-other', type: 'knowledge' },
+      'Другая запись на том же месте.',
+    )
+    await expect(acceptProposals(root, [FROM])).rejects.toThrow(/k-other/)
+    expect(await gone(join(root, FROM))).toBe(false)
+    expect(await readFile(join(root, TO), 'utf8')).toMatch(/Другая запись/)
+
+    await putRecord(root, TO, { id: 'k-price', type: 'knowledge', version: 1 }, 'Старая цена.')
+    await putRecord(
+      root,
+      FROM,
+      { id: 'k-price', type: 'knowledge', version: 2, status: 'proposal' },
+      'Новая цена.',
+    )
+    expect(await acceptProposals(root, [FROM])).toEqual([
+      { id: 'k-price', from: FROM, to: TO, committed: false },
+    ])
+    expect(await readFile(join(root, TO), 'utf8')).toMatch(/Новая цена\./)
+  })
+
+  it('FR-MIND-3: accept stops when the rewrite does not leave the record confirmed', async () => {
+    const root = await tempMind()
+    const flow =
+      '---\n{id: k-flow, type: knowledge, scope: shared, status: proposal, version: 1, sources: [boris], valid_from: 2026-01-01, valid_to: null}\n---\nФакт.\n'
+    await putFile(root, 'mind/proposals/shared/knowledge/k-flow.md', flow)
+    await expect(acceptProposals(root, ['shared/knowledge/k-flow.md'])).rejects.toThrow(/confirmed/)
+    expect(await gone(join(root, 'mind/shared/knowledge/k-flow.md'))).toBe(true)
+    expect(await gone(join(root, 'mind/proposals/shared/knowledge/k-flow.md'))).toBe(false)
+  })
 })
