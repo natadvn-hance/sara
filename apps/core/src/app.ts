@@ -16,6 +16,7 @@ import { startConvDaySummary } from './conversation/daySummary'
 import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
 import { sendTextNow, sendTurnReply } from './conversation/outbox'
 import { startReconcile } from './conversation/reconcile'
+import { decideDormant, setRemindDeps, syncReminders } from './conversation/reminders'
 import { registerConversationRoutes } from './conversation/routes'
 import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
@@ -86,6 +87,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     db,
     notifier: bot.notifier,
     sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
+    decideDormant,
   })
   // A press on a conversation card goes to the conversation, every other press to the lead pipeline.
   const onPress = async (p: { taskId: string; action: TaskAction }) => {
@@ -171,6 +173,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
   })
+  // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
+  setRemindDeps({ db, profi, gateway, mind, notifier: bot.notifier })
   const conversationDeps: ConversationEventDeps = {
     db,
     profi,
@@ -178,6 +182,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     onTurnNeeded: (c) => startTurnFor(c),
     onTyping: (c) => pokeTurn(c),
     onSpecialist: (c, added) => compareTurn(cardDeps, c.id, added),
+    // The reminders follow the chat as read: our message last starts one, a client's message cancels it.
+    onChatState: (c, messages) => syncReminders(c, messages),
   }
   const conversationEvents = createConversationEvents(conversationDeps)
   const accountEvents = createProfiEventDispatcher({
