@@ -1,8 +1,9 @@
 import { type AuthorBasis, type ChatAuthor, type MessageSide, newEventId } from '@sara/shared'
-import type { Db } from '../../src/db/client'
-import { account, chatMessage, lead } from '../../src/db/schema'
 import { ensureConversation, getConversation } from '../../src/conversation/store'
 import type { ConversationRow } from '../../src/conversation/types'
+import type { Db } from '../../src/db/client'
+import { account, chatMessage, lead } from '../../src/db/schema'
+import { createDeal } from '../../src/domain/deal'
 
 export const ACC = 'hance-marketing'
 
@@ -28,7 +29,7 @@ export async function seedChat(
   db: Db,
   chatId: string,
   messages: SeedMessage[],
-  o: { clientName?: string | null } = {},
+  o: { clientName?: string | null; deal?: boolean } = {},
 ): Promise<ConversationRow> {
   await db
     .insert(account)
@@ -50,6 +51,8 @@ export async function seedChat(
         correlationId: newEventId(),
       })
       .onConflictDoNothing()
+  if (o.deal && o.clientName !== null)
+    await createDeal(db, { leadId: chatId, accountId: ACC, correlationId: newEventId() })
   const conv = await ensureConversation(db, { accountId: ACC, chatId, orderId: chatId })
   await addMessages(db, conv.id, chatId, messages)
   const fresh = await getConversation(db, conv.id)

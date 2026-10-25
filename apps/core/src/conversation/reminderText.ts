@@ -7,7 +7,7 @@ import { checkReplyText } from './check/codeChecks'
 import { buildDossier, clientNames } from './dossier'
 import { ALWAYS } from './engine'
 import { formatReminderInput } from './prompt'
-import type { ReminderTone } from './reminders'
+import type { ReminderTone } from './reminderLadder'
 import { getConversation } from './store'
 import type { CheckIssue, MindHit, MindSearch } from './types'
 
@@ -79,7 +79,9 @@ export async function writeReminder(
       d.mind.version(),
       d.mind.byIds(ALWAYS),
       d.mind.search({
-        text: [dossier.order?.title, dossier.order?.text, lastOurs?.text].filter(Boolean).join('\n'),
+        text: [dossier.order?.title, dossier.order?.text, lastOurs?.text]
+          .filter(Boolean)
+          .join('\n'),
         scope: dossier.scope,
         types: ['knowledge'],
         limit: KNOWLEDGE_LIMIT,

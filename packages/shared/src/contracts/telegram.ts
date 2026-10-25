@@ -17,6 +17,8 @@ export const TASK_ACTIONS = [
   'close',
   /** M5: «Все да» under a batch of lessons. */
   'all',
+  /** «Напоминать дальше» on the task of a client who is quiet for 7 days (M4 reminders). */
+  'remind',
 ] as const
 export type TaskAction = (typeof TASK_ACTIONS)[number]
 

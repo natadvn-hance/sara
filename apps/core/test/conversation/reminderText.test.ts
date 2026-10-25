@@ -137,7 +137,10 @@ describe('the text of a reminder', () => {
       await resetDb(db)
       const r = await write(await fakeGateway(db, { reminder: { ...GOOD, text } }))
       expect(r.text, text).toBeNull()
-      expect(r.issues.map((x) => x.id), text).toContain(id)
+      expect(
+        r.issues.map((x) => x.id),
+        text,
+      ).toContain(id)
     }
   })
 
