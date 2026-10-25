@@ -438,6 +438,346 @@ for (const scheme of ['light', 'dark'] as const) {
   })
 }
 
+const CALIBRATION = `${DIRECTION}/calibration`
+const CAL_ITEMS = Array.from({ length: 20 }, (_, i) => ({
+  leadId: `c${i + 1}`,
+  title: `Заявка ${i + 1}`,
+  city: 'Москва',
+  budget: i % 2 === 0 ? 'до 50 000 ₽' : null,
+  text: `Описание заявки ${i + 1}`,
+  mark: null as string | null,
+}))
+const MISS = {
+  leadId: 'c3',
+  title: 'Сайт для клиники',
+  city: 'Москва',
+  text: 'Нужен сайт с записью онлайн',
+  kind: 'sara_no_boris_yes',
+  score: 41,
+  reason: 'Бюджет не назван',
+  axes: AXES,
+  stopFactor: null,
+  redFlags: [],
+  note: null,
+}
+const calResult = {
+  decisive: 20,
+  unsure: 0,
+  agreement: 0.7,
+  reliable: true,
+  passed: false,
+  threshold: 56,
+  misses: [
+    MISS,
+    { ...MISS, leadId: 'c4', title: 'Лишняя заявка', kind: 'sara_yes_boris_no', score: 66 },
+  ],
+  thresholdHint: { from: 56, to: 48, before: 0.7, after: 0.9 },
+}
+/** A calibration run as the API tells it. */
+const calRun = (state: string, over: object = {}) => ({
+  id: RUN_ID,
+  kind: 'calibration',
+  state,
+  total: 20,
+  done: 0,
+  skipped: 0,
+  stop_reason: null,
+  result: null,
+  calibration: { marked: 0, items: [], result: null, advice: null, stale: false },
+  ...over,
+})
+
+test('FR-ACC-4: Boris marks 20 real leads one by one, sees no score, and then the agreement', async ({
+  page,
+}) => {
+  test.setTimeout(120_000)
+  await page.goto(`${DIRECTION}`)
+  await page.getByRole('link', { name: 'Проверить Сару на моих решениях' }).click()
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  for (let i = 1; i <= 20; i++) {
+    await expect(page.getByText(`${i - 1} из 20`)).toBeVisible()
+    await expect(page.getByText('Балл Сары')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Взяли бы' }).click()
+  }
+  await expect(page.getByText('Согласие: 100% (20 из 20)')).toBeVisible({ timeout: 90_000 })
+  await expect(page.getByText('Цель 85% достигнута')).toBeVisible()
+})
+
+test('FR-ACC-4: the keys 1, 2 and 3 mark and "Назад" lets him change a mark', async ({ page }) => {
+  await page.route(RUNS, (route) => route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }))
+  const items = CAL_ITEMS.map((i) => ({ ...i }))
+  let marks = 0
+  await page.route(`${RUNS}/${RUN_ID}/marks`, (route) => {
+    const body = route.request().postDataJSON() as { lead_id: string; mark: string }
+    const it = items.find((x) => x.leadId === body.lead_id)
+    if (it) {
+      if (it.mark === null) marks++
+      it.mark = body.mark
+    }
+    return route.fulfill({ json: { ok: true, marked: marks, total: 20, complete: false } })
+  })
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({
+      json: calRun('marking', {
+        calibration: { marked: marks, items, result: null, advice: null, stale: false },
+      }),
+    }),
+  )
+  await page.goto(CALIBRATION)
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByRole('heading', { name: 'Заявка 1' })).toBeVisible()
+  await page.keyboard.press('2')
+  await expect(page.getByRole('heading', { name: 'Заявка 2' })).toBeVisible()
+  await page.keyboard.press('3')
+  await expect(page.getByRole('heading', { name: 'Заявка 3' })).toBeVisible()
+  await page.getByRole('button', { name: 'Назад' }).click()
+  await expect(page.getByRole('heading', { name: 'Заявка 2' })).toBeVisible()
+  await expect(page.getByText('Ты уже отмечал эту заявку, ответ можно поменять.')).toBeVisible()
+  await page.keyboard.press('1')
+  expect(items.map((i) => i.mark).slice(0, 3)).toEqual(['no', 'yes', null])
+})
+
+test('FR-ACC-4: the result shows the misses with "Почему так", the threshold hint, a note and an advice', async ({
+  page,
+}) => {
+  let applied = 0
+  await page.route(RUNS, (route) => route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }))
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({
+      json: calRun('done', {
+        done: 20,
+        calibration: { marked: 20, items: [], result: calResult, advice: null, stale: false },
+      }),
+    }),
+  )
+  await page.route(`${RUNS}/${RUN_ID}/notes`, (route) => route.fulfill({ json: { ok: true } }))
+  await page.route(`${RUNS}/${RUN_ID}/advice`, (route) =>
+    route.fulfill({
+      json: {
+        advice: {
+          summary: 'Порог ниже: 50 вместо 56',
+          why: 'Ты брал такие заявки',
+          lines: ['Порог: 56 → 50'],
+        },
+      },
+    }),
+  )
+  await page.route(`${RUNS}/${RUN_ID}/apply`, (route) => {
+    applied++
+    return route.fulfill({ json: { id: RUN_ID } })
+  })
+  await page.goto(CALIBRATION)
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByText('Согласие: 70% (14 из 20)')).toBeVisible()
+  await expect(page.getByText('Цель 85% не достигнута.')).toBeVisible()
+  await expect(page.getByText('Порог 56 → 48: согласие было 70%, стало бы 90%.')).toBeVisible()
+  await expect(page.getByText('Сара отсеяла, а ты взял бы')).toBeVisible()
+  await expect(page.getByText('Сара показала бы, а ты нет')).toBeVisible()
+  const first = page.getByRole('list', { name: 'Заявки, которые Сара отсеяла, а ты взял бы' })
+  await first.getByText('Почему так').click()
+  await expect(first.getByText('Бюджет не назван')).toBeVisible()
+  await expect(first.getByText('Качество клиента: 30, Мелкий клиент')).toBeVisible()
+  await first.getByLabel('Почему ты так решил? (необязательно)').fill('нормальный бюджет')
+  await first.getByRole('button', { name: 'Записать причину' }).click()
+  await expect(first.getByText('Записано')).toBeVisible()
+  await page.getByRole('button', { name: 'Предложить поправку' }).click()
+  await expect(page.getByText('Порог ниже: 50 вместо 56')).toBeVisible()
+  await expect(page.getByText('Порог: 56 → 50')).toBeVisible()
+  await page.getByRole('button', { name: 'Применить к черновику' }).last().click()
+  await expect.poll(() => applied).toBe(1)
+})
+
+test('FR-ACC-4: "не знаю" makes the check unreliable, and a stale one offers to repeat', async ({
+  page,
+}) => {
+  await page.route(RUNS, (route) => route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }))
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({
+      json: calRun('done', {
+        done: 20,
+        calibration: {
+          marked: 20,
+          items: [],
+          result: {
+            ...calResult,
+            decisive: 12,
+            unsure: 8,
+            agreement: 1,
+            reliable: false,
+            misses: [],
+            thresholdHint: null,
+          },
+          advice: null,
+          stale: true,
+        },
+      }),
+    }),
+  )
+  await page.goto(CALIBRATION)
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByText('Слишком много «не знаю»')).toBeVisible()
+  await expect(page.getByText('Цель 85% достигнута')).toHaveCount(0)
+  await expect(page.getByText('Правила изменились после этой проверки.')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Проверить заново на тех же заявках' }),
+  ).toBeVisible()
+})
+
+test('FR-ACC-4: too few leads and the Claude limit say so in plain words', async ({ page }) => {
+  await page.route(RUNS, (route) =>
+    route.fulfill({ status: 409, json: { error: 'Заявок пока мало: 4, нужно хотя бы 10.' } }),
+  )
+  await page.goto(CALIBRATION)
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Заявок пока мало: 4, нужно хотя бы 10.')
+  await page.unroute(RUNS)
+  await page.route(RUNS, (route) => route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }))
+  await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+    route.fulfill({ json: calRun('stopped', { stop_reason: 'limit' }) }),
+  )
+  await page.getByRole('button', { name: 'Начать проверку' }).click()
+  await expect(page.getByText('Подожди, лимит Claude кончился. Попробуй позже.')).toBeVisible()
+})
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`FR-UI-3: the calibration screens fit 360 px in the ${scheme} theme`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await page.setViewportSize({ width: 360, height: 740 })
+    await page.route(RUNS, (route) =>
+      route.fulfill({ status: 201, json: { id: RUN_ID, total: 20 } }),
+    )
+    let state = 'marking'
+    await page.route(`${RUNS}/${RUN_ID}`, (route) =>
+      route.fulfill({
+        json:
+          state === 'marking'
+            ? calRun('marking', {
+                calibration: {
+                  marked: 0,
+                  items: CAL_ITEMS,
+                  result: null,
+                  advice: null,
+                  stale: false,
+                },
+              })
+            : calRun('done', {
+                done: 20,
+                calibration: {
+                  marked: 20,
+                  items: [],
+                  result: calResult,
+                  advice: null,
+                  stale: false,
+                },
+              }),
+      }),
+    )
+    await page.goto(CALIBRATION)
+    await page.getByRole('button', { name: 'Начать проверку' }).click()
+    await expect(page.getByRole('heading', { name: 'Заявка 1' })).toBeVisible()
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0)
+    // The mark buttons are thumb-sized.
+    for (const b of await page.getByRole('button', { name: /Взяли бы|Нет|Не знаю/ }).all())
+      expect((await b.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+    state = 'done'
+    // The run is in the address, so a reload goes straight back to it.
+    await page.reload()
+    await expect(page.getByText('Согласие: 70% (14 из 20)')).toBeVisible()
+    await page.getByText('Почему так').first().click()
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0)
+    const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    expect(background).toBe(scheme === 'dark' ? 'rgb(18, 18, 18)' : 'rgb(250, 249, 247)')
+  })
+}
+
+test('FR-ACC-3: step 4 shows the calibration of the draft and step 8 turns a new direction on or into the shadow', async ({
+  page,
+}) => {
+  const view = (over: object) => ({
+    onboarding: {
+      mode: 'edit',
+      basedOn: 1,
+      step: 4,
+      steps: {},
+      rules: { about: 'x' },
+      changes: ['Порог: 56 → 50'],
+      changed: true,
+      calibration: null,
+      directionState: 'draft',
+      ...over,
+    },
+  })
+  const passed = {
+    runId: RUN_ID,
+    state: 'done',
+    agreement: 0.9,
+    decisive: 20,
+    passed: true,
+    reliable: true,
+  }
+  const current = view({ calibration: passed })
+  await page.route(`**/api/directions/${ACCOUNT}/onboarding`, (route) =>
+    route.request().method() === 'GET' ? route.fulfill({ json: current }) : route.continue(),
+  )
+  let finished: unknown = null
+  await page.route(`**/api/directions/${ACCOUNT}/onboarding/finish`, (route) => {
+    finished = route.request().postDataJSON()
+    return route.fulfill({ json: { version: 7 } })
+  })
+  await page.goto(ONBOARDING)
+  await expect(page.getByRole('heading', { name: 'Шаг 4. Калибровка' })).toBeVisible()
+  await expect(page.getByText('Согласие на этих правилах: 90%. Цель достигнута.')).toBeVisible()
+  await page.getByRole('button', { name: 'К включению' }).click()
+  await expect(
+    page.getByText('Калибровка на этих правилах: согласие 90%, цель достигнута.'),
+  ).toBeVisible()
+  await expect(page.getByLabel('Зачем сохраняешь без проверки?')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Включить в тени' }).click()
+  await expect(page.getByText('Правила сохранены: v7')).toBeVisible()
+  expect(finished).toEqual({ state: 'shadow' })
+})
+
+test('FR-ACC-3: below the target step 8 saves only with a reason and says the agreement', async ({
+  page,
+}) => {
+  const weak = {
+    runId: RUN_ID,
+    state: 'done',
+    agreement: 0.8,
+    decisive: 20,
+    passed: false,
+    reliable: true,
+  }
+  await page.route(`**/api/directions/${ACCOUNT}/onboarding`, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({
+          json: {
+            onboarding: {
+              mode: 'edit',
+              basedOn: 1,
+              step: 4,
+              steps: {},
+              rules: { about: 'x' },
+              changes: ['Порог: 56 → 50'],
+              changed: true,
+              calibration: weak,
+              directionState: 'on',
+            },
+          },
+        })
+      : route.continue(),
+  )
+  await page.goto(ONBOARDING)
+  await page.getByRole('button', { name: 'К включению' }).click()
+  await expect(
+    page.getByText('Калибровка на этих правилах: согласие 80%, цель 85% не достигнута.'),
+  ).toBeVisible()
+  const save = page.getByRole('button', { name: 'Сохранить всё равно (согласие 80%)' })
+  await expect(save).toBeDisabled()
+  await page.getByLabel('Зачем сохраняешь без проверки?').fill('Нужно срочно')
+  await expect(save).toBeEnabled()
+})
+
 // Last: it changes the active rules, and the first test of this file looks at their threshold.
 test('FR-ACC-3: three confirmed steps are saved as new rules, without calibration only with a reason', async ({
   page,
@@ -452,9 +792,13 @@ test('FR-ACC-3: three confirmed steps are saved as new rules, without calibratio
   await page.getByLabel('Расскажи своими словами').fill('Лучшие заказы: понятная задача')
   await page.getByRole('button', { name: 'Отправить' }).click()
   await page.getByRole('button', { name: 'Да, правильно' }).click()
-  await expect(page.getByText('Черновик правил готов')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Шаг 4. Калибровка' })).toBeVisible()
+  await expect(page.getByText('На этих правилах Сару ещё не проверяли.')).toBeVisible()
+  await page.getByRole('button', { name: 'К включению' }).click()
+  await expect(page.getByRole('heading', { name: 'Шаг 8. Включение' })).toBeVisible()
   await expect(page.getByText('Порог: 56 → 55')).toBeVisible()
-  const save = page.getByRole('button', { name: 'Сохранить без калибровки' })
+  await expect(page.getByText('Калибровки на этих правилах ещё не было.')).toBeVisible()
+  const save = page.getByRole('button', { name: 'Сохранить всё равно (без проверки)' })
   await expect(save).toBeDisabled()
   await page.getByLabel('Зачем сохраняешь без проверки?').fill('Проверю позже на заявках')
   await save.click()
