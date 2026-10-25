@@ -15,7 +15,7 @@ export type DraftSource = Pick<
   'title' | 'category' | 'city' | 'budget_text' | 'text' | 'client_name'
 > & {
   /** What the order page says about the client; absent when the page was not read. Its name is only hidden from the model, never sent (ADR-016). */
-  client_info?: ClientInfo | null
+  client_info?: (Pick<ClientInfo, 'name'> & Partial<ClientInfo>) | null
 }
 
 /** The Analyst's reading of the order and its short разбор, kept beside the draft. */
@@ -97,18 +97,20 @@ export function priceWithin(price: number | null, budgetText: string | null): nu
 }
 
 /** The client as the order page shows them, in one line without the name (ADR-016); null when it shows nothing. */
-function clientLine(info: ClientInfo | null | undefined): string | null {
+function clientLine(info: DraftSource['client_info']): string | null {
   if (!info) return null
   const parts = [
     info.on_profi_since,
-    info.phone_verified === null
+    info.phone_verified === null || info.phone_verified === undefined
       ? null
       : info.phone_verified
         ? 'номер подтверждён'
         : 'номер не подтверждён',
     info.reviews &&
       `отзывы специалистов: ${info.reviews.positive} ${plural(info.reviews.positive, ['хороший', 'хороших', 'хороших'])}, ${info.reviews.negative} ${plural(info.reviews.negative, ['плохой', 'плохих', 'плохих'])}`,
-    info.review_tags.length > 0 && `отметки в отзывах: ${info.review_tags.join(', ')}`,
+    info.review_tags &&
+      info.review_tags.length > 0 &&
+      `отметки в отзывах: ${info.review_tags.join(', ')}`,
   ].filter((p): p is string => typeof p === 'string' && p !== '')
   return parts.length > 0 ? `Клиент на площадке: ${parts.join('; ')}` : null
 }
