@@ -37,10 +37,29 @@ export type BoardScroll = {
   pauseMs?: number
   /** A pass stops scrolling after this long, so the one tab is not held from the checks and bids behind it. */
   budgetMs?: number
+  /** The ways to make the board load more, in the order tried (the one that worked last time goes first). */
+  ways?: BoardWay[]
 }
+
+/**
+ * How the board is made to load its next part: the wheel over the list, the last card scrolled into view, the
+ * scroll box around the cards taken to its bottom, or the «Показать ещё» button. All of them are what a person does;
+ * which one the live page answers to was not known when this was written, so the pass tries them in turn.
+ */
+export type BoardWay = 'wheel' | 'last_card' | 'container' | 'button'
+const BOARD_WAYS: BoardWay[] = ['wheel', 'last_card', 'container', 'button']
+const MORE_BUTTON =
+  /^\s*(показать\s+ещ[её]|ещ[её]\s+заказ|показать\s+больше|загрузить\s+ещ[её]|больше\s+заказов)/i
 // The board answers about 17 orders at a time, by relevance and not by time (346 on 24.10.2026): a new order of low
 // relevance sits far down. The first pages every minute, the whole board about every 10 minutes.
-const BOARD_SCROLL = { pages: 4, fullEvery: 10, fullPages: 30, pauseMs: 1200, budgetMs: 50000 }
+const BOARD_SCROLL = {
+  pages: 4,
+  fullEvery: 10,
+  fullPages: 30,
+  pauseMs: 1200,
+  budgetMs: 50000,
+  ways: BOARD_WAYS,
+}
 
 /**
  * The minute check (FR-LEAD-1) and the 10-minute chat check (FR-CONV-1): open the feed and unread chats in the
@@ -165,16 +184,160 @@ export function startInsurance(o: {
     onFeed = true
   }
 
+  let goodWay: BoardWay | null = null
+  let probed = false
+
+  const arrived = (seq: number) => (o.eyes.board()?.seq ?? 0) > seq
+  async function answered(seq: number, ms: number): Promise<boolean> {
+    for (let t = 0; t < ms && can() && !arrived(seq); t += 100) await sleep(100)
+    return arrived(seq)
+  }
+
+  /** One way, then a wait for the page's own answer (a new board answer through the eyes). */
+  async function tryWay(way: BoardWay, seq: number): Promise<boolean> {
+    const page = o.ab.page
+    if (way === 'wheel') {
+      const [w, h] = await page.evaluate(() => [innerWidth, innerHeight]).catch(() => [1280, 720])
+      await page.mouse.move((w ?? 1280) / 2, (h ?? 720) / 2).catch(() => {})
+      for (let step = 0; step < 3 && can(); step++) {
+        await page.mouse.wheel(0, 450 + Math.random() * 250).catch(() => {})
+        await sleep(120 + Math.random() * 120)
+        if (arrived(seq)) return true
+      }
+      return answered(seq, 1800)
+    }
+    if (way === 'button') {
+      await page
+        .locator('button, a, [role="button"]')
+        .filter({ hasText: MORE_BUTTON })
+        .first()
+        .click({ timeout: 1500 })
+        .catch(() => {})
+      return answered(seq, 1500)
+    }
+    // In the page: no named inner functions (tsx wraps those in a helper the page does not have).
+    await page
+      .evaluate(
+        ({ sel, how }) => {
+          const cards = sel ? Array.from(document.querySelectorAll(sel)) : []
+          const last = cards.length > 0 ? cards[cards.length - 1] : undefined
+          if (how === 'last_card') {
+            // To the top of the view: the list then runs to its end, past whatever the card holds below its link.
+            if (last) last.scrollIntoView({ block: 'start' })
+            return
+          }
+          let el = last ? last.parentElement : null
+          while (el && el !== document.documentElement) {
+            if (
+              el.scrollHeight > el.clientHeight + 4 &&
+              /(auto|scroll)/.test(getComputedStyle(el).overflowY)
+            ) {
+              el.scrollTop = el.scrollHeight
+              return
+            }
+            el = el.parentElement
+          }
+          const root = document.scrollingElement
+          if (root) root.scrollTop = root.scrollHeight
+        },
+        { sel: o.parsers.boardCards ?? '', how: way },
+      )
+      .catch(() => {})
+    return answered(seq, 1500)
+  }
+
+  /** The next part of the board: the way that worked before first, then the others. Null: none of them did. */
+  async function loadMore(seq: number): Promise<{ way: BoardWay | null; tried: BoardWay[] }> {
+    const ways = scroll.ways
+    const order =
+      goodWay && ways.includes(goodWay) ? [goodWay, ...ways.filter((w) => w !== goodWay)] : ways
+    const tried: BoardWay[] = []
+    for (const way of order) {
+      if (!can()) break
+      tried.push(way)
+      if (await tryWay(way, seq)) {
+        goodWay = way
+        return { way, tried }
+      }
+    }
+    goodWay = null
+    return { way: null, tried }
+  }
+
   /**
-   * Scrolls the open board like a person (the mouse over the list, the wheel, a look between), until the page itself
-   * has asked the site for its next part: each answer passes the eyes, so nothing is called by hand. Stops at the
-   * page count, the end of the board, the time budget, or when the tab may not move.
+   * What the board page is made of, without any order's words: how many cards, the boxes around the last card that
+   * scroll (tag, classes, sizes), the window's sizes, buttons that read like «show more». For calibrating the scroll.
+   */
+  function probeBoard() {
+    return o.ab.page
+      .evaluate((sel) => {
+        const cards = sel ? Array.from(document.querySelectorAll(sel)) : []
+        const last = cards.length > 0 ? cards[cards.length - 1] : undefined
+        const boxes = []
+        let el = last ? last.parentElement : null
+        while (el && el !== document.documentElement) {
+          if (
+            el.scrollHeight > el.clientHeight + 4 &&
+            /(auto|scroll)/.test(getComputedStyle(el).overflowY)
+          ) {
+            boxes.push({
+              tag: el.tagName.toLowerCase(),
+              classes: Array.from(el.classList).slice(0, 6),
+              scrollTop: Math.round(el.scrollTop),
+              scrollHeight: el.scrollHeight,
+              clientHeight: el.clientHeight,
+            })
+          }
+          el = el.parentElement
+        }
+        const rect = last ? last.getBoundingClientRect() : null
+        const root = document.scrollingElement
+        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+          .filter(
+            (b) =>
+              /(показать|ещ[её]|больше|загрузить)/i.test((b.textContent ?? '').trim()) &&
+              (b.textContent ?? '').trim().length < 30,
+          )
+          .slice(0, 3)
+          .map((b) => ({
+            tag: b.tagName.toLowerCase(),
+            classes: Array.from(b.classList).slice(0, 6),
+            text: (b.textContent ?? '').trim(),
+          }))
+        return {
+          cards: cards.length,
+          lastCard:
+            last && rect
+              ? {
+                  tag: last.tagName.toLowerCase(),
+                  classes: Array.from(last.classList).slice(0, 6),
+                  top: Math.round(rect.top),
+                  bottom: Math.round(rect.bottom),
+                }
+              : null,
+          boxes: boxes.slice(0, 3),
+          window: {
+            scrollHeight: root ? root.scrollHeight : 0,
+            innerHeight,
+            scrollY: Math.round(scrollY),
+          },
+          buttons,
+        }
+      }, o.parsers.boardCards ?? '')
+      .catch(() => null)
+  }
+
+  /**
+   * Scrolls the open board like a person until the page itself has asked the site for its next part: each answer
+   * passes the eyes, so nothing is called by hand. Stops at the page count, the end of the board, the time budget, or
+   * when the tab may not move or no way makes the page load more.
    */
   async function scrollBoard(pages: number) {
-    const page = o.ab.page
     const t0 = Date.now()
     let loaded = 1
     let stoppedBy: 'pages' | 'end' | 'quiet' | 'time' | 'gate' = 'pages'
+    const worked: BoardWay[] = []
+    let tried: BoardWay[] = []
     while (loaded < pages) {
       if (!can()) {
         stoppedBy = 'gate'
@@ -189,27 +352,20 @@ export function startInsurance(o: {
         stoppedBy = 'end'
         break
       }
-      const [w, h] = await page.evaluate(() => [innerWidth, innerHeight]).catch(() => [1280, 720])
-      await page.mouse.move((w ?? 1280) / 2, (h ?? 720) / 2).catch(() => {})
-      let arrived = false
-      for (let step = 0; step < 14 && !arrived && can(); step++) {
-        await page.mouse.wheel(0, 450 + Math.random() * 250).catch(() => {})
-        await sleep(120 + Math.random() * 120)
-        arrived = (o.eyes.board()?.seq ?? 0) > before.seq
-      }
-      // A slow answer: the page asked, the site is still thinking.
-      for (let wait = 0; wait < 30 && !arrived && can(); wait++) {
-        await sleep(100)
-        arrived = (o.eyes.board()?.seq ?? 0) > before.seq
-      }
-      if (!arrived) {
+      const r = await loadMore(before.seq)
+      tried = r.tried
+      if (!r.way) {
         stoppedBy = can() ? 'quiet' : 'gate'
         break
       }
+      worked.push(r.way)
       loaded++
       await sleep(scroll.pauseMs * (0.7 + Math.random() * 0.6))
     }
-    // How far the pass got and why it stopped: a note for calibrating the scroll on the live board (no order, no text).
+    // How far the pass got, why it stopped and by which way: a note for calibrating the scroll on the live board.
+    // When nothing loaded (and once on the first pass) it holds the shape of the page too, never an order's words.
+    const probe = stoppedBy === 'quiet' || !probed ? await probeBoard() : undefined
+    probed = true
     await keep({
       what: 'board_scroll',
       pages: loaded,
@@ -217,6 +373,9 @@ export function startInsurance(o: {
       more: o.eyes.board()?.more ?? null,
       stoppedBy,
       ms: Date.now() - t0,
+      worked,
+      tried,
+      ...(probe && { probe }),
     })
   }
 

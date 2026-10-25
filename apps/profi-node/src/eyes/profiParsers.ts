@@ -220,6 +220,7 @@ export function fromStreamFrame(body: unknown): ParseResult {
 }
 
 export const profiParsers: Parsers = {
+  boardCards: ORDER_LINK,
   paths: {
     feed: '/backoffice/n.php',
     chats: '/backoffice/r.php',

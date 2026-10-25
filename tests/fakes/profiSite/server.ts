@@ -9,6 +9,7 @@ import {
   CHANGED_LAYOUT,
   chatPage,
   chatsPage,
+  type BoardLayout,
   feedPage,
   type Layout,
   loginPage,
@@ -80,6 +81,8 @@ export type ProfiSite = {
   feedRequests: number
   /** The board gives this many orders to a page and the rest by cursor, as the live one does; 0: all at once. */
   boardPageSize: number
+  /** How the feed page loads the rest of a long board (see BoardLayout); the wheel over the window by default. */
+  boardLayout: BoardLayout
   bidSettings: BidSettings
   setBalance(rub: number): void
   /** Back to a fresh form: no bids, 5000 ₽, the wallet pays, the answer comes. */
@@ -189,7 +192,14 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
-  const state = { balance: 5000, openerClicks: 0, bidPosts: 0, feedRequests: 0, boardPageSize: 0 }
+  const state = {
+    balance: 5000,
+    openerClicks: 0,
+    bidPosts: 0,
+    feedRequests: 0,
+    boardPageSize: 0,
+    boardLayout: 'window' as BoardLayout,
+  }
   const bids: SiteBid[] = []
   const freshBidSettings = (): BidSettings => ({
     mode: 'ok',
@@ -344,7 +354,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       return res
         .writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
         .end('<!doctype html><h1>Оплата</h1>')
-    if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout))
+    if (p === '/backoffice/a.php') return html(res, feedPage(rtp.url, layout, state.boardLayout))
     if (p === '/backoffice/n.php')
       return html(res, orderPage(url.searchParams.get('o') ?? '', bidSettings))
     if (p === '/backoffice/widget.html') return html(res, widgetPage())
@@ -397,6 +407,12 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     set boardPageSize(n: number) {
       state.boardPageSize = n
     },
+    get boardLayout() {
+      return state.boardLayout
+    },
+    set boardLayout(l: BoardLayout) {
+      state.boardLayout = l
+    },
     bids,
     bidSettings,
     setBalance(rub) {
@@ -409,6 +425,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.bidPosts = 0
       state.feedRequests = 0
       state.boardPageSize = 0
+      state.boardLayout = 'window'
       Object.assign(bidSettings, freshBidSettings())
     },
     orders,
