@@ -336,6 +336,45 @@ describe('client data and the model', () => {
   })
 })
 
+describe('an answer that must stay hidden', () => {
+  it('NFR-PRIV-2: with restore off the tags of the answer stay as the model wrote them', async () => {
+    const gw = await gateway({
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({
+        sorter: {
+          verdict: 'fit',
+          reason: 'Это [имя 1], тел. [телефон 1]',
+          tags: [],
+          confidence: 0.9,
+        },
+      }),
+    })
+    const r = await gw.call('sorter', 'Олег, тел. +7 916 123-45-67', SorterOutput, {
+      redact: { names: ['Олег'], restore: false },
+    })
+    expect(r).toMatchObject({ ok: true, output: { reason: 'Это [имя 1], тел. [телефон 1]' } })
+  })
+})
+
+describe('what pseudonymized says', () => {
+  it('NFR-PRIV-2: a call that carries a client but names no one is not marked as pseudonymized', async () => {
+    const gw = await gateway({
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({
+        sorter: { verdict: 'fit', reason: 'да', tags: [], confidence: 0.9 },
+        probe: { ok: true },
+      }),
+    })
+    const text = 'Меня зовут Ирина, нужен сайт'
+    await gw.call('sorter', text, SorterOutput, { redact: { names: [] } })
+    await gw.call('sorter', text, SorterOutput, { redact: { names: [null, ' '] } })
+    await gw.call('sorter', text, SorterOutput, { redact: { names: ['Ирина'] } })
+    await gw.call('probe', 'Проверка связи.', ProbeOutput)
+    const rows = await db.execute<{ pseudonymized: boolean }>(
+      sql`select pseudonymized from core.model_call order by started_at, id`,
+    )
+    expect(rows.rows.map((r) => r.pseudonymized)).toEqual([false, false, true, true])
+  })
+})
+
 describe('Claude limit in the gateway', () => {
   const SORTED = { verdict: 'fit', reason: 'да', tags: [], confidence: 0.9 }
   const BY_ROLE = JSON.stringify({ sorter: SORTED, probe: { ok: true } })
