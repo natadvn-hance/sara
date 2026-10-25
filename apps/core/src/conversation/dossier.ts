@@ -27,6 +27,18 @@ export function turnMessageIds(
     .map((m) => m.platformMessageId)
 }
 
+/**
+ * The chat as it was when the turn began: in shadow our side may answer while the turn runs, and the draft is
+ * written, and compared with that answer, as if the answer had not come yet (M4 design 5.9). The first message of
+ * our side after the anchor and all that follows it are left out; with none after the anchor nothing changes.
+ */
+export function untilOurs<T extends DossierMessage>(messages: T[], anchor: string | null): T[] {
+  const at = anchor ? messages.findIndex((m) => m.platformMessageId === anchor) : -1
+  if (at < 0) return messages
+  const cut = messages.findIndex((m, i) => i > at && m.side === 'specialist')
+  return cut < 0 ? messages : messages.slice(0, cut)
+}
+
 /** Words that open a message before a comma and are not a name. */
 const NOT_NAMES = new Set([
   'здравствуйте',
@@ -99,7 +111,7 @@ export async function buildDossier(
   db: Db,
   conversationId: string,
   now: Date,
-  o: { night: { from: number; to: number }; profi?: ProfiClient },
+  o: { night: { from: number; to: number }; profi?: ProfiClient; anchor?: string },
 ): Promise<Dossier> {
   const conv = await getConversation(db, conversationId)
   if (!conv) throw new Error(`conversation ${conversationId} not found`)
@@ -108,13 +120,16 @@ export async function buildDossier(
     .from(chatMessage)
     .where(eq(chatMessage.conversationId, conversationId))
     .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
-  const messages: DossierMessage[] = rows.map((r) => ({
-    author: r.author as DossierMessage['author'],
-    side: r.side as DossierMessage['side'],
-    text: r.text,
-    sentAt: r.sentAt,
-    platformMessageId: r.platformMessageId,
-  }))
+  const messages: DossierMessage[] = untilOurs(
+    rows.map((r) => ({
+      author: r.author as DossierMessage['author'],
+      side: r.side as DossierMessage['side'],
+      text: r.text,
+      sentAt: r.sentAt,
+      platformMessageId: r.platformMessageId,
+    })),
+    o.anchor ?? null,
+  )
   const [l] = conv.orderId ? await db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
   let order: Dossier['order'] = l
     ? { title: l.title, category: l.category, city: l.city, budgetText: l.budgetText, text: l.text }

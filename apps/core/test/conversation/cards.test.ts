@@ -2,7 +2,7 @@ import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { sendTurnCard } from '../../src/conversation/cards'
-import { compareTurn, similarity } from '../../src/conversation/compare'
+import { compareAfterTurn, compareTurn, similarity } from '../../src/conversation/compare'
 import { ensureConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
 import { chatMessage, convTurn, lead, task } from '../../src/db/schema'
@@ -179,6 +179,65 @@ describe('comparison in shadow', () => {
     // A second message of our side does not compare the same turn again.
     await compareTurn({ db, notifier }, convId, [actual as never])
     expect(edits).toHaveLength(1)
+  })
+
+  const ours = (id: string, author: 'sara' | 'unknown', text: string, at: Date) =>
+    db.insert(chatMessage).values({
+      id: newEventId(),
+      accountId: 'hance-marketing',
+      chatId: CHAT,
+      orderId: CHAT,
+      platformMessageId: id,
+      side: 'specialist',
+      author,
+      authorBasis: author === 'sara' ? 'outbox' : 'v1_or_boris',
+      text,
+      sentAt: at.toISOString(),
+      source: 'node',
+      conversationId: convId,
+    })
+
+  it('FR-CONV-10: the comparison after a running turn takes the first message of our side that is not Sara’s', async () => {
+    await turn('t-1', { state: 'decided' })
+    await sendTurnCard({ db, notifier }, 't-1')
+    const now = Date.now()
+    await ours('m-3', 'sara', 'Мой старый ответ', new Date(now + 1000))
+    await ours('m-4', 'unknown', 'Анна, давайте начнём с созвона.', new Date(now + 2000))
+    await ours('m-5', 'unknown', 'И ещё одно сообщение', new Date(now + 3000))
+    const heard = {
+      side: 'specialist',
+      platformMessageId: 'm-5',
+      author: 'unknown',
+      text: 'И ещё одно сообщение',
+      sentAt: new Date().toISOString(),
+      accountId: 'hance-marketing',
+    } as never
+    // The event finds the turn still running and leaves it to the turn's own step.
+    await compareTurn({ db, notifier }, convId, [heard])
+    expect(edits).toHaveLength(0)
+    await compareAfterTurn({ db, notifier }, 't-1')
+    const [row] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+    expect(row?.actualMessageId).toBe('m-4')
+    expect(row?.actualAuthor).toBe('unknown')
+    expect(edits).toHaveLength(1)
+    expect(await countEvents(db, 'conv.compared')).toBe(1)
+    // A turn compared once is never compared twice, by this way or by the event.
+    await compareAfterTurn({ db, notifier }, 't-1')
+    await db.update(convTurn).set({ outcome: 'drafted' })
+    await compareTurn({ db, notifier }, convId, [heard])
+    expect(edits).toHaveLength(1)
+    expect(await countEvents(db, 'conv.compared')).toBe(1)
+  })
+
+  it('FR-CONV-10: nothing is compared while no message of our side follows, and never after the switch', async () => {
+    await turn('t-1', { state: 'decided' })
+    await sendTurnCard({ db, notifier }, 't-1')
+    await compareAfterTurn({ db, notifier }, 't-1')
+    expect(edits).toHaveLength(0)
+    await ours('m-4', 'unknown', 'Анна, давайте начнём с созвона.', new Date(Date.now() + 2000))
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await compareAfterTurn({ db, notifier }, 't-1')
+    expect(edits).toHaveLength(0)
   })
 
   it('FR-CONV-10: similarity of the same text is 100 and of unrelated texts near 0', () => {

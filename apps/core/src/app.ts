@@ -11,7 +11,7 @@ import { requireSession } from './auth/session'
 import type { Config } from './config'
 import { forwardTurn, sendTurnCard } from './conversation/cards'
 import { onConvEdit, onConvPress, onConvReply } from './conversation/commands'
-import { compareTurn } from './conversation/compare'
+import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
 import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
 import { sendTextNow, sendTurnReply } from './conversation/outbox'
@@ -161,6 +161,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     forward: (id) => forwardTurn(cardDeps, id),
     // In shadow the turn never reaches a send; after the switch it goes through the message outbox.
     send: (id, round) => sendTurnReply({ db, profi }, id, round),
+    compare: (id) => compareAfterTurn(cardDeps, id),
   })
   const conversationDeps: ConversationEventDeps = {
     db,
