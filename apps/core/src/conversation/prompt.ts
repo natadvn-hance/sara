@@ -27,8 +27,12 @@ const moscow = (iso: string) =>
     minute: '2-digit',
   })
 
-/** The client's own words go to the model framed as data, so a trap inside them is not an instruction (12.4). */
-const framed = (text: string) => `<<< данные клиента\n${text}\n>>>`
+/**
+ * The client's own words go to the model framed as data, so a trap inside them is not an instruction (12.4). A run of
+ * three signs in the words that would open or close the frame is spaced out, so the words cannot end it early.
+ */
+const framed = (text: string) =>
+  `<<< данные клиента\n${text.replace(/[<>]{3,}/g, (run) => [...run].join(' '))}\n>>>`
 
 const record = (h: MindHit) => `[${h.id}] (${TYPE[h.type]}) ${h.title}\n${h.body.trim()}`
 

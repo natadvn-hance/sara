@@ -27,6 +27,9 @@ const quote = (s: string, max = 400) => {
   return `«${t.length > max ? `${t.slice(0, max - 1)}…` : t}»`
 }
 
+/** Words from outside (a client's, Boris's, the page's) may hold a long dash; Boris reads a short hyphen (NFR-UX-1). */
+const hyphenated = (s: string) => s.replace(/[\u2014\u2013]/g, '-')
+
 export type CardView = {
   name: string | null
   orderTitle: string | null
@@ -76,22 +79,26 @@ export const CONV_TEXTS = {
     )
     if (v.shadow) lines.push('Режим тени: клиенту ничего не ушло.')
     // A draft that failed the dash check is still shown to Boris, with a hyphen (NFR-UX-1).
-    return lines.join('\n').replace(/[\u2014\u2013]/g, '-')
+    return hyphenated(lines.join('\n'))
   },
 
   /** What really went to the client, added to the shadow card. */
   compared: (atHhmm: string, author: ChatAuthor, text: string, similarity: number | null) =>
-    `Ушло клиенту в ${atHhmm} (${AUTHOR_RU[author]}): ${quote(text, 300)}.${
-      similarity === null ? '' : ` Сходство с моим: ${similarity}%.`
-    }`,
+    hyphenated(
+      `Ушло клиенту в ${atHhmm} (${AUTHOR_RU[author]}): ${quote(text, 300)}.${
+        similarity === null ? '' : ` Сходство с моим: ${similarity}%.`
+      }`,
+    ),
 
   answeredYourself: 'Ты ответил сам, черновик не нужен.',
 
   /** The words of a client Boris leads, or of a closed conversation (FR-NOTIF-1, «Клиент написал»). */
   forward: (name: string | null, orderTitle: string | null, words: string, closed: boolean) =>
-    `💬 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}${
-      closed ? ' (разговор закрыт)' : ''
-    } пишет: ${quote(words)}`,
+    hyphenated(
+      `💬 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}${
+        closed ? ' (разговор закрыт)' : ''
+      } пишет: ${quote(words)}`,
+    ),
 
   buttons: {
     good: 'Хорошо',

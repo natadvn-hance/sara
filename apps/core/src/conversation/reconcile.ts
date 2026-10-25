@@ -17,23 +17,28 @@ export async function reconcileChats(
 ): Promise<number> {
   let read = 0
   for (const accountId of accountIds) {
-    const { chats } = await d.profi.listChats(accountId)
-    for (const c of chats) {
-      if (!c.last_message_at || now.getTime() - new Date(c.last_message_at).getTime() > RECENT_MS)
-        continue
-      const [ours] = await d.db
-        .select({ last: max(chatMessage.sentAt) })
-        .from(chatMessage)
-        .where(and(eq(chatMessage.accountId, accountId), eq(chatMessage.chatId, c.chat_id)))
-      if (ours?.last && new Date(ours.last).getTime() >= new Date(c.last_message_at).getTime())
-        continue
-      const conv = await ensureConversation(d.db, {
-        accountId,
-        chatId: c.chat_id,
-        orderId: c.order_id,
-      })
-      await onChatNews(d, conv, now, { clientHeard: true })
-      read++
+    // An account that cannot be read (not logged in, the service down) must not cost the others their round.
+    try {
+      const { chats } = await d.profi.listChats(accountId)
+      for (const c of chats) {
+        if (!c.last_message_at || now.getTime() - new Date(c.last_message_at).getTime() > RECENT_MS)
+          continue
+        const [ours] = await d.db
+          .select({ last: max(chatMessage.sentAt) })
+          .from(chatMessage)
+          .where(and(eq(chatMessage.accountId, accountId), eq(chatMessage.chatId, c.chat_id)))
+        if (ours?.last && new Date(ours.last).getTime() >= new Date(c.last_message_at).getTime())
+          continue
+        const conv = await ensureConversation(d.db, {
+          accountId,
+          chatId: c.chat_id,
+          orderId: c.order_id,
+        })
+        await onChatNews(d, conv, now, { clientHeard: true })
+        read++
+      }
+    } catch (e) {
+      console.error('chat check failed for', accountId, e instanceof Error ? e.message : e)
     }
   }
   return read

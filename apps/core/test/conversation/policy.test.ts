@@ -244,6 +244,15 @@ describe('call request', () => {
     expect(detectCallRequest('Сейчас удобно')).toBeNull()
     expect(detectCallRequest('бюджет 89000000')).toBeNull()
   })
+
+  it('FR-CONV-5: «перезвоните» is a call word, and a longer number is not a phone', () => {
+    expect(detectCallRequest('Перезвоните мне, пожалуйста')?.keyword).toBe(true)
+    expect(detectCallRequest('можно перезвонить завтра?')?.keyword).toBe(true)
+    // A number with more digits than a Russian phone holds is an order or an account number.
+    expect(detectCallRequest('номер заказа 891812345678901')).toBeNull()
+    expect(detectCallRequest('счёт 12348918123456789')).toBeNull()
+    expect(detectCallRequest('звоните 89181234567.')?.phone).toBe('89181234567')
+  })
 })
 
 describe('Moscow hours', () => {

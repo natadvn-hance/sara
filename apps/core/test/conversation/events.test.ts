@@ -196,4 +196,32 @@ describe('reconcile', () => {
       ),
     ).toBe(0)
   })
+
+  it('FR-CONV-1: one account failing does not stop the check of the others', async () => {
+    await setSetting(db, 'pipeline.conversations', true, 'system')
+    const now = new Date()
+    const p = stubProfi([chatMsg('m-9', 'client', 'Вы тут?', now.toISOString())])
+    p.listChats = async (accountId: string) => {
+      if (accountId === 'broken') throw new Error('the account is not logged in')
+      return {
+        chats: [{ chat_id: CHAT, order_id: CHAT, last_message_at: now.toISOString(), unread: 1 }],
+      }
+    }
+    const n = await reconcileChats(
+      {
+        db,
+        profi: p,
+        notifier: { sendText: async () => ({ messageId: 1 }) },
+        onTurnNeeded: async (c) => {
+          turns.push(c.chatId)
+        },
+        onTyping: async () => {},
+        onSpecialist: async () => {},
+      },
+      ['broken', ACC],
+      now,
+    )
+    expect(n).toBe(1)
+    expect(turns).toEqual([CHAT])
+  })
 })

@@ -3,7 +3,7 @@ import { moscowDayStart } from '../../src/conversation/cards'
 import { daySummary } from '../../src/conversation/daySummary'
 import { convReport } from '../../src/conversation/report'
 import { ensureConversation } from '../../src/conversation/store'
-import { convTurn } from '../../src/db/schema'
+import { convTurn, jobRun } from '../../src/db/schema'
 import { openTestDb, resetDb } from '../helpers/db'
 import { countEvents } from '../helpers/events'
 
@@ -88,6 +88,19 @@ describe('the evening conversation summary', () => {
     expect(sent[0]).toMatch(/Разговоры за день: 3 реплики клиентов/)
     expect(sent[0]).toMatch(/сходство 50%/)
     expect(await countEvents(db, 'conv.day_summary')).toBe(1)
+  })
+
+  it('FR-NOTIF-3: the summary’s day is the Moscow date, not the UTC date of the Moscow midnight', async () => {
+    const evening = new Date(new Date(moscowDayStart(new Date())).getTime() + 20.5 * 3600_000)
+    const conv = await ensureConversation(db, {
+      accountId: 'hance-marketing',
+      chatId: 'c-3',
+      orderId: null,
+    })
+    await turns(conv.id)
+    expect(await daySummary({ db, notifier }, evening)).toBe('sent')
+    const [row] = await db.select().from(jobRun)
+    expect(row?.day).toBe(evening.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' }))
   })
 
   it('FR-NOTIF-3: before 20:00 Moscow there is no summary yet', async () => {

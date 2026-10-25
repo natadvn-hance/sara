@@ -46,6 +46,9 @@ import { getSetting } from './settings/store'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
 
+/** How often the mind index is checked for records that came into force or went out of it by their dates. */
+const MIND_REFRESH_MS = 3600_000
+
 export type RunningApp = {
   url: string
   app: FastifyInstance
@@ -146,9 +149,14 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   setReminderHandler((taskId) => lp.onReminder(taskId))
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
   const mind = createMindSearch(db)
-  await ensureMindIndex(db, config.mindDir).catch((e) =>
-    console.error('mind index failed', e instanceof Error ? e.message : e),
-  )
+  const refreshMind = () =>
+    ensureMindIndex(db, config.mindDir).catch((e) =>
+      console.error('mind index failed', e instanceof Error ? e.message : e),
+    )
+  await refreshMind()
+  // Records that come into force or go out of it by their dates are picked up without a restart.
+  const mindTimer = setInterval(() => void refreshMind(), MIND_REFRESH_MS)
+  mindTimer.unref()
   const cardDeps = { db, notifier: bot.notifier }
   setTurnDeps({
     db,
@@ -275,6 +283,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()
+      clearInterval(mindTimer)
       conversationSummary.stop()
       gateway.stop()
       await bot.stop()

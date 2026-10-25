@@ -3,6 +3,7 @@ import { and, gte, lt } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { convTurn, jobRun } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { mskParts } from '../learning/summary'
 import type { Notifier } from '../notify/notifier'
 import { moscowDayStart } from './cards'
 import { turnStats } from './report'
@@ -29,7 +30,7 @@ export async function daySummary(
   if (rows.length === 0) return 'empty'
   const taken = await d.db
     .insert(jobRun)
-    .values({ name: 'conv_day_summary', day: from.slice(0, 10) })
+    .values({ name: 'conv_day_summary', day: mskParts(now).day })
     .onConflictDoNothing()
     .returning({ day: jobRun.day })
   if (taken.length === 0) return 'already'
