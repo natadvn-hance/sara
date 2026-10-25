@@ -459,6 +459,56 @@ describe('the turn workflow', () => {
     expect(sends).toHaveLength(0)
   }, 40000)
 
+  it('FR-CONV-11: «Закрыть» pressed during the pause stops the turn: the client’s words go to Boris', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Как начнём?')
+    await duringPause(async () => {
+      await db.update(conversation).set({ closedAt: new Date().toISOString() })
+    })
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('closed')
+    expect(forwards).toHaveLength(1)
+    expect(sends).toHaveLength(0)
+    expect(cards).toHaveLength(0)
+  }, 40000)
+
+  it('FR-CONV-11: «Беру сам» pressed during the pause stops the turn: the client’s words go to Boris', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Как начнём?')
+    await duringPause(async () => {
+      await db.update(conversation).set({ owner: 'boris', ownerReason: 'take' })
+    })
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('forwarded')
+    expect(forwards).toHaveLength(1)
+    expect(sends).toHaveLength(0)
+  }, 40000)
+
+  it('FR-OPS-1: the «Пишет клиентам» pause switched off during the pause makes the reply a draft', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Как начнём?')
+    await duringPause(() => setSetting(db, 'outbound.messages', false, 'boris'))
+    const [t] = await turnsDone(1)
+    expect(t).toMatchObject({ outcome: 'drafted', decision: 'draft' })
+    expect(t?.decisionReason).toBe('пауза «Пишет клиентам»')
+    expect(cards).toHaveLength(1)
+    expect(sends).toHaveLength(0)
+  }, 40000)
+
+  it('FR-OPS-1: an account paused during the pause makes the reply a draft', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Как начнём?')
+    await duringPause(async () => {
+      await db
+        .insert(account)
+        .values({ id: ACC, title: 'Hance', egressIp: '203.0.113.7', paused: true })
+    })
+    const [t] = await turnsDone(1)
+    expect(t).toMatchObject({ outcome: 'drafted', decisionReason: 'аккаунт на паузе' })
+    expect(cards).toHaveLength(1)
+    expect(sends).toHaveLength(0)
+  }, 40000)
+
   it('FR-CONV-11: a client Boris took is forwarded to him without the model', async () => {
     await clientWrites('m-0', 'Привет')
     await turnsDone(1)

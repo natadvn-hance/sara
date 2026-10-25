@@ -64,7 +64,7 @@ const MAX_WAKES = 200
 /** An unreadable chat is retried every minute for half an hour. */
 const UNREADABLE_TRIES = 30
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
-/** The card and forward steps talk to Telegram: the same retries, and a failure that ends the turn as failed. */
+/** The steps that talk to Telegram or the service: the same retries, and a failure that ends the turn as failed. */
 const notifyStep = () => ({ ...DB_STEP, ...d().stepRetry })
 
 type Gate = 'go' | 'closed' | 'take' | 'answered' | 'unclear' | 'unreadable'
@@ -357,23 +357,45 @@ async function journalStepFailed(turnId: string, reason: string): Promise<void> 
   }
 }
 
-/** Step 7 before sending: did the client write more, or did our side answer, since the plan? */
+type Seen = 'same' | 'more' | 'answered' | 'unclear' | 'closed' | 'take' | 'held'
+
+/**
+ * Step 7 before sending: what happened since the plan, during the human pause too. The client wrote more, our side
+ * answered, a message of an unknown side came, Boris pressed «Закрыть» or «Беру сам», or the account or the «Пишет
+ * клиентам» switch was paused (then the reply is a draft with that reason).
+ */
 async function reread(
+  turnId: string,
   conversationId: string,
   anchor: string,
   covered: string[],
-): Promise<'same' | 'more' | 'answered' | 'unclear'> {
+): Promise<Seen> {
   const { db } = d()
-  const conv = await getConversation(db, conversationId)
+  let conv = await getConversation(db, conversationId)
   if (!conv) return 'answered'
   const v1Writes = await getSetting(db, 'conv.v1_writes')
   const r = await syncChat(d(), conv, new Date(), { v1Writes })
-  await applyOwnerRule(db, conv, r.added, { v1Writes })
+  conv = await applyOwnerRule(db, conv, r.added, { v1Writes })
+  if (conv.closedAt) return 'closed'
+  if (conv.owner === 'boris' && conv.ownerReason === 'take') return 'take'
   const after = sinceAnchor(r.messages, anchor)
   if (after.some((m) => m.side === 'unknown')) return 'unclear'
-  if (after.some((m) => m.side === 'specialist')) return 'answered'
+  if (!v1Writes && after.some((m) => m.side === 'specialist')) return 'answered'
   const known = new Set(covered)
-  return after.some((m) => m.side === 'client' && !known.has(m.platformMessageId)) ? 'more' : 'same'
+  if (after.some((m) => m.side === 'client' && !known.has(m.platformMessageId))) return 'more'
+  const settings = await policySettings(db, conv.accountId)
+  const why = settings.v1Writes
+    ? 'режим тени'
+    : settings.accountPaused
+      ? 'аккаунт на паузе'
+      : !settings.outboundMessages
+        ? 'пауза «Пишет клиентам»'
+        : null
+  if (why) {
+    await stamp(turnId, 'reread', { decision: 'draft', decisionReason: why })
+    return 'held'
+  }
+  return 'same'
 }
 
 const OUTCOME_EVENT = {
@@ -506,12 +528,41 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
         { name: `pause-${round}` },
       )
       await DBOS.sleep(pause)
-      const seen = await DBOS.runStep(() => reread(conversationId, anchor, covered), {
-        name: `reread-${round}`,
-        ...DB_STEP,
-      })
+      const read = await tried(
+        turnId,
+        `reread-${round}`,
+        () => reread(turnId, conversationId, anchor, covered),
+        notifyStep(),
+      )
+      if (!read.ok) {
+        // The chat cannot be read to check: nothing is sent, Boris gets the draft.
+        outcome = 'failed'
+        await tried(turnId, `card-${round}`, () => d().card(turnId), notifyStep())
+        break
+      }
+      const seen = read.value
       if (seen === 'answered' || seen === 'unclear') {
         outcome = seen
+        break
+      }
+      if (seen === 'closed' || seen === 'take') {
+        const fwd = await tried(
+          turnId,
+          `reread-forward-${round}`,
+          () => d().forward(turnId),
+          notifyStep(),
+        )
+        outcome = !fwd.ok ? 'failed' : seen === 'take' ? 'forwarded' : 'closed'
+        break
+      }
+      if (seen === 'held') {
+        const held = await tried(
+          turnId,
+          `reread-card-${round}`,
+          () => d().card(turnId),
+          notifyStep(),
+        )
+        outcome = held.ok ? 'drafted' : 'failed'
         break
       }
       if (seen === 'more' && round < MAX_ROUNDS) continue
