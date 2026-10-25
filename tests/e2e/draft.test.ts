@@ -6,7 +6,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { event, lead, outbox, question, task } from '../../apps/core/src/db/schema'
+import { event, lead, leadLabel, outbox, question, task } from '../../apps/core/src/db/schema'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
@@ -22,6 +22,8 @@ const BODY = 'Понимаю, клинике важно быстро начат�
 const ANALYST = analystAnswer(BODY)
 /** The sample order 90000001: client Ирина, budget «до 150 000 ₽». */
 const DRAFT = `Ирина, добрый день!\n\n${BODY}`
+/** Sara's note after a new text; the sample order 90000001 is «Сайт для стоматологической клиники». */
+const SAVED = 'Записала новый текст отклика для «Сайт для стоматологической клиники»'
 const NBSP = ' '
 const { db, close } = openTestDb()
 
@@ -325,7 +327,7 @@ describe('«Изменить»', () => {
     expect(tg.answers.at(-1)?.text).toBe('Жду новый текст отклика')
     expect(said(ASK)).toBe(true)
     tg.pushText(111, NEW, ask)
-    await until(() => said('Записала новый текст отклика'))
+    await until(() => said(SAVED))
     expect(cards()).toHaveLength(2)
     expect(cards()[1]?.text).toContain(
       `<b>Черновик отклика</b>\n<blockquote>Ирина, добрый день!\n\n${NEW}</blockquote>`,
@@ -360,7 +362,7 @@ describe('«Изменить»', () => {
     expect((await leadOf(id))?.draftText).toBe(DRAFT)
     expect(cards()).toHaveLength(1)
     tg.pushText(111, NEW)
-    await until(() => said('Записала новый текст отклика'))
+    await until(() => said(SAVED))
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
   })
 
@@ -386,7 +388,7 @@ describe('«Изменить»', () => {
     await until(() => cards().length === 1)
     const ask = await pressEdit(cards()[0])
     tg.pushText(111, 'Сделаем сайт. Когда старт?', ask)
-    await until(() => said('Записала новый текст отклика'))
+    await until(() => said(SAVED))
     expect(cards()[1]?.text).toContain('Стоимость услуги: не указана')
     expect((await eventsOf('draft.edited', id)).map((e) => e.payload)).toEqual([
       { before: null, after: 'Сделаем сайт. Когда старт?', voice: false },
@@ -406,7 +408,7 @@ describe('«Изменить»', () => {
     const first = await pressEdit(cards()[0])
     await pressEdit(cards()[0])
     tg.pushText(111, NEW, first)
-    await until(() => said('Записала новый текст отклика'))
+    await until(() => said(SAVED))
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
     // The second request is closed too: a later plain message does not rewrite the draft.
     expect((await editRequests()).map((q) => q.answeredAt !== null)).toEqual([true, true])
@@ -414,6 +416,38 @@ describe('«Изменить»', () => {
     await until(() => said('Пока я понимаю только ответы на мои вопросы'))
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
     expect(cards()).toHaveLength(2)
+  })
+
+  it('FR-LEAD-7: a text without a reply, with an edit request and a «почему?» both waiting, is stored nowhere', async () => {
+    byRole = { ...byRole, scorer: scorerAnswer(90) }
+    const a = orderId()
+    const b = orderId()
+    await fake.emitOrder({ order_id: a, title: 'Сайт для кафе' })
+    await until(() => cards().length === 1)
+    await fake.emitOrder({ order_id: b, title: 'Реклама на радио' })
+    await until(() => cards().length === 2)
+    const ask = await pressEdit(cards()[0])
+    tg.pushPress(111, button(cards()[1], 'skip'))
+    await until(() =>
+      tg.sent.some(
+        (m) => m.text === 'Почему пропустил «Реклама на радио»? Напиши или скажи голосом.',
+      ),
+    )
+
+    tg.pushText(111, NEW)
+    await until(() => tg.sent.some((m) => m.text.startsWith('Не поняла')))
+    expect(tg.sent.at(-1)?.text).toBe(
+      'Не поняла, к какому моему вопросу это. Сейчас жду:\n- новый текст отклика на «Сайт для кафе»\n- почему пропустил «Реклама на радио»\nНажми «Ответить» на нужном моём сообщении и пришли текст ещё раз.',
+    )
+    expect((await leadOf(a))?.draftText).toBe(DRAFT)
+    expect((await db.select().from(leadLabel).where(eq(leadLabel.leadId, b)))[0]?.reason).toBeNull()
+    expect(cards()).toHaveLength(2)
+
+    // A reply finds its place, and the note says whose text it was.
+    tg.pushText(111, NEW, ask)
+    await until(() => said('Записала новый текст отклика для «Сайт для кафе»'))
+    expect((await leadOf(a))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
+    expect((await db.select().from(leadLabel).where(eq(leadLabel.leadId, b)))[0]?.reason).toBeNull()
   })
 
   it('FR-LEAD-7: «Изменить» on a decided card does nothing', async () => {

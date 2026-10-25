@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, isNotNull } from 'drizzle-orm'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFakeTelegram, type FakeTelegram } from '../../../tests/fakes/telegramApi'
 import { leadLabel, question } from '../src/db/schema'
@@ -76,14 +76,14 @@ describe("Boris's words in the bot", () => {
   it("FR-LEAD-7: Boris's reply text to a question is noted", async () => {
     const q = await asked()
     tg.pushText(111, 'не наш профиль', q)
-    await until(() => said('Записала: «не наш профиль»'))
+    await until(() => said('Записала по «Реклама на ТВ»: «не наш профиль»'))
     expect(await label()).toMatchObject({ reason: 'не наш профиль', voice: false })
   })
 
   it('FR-LEAD-7: a voice answer is recognized and noted, marked as voice', async () => {
     const q = await asked()
     tg.pushVoice(111, q)
-    await until(() => said('Записала: «бюджет копейки»'))
+    await until(() => said('Записала по «Реклама на ТВ»: «бюджет копейки»'))
     expect(transcribe).toHaveBeenCalledOnce()
     expect(await label()).toMatchObject({ reason: 'бюджет копейки', voice: true })
   })
@@ -108,15 +108,45 @@ describe("Boris's words in the bot", () => {
     expect((await label())?.reason).toBeNull()
     // The «почему?» asked before is still open for its own answer.
     tg.pushText(111, 'не наш профиль', q)
-    await until(() => said('Записала: «не наш профиль»'))
+    await until(() => said('Записала по «Реклама на ТВ»: «не наш профиль»'))
+  })
+
+  it('FR-LEAD-7: a plain text while an edit request and a «почему?» both wait is asked about, not stored', async () => {
+    await asked()
+    const taskId = await leadWithScore(db, '920002', 80)
+    await askForDraft({ db, notifier: bot.notifier }, { taskId, title: 'Сайт клиники' }, new Date())
+    tg.pushText(111, 'новый текст отклика')
+    await until(() => tg.sent.some((m) => m.text.startsWith('Не поняла')))
+    expect(tg.sent.at(-1)?.text).toBe(
+      'Не поняла, к какому моему вопросу это. Сейчас жду:\n- почему пропустил «Реклама на ТВ»\n- новый текст отклика на «Реклама на ТВ»\nНажми «Ответить» на нужном моём сообщении и пришли текст ещё раз.',
+    )
+    expect(onDraftText).not.toHaveBeenCalled()
+    expect((await label())?.reason).toBeNull()
+    expect(await db.select().from(question).where(isNotNull(question.answeredAt))).toHaveLength(0)
+  })
+
+  it('FR-NOTIF-1: two edit requests for the same lead are listed once when Sara asks which question a text answers', async () => {
+    await asked()
+    const taskId = await leadWithScore(db, '920003', 80)
+    const edit = { db, notifier: bot.notifier }
+    await askForDraft(edit, { taskId, title: 'Сайт клиники' }, new Date())
+    await askForDraft(edit, { taskId, title: 'Сайт клиники' }, new Date())
+    tg.pushText(111, 'новый текст отклика')
+    await until(() => tg.sent.some((m) => m.text.startsWith('Не поняла')))
+    expect(
+      tg.sent
+        .at(-1)
+        ?.text.split('\n')
+        .filter((l) => l.startsWith('- ')),
+    ).toHaveLength(2)
   })
 
   it('NFR-UX-1: a long dash in the recognized voice comes back to Boris as a hyphen', async () => {
     const q = await asked()
     heard = `бюджет ${String.fromCharCode(0x2014)} копейки`
     tg.pushVoice(111, q)
-    await until(() => tg.sent.some((m) => m.text.startsWith('Записала:')))
-    expect(tg.sent.at(-1)?.text).toBe('Записала: «бюджет - копейки»')
+    await until(() => tg.sent.some((m) => m.text.startsWith('Записала по')))
+    expect(tg.sent.at(-1)?.text).toBe('Записала по «Реклама на ТВ»: «бюджет - копейки»')
   })
 
   it('FR-LEAD-7: an unrecognized voice asks for text and notes nothing', async () => {
@@ -165,8 +195,8 @@ describe("Boris's words in the bot", () => {
     await until(() => transcribe.mock.calls.length === 1)
     tg.pushPress(111, 't:0192f3c4-5b6a-7c8d-9e0f-112233445566:skip')
     await until(() => tg.answers.length === 1)
-    expect(said('Записала: «бюджет копейки»')).toBe(false)
+    expect(said('Записала по «Реклама на ТВ»: «бюджет копейки»')).toBe(false)
     release()
-    await until(() => said('Записала: «бюджет копейки»'))
+    await until(() => said('Записала по «Реклама на ТВ»: «бюджет копейки»'))
   })
 })

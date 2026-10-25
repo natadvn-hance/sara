@@ -129,6 +129,11 @@ async function draftFor(
   }
 }
 
+/** The day's card cap is spent: a shown order is held for the summary (the decision itself is taken under a lock). */
+async function capSpent(): Promise<boolean> {
+  return (await cardsToday(d().db, new Date())) >= (await getSetting(d().db, 'cards.max_per_day'))
+}
+
 /** The draft goes on the lead (one there already, Boris's edit, is kept) and its outcome into the journal. */
 function storeDraft(
   l: { id: string; correlationId: string },
@@ -335,10 +340,15 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   }
 
   // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.
+  // An order the day's cap will hold goes to the summary undrafted: «Показать» writes its draft if Boris asks.
   const draft = (await DBOS.patch('analyst-draft'))
-    ? await DBOS.runStep(() => draftFor(order, { correlationId, causationId: e.id }), {
-        name: 'draft',
-      })
+    ? await DBOS.runStep(
+        async () =>
+          (await capSpent().catch(() => false))
+            ? null
+            : draftFor(order, { correlationId, causationId: e.id }),
+        { name: 'draft' },
+      )
     : null
   if (draft) {
     await DBOS.runStep(() => storeDraft({ id: order.order_id, correlationId }, draft), {
@@ -597,7 +607,7 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   })
   if (!saved) return TEXTS.alreadyDone
   await sendCard(t.id, 'edit')
-  return TEXTS.draftSaved
+  return TEXTS.draftSaved(l.title)
 }
 
 /**
@@ -641,12 +651,12 @@ async function bringCard(
   })
   if (!resolved) return null
   await startDecisionWait(decisionId, await d().remindAfterMs())
-  if (action === 'open') {
-    // A held order got its draft before its task: the card goes at once.
+  if (action === 'open' && l.draftText) {
+    // A held order that has its draft (a race with the cap, an order held before drafts waited): the card goes at once.
     await sendCard(decisionId, 'summary')
   } else {
-    // A dropped order has no draft yet: the press is answered now, the card follows its draft (a reminder brings
-    // it back if this fails).
+    // A dropped or held order has no draft yet: the press is answered now, the card follows its draft (a reminder
+    // brings it back if this fails).
     void draftThenCard(l, decisionId).catch((err) =>
       console.error('want card failed', err instanceof Error ? err.message.slice(0, 200) : err),
     )
@@ -668,15 +678,20 @@ async function onWant(reviewId: string): Promise<string> {
 /** «Показать» from the daily summary: an order held over the card cap comes as a card; Boris has not decided yet. */
 async function onOpen(heldId: string): Promise<string> {
   const found = await leadOfTask(heldId)
-  // FR-LEAD-10 at the press, which may come days after the summary. The lead keeps no publication time; seen_at
+  const now = new Date()
+  // FR-LEAD-10 at a press that comes days after the summary. The summary offered the order while it was fresh, so a
+  // press the same day works for it, however old it has become by then. The lead keeps no publication time; seen_at
   // is never earlier, so this errs toward showing.
   if (
     found?.task.kind === 'lead_held' &&
     found.task.state === 'open' &&
-    isStale(found.lead.seenAt, new Date())
+    isStale(found.lead.seenAt, now) &&
+    isStale(found.task.createdAt, now)
   )
     return CARD_FLOW_TEXTS.staleHeld
-  return (await bringCard(heldId, 'lead_held', 'open')) ? TEXTS.cardSent : TEXTS.alreadyDone
+  const l = await bringCard(heldId, 'lead_held', 'open')
+  if (!l) return TEXTS.alreadyDone
+  return l.draftText ? TEXTS.cardSent : TEXTS.wantCard
 }
 
 /**

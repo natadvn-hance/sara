@@ -239,6 +239,72 @@ describe('Claude limit state', () => {
     guard.stop()
   })
 
+  it('FR-OPS-3: a limit adopted with its start counts the 6 hours from that start, not from the restart', async () => {
+    const { guard } = setup()
+    guard.adopt(T0.getTime() - 300 * MIN)
+    let got: string | null = null
+    void guard.wait(Date.now() + 360 * MIN).then((r) => {
+      got = r
+    })
+    await vi.advanceTimersByTimeAsync(59 * MIN)
+    expect(got).toBeNull()
+    await vi.advanceTimersByTimeAsync(MIN)
+    expect(got).toBe('expired')
+    guard.stop()
+  })
+
+  it('FR-OPS-3: a limit that began more than 6 hours before the restart is not waited for at all', async () => {
+    const { guard } = setup()
+    guard.adopt(T0.getTime() - 400 * MIN)
+    expect(await guard.wait(Date.now() + 360 * MIN)).toBe('expired')
+    guard.stop()
+  })
+
+  it('FR-OPS-3: a limit adopted with its reset time knows a reset past the deadline', async () => {
+    const { guard } = setup()
+    guard.adopt(T0.getTime() - MIN, new Date(T0.getTime() + 3 * 24 * 60 * MIN))
+    expect(await guard.wait(Date.now() + 360 * MIN)).toBe('expired')
+    guard.stop()
+  })
+
+  it('FR-OPS-3: a limit adopted with a near reset time keeps a call waiting for it', async () => {
+    const { guard } = setup()
+    guard.adopt(T0.getTime() - MIN, new Date(T0.getTime() + 30 * MIN))
+    const waiting = guard.wait(Date.now() + 360 * MIN)
+    await vi.advanceTimersByTimeAsync(31 * MIN)
+    guard.answered(Date.now())
+    expect(await waiting).toBe('go')
+    guard.stop()
+  })
+
+  it('FR-OPS-3: a reset time learned while a call waits shortens that wait when it falls past its deadline', async () => {
+    const { guard } = setup()
+    guard.hit(null, Date.now())
+    let got: string | null = null
+    void guard.wait(Date.now() + 120 * MIN).then((r) => {
+      got = r
+    })
+    await vi.advanceTimersByTimeAsync(5 * MIN)
+    expect(got).toBeNull()
+    guard.hit(new Date(T0.getTime() + 3 * 24 * 60 * MIN), Date.now())
+    await vi.advanceTimersByTimeAsync(0)
+    expect(got).toBe('expired')
+    guard.stop()
+  })
+
+  it('FR-OPS-3: a reset time learned while a call waits leaves it waiting when the reset comes in time', async () => {
+    const { guard } = setup()
+    guard.hit(null, Date.now())
+    let got: string | null = null
+    void guard.wait(Date.now() + 120 * MIN).then((r) => {
+      got = r
+    })
+    guard.hit(new Date(T0.getTime() + 60 * MIN), Date.now())
+    await vi.advanceTimersByTimeAsync(30 * MIN)
+    expect(got).toBeNull()
+    guard.stop()
+  })
+
   it('FR-OPS-3: a stopped limit state keeps waiting calls waiting, tells nothing and probes no more', async () => {
     const { guard, events, probes } = setup()
     guard.hit(null, Date.now())

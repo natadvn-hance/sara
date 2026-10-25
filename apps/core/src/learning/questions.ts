@@ -1,7 +1,7 @@
 import { newEventId } from '@sara/shared'
-import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { leadLabel, question } from '../db/schema'
+import { lead, leadLabel, question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
@@ -16,7 +16,7 @@ const WHY_KINDS: QuestionKind[] = ['why_skip', 'why_want', 'why_decline']
 
 /** At most this many «почему?» a Moscow day, so Sara never floods Boris with questions. */
 export const QUESTIONS_PER_DAY = 3
-/** A message without a reply answers the latest open question this recent. */
+/** A message without a reply may answer an open question this recent. */
 const ANSWER_WINDOW_MS = 30 * 60_000
 
 const textOf = (kind: Exclude<QuestionKind, 'edit_draft'>, title: string) =>
@@ -58,7 +58,7 @@ export async function askWhy(
 
 /**
  * After «Изменить»: asks for the new bid text. It is Boris's own request, so it never counts toward the day's
- * «почему?»; a reply to it (or the next message within 30 minutes) becomes the draft, not a reason.
+ * «почему?»; a reply to it becomes the draft, and so does a plain message when it is the only request waiting.
  */
 export async function askForDraft(
   d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
@@ -104,45 +104,76 @@ async function send(
 }
 
 /**
- * Boris's words become the answer to a question: the one he replied to, or else the latest open one asked in
- * the last 30 minutes (and sent: a place taken for a question that never went out answers nothing). For a lead
- * the answer is also the reason on its label.
+ * Boris's words become the answer to a «почему?»: the one he replied to, or else the latest open one asked in the
+ * last 30 minutes (and sent: a place taken for a question that never went out answers nothing). For a lead the
+ * answer is also the reason on its label. A request for a bid text is not a «почему?»: it takes its answer in
+ * the inbox, never here.
  */
 export async function answerQuestion(
   db: Db,
   a: { text: string; replyToMessageId: number | null; voice: boolean; at: Date },
 ): Promise<{ question: QuestionRow } | null> {
   const q = await openQuestion(db, a)
-  if (!q) return null
+  if (!q || 'ambiguous' in q || q.kind === 'edit_draft') return null
   const answered = await db.transaction((tx) => markAnswered(tx, q, a))
   return answered ? { question: { ...q, answeredAt: a.at.toISOString(), answer: a.text } } : null
 }
 
-/** The open question Boris's words answer: the one he replied to, or the latest sent in the last 30 minutes. */
+/** Several open questions fit a message without a reply, and none of them may take it on a guess. */
+export type Ambiguous = { ambiguous: QuestionRow[] }
+
+/**
+ * The open question Boris's words answer: the one he replied to; or, without a reply, the latest «почему?» sent in
+ * the last 30 minutes, or the request for a bid text when it is the only kind open and all of it is about one
+ * lead. A text could be a new bid or a reason, so with both waiting (or edit requests for two leads) nothing is
+ * guessed: the answer is `ambiguous` and Boris is asked to reply to the one he means.
+ */
 export async function openQuestion(
   db: Db,
   a: { replyToMessageId: number | null; at: Date },
-): Promise<QuestionRow | null> {
+): Promise<QuestionRow | Ambiguous | null> {
   const open = isNull(question.answeredAt)
-  const [q] =
-    a.replyToMessageId !== null
-      ? await db
-          .select()
-          .from(question)
-          .where(and(open, eq(question.telegramMessageId, a.replyToMessageId)))
-      : await db
-          .select()
-          .from(question)
-          .where(
-            and(
-              open,
-              isNotNull(question.telegramMessageId),
-              gte(question.askedAt, new Date(a.at.getTime() - ANSWER_WINDOW_MS).toISOString()),
-            ),
-          )
-          .orderBy(desc(question.askedAt))
-          .limit(1)
-  return q ?? null
+  if (a.replyToMessageId !== null) {
+    const [q] = await db
+      .select()
+      .from(question)
+      .where(and(open, eq(question.telegramMessageId, a.replyToMessageId)))
+    return q ?? null
+  }
+  // A request for a lead already decided has nothing left to take: it does not stand in the way.
+  const stillWanted = or(
+    ne(question.kind, 'edit_draft'),
+    sql`exists (select 1 from ${task} where ${task.id}::text = ${question.entityId} and ${task.state} = 'open')`,
+  )
+  const recent = await db
+    .select()
+    .from(question)
+    .where(
+      and(
+        open,
+        isNotNull(question.telegramMessageId),
+        gte(question.askedAt, new Date(a.at.getTime() - ANSWER_WINDOW_MS).toISOString()),
+        stillWanted,
+      ),
+    )
+    .orderBy(desc(question.askedAt))
+  const edits = recent.filter((q) => q.kind === 'edit_draft')
+  const whys = recent.filter((q) => q.kind !== 'edit_draft')
+  if (edits.length === 0) return whys[0] ?? null
+  if (whys.length === 0 && new Set(edits.map((q) => q.entityId)).size === 1) return edits[0] ?? null
+  return { ambiguous: recent.reverse() }
+}
+
+/** What a question is about, for a note to Boris: the lead's title (null for the proposal's «почему?»). */
+export async function titleOf(db: Db, q: QuestionRow): Promise<string | null> {
+  if (q.kind === 'why_decline') return null
+  const leadId =
+    q.kind === 'edit_draft'
+      ? (await db.select({ id: task.entityId }).from(task).where(eq(task.id, q.entityId)))[0]?.id
+      : q.entityId
+  if (!leadId) return null
+  const [l] = await db.select({ title: lead.title }).from(lead).where(eq(lead.id, leadId))
+  return l?.title ?? null
 }
 
 /** Every open edit request of the task is closed: one text answers them all, a later message lands on none. */

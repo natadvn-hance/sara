@@ -5,6 +5,7 @@ import { createBotControl } from '../src/notify/botControl'
 import type { LeadCard } from '../src/notify/cards'
 import { createTelegramRuntime, type TelegramRuntime } from '../src/notify/telegram'
 import { getMe } from '../src/notify/telegramApi'
+import { setSetting } from '../src/settings/store'
 import { openTestDb, resetDb } from './helpers/db'
 import { countEvents } from './helpers/events'
 
@@ -167,6 +168,8 @@ describe('telegram bot', () => {
   it('FR-NOTIF-2: a silent lead card goes with disable_notification, a usual one without', async () => {
     tg.pushStart(111)
     await until(() => tg.sent.length === 1)
+    // Outside the quiet hours, whatever the clock of the run.
+    await setSetting(db, 'cards.quiet_hours', null, 'boris')
     await bot.notifier.sendLeadCard(CARD, { silent: true })
     await bot.notifier.sendLeadCard(CARD)
     expect(tg.sent[1]?.disable_notification).toBe(true)
