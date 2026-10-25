@@ -152,16 +152,21 @@ export async function startReminder(
 
 const OPEN = ['PENDING', 'ENQUEUED', 'DELAYED'] as const
 
+/** The ids of the reminder processes of a conversation that are not over. */
+export async function openReminders(conversationId: string): Promise<string[]> {
+  const open = await DBOS.listWorkflows({
+    workflow_id_prefix: `conv-remind:${conversationId}:`,
+    status: [...OPEN],
+  })
+  return open.map((w) => w.workflowID)
+}
+
 /** Stops the waiting reminder processes of a conversation, but the one of `keep`; returns how many it stopped. */
 export async function cancelReminders(
   conversationId: string,
   o: { keep?: string } = {},
 ): Promise<number> {
-  const open = await DBOS.listWorkflows({
-    workflow_id_prefix: `conv-remind:${conversationId}:`,
-    status: [...OPEN],
-  })
-  const ids = open.map((w) => w.workflowID).filter((id) => id !== o.keep)
+  const ids = (await openReminders(conversationId)).filter((id) => id !== o.keep)
   if (ids.length > 0) await DBOS.cancelWorkflows(ids)
   return ids.length
 }

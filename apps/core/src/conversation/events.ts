@@ -21,6 +21,8 @@ export type ConversationEventDeps = {
   onTyping(conv: ConversationRow): Promise<void>
   /** Our side wrote: a shadow turn compares its draft with it (M4 design 5.12). */
   onSpecialist(conv: ConversationRow, added: StoredMessage[]): Promise<void>
+  /** The chat as read, whole: the reminders follow it (FR-CONV-12). Its failure never stops the reading. */
+  onChatState?(conv: ConversationRow, messages: StoredMessage[]): Promise<void>
 }
 
 /** After three unclear authors in a row Boris hears of it once (FR-CONV-2). */
@@ -71,6 +73,11 @@ export async function onChatNews(
   const v1Writes = await getSetting(d.db, 'conv.v1_writes')
   const r = await syncChat(d, conv, now, { v1Writes })
   conv = await applyOwnerRule(d.db, conv, r.added, { v1Writes })
+  try {
+    await d.onChatState?.(conv, r.messages)
+  } catch (e) {
+    console.error('reminders could not follow the chat', e instanceof Error ? e.message : e)
+  }
   if (r.unclear) {
     for (const m of r.added.filter((x) => x.side === 'unknown'))
       await noteUnclear(d, conv, m.platformMessageId)

@@ -1,5 +1,5 @@
 import { newEventId, plural } from '@sara/shared'
-import { and, gte, lt } from 'drizzle-orm'
+import { and, eq, gte, lt } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { convTurn, jobRun } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -26,7 +26,14 @@ export async function daySummary(
   const rows = await d.db
     .select()
     .from(convTurn)
-    .where(and(gte(convTurn.createdAt, from), lt(convTurn.createdAt, to)))
+    .where(
+      and(
+        gte(convTurn.createdAt, from),
+        lt(convTurn.createdAt, to),
+        // Only the answers to client turns: a reminder's draft is in the report, not in the evening summary.
+        eq(convTurn.kind, 'reply'),
+      ),
+    )
   if (rows.length === 0) return 'empty'
   const taken = await d.db
     .insert(jobRun)
