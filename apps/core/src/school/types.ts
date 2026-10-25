@@ -144,6 +144,8 @@ export type NightJob = {
   atMsk: { hour: number; minute: number }
   /** Runs only on the weekly night, with the weekly units on top. */
   weekly?: boolean
+  /** Never on the weekly night (the golden exam: the weekly run covers it). */
+  notWeekly?: boolean
   /** Models the job calls: a limit on one of them in the last 12 hours skips the job. */
   models: ModelName[]
   /** Always runs: no school.on, budget or limit check (the mind exchange). */

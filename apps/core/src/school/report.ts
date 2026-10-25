@@ -26,7 +26,10 @@ export async function schoolReport(db: Db, days: number): Promise<string> {
     from core.model_call
     where priority = 'P3' and started_at > ${since}
     group by 1, 2, 3 order by 1, 2`)
-  out.push('', 'Единицы ночной школы (haiku 1, sonnet 4, opus 20):')
+  out.push(
+    '',
+    'Единицы вызовов P3 по дням: ночная школа и фоновые прогоны (haiku 1, sonnet 4, opus 20):',
+  )
   if (units.rows.length === 0) out.push('  пока нет')
   const byDay = new Map<string, Map<string, number>>()
   for (const r of units.rows) {
@@ -72,14 +75,16 @@ export async function schoolReport(db: Db, days: number): Promise<string> {
       : `Тренировки: ${trainings.rows.map((t) => `${t.mode} ${t.n}${t.sim === null ? '' : `, сходство ${t.sim}%`}`).join('; ')}`,
   )
 
-  const commits = await db.execute<{ kind: string; n: number; last_push: string | null }>(sql`
-    select kind, count(*)::int as n,
-      to_char(max(pushed_at) at time zone 'Europe/Moscow', 'YYYY-MM-DD HH24:MI') as last_push
+  const commits = await db.execute<{ kind: string; n: number }>(sql`
+    select kind, count(*)::int as n
     from core.mind_commit where created_at > ${since} group by 1 order by 1`)
+  const pushed = await db.execute<{ last_push: string | null }>(sql`
+    select to_char(max(pushed_at) at time zone 'Europe/Moscow', 'YYYY-MM-DD HH24:MI') as last_push
+    from core.mind_commit`)
   out.push(
     commits.rows.length === 0
       ? 'Коммиты разума: пока нет'
-      : `Коммиты разума: ${commits.rows.map((c) => `${c.kind} ${c.n}`).join(', ')}; последний в GitHub: ${commits.rows.map((c) => c.last_push).find((x) => x) ?? 'не отправлялись'}`,
+      : `Коммиты разума: ${commits.rows.map((c) => `${c.kind} ${c.n}`).join(', ')}; последний в GitHub: ${pushed.rows[0]?.last_push ?? 'не отправлялись'}`,
   )
 
   const exams = await db.execute<{ kind: string; n: number; score: number | null }>(sql`
