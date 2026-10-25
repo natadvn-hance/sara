@@ -20,7 +20,7 @@ const TITLES = [
   'Включение',
 ]
 /** The steps that talk to Claude and are built (the rest say «скоро»). */
-const BUILT = [1, 2, 3]
+const BUILT = [1, 2, 3, 4, 8]
 
 const ASK: Record<number, { hint: string; example: string }> = {
   1: {
@@ -233,6 +233,67 @@ function StepCard({
   )
 }
 
+function CalibrationStep({
+  accountId,
+  view,
+  onNext,
+}: {
+  accountId: string
+  view: OnboardingView
+  onNext: () => void
+}) {
+  const c = view.calibration
+  const to = `/accounts/${accountId}/direction/calibration?rules=draft${c ? `&run=${c.runId}` : ''}`
+  return (
+    <Card>
+      <h2 className="font-display text-lg">Шаг 4. Калибровка</h2>
+      <p>
+        Сара покажет 20 настоящих заявок, ты отметишь, какие взял бы. Потом сравним с её оценкой по
+        этим правилам. Цель: согласие от 85%.
+      </p>
+      {!c ? (
+        <p>На этих правилах Сару ещё не проверяли.</p>
+      ) : c.state === 'marking' ? (
+        <p>Проверка начата, ждёт твоих отметок.</p>
+      ) : c.state === 'stopped' ? (
+        <p>
+          Проверка остановилась (лимит Claude или нет токена). Открой её и посчитай заново, отметки
+          сохранены.
+        </p>
+      ) : c.state === 'failed' ? (
+        <p role="alert">Проверка не получилась. Открой её и посчитай заново, отметки сохранены.</p>
+      ) : c.state !== 'done' ? (
+        <p role="status">Сара считает, подожди.</p>
+      ) : c.agreement === null ? (
+        <p>Проверка закончилась без ответов «да» и «нет».</p>
+      ) : (
+        <p className={c.passed ? 'text-ok' : undefined}>
+          {`Согласие на этих правилах: ${Math.round(c.agreement * 100)}%. ${c.passed ? 'Цель достигнута.' : c.reliable ? 'Цель не достигнута.' : 'Ответов «да» и «нет» мало, проверка ненадёжна.'}`}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <a
+          className="inline-flex min-h-11 items-center rounded-md bg-accent px-4 font-medium text-white hover:opacity-90"
+          href={to}
+          onClick={(e) => {
+            e.preventDefault()
+            go(to)
+          }}
+        >
+          {!c
+            ? 'Проверить Сару на моих решениях'
+            : c.state === 'done'
+              ? 'Открыть результат'
+              : 'Продолжить проверку'}
+        </a>
+        <Button variant="secondary" onClick={onNext}>
+          К включению
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
 function FinishCard({
   view,
   accountId,
@@ -248,34 +309,68 @@ function FinishCard({
   const [reason, setReason] = useState('')
   const a = useAction()
   const unchanged = !view.changed
+  const c = view.calibration
+  // What the core's gate sees, not the latest run's own verdict: a repeat still being scored does not hide it.
+  const passed = view.gatePassed
+  const asking = view.directionState === 'draft'
+  // A direction that is still a draft is turned on only after a calibration or with a reason, even with rules
+  // that changed nothing.
+  const gated = !unchanged || asking
+
+  const save = (state?: 'on' | 'shadow') =>
+    a.run(async () => {
+      const r = await api<{ version: number | null }>(`${path(accountId)}/finish`, {
+        ...(!gated || passed ? {} : { override: { reason } }),
+        ...(state ? { state } : {}),
+      })
+      // First the saved card, then the refetch that finds the draft closed: no flash of the start card.
+      onSaved(r.version)
+      await qc.invalidateQueries({ queryKey: ['direction', accountId] })
+      await qc.invalidateQueries({ queryKey: ['onboarding', accountId] })
+    })
+  const needsReason = gated && !passed
+  const blocked = a.busy || !view.rules || (needsReason && !reason.trim())
+  const all =
+    c?.agreement != null ? ` (согласие ${Math.round(c.agreement * 100)}%)` : ' (без проверки)'
 
   return (
     <Card>
-      <h2 className="font-display text-lg">Черновик правил готов</h2>
+      <h2 className="font-display text-lg">Шаг 8. Включение</h2>
       {unchanged ? (
         <p>Пока ничего не изменено.</p>
       ) : (
         <div className="grid gap-1">
           <p className="font-medium">Что изменится:</p>
           <ul className="grid gap-1 text-sm">
-            {view.changes.map((c) => (
-              <li key={c}>{c}</li>
+            {view.changes.map((x) => (
+              <li key={x}>{x}</li>
             ))}
           </ul>
         </div>
       )}
-      <p className="text-sm text-muted">
-        Калибровка на настоящих заявках, формат отклика, кейсы, скорость и деньги появятся в
-        следующих обновлениях. Сейчас черновик можно сохранить без проверки: напиши, зачем.
-      </p>
-      {unchanged ? null : (
-        <Input
-          label="Зачем сохраняешь без проверки?"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          maxLength={1000}
-        />
+      {!gated ? null : passed ? (
+        <p className="text-ok">{`Калибровка на этих правилах: согласие ${Math.round((c?.agreement ?? 0) * 100)}%, цель достигнута.`}</p>
+      ) : (
+        <>
+          <p role="status">
+            {c?.agreement != null
+              ? `Калибровка на этих правилах: согласие ${Math.round(c.agreement * 100)}%, цель 85% не достигнута.`
+              : 'Калибровки на этих правилах ещё не было.'}
+          </p>
+          <p className="text-sm text-muted">
+            Сохранить правила можно и так, но осознанно: напиши, зачем. Это останется в истории.
+          </p>
+          <Input
+            label="Зачем сохраняешь без проверки?"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            maxLength={1000}
+          />
+        </>
       )}
+      <p className="text-sm text-muted">
+        Формат отклика, кейсы, скорость и деньги появятся в следующих обновлениях.
+      </p>
       <a
         className="text-accent underline"
         href={`/accounts/${accountId}/direction/recompute?rules=draft`}
@@ -301,23 +396,25 @@ function FinishCard({
           Обновить черновик
         </Button>
       ) : null}
-      <div>
-        <Button
-          disabled={a.busy || !view.rules || (!unchanged && !reason.trim())}
-          onClick={() =>
-            a.run(async () => {
-              const r = await api<{ version: number | null }>(`${path(accountId)}/finish`, {
-                ...(unchanged ? {} : { override: { reason } }),
-              })
-              // First the saved card, then the refetch that finds the draft closed: no flash of the start card.
-              onSaved(r.version)
-              await qc.invalidateQueries({ queryKey: ['direction', accountId] })
-              await qc.invalidateQueries({ queryKey: ['onboarding', accountId] })
-            })
-          }
-        >
-          {unchanged ? 'Закончить настройку' : 'Сохранить без калибровки'}
-        </Button>
+      <div className="flex flex-wrap gap-2">
+        {asking ? (
+          <>
+            <Button disabled={blocked} onClick={() => save('on')}>
+              {needsReason ? `Включить всё равно${all}` : 'Включить'}
+            </Button>
+            <Button variant="secondary" disabled={blocked} onClick={() => save('shadow')}>
+              Включить в тени
+            </Button>
+          </>
+        ) : (
+          <Button disabled={blocked} onClick={() => save()}>
+            {unchanged && !needsReason
+              ? 'Закончить настройку'
+              : needsReason
+                ? `Сохранить всё равно${all}`
+                : 'Сохранить правила'}
+          </Button>
+        )}
       </div>
     </Card>
   )
@@ -369,6 +466,8 @@ function Wizard({
           onView={onView}
           onDone={() => setSelected(null)}
         />
+      ) : step === 4 ? (
+        <CalibrationStep accountId={accountId} view={view} onNext={() => setSelected(8)} />
       ) : (
         <FinishCard view={view} accountId={accountId} onView={onView} onSaved={onSaved} />
       )}

@@ -16,19 +16,10 @@ import { Card } from '../components/ui/card'
 import { Progress } from '../components/ui/progress'
 import { WhyBox } from '../components/ui/whybox'
 import { useAction } from '../hooks'
+import { failedText, pct, stoppedText } from '../runTexts'
 
 const DECISION = { show: 'показать', drop: 'отсеять' } as const
 const BORIS = { yes: 'ты: взял бы', no: 'ты: не взял бы' } as const
-const STOPPED: Record<string, string> = {
-  limit: 'Подожди, лимит Claude кончился. Попробуй позже.',
-  not_connected: 'Claude не подключён: вставь токен в мастере настройки.',
-}
-const FAILED: Record<string, string> = {
-  nothing_scored:
-    'Не получилось оценить ни одной заявки. Проверь, что Claude подключён, и попробуй ещё раз.',
-  stale: 'Проверка зависла и закрыта. Запусти заново.',
-}
-const pct = (x: number) => `${Math.round(x * 100)}%`
 const base = (accountId: string) => `/api/directions/${encodeURIComponent(accountId)}`
 
 function Item({ i, titles }: { i: RecomputeItem; titles: Map<string, string> }) {
@@ -246,15 +237,9 @@ export function RecomputePage({ accountId }: { accountId: string }) {
         </Card>
       ) : null}
       {state === 'stopped' ? (
-        <p role="status">
-          {STOPPED[run.data?.stop_reason ?? ''] ?? 'Проверка остановлена. Попробуй ещё раз.'}
-        </p>
+        <p role="status">{stoppedText(run.data?.stop_reason ?? null)}</p>
       ) : null}
-      {state === 'failed' ? (
-        <p role="alert">
-          {FAILED[run.data?.stop_reason ?? ''] ?? 'Проверка сломалась. Попробуй ещё раз.'}
-        </p>
-      ) : null}
+      {state === 'failed' ? <p role="alert">{failedText(run.data?.stop_reason ?? null)}</p> : null}
       {state === 'done' && run.data?.result ? <Result r={run.data.result} titles={titles} /> : null}
     </main>
   )

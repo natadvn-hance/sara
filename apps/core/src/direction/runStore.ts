@@ -1,6 +1,6 @@
 import { type DirectionRules, newEventId } from '@sara/shared'
 import { eq, inArray, sql } from 'drizzle-orm'
-import type { Db } from '../db/client'
+import type { Db, Tx } from '../db/client'
 import { directionRun } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { rulesHash } from './hash'
@@ -19,6 +19,10 @@ export type NewRun = {
   baseRules: DirectionRules | null
   leadIds: string[]
   seed?: number
+  /** A calibration starts waiting for Boris's marks: it uses no model and is not a «busy» run. */
+  state?: 'queued' | 'marking'
+  /** More rows of the run's own, written in the same transaction. */
+  inTx?: (tx: Tx, runId: string) => Promise<void>
 }
 
 /** A run starts only when none is waiting or running: they share the model's slots with the live work. */
@@ -39,7 +43,7 @@ export async function createRun(
       .from(directionRun)
       .where(inArray(directionRun.state, ['queued', 'running']))
       .limit(1)
-    if (busy) return { ok: false as const, error: 'busy' as const }
+    if (busy && a.state !== 'marking') return { ok: false as const, error: 'busy' as const }
     const id = newEventId()
     await tx.insert(directionRun).values({
       id,
@@ -51,8 +55,10 @@ export async function createRun(
       baseHash: a.baseRules ? rulesHash(a.baseRules) : null,
       leadIds: a.leadIds,
       seed: a.seed ?? 0,
+      state: a.state ?? 'queued',
       total: a.leadIds.length,
     })
+    await a.inTx?.(tx, id)
     return { ok: true as const, id }
   })
 }

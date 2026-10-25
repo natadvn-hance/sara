@@ -1,6 +1,7 @@
 import { eq, inArray } from 'drizzle-orm'
 import { directionRun } from '../db/schema'
 import { loadRole } from '../gateway/roles'
+import { calibrationProcess } from './calibration'
 import { recomputeProcess } from './recompute'
 import { finishRun, getRun, type RunRow } from './runStore'
 import { ClaudeStopError, type TrialDeps } from './trial'
@@ -39,7 +40,10 @@ export async function runWorker(
     const ids = run.leadIds as string[]
     let skipped = 0
     for (const [i, leadId] of ids.entries()) {
-      const r = run.kind === 'recompute' ? await recomputeProcess(d, run, leadId) : 'ok'
+      const r =
+        run.kind === 'recompute'
+          ? await recomputeProcess(d, run, leadId)
+          : await calibrationProcess(d, run, leadId)
       if (r === 'miss') skipped++
       await d.db
         .update(directionRun)
@@ -64,6 +68,15 @@ export async function runWorker(
   }
 }
 
+/** Runs go one after the other, in the order they are scheduled, so two never share the model's slots. */
+let chain: Promise<void> = Promise.resolve()
+export function scheduleRun(d: TrialDeps, runId: string): void {
+  // runWorker never rejects; the catch is for what must never happen.
+  chain = chain
+    .then(() => runWorker(d, runId))
+    .catch((e) => console.error('direction run crashed', e))
+}
+
 /** On start: runs a restart cut off go on in the background, one after the other; nothing here may reject. */
 export async function resumeRuns(d: TrialDeps): Promise<void> {
   let rows: { id: string }[] = []
@@ -80,7 +93,5 @@ export async function resumeRuns(d: TrialDeps): Promise<void> {
     )
     return
   }
-  void (async () => {
-    for (const r of rows) await runWorker(d, r.id)
-  })()
+  for (const r of rows) scheduleRun(d, r.id)
 }

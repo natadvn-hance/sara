@@ -1,6 +1,6 @@
 import { DirectionProfileData, DirectionState, newEventId, type ReplyFormat } from '@sara/shared'
 import { eq, sql } from 'drizzle-orm'
-import type { Db, DbOrTx } from '../db/client'
+import type { Db, DbOrTx, Tx } from '../db/client'
 import { directionProfile } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 
@@ -73,58 +73,64 @@ export async function saveProfile(
   patch: ProfilePatch,
   actor: 'boris' | 'system',
 ): Promise<number> {
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${`direction_profile:${accountId}`}))`,
-    )
-    const now = await getProfile(tx, accountId)
-    const next = {
-      state: DirectionState.parse(patch.state ?? now.state),
-      ...DirectionProfileData.parse({
-        speed: patch.speed ?? now.speed,
-        reply_format: patch.reply_format === undefined ? now.reply_format : patch.reply_format,
-        cases: patch.cases ?? now.cases,
-      }),
-    }
-    const changed = (Object.keys(patch) as (keyof ProfilePatch)[])
-      .filter((k) => patch[k] !== undefined && JSON.stringify(patch[k]) !== JSON.stringify(now[k]))
-      .sort()
-    // Nothing to change: no new version and no journal line.
-    if (changed.length === 0) return now.version
-    const version = now.version + 1
-    await tx
-      .insert(directionProfile)
-      .values({
-        accountId,
+  return db.transaction((tx) => saveProfileIn(tx, accountId, patch, actor))
+}
+
+/** The same inside a transaction the caller already holds, so a profile and a rules version commit together. */
+export async function saveProfileIn(
+  tx: Tx,
+  accountId: string,
+  patch: ProfilePatch,
+  actor: 'boris' | 'system',
+): Promise<number> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`direction_profile:${accountId}`}))`)
+  const now = await getProfile(tx, accountId)
+  const next = {
+    state: DirectionState.parse(patch.state ?? now.state),
+    ...DirectionProfileData.parse({
+      speed: patch.speed ?? now.speed,
+      reply_format: patch.reply_format === undefined ? now.reply_format : patch.reply_format,
+      cases: patch.cases ?? now.cases,
+    }),
+  }
+  const changed = (Object.keys(patch) as (keyof ProfilePatch)[])
+    .filter((k) => patch[k] !== undefined && JSON.stringify(patch[k]) !== JSON.stringify(now[k]))
+    .sort()
+  // Nothing to change: no new version and no journal line.
+  if (changed.length === 0) return now.version
+  const version = now.version + 1
+  await tx
+    .insert(directionProfile)
+    .values({
+      accountId,
+      state: next.state,
+      speed: next.speed,
+      replyFormat: next.reply_format,
+      cases: next.cases,
+      version,
+    })
+    .onConflictDoUpdate({
+      target: directionProfile.accountId,
+      set: {
         state: next.state,
         speed: next.speed,
         replyFormat: next.reply_format,
         cases: next.cases,
         version,
-      })
-      .onConflictDoUpdate({
-        target: directionProfile.accountId,
-        set: {
-          state: next.state,
-          speed: next.speed,
-          replyFormat: next.reply_format,
-          cases: next.cases,
-          version,
-          updatedAt: new Date().toISOString(),
-        },
-      })
-    await appendEvent(tx, {
-      type: 'direction.profile_changed',
-      v: 1,
-      entity: { kind: 'direction', id: accountId },
-      account_id: accountId,
-      actor,
-      occurred_at: new Date().toISOString(),
-      causation_id: null,
-      correlation_id: newEventId(),
-      reason: null,
-      payload: { version, changed },
+        updatedAt: new Date().toISOString(),
+      },
     })
-    return version
+  await appendEvent(tx, {
+    type: 'direction.profile_changed',
+    v: 1,
+    entity: { kind: 'direction', id: accountId },
+    account_id: accountId,
+    actor,
+    occurred_at: new Date().toISOString(),
+    causation_id: null,
+    correlation_id: newEventId(),
+    reason: null,
+    payload: { version, changed },
   })
+  return version
 }

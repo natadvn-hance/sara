@@ -81,6 +81,9 @@ export type OnboardingView = {
   changes: string[]
   changed: boolean
   broken?: boolean
+  calibration: CalibrationSummary | null
+  gatePassed: boolean
+  directionState: DirectionState
 }
 
 export type RecomputeItem = {
@@ -109,6 +112,46 @@ export type RecomputeResult = {
   agreementAfter: number | null
   items: RecomputeItem[]
 }
+export type CalibrationSummary = {
+  runId: string
+  state: string
+  agreement: number | null
+  decisive: number
+  passed: boolean
+  reliable: boolean
+}
+export type CalibrationItem = {
+  leadId: string
+  title: string
+  city: string
+  budget: string | null
+  text: string
+  mark: 'yes' | 'no' | 'unsure' | null
+}
+export type CalibrationMiss = {
+  leadId: string
+  title: string
+  city: string
+  text: string
+  kind: 'sara_no_boris_yes' | 'sara_yes_boris_no'
+  score: number
+  reason: string
+  axes: { id: string; score: number; why: string }[]
+  stopFactor: string | null
+  redFlags: string[]
+  note: string | null
+}
+export type CalibrationResult = {
+  decisive: number
+  unsure: number
+  agreement: number | null
+  reliable: boolean
+  passed: boolean
+  threshold: number
+  misses: CalibrationMiss[]
+  thresholdHint: { from: number; to: number; before: number; after: number } | null
+}
+export type Advice = { summary: string; why: string; lines: string[] }
 export type RunView = {
   id: string
   kind: 'recompute' | 'calibration'
@@ -118,4 +161,11 @@ export type RunView = {
   skipped: number
   stop_reason: string | null
   result: RecomputeResult | null
+  calibration: {
+    marked: number
+    items: CalibrationItem[]
+    result: CalibrationResult | null
+    advice: Advice | null
+    stale: boolean
+  } | null
 }

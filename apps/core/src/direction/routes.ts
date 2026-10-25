@@ -22,7 +22,10 @@ const SayBody = z.object({
   say: z.string().trim().min(1).max(4000),
   fix: z.string().trim().min(1).max(2000).optional(),
 })
-const FinishBody = z.object({ override: z.object({ reason: z.string().max(1000) }).optional() })
+const FinishBody = z.object({
+  override: z.object({ reason: z.string().max(1000) }).optional(),
+  state: z.enum(['on', 'shadow']).optional(),
+})
 const StepParams = z.object({ accountId: z.string(), n: z.coerce.number().int() })
 
 export const DIRECTION_ERRORS = {

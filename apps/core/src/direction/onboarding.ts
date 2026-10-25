@@ -1,5 +1,6 @@
 import {
   DirectionRules,
+  type DirectionState,
   newEventId,
   OnbAbout,
   OnbIdeal,
@@ -10,13 +11,15 @@ import {
 } from '@sara/shared'
 import { and, eq, sql } from 'drizzle-orm'
 import type { ZodType } from 'zod'
-import type { Db, DbOrTx, Tx } from '../db/client'
+import type { Db, DbOrTx } from '../db/client'
 import { directionOnboarding, directionOverride } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import type { RoleName } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
 import { rulesText } from '../leads/scorer'
+import { type CalibrationSummary, calibrationPassed, latestCalibration } from './calibration'
 import { rulesDiff } from './diff'
+import { getProfile, saveProfileIn } from './profile'
 import { activeRules, insertVersion } from './store'
 
 export type AboutData = Omit<OnbAbout, 'understood'>
@@ -174,6 +177,12 @@ export type OnboardingView = {
   changed: boolean
   /** The stored draft no longer reads (the contract moved on): it can only be cancelled. */
   broken?: boolean
+  /** The latest calibration of exactly these rules (the draft's, as it is now), if any. */
+  calibration: CalibrationSummary | null
+  /** What the gate of finishing sees: a finished calibration of exactly these rules reached the target. */
+  gatePassed: boolean
+  /** Whether the direction works, works in the shadow, or is still being set up. */
+  directionState: DirectionState
 }
 
 const emptyStep = (): StepState => ({
@@ -247,6 +256,9 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
       changes: [],
       changed: false,
       broken: true,
+      calibration: null,
+      gatePassed: false,
+      directionState: (await getProfile(db, row.accountId)).state,
     }
   const active = (await activeRules(db, row.accountId)).rules
   const base = mode === 'edit' ? active : null
@@ -264,6 +276,10 @@ async function viewOf(db: DbOrTx, row: Row): Promise<OnboardingView> {
     rules,
     changes: diff?.lines ?? [],
     changed: (diff?.sections.length ?? 0) > 0,
+    calibration: rules ? await latestCalibration(db, row.accountId, rules) : null,
+    // The gate looks at the latest finished calibration; a newer repeat still being scored does not hide it.
+    gatePassed: rules ? await calibrationPassed(db, row.accountId, rules) : false,
+    directionState: (await getProfile(db, row.accountId)).state,
   }
 }
 
@@ -492,7 +508,8 @@ export async function finishOnboarding(
   accountId: string,
   opts: {
     override?: { reason: string }
-    calibrated?: (tx: Tx, rules: DirectionRules) => Promise<boolean>
+    /** Turn the direction on, or on in the shadow, together with the version (the profile's state). */
+    state?: DirectionState
   },
 ): Promise<FinishResult> {
   return db.transaction(async (tx): Promise<FinishResult> => {
@@ -507,14 +524,20 @@ export async function finishOnboarding(
     const draft = draftOf(row)
     const rules = draft ? assembleRules(row.mode === 'edit' ? active.rules : null, draft) : null
     if (!rules) return { ok: false, error: 'incomplete' }
-    const done = (version: number | null) =>
-      tx
+    const done = async (version: number | null) => {
+      await tx
         .update(directionOnboarding)
         .set({ state: 'finished', updatedAt: new Date().toISOString() })
         .where(eq(directionOnboarding.accountId, accountId))
-        .then(() => ({ ok: true as const, version }))
+      if (opts.state) await saveProfileIn(tx, accountId, { state: opts.state }, 'boris')
+      return { ok: true as const, version }
+    }
     const sections = rulesDiff(active.rules, rules).sections
-    if (sections.length === 0) {
+    // Rules that change nothing need no calibration, unless a direction that is still a draft is being turned on:
+    // its rules may be the seed of another direction, and only a calibration says they fit this one.
+    const turningOn =
+      opts.state !== undefined && (await getProfile(tx, accountId)).state === 'draft'
+    if (sections.length === 0 && !turningOn) {
       await appendEvent(
         tx,
         journal('direction.onboarding_finished', accountId, { version: null, sections }),
@@ -522,8 +545,32 @@ export async function finishOnboarding(
       return done(null)
     }
     const reason = opts.override?.reason.trim() ?? ''
-    const passed = (await opts.calibrated?.(tx, rules)) ?? false
+    const passed = await calibrationPassed(tx, accountId, rules)
     if (!passed && !reason) return { ok: false, error: 'needs_calibration' }
+    // What the journal keeps of a save below the target: the fact and the agreement, never Boris's words.
+    const agreement = passed ? null : (await latestCalibration(tx, accountId, rules))?.agreement
+    const overridden = passed
+      ? {}
+      : {
+          override: true,
+          ...(agreement == null ? {} : { agreement_percent: Math.round(agreement * 100) }),
+        }
+    if (sections.length === 0) {
+      await appendEvent(
+        tx,
+        journal('direction.onboarding_finished', accountId, {
+          version: null,
+          sections,
+          ...overridden,
+        }),
+      )
+      if (!passed)
+        await tx
+          .insert(directionOverride)
+          .values({ accountId, version: active.version, reason })
+          .onConflictDoNothing()
+      return done(null)
+    }
     const version = await insertVersion(tx, {
       accountId,
       rules,
@@ -532,14 +579,58 @@ export async function finishOnboarding(
     })
     await appendEvent(
       tx,
-      journal('direction.onboarding_finished', accountId, {
-        version,
-        sections,
-        ...(passed ? {} : { override: true }),
-      }),
+      journal('direction.onboarding_finished', accountId, { version, sections, ...overridden }),
     )
     // Why Boris saved below the target stays for good, apart from the draft that the next onboarding replaces.
     if (!passed) await tx.insert(directionOverride).values({ accountId, version, reason })
     return done(version)
+  })
+}
+
+/**
+ * Puts a change of the rules (a calibration's advice or threshold hint) into the open draft, as the confirmed data
+ * of the steps whose sections it touches; an onboarding is started when none is open. No version is made. False:
+ * the draft could not take it (closed meanwhile, or no longer reads).
+ */
+export async function applyRulesToDraft(
+  db: Db,
+  accountId: string,
+  to: DirectionRules,
+  understood: string,
+): Promise<boolean> {
+  await startOnboarding(db, accountId, 'edit')
+  return db.transaction(async (tx) => {
+    await lock(tx, `onboarding:${accountId}`)
+    const row = await openRow(tx, accountId)
+    const draft = row ? draftOf(row) : null
+    if (!row || !draft) return false
+    const active = (await activeRules(tx, accountId)).rules
+    const current = assembleRules(row.mode === 'edit' ? active : null, draft) ?? active
+    const sections = new Set(rulesDiff(current, to).sections)
+    const set = (step: '1' | '2' | '3', data: unknown) => {
+      const old = draft.steps[step] ?? emptyStep()
+      draft.steps[step] = {
+        ...old,
+        proposal: { understood, data },
+        attempts: [...old.attempts, { fix: null, understood }],
+        confirmed: data,
+        skipped: false,
+      }
+    }
+    if (sections.has('about')) {
+      const was = confirmedOf(AboutSchema, draft.steps['1'])
+      set('1', {
+        about: to.about,
+        services: was?.services ?? [],
+        clients: was?.clients ?? [],
+        budgets: was?.budgets ?? [],
+      })
+    }
+    if (sections.has('stop_factors') || sections.has('red_flags'))
+      set('2', { stop_factors: to.stop_factors, red_flags: to.red_flags })
+    if (sections.has('axes') || sections.has('threshold') || sections.has('notes'))
+      set('3', { axes: to.axes, threshold: to.threshold, notes: to.notes })
+    await write(tx, accountId, draft)
+    return true
   })
 }

@@ -219,6 +219,18 @@ export function DirectionPage({ accountId }: { accountId: string }) {
       <p>
         <a
           className="text-accent underline"
+          href={`/accounts/${encodeURIComponent(accountId)}/direction/calibration`}
+          onClick={(e) => {
+            e.preventDefault()
+            go(`/accounts/${encodeURIComponent(accountId)}/direction/calibration`)
+          }}
+        >
+          Проверить Сару на моих решениях
+        </a>
+      </p>
+      <p>
+        <a
+          className="text-accent underline"
           href={`/accounts/${encodeURIComponent(accountId)}/direction/recompute`}
           onClick={(e) => {
             e.preventDefault()
