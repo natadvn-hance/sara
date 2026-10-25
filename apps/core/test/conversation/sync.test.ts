@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { applyOwnerRule, ensureConversation, getConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
 import { chatMessage, deal, event, lead, outbox } from '../../src/db/schema'
+import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
 import { countEvents } from '../helpers/events'
@@ -154,14 +155,23 @@ describe('owner rule', () => {
     expect(await countEvents(db, 'conv.boris_wrote')).toBe(0)
   })
 
+  // The moment old Sara stopped writing: only what was written and heard after it can be Boris's (ADR-024).
+  async function switchedOff() {
+    await setSetting(db, 'conv.v1_writes', false, 'boris')
+    return Date.now()
+  }
+  const later = (from: number, ms: number) => new Date(from + ms)
+
   it('FR-CONV-10: after the switch a specialist message not in our outbox makes the client Boris’s', async () => {
     const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
     const p = stubProfi([bid, ask])
-    await syncChat({ db, profi: p }, conv, new Date(), live)
+    // The chat is known before the switch.
+    await syncChat({ db, profi: p }, conv, new Date(), shadow)
+    const at = await switchedOff()
     p.chat.push(
-      chatMsg('m-5', 'specialist', 'Анна, давайте я вам наберу', '2026-10-20T10:07:00.000Z'),
+      chatMsg('m-5', 'specialist', 'Анна, давайте я вам наберу', later(at, 50).toISOString()),
     )
-    const r = await syncChat({ db, profi: p }, conv, new Date(), live)
+    const r = await syncChat({ db, profi: p }, conv, later(at, 100), live)
     expect(r.added).toHaveLength(1)
     expect(r.added[0]).toMatchObject({ author: 'boris', authorBasis: 'after_cutover' })
     const after = await applyOwnerRule(db, conv, r.added, live)
@@ -170,12 +180,77 @@ describe('owner rule', () => {
     expect(await countEvents(db, 'conv.boris_wrote')).toBe(1)
   })
 
+  it('FR-CONV-10: a message written before the switch but heard after it stays unknown', async () => {
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    const p = stubProfi([bid, ask])
+    await syncChat({ db, profi: p }, conv, new Date(), shadow)
+    const at = await switchedOff()
+    // Old Sara answered a minute before the switch; Sara's next reading of the chat is after it.
+    p.chat.push(chatMsg('m-5', 'specialist', 'Анна, наберу вас', later(at, -60_000).toISOString()))
+    const r = await syncChat({ db, profi: p }, conv, later(at, 100), live)
+    expect(r.added[0]).toMatchObject({ author: 'unknown', authorBasis: 'v1_or_boris' })
+    expect((await applyOwnerRule(db, conv, r.added, live)).owner).toBe('sara')
+  })
+
+  it('FR-CONV-10: without a switch moment no message of our side is Boris’s', async () => {
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    const p = stubProfi([bid, ask])
+    await syncChat({ db, profi: p }, conv, new Date(), shadow)
+    // The setting was never changed to «off», yet the caller says old Sara is gone.
+    p.chat.push(chatMsg('m-5', 'specialist', 'Анна, наберу вас', new Date().toISOString()))
+    const r = await syncChat({ db, profi: p }, conv, new Date(Date.now() + 100), live)
+    expect(r.added[0]).toMatchObject({ author: 'unknown', authorBasis: 'v1_or_boris' })
+  })
+
+  it('FR-CONV-10: the first reading of a chat after the switch leaves every message of our side nobody’s, fresh or old', async () => {
+    const at = await switchedOff()
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    const fresh = chatMsg('m-4', 'specialist', 'Анна, наберу вас', later(at, 50).toISOString())
+    const r = await syncChat(
+      { db, profi: stubProfi([bid, ask, fresh]) },
+      conv,
+      later(at, 100),
+      live,
+    )
+    expect(r.added.filter((m) => m.side === 'specialist')).toEqual([
+      expect.objectContaining({ platformMessageId: 'm-1', author: 'unknown' }),
+      expect.objectContaining({
+        platformMessageId: 'm-4',
+        author: 'unknown',
+        authorBasis: 'v1_or_boris',
+      }),
+    ])
+    expect((await applyOwnerRule(db, conv, r.added, live)).owner).toBe('sara')
+  })
+
+  it('FR-CONV-10: copies exported from old Sara do not make a chat known', async () => {
+    const at = await switchedOff()
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    await db.insert(chatMessage).values({
+      id: newEventId(),
+      accountId: ACC,
+      chatId: CHAT,
+      orderId: CHAT,
+      platformMessageId: 'v1:x:specialist:1',
+      side: 'specialist',
+      author: 'sara_v1',
+      authorBasis: 'v1_text',
+      text: 'Анна, добрый день!',
+      sentAt: '2026-10-01T10:00:00.000Z',
+      source: 'v1',
+    })
+    const fresh = chatMsg('m-4', 'specialist', 'Анна, наберу вас', later(at, 50).toISOString())
+    const r = await syncChat({ db, profi: stubProfi([fresh]) }, conv, later(at, 100), live)
+    expect(r.added[0]).toMatchObject({ author: 'unknown', authorBasis: 'v1_or_boris' })
+  })
+
   it('FR-CONV-10: after the switch the history of a chat read for the first time stays nobody’s', async () => {
+    await switchedOff()
     const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
     const r = await syncChat(
       { db, profi: stubProfi([bid, ask]) },
       conv,
-      new Date('2026-10-20T10:00:30Z'),
+      new Date(Date.now() + 100),
       live,
     )
     expect(r.added[0]).toMatchObject({

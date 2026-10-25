@@ -13,6 +13,12 @@ export async function getSetting<K extends SettingKey>(
   return SETTINGS[key].schema.parse(row.value) as SettingValue<K>
 }
 
+/** When a setting was last changed, or null when it never was (it still has its default). */
+export async function getSettingChangedAt(db: DbOrTx, key: SettingKey): Promise<string | null> {
+  const [row] = await db.select({ at: setting.changedAt }).from(setting).where(eq(setting.key, key))
+  return row?.at ?? null
+}
+
 /** Changes one setting; the value is checked, the old one kept in history, the change journaled. */
 export async function setSetting<K extends SettingKey>(
   db: Db,
