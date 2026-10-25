@@ -1,4 +1,5 @@
 import type {
+  Availability,
   DirectionCase,
   DirectionRules,
   DirectionState,
@@ -176,4 +177,10 @@ export type RunView = {
     advice: Advice | null
     stale: boolean
   } | null
+}
+
+/** Boris's free time and the next times Sara would offer from it (FR-MEET-1). */
+export type AvailabilityView = {
+  availability: Availability
+  preview: { startsAt: string; label: string }[]
 }

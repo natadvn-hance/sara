@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, go, type SetupState } from './api'
 import { AccountsPage } from './pages/Accounts'
+import { AvailabilityPage } from './pages/Availability'
 import { CalibrationPage } from './pages/Calibration'
 import { DirectionPage } from './pages/Direction'
 import { HealthPage } from './pages/Health'
@@ -34,6 +35,7 @@ export function App() {
   if (path.startsWith('/setup')) return <SetupPage />
   if (path.startsWith('/login')) return <LoginPage />
   if (path.startsWith('/health')) return <HealthPage />
+  if (path.startsWith('/meetings/availability')) return <AvailabilityPage />
   const login = /^\/accounts\/([^/]+)\/login/.exec(path)
   if (login?.[1]) return <LiveScreenPage accountId={decodeURIComponent(login[1])} />
   const calibration = /^\/accounts\/([^/]+)\/direction\/calibration\/?$/.exec(path)
