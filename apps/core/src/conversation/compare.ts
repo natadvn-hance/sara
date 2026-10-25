@@ -1,6 +1,6 @@
 import { normalizeText } from '@sara/shared'
 import { and, asc, desc, eq, gte, inArray, isNull } from 'drizzle-orm'
-import { chatMessage, convTurn } from '../db/schema'
+import { chatMessage, convTurn, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { getSetting } from '../settings/store'
 import { type CardDeps, redrawCard } from './cards'
@@ -69,11 +69,19 @@ async function record(
       similarity: score,
     },
   })
-  await redrawCard(
-    d,
-    row,
-    CONV_TEXTS.compared(hhmm(actual.sentAt), actual.author, actual.text, score),
-  )
+  const compared = CONV_TEXTS.compared(hhmm(actual.sentAt), actual.author, actual.text, score)
+  // After the switch a reply of our side that is not Sara's own is Boris's: the draft has no use any more, the
+  // card is closed and redrawn without its buttons (design 5.9, «Ты ответил сам»).
+  if (!(await getSetting(d.db, 'conv.v1_writes')) && actual.author !== 'sara') {
+    if (row.taskId)
+      await d.db
+        .update(task)
+        .set({ state: 'resolved', resolution: 'answered', resolvedAt: new Date().toISOString() })
+        .where(and(eq(task.id, row.taskId), eq(task.state, 'open')))
+    await redrawCard(d, row, `${compared}\n${CONV_TEXTS.answeredYourself}`, { buttons: false })
+    return
+  }
+  await redrawCard(d, row, compared)
 }
 
 /**

@@ -181,7 +181,7 @@ describe('comparison in shadow', () => {
     expect(edits).toHaveLength(1)
   })
 
-  const ours = (id: string, author: 'sara' | 'unknown', text: string, at: Date) =>
+  const ours = (id: string, author: 'sara' | 'unknown' | 'boris', text: string, at: Date) =>
     db.insert(chatMessage).values({
       id: newEventId(),
       accountId: 'hance-marketing',
@@ -190,7 +190,8 @@ describe('comparison in shadow', () => {
       platformMessageId: id,
       side: 'specialist',
       author,
-      authorBasis: author === 'sara' ? 'outbox' : 'v1_or_boris',
+      authorBasis:
+        author === 'sara' ? 'outbox' : author === 'boris' ? 'after_cutover' : 'v1_or_boris',
       text,
       sentAt: at.toISOString(),
       source: 'node',
@@ -227,6 +228,30 @@ describe('comparison in shadow', () => {
     await compareTurn({ db, notifier }, convId, [heard])
     expect(edits).toHaveLength(1)
     expect(await countEvents(db, 'conv.compared')).toBe(1)
+  })
+
+  it('FR-CONV-10: after the switch Boris’s own reply closes the card, which is redrawn without buttons', async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await turn('t-1', {
+      state: 'finished',
+      outcome: 'drafted',
+      finishedAt: new Date().toISOString(),
+    })
+    const card = await sendTurnCard({ db, notifier }, 't-1')
+    await ours('m-3', 'boris', 'Анна, давайте начнём с созвона.', new Date(Date.now() + 2000))
+    const [actual] = await db
+      .select()
+      .from(chatMessage)
+      .where(eq(chatMessage.platformMessageId, 'm-3'))
+    await compareTurn({ db, notifier }, convId, [actual as never])
+    expect(edits).toHaveLength(1)
+    expect(edits[0]?.text).toMatch(/Ты ответил сам/)
+    expect(edits[0]?.rows).toEqual([])
+    const [t] = await db
+      .select()
+      .from(task)
+      .where(eq(task.id, card?.taskId ?? ''))
+    expect(t).toMatchObject({ state: 'resolved', resolution: 'answered' })
   })
 
   it('FR-CONV-10: nothing is compared while no message of our side follows, and never after the switch', async () => {
