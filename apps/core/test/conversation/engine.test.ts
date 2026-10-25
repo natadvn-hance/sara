@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { newEventId, SETTINGS } from '@sara/shared'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { buildDossier } from '../../src/conversation/dossier'
+import { buildDossier, clientNames } from '../../src/conversation/dossier'
 import { planTurn, recall } from '../../src/conversation/engine'
 import { formatInterlocutorInput } from '../../src/conversation/prompt'
 import { ensureConversation } from '../../src/conversation/store'
@@ -182,6 +182,57 @@ describe('dossier and the Interlocutor input', () => {
     expect(r.examples.map((e) => e.id)).toEqual(['e-1'])
     expect(r.procedure?.id).toBe('j-stage-talking')
     expect(r.mindVersion).toBe('mind-v1')
+  })
+})
+
+describe('names to hide', () => {
+  const chat = (first: string) =>
+    stubProfi([
+      chatMsg('m-1', 'specialist', first, new Date(Date.now() - 3600_000).toISOString()),
+      chatMsg('m-2', 'client', 'Как начнём?', new Date().toISOString()),
+    ])
+  const store = async (first: string, withLead: boolean) => {
+    if (withLead)
+      await db.insert(lead).values({
+        id: '95147898',
+        accountId: 'hance-marketing',
+        title: 'Сайт',
+        category: 'Сайты',
+        city: 'Краснодар',
+        text: 'Нужен сайт',
+        clientName: 'Ольга Петрова',
+        bidPriceRub: 100,
+        seenAt: new Date().toISOString(),
+        correlationId: newEventId(),
+      })
+    const conv = await ensureConversation(db, {
+      accountId: 'hance-marketing',
+      chatId: '95147898',
+      orderId: withLead ? '95147898' : null,
+    })
+    await syncChat({ db, profi: chat(first) }, conv, new Date(), { v1Writes: true })
+    return conv
+  }
+
+  it('ADR-016: the name of a chat old Sara began is taken from her greeting', async () => {
+    const conv = await store('Анна, добрый день! Понимаю задачу.', false)
+    expect(await clientNames(db, conv)).toEqual(['Анна'])
+    expect(
+      await clientNames(
+        db,
+        conv,
+        await buildDossier(db, conv.id, new Date(), { night: settings.night }),
+      ),
+    ).toEqual(['Анна'])
+  })
+
+  it('ADR-016: a greeting word is not a name, and a chat without a greeting has none', async () => {
+    expect(await clientNames(db, await store('Здравствуйте, понимаю задачу.', false))).toEqual([])
+  })
+
+  it('ADR-016: the names are those of the lead and of the greeting, once each', async () => {
+    const conv = await store('Ольга, здравствуйте! Понимаю задачу.', true)
+    expect(await clientNames(db, conv)).toEqual(['Ольга Петрова', 'Ольга'])
   })
 })
 

@@ -7,7 +7,7 @@ import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
-import { buildDossier, turnMessageIds } from './dossier'
+import { buildDossier, clientNames, turnMessageIds } from './dossier'
 import { planTurn } from './engine'
 import { applyOwnerRule, getConversation, updateConversation } from './store'
 import { storedOf, syncChat } from './sync'
@@ -207,7 +207,7 @@ async function planStep(turnId: string, conversationId: string): Promise<Planned
     await stamp(turnId, 'recalled', { messageIds: dossier.turnMessageIds })
     const plan = await planTurn(
       { gateway, mind },
-      { dossier, names: dossier.clientName ? [dossier.clientName] : [], settings, now },
+      { dossier, names: await clientNames(db, conv, dossier), settings, now },
     )
     const out = plan.output
     await stamp(turnId, 'planned', {

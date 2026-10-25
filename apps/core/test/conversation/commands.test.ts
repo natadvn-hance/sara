@@ -14,7 +14,16 @@ import {
 } from '../../src/conversation/commands'
 import { ensureConversation, getConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
-import { convTurn, deal, lead, mindProposal, question, task } from '../../src/db/schema'
+import {
+  chatMessage,
+  conversation,
+  convTurn,
+  deal,
+  lead,
+  mindProposal,
+  question,
+  task,
+} from '../../src/db/schema'
 import { handleBorisMessage } from '../../src/learning/inbox'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
@@ -202,6 +211,47 @@ describe('Boris’s commands', () => {
       // Nothing waits any more: the next words on the card are not understood.
       expect(await borisSays('ещё что-то', cardMessage)).toMatch(/Не поняла/)
     })
+  })
+
+  it('ADR-016: Boris’s words proposed as an example keep no client name, also in a chat old Sara began', async () => {
+    // A chat without a lead: the name is known from the greeting of our first message only.
+    await db.update(conversation).set({ dealId: null })
+    await db.delete(deal)
+    await db.delete(lead)
+    await syncChat(
+      {
+        db,
+        profi: stubProfi([
+          chatMsg(
+            'm-0',
+            'specialist',
+            'Анна, добрый день! Понимаю задачу.',
+            new Date(Date.now() - 7200_000).toISOString(),
+          ),
+        ]),
+      },
+      (await getConversation(db, convId)) as never,
+      new Date(),
+      { v1Writes: true },
+    )
+    await db.delete(mindProposal)
+    await say(deps(), convId, 'Анна, начнём с короткого созвона.')
+    const [p] = await db.select().from(mindProposal)
+    expect(p?.content).not.toContain('Анна')
+    expect(p?.content).toContain('[имя 1]')
+  })
+
+  it('ADR-016: no example is proposed from Boris’s words when no name of the client is known', async () => {
+    await db.update(conversation).set({ dealId: null })
+    await db.delete(deal)
+    await db.delete(lead)
+    await db.delete(chatMessage)
+    await db.delete(mindProposal)
+    await say(deps(), convId, 'Добрый день, начнём с короткого созвона.')
+    expect(await db.select().from(mindProposal)).toHaveLength(0)
+    // The words are still kept beside the draft.
+    const [t] = await db.select().from(convTurn).where(eq(convTurn.id, 't-1'))
+    expect(t?.borisText).toBe('Добрый день, начнём с короткого созвона.')
   })
 
   it('FR-CONV-11: «Хорошо» marks the draft good once', async () => {
