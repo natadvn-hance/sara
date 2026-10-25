@@ -10,6 +10,7 @@ import type { Db } from '../db/client'
 import { chatMessage, outbox } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { ProfiClient } from '../profi/client'
+import { getSettingChangedAt } from '../settings/store'
 import type { ConversationRow, StoredMessage } from './types'
 
 export type SyncResult = {
@@ -75,14 +76,14 @@ async function ourTexts(db: Db, conv: ConversationRow): Promise<Map<string, 'sar
 
 /**
  * Whose voice a live message is (ADR-024). Old Sara's own evidence is known only to the history export (part A);
- * live, a message from our side is the new Sara's when her outbox holds its text, Boris's after the switch, and
- * nobody's for sure while old Sara still writes.
+ * live, a message from our side is the new Sara's when her outbox holds its text, and Boris's only when it is
+ * proved to be after the switch: `afterSwitch` says the chat was already known to Sara, and the message was written
+ * and heard after old Sara stopped writing. Anything else may be old Sara's or Boris's, nobody's for sure.
  */
 export function liveAuthor(
   m: Pick<ChatMessage, 'author' | 'text'>,
   ours: Map<string, 'sara' | 'boris'>,
-  v1Writes: boolean,
-  approx = false,
+  afterSwitch: boolean,
 ): { author: ChatAuthor; basis: AuthorBasis } {
   if (m.author === 'client') return { author: 'client', basis: 'side' }
   if (m.author === 'system') return { author: 'system', basis: 'side' }
@@ -91,8 +92,7 @@ export function liveAuthor(
   // Boris's text the new Sara sent for him («Написать текст») is his voice.
   if (sent === 'boris') return { author: 'boris', basis: 'say' }
   if (sent === 'sara') return { author: 'sara', basis: 'outbox' }
-  // A message older than the first reading of its chat may be from before the switch, when old Sara still wrote.
-  if (!v1Writes && !approx) return { author: 'boris', basis: 'after_cutover' }
+  if (afterSwitch) return { author: 'boris', basis: 'after_cutover' }
   return { author: 'unknown', basis: 'v1_or_boris' }
 }
 
@@ -112,7 +112,11 @@ export async function syncChat(
     .from(chatMessage)
     .where(and(eq(chatMessage.accountId, conv.accountId), eq(chatMessage.chatId, conv.chatId)))
   const byId = new Map(known.map((r) => [r.platformMessageId, storedOf(r)]))
-  const first = known.length === 0
+  // The chat is new to Sara when she has stored nothing of it herself: the copies of old Sara's export do not count.
+  const first = !known.some((r) => r.source === 'node')
+  // The moment old Sara stopped writing: when the setting was turned off (ADR-024). Without it nothing is proved.
+  const switchedAt = o.v1Writes ? null : await getSettingChangedAt(d.db, 'conv.v1_writes')
+  const switchedMs = switchedAt ? new Date(switchedAt).getTime() : null
   const fresh = chat.filter((m) => !byId.has(m.platform_message_id))
   const ours = fresh.some((m) => m.author === 'specialist')
     ? await ourTexts(d.db, conv)
@@ -120,7 +124,14 @@ export async function syncChat(
   const added: StoredMessage[] = []
   for (const m of fresh) {
     const approx = first && heardAt.getTime() - new Date(m.sent_at).getTime() > FRESH_MS
-    const who = liveAuthor(m, ours, o.v1Writes, approx)
+    const who = liveAuthor(
+      m,
+      ours,
+      !first &&
+        switchedMs !== null &&
+        new Date(m.sent_at).getTime() > switchedMs &&
+        heardAt.getTime() > switchedMs,
+    )
     const [row] = await d.db
       .insert(chatMessage)
       .values({
