@@ -1,5 +1,5 @@
 ---
-id: price
+id: k-price
 type: knowledge
 scope: shared
 status: maybe

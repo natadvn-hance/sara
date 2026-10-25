@@ -1,5 +1,5 @@
 ---
-id: price-basic
+id: k-price-basic
 type: knowledge
 scope: shared
 status: confirmed
