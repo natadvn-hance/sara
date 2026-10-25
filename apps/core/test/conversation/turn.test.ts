@@ -20,8 +20,9 @@ import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
 import { countEvents } from '../helpers/events'
 
 // The real code checks come with part D; here every reply passes them, so the send path can run.
+const checks = vi.hoisted(() => ({ issues: [] as { id: string; detail: string }[] }))
 vi.mock('../../src/conversation/check/codeChecks', () => ({
-  checkReplyText: () => [],
+  checkReplyText: () => checks.issues,
   isNewMoscowDay: () => false,
 }))
 // The Checker comes with part D too: here it read every reply and found nothing.
@@ -144,6 +145,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
+  checks.issues = []
   await resetDb(db)
   profi.chat = [
     chatMsg(
@@ -281,12 +283,33 @@ describe('the turn workflow', () => {
         title: 'Лиса-Клиник: онлайн-запись, Краснодар',
       },
     })
-    // The next turn of the chat is not offered this case again.
+    // In shadow the draft never went to the client: the next turn is offered the case again.
+    expect(turn?.outcome).toBe('drafted')
+    await clientWrites('m-3', 'А ещё примеры есть?')
+    const next = (await turnsDone(2)).find((t) => t.id !== turn?.id)
+    expect((next?.recalled as { cases?: string[] } | null)?.cases).toContain('k-case-01')
+  }, 40000)
+
+  it('FR-CONV-3: a case the client heard in a sent reply is not offered again', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Вы делали что-то похожее для клиник?')
+    const [turn] = await turnsDone(1)
+    expect(turn?.outcome).toBe('sent')
     await clientWrites('m-3', 'А ещё примеры есть?')
     const next = (await turnsDone(2)).find((t) => t.id !== turn?.id)
     expect((next?.recalled as { cases?: string[] } | null)?.cases).not.toContain('k-case-01')
     expect((next?.recalled as { cases?: string[] } | null)?.cases).toContain('k-case-02')
-  })
+  }, 40000)
+
+  it('FR-CONV-3: a case id the checks rejected is not in the trace, so the card shows no case', async () => {
+    checks.issues = [{ id: 'case.unknown', detail: 'кейс k-case-01 не из кейсов этого хода' }]
+    await clientWrites('m-2', 'Вы делали что-то похожее для клиник?')
+    const [turn] = await turnsDone(1)
+    // The answer still names the case (the fake model says it twice), the checks refuse it, the draft goes to Boris.
+    expect(turn?.checks).toMatchObject({ issues: [{ id: 'case.unknown' }] })
+    expect((turn?.understanding as { case?: unknown } | null)?.case).toBeNull()
+    expect(turn?.decision).toBe('draft')
+  }, 40000)
 
   it('FR-CONV-7: three client messages with typing between them get one reply', async () => {
     await clientWrites('m-2', 'Здравствуйте')

@@ -196,6 +196,7 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     if (!res.ok) {
       failure = res.errorClass
       output = null
+      chosen = undefined
       break
     }
     // Only a reply carries a text and a case; with another move they are never checked, so never shown or kept.
@@ -248,5 +249,17 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     now: input.now,
     callRequest,
   })
-  return { recall: r, output, issues, attempts, decision, modelCallIds, checkerRan, failure }
+  // The case the reply tells for the trace and the card: offered to the last attempt, and no case check refused it.
+  const tellsCase = output?.move === 'reply' && !issues.some(isCaseIssue) ? chosen : undefined
+  return {
+    recall: r,
+    output,
+    issues,
+    attempts,
+    decision,
+    modelCallIds,
+    checkerRan,
+    failure,
+    case: tellsCase,
+  }
 }

@@ -166,8 +166,11 @@ export async function buildDossier(
 }
 
 /**
- * The cases the earlier turns of this chat told, from their traces (`understanding.case`), each once. The turn being
- * planned is left out: planning it again after CHAT_CHANGED must not call its own first try a repeat.
+ * The cases the client heard from our side in the earlier turns of this chat, each once: those in the traces
+ * (`understanding.case`) of turns whose reply really went to the client (outcome «sent»). A shadow draft, a call to
+ * Boris, a failed turn or one a message of ours cancelled told the client nothing. A case that a message of our side
+ * names by its brand is told too, but that is read from the chat where the cases are (casesFor, caseIssues). The turn
+ * being planned is left out: planning it again after CHAT_CHANGED must not call its own first try a repeat.
  */
 async function toldCases(
   db: Db,
@@ -180,6 +183,7 @@ async function toldCases(
     .where(
       and(
         eq(convTurn.conversationId, conversationId),
+        eq(convTurn.outcome, 'sent'),
         exceptTurn ? ne(convTurn.id, exceptTurn) : undefined,
       ),
     )

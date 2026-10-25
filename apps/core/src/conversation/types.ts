@@ -204,6 +204,8 @@ export type TurnPlan = {
   modelCallIds: string[]
   checkerRan: boolean
   failure: string | null
+  /** The case the final reply tells: one it was offered and no check refused; none when the reply has no valid case. */
+  case?: CaseHit
 }
 
 export type EngineDeps = { gateway: Gateway; mind: MindSearch }
