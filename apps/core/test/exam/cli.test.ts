@@ -1,12 +1,15 @@
 import { execFile } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { newEventId } from '@sara/shared'
+import { count } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { chatMessage, examRun, mindProposal } from '../../src/db/schema'
+import { chatMessage, event, examRun, mindIndex, mindProposal } from '../../src/db/schema'
 import { assertNotCi, main, parseArgs, UsageError } from '../../src/exam/cli'
+import { folderMindVersion } from '../../src/exam/mindState'
+import { appendEvent } from '../../src/journal/journal'
 import { createSecretStore } from '../../src/secrets/store'
 import { interlocutorAnswer } from '../helpers/conversation'
 import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
@@ -93,9 +96,13 @@ describe('the exam command line', { timeout: 90_000 }, () => {
      */
     async function envWith(
       answer: unknown,
-      o: { small?: boolean } = {},
+      o: { small?: boolean; mind?: Record<string, string> } = {},
     ): Promise<NodeJS.ProcessEnv> {
       const dir = await mkdtemp(join(tmpdir(), 'exam-cli-'))
+      for (const [path, text] of Object.entries(o.mind ?? {})) {
+        await mkdir(join(dir, 'mind', path, '..'), { recursive: true })
+        await writeFile(join(dir, 'mind', path), text)
+      }
       await createSecretStore(join(dir, 'data')).set('claude_oauth_token', 'tok')
       await mkdir(join(dir, 'scenarios'))
       await copyFile(
@@ -191,6 +198,43 @@ describe('the exam command line', { timeout: 90_000 }, () => {
       expect(text).toMatch(/не прошёл/i)
       const [stored] = await db.select().from(examRun)
       expect(stored).toMatchObject({ passed: false, score: 0.5, s1: 0 })
+    })
+
+    it('FR-TRAIN-8: the exam never builds the index: a folder of another mind than the index is refused', async () => {
+      const sink = io()
+      const env = await envWith(CALL_BORIS, {
+        small: true,
+        mind: { 'mind/shared/knowledge/k-a.md': 'запись разума' },
+      })
+      expect(await main([], env, sink.io)).toBe(2)
+      expect(sink.lines.join('\n')).toMatch(/Индекс разума/)
+      expect(sink.lines.join('\n')).toMatch(/не обновляет/)
+      // Nothing was written: no run, no index rows, no event of an index built.
+      expect(await db.select().from(examRun)).toEqual([])
+      expect((await db.select({ n: count() }).from(mindIndex))[0]?.n).toBe(0)
+      expect((await db.select({ n: count() }).from(event))[0]?.n).toBe(0)
+    })
+
+    it('FR-TRAIN-8: with the index built for the folder the exam runs, and stores that version', async () => {
+      const env = await envWith(CALL_BORIS, {
+        small: true,
+        mind: { 'mind/shared/knowledge/k-a.md': 'запись разума' },
+      })
+      const version = await folderMindVersion(join(env.SARA_MIND_DIR ?? ''))
+      await appendEvent(db, {
+        type: 'mind.indexed',
+        v: 1,
+        entity: { kind: 'mind', id: version },
+        account_id: null,
+        actor: 'system',
+        occurred_at: new Date().toISOString(),
+        causation_id: null,
+        correlation_id: newEventId(),
+        reason: null,
+        payload: { mind_version: version, records: 1, errors: 0 },
+      })
+      const sink = io()
+      expect(await main([], env, sink.io), sink.lines.join('\n')).toBe(0)
     })
 
     it('FR-TRAIN-8: the exam refuses to run in CI before it touches anything', async () => {

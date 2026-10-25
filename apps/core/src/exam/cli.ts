@@ -8,10 +8,10 @@ import { pathToFileURL } from 'node:url'
 import { loadConfig } from '../config'
 import { createDb } from '../db/client'
 import { createGateway } from '../gateway/gateway'
-import { ensureMindIndex } from '../mind/indexer'
 import { createMindSearch } from '../mind/search'
 import { createSecretStore } from '../secrets/store'
 import { buildScenarios } from './build'
+import { mindStateProblem, readMindState } from './mindState'
 import { ExamSetupError, type ExamSummary, runExam, type ScenarioResult } from './run'
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
@@ -133,10 +133,15 @@ export function verdict(args: Args, summary: ExamSummary, io: Io): number {
     io.out(
       `Модель не ответила в сценариях: ${summary.unanswered} (Собеседник, Проверяющий или судья, который считается). Проверь связь с Claude (pnpm probe:claude): такой прогон не показывает, как Сара отвечает.`,
     )
+  if (summary.mindShifted > 0)
+    io.out(
+      `Индекс разума менялся во время прогона (сценариев с другой версией: ${summary.mindShifted}): такой прогон не считается, запусти его снова.`,
+    )
   if (summary.worse.length > 0)
     io.out(`Хуже, чем в прошлом прошедшем прогоне, стали сценарии: ${summary.worse.join(', ')}.`)
   if (summary.passed) io.out('Прошёл: S1 нет, ни один сценарий не стал хуже.')
   else if (summary.unanswered > 0) io.out('Не прошёл: часть сценариев осталась без ответа.')
+  else if (summary.mindShifted > 0) io.out('Не прошёл: разум менялся во время прогона.')
   else if (summary.s1 > 0) io.out(`Не прошёл: есть S1 (${summary.s1}).`)
   else if (summary.worse.length > 0) io.out('Не прошёл: итог хуже прошлого прошедшего прогона.')
   else if (args.compare && summary.baseline === null) io.out(NO_BASELINE)
@@ -167,7 +172,9 @@ async function execute(args: Args, env: NodeJS.ProcessEnv, io: Io): Promise<numb
         )
       return 0
     }
-    await ensureMindIndex(db, config.mindDir)
+    // The exam reads the index the core keeps and never builds it: a candidate mind would go live before the guard.
+    const problem = mindStateProblem(await readMindState(db, config.mindDir))
+    if (problem) throw new ExamSetupError(problem)
     const mind = createMindSearch(db)
     const mindVersion = await mind.version()
     io.out(`Экзамен, разум ${mindVersion}.`)

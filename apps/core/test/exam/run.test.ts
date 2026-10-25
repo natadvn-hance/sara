@@ -403,6 +403,23 @@ describe('runExam', { timeout: 30_000 }, () => {
     expect(summary.passed).toBe(false)
   })
 
+  it('FR-TRAIN-8: a run in which the mind changed under it does not pass, and keeps the version it began with', async () => {
+    let calls = 0
+    const mind = fakeMind()
+    // The index is rebuilt while the run goes: the first scenario reads another mind than the run began with.
+    const shifting = { ...mind, version: async () => (calls++ === 0 ? 'mind-v1' : 'mind-v2') }
+    const { summary } = await exam(
+      { interlocutor: { $sequence: [CALL_BORIS, NONE] } },
+      { only: TWO, mind: shifting },
+    )
+    expect(summary).toMatchObject({ mindVersion: 'mind-v1', mindShifted: 2, passed: false, s1: 0 })
+    const [run] = await db.select().from(examRun)
+    expect(run).toMatchObject({ mindVersion: 'mind-v1', passed: false })
+    // A mind that stays what it was does not hold the run.
+    const steady = await exam({ interlocutor: { $sequence: [CALL_BORIS, NONE] } }, { only: TWO })
+    expect(steady.summary).toMatchObject({ mindShifted: 0, passed: true })
+  })
+
   it('FR-TRAIN-8: a set with a broken file or an unknown id refuses to run', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'exam-bad-'))
     await writeFile(join(dir, 'x-broken.json'), '{')

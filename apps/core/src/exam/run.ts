@@ -92,6 +92,8 @@ export type ScenarioResult = {
   text: string | null
   grade: Grade
   judge: JudgeRecord
+  /** The mind version the engine read for this scenario; null when it read none (the engine broke). */
+  mindVersion: string | null
 }
 
 export type ExamSummary = {
@@ -110,6 +112,8 @@ export type ExamSummary = {
   overlap: number
   /** The scenarios that got worse than in the baseline. */
   worse: string[]
+  /** In how many scenarios the engine read another mind version than the run began with: such a run never passes. */
+  mindShifted: number
   /** In how many scenarios a model gave no answer (the Interlocutor, the Checker, a judge that counts): the run never passes. */
   unanswered: number
   scenarios: number
@@ -247,6 +251,7 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
       text: out?.move === 'reply' ? out.text : null,
       grade,
       judge,
+      mindVersion: plan.recall.mindVersion || null,
     }
     await d.db.insert(examResult).values({
       runId,
@@ -276,6 +281,9 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
   const countOf = (sev: string) => failures.filter((f) => f.severity === sev).length
   const score = round4(results.reduce((sum, r) => sum + r.grade.score, 0) / results.length)
   const s1 = countOf('S1')
+  const mindShifted = results.filter(
+    (r) => r.mindVersion !== null && r.mindVersion !== mindVersion,
+  ).length
   const unanswered = failures.filter((f) => UNANSWERED.includes(f.id)).length
   const baseline = await findBaseline(d.db, { setKey, hashes, runId })
   const worse = gotWorse(
@@ -291,6 +299,7 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
     s3: countOf('S3'),
     passed:
       unanswered === 0 &&
+      mindShifted === 0 &&
       worse.length === 0 &&
       examVerdict({ score, s1 }, baseline?.kind === 'same' ? baseline : null) &&
       // A guard run with nothing to compare with proved nothing.
@@ -300,6 +309,7 @@ export async function runExam(d: ExamDeps, o: ExamOptions): Promise<ExamSummary>
     overlap: baseline?.scores.size ?? 0,
     worse,
     unanswered,
+    mindShifted,
     scenarios: results.length,
     comparedTo: baseline?.id ?? null,
     previousScore: baseline?.score ?? null,
