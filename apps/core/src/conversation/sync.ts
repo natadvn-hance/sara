@@ -143,7 +143,20 @@ export async function syncChat(
       })
       .onConflictDoNothing()
       .returning()
-    if (!row) continue
+    if (!row) {
+      // Another sync stored it between our reading and this insert: the chat as stored is still whole.
+      const [other] = await d.db
+        .select()
+        .from(chatMessage)
+        .where(
+          and(
+            eq(chatMessage.accountId, conv.accountId),
+            eq(chatMessage.platformMessageId, m.platform_message_id),
+          ),
+        )
+      if (other) byId.set(other.platformMessageId, storedOf(other))
+      continue
+    }
     const s = storedOf(row)
     added.push(s)
     byId.set(s.platformMessageId, s)

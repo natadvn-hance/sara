@@ -74,6 +74,23 @@ describe('chat sync', () => {
     expect(rows.map((m) => m.approxTime)).toEqual([true, false])
   })
 
+  it('FR-CONV-2: a sync that loses the race to a concurrent one still returns the whole chat', async () => {
+    const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
+    const chat = [bid, ask]
+    for (let i = 3; i <= 8; i++)
+      chat.push(chatMsg(`m-${i}`, 'client', `Вопрос ${i}`, `2026-10-20T10:0${i}:00.000Z`))
+    const p = stubProfi(chat)
+    const [a, b] = await Promise.all([
+      syncChat({ db, profi: p }, conv, new Date(), shadow),
+      syncChat({ db, profi: p }, conv, new Date(), shadow),
+    ])
+    expect(a.messages.map((m) => m.platformMessageId)).toHaveLength(8)
+    expect(b.messages.map((m) => m.platformMessageId)).toHaveLength(8)
+    // Each message is stored, and reported as added, by exactly one of the two.
+    expect(a.added.length + b.added.length).toBe(8)
+    expect(await db.select().from(chatMessage)).toHaveLength(8)
+  })
+
   it('FR-CONV-9: our own sent message is Sara’s, found by its text in the outbox', async () => {
     const conv = await ensureConversation(db, { accountId: ACC, chatId: CHAT, orderId: CHAT })
     await db.insert(outbox).values({
