@@ -146,6 +146,12 @@ describe('the route of an order', () => {
     expect(rows[0]).toMatchObject({ margin: 8, decision: 'drop' })
   })
 
+  it('FR-LEAD-4: an order nobody won is nobody’s loss: its own account can still be asked to bid after all', async () => {
+    await vote('o6', 'hance-marketing', 5, 'drop')
+    expect(await decideRoute(db, 'o6', newEventId())).toEqual({ winner: null, needsChoice: false })
+    expect(await lostRoute(db, 'o6', 'hance-marketing')).toBe(false)
+  })
+
   it('FR-LEAD-4: no route means nobody lost; a route for another account means this one did', async () => {
     expect(await lostRoute(db, 'o5', 'hance-marketing')).toBe(false)
     await vote('o5', 'other', 5)

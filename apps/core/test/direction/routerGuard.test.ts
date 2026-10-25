@@ -89,6 +89,32 @@ describe('one bid per order', () => {
     })
   })
 
+  it('FR-LEAD-4: a bid row already there under another key makes recordBid create nothing, without an error', async () => {
+    await db.insert(outbox).values({
+      id: newEventId(),
+      kind: 'bid',
+      idempotencyKey: 'bid:legacy-key',
+      payload: bid('a'),
+    })
+    const r = await db.transaction((tx) => recordBid(tx, bid('b')))
+    expect(r.created).toBe(false)
+    expect(r.outboxId).not.toBeNull()
+    expect(await db.select().from(outbox)).toHaveLength(1)
+    expect(await count('bid.requested')).toBe(0)
+  })
+
+  it('FR-LEAD-4: an order nobody won can still be bid on (a «Взял бы» after the summary)', async () => {
+    await recordCandidate(db, '7001', {
+      accountId: 'a',
+      score: 40,
+      decision: 'drop',
+      stopFactor: null,
+      margin: -16,
+    })
+    await decideRoute(db, '7001', newEventId())
+    expect((await db.transaction((tx) => recordBid(tx, bid('a')))).created).toBe(true)
+  })
+
   it('FR-LEAD-4: recordBid refuses an account that lost the route and writes nothing', async () => {
     await route('7001', 'a')
     const r = await db.transaction((tx) => recordBid(tx, bid('b')))
@@ -172,20 +198,24 @@ describe('pressing «Откликнуться»', () => {
     expect(await count('task.resolved')).toBe(0)
   })
 
-  it('FR-LEAD-4: the guard in the same transaction rolls the decision back too', async () => {
-    // The route appears between the first look and the decision: recordBid refuses, the task is not resolved.
+  it('FR-LEAD-4: if the route appears between the first look and the decision, the press is refused and rolled back', async () => {
     const taskId = await openLead('b')
-    await route('7001', 'a')
-    await db.execute(sql`select 1`)
-    const r = await db
-      .transaction(async (tx) => {
-        await tx.update(task).set({ state: 'resolved' }).where(eq(task.id, taskId))
-        const bid2 = await recordBid(tx, bid('b'))
-        if (bid2.outboxId === null) tx.rollback()
-        return bid2
-      })
-      .catch(() => null)
-    expect(r).toBeNull()
+    // The wallet is read after the first look and before the decision's transaction: the route lands there.
+    const racing = createLeadPipeline({
+      db,
+      gateway: {} as Gateway,
+      notifier,
+      profi: {
+        sessionHealth: async () => {
+          await route('7001', 'a')
+          return { alive: true, balance_rub: 5000 }
+        },
+      } as never,
+      remindAfterMs: async () => 3_600_000,
+    })
+    expect(await racing.onPress({ taskId, action: 'bid' })).toBe(TEXTS.lostRoute)
     expect((await db.select().from(task).where(eq(task.id, taskId)))[0]?.state).toBe('open')
+    expect(await db.select().from(outbox)).toHaveLength(0)
+    expect(await count('task.resolved')).toBe(0)
   })
 })

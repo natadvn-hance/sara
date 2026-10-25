@@ -179,8 +179,11 @@ export async function routeOrder(
   return { ...route, mine }
 }
 
-/** True when the order has a route and this account is not its winner: nothing of the order is this account's to do. */
+/**
+ * True when another direction won the order: nothing of it is this account's to do. An order nobody won (the
+ * Scorer dropped it, a direction in the shadow) is nobody's loss, so Boris can still take it from the summary.
+ */
 export async function lostRoute(db: DbOrTx, orderId: string, accountId: string): Promise<boolean> {
   const route = await routeOf(db, orderId)
-  return route !== null && route.winner !== accountId
+  return route !== null && route.winner !== null && route.winner !== accountId
 }
