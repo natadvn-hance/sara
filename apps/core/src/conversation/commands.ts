@@ -23,6 +23,8 @@ export type CommandDeps = {
     author: 'sara' | 'boris',
     o?: SendOptions,
   ): Promise<string>
+  /** Boris's answer on the task of a client quiet for 7 days reaches the reminder process (FR-CONV-12). */
+  decideDormant?(reminderTurnId: string, decision: 'remind' | 'close'): Promise<void>
 }
 
 export const COMMAND_TEXTS = {
@@ -46,6 +48,8 @@ export const COMMAND_TEXTS = {
   answeredYourself:
     'Ты уже ответил сам: в чате есть твоё сообщение после слов клиента. Черновик не отправляю.',
   stale: 'Черновик устарел: клиент успел дописать. Текст не ушёл, посмотри новые сообщения.',
+  remindOn:
+    'Хорошо, напомню ему ещё: через 10 суток, потом через 30. Если он ответит раньше, остановлюсь.',
 }
 
 type CardTask = typeof task.$inferSelect
@@ -153,7 +157,7 @@ async function latestTurn(db: Db, conversationId: string) {
   const [t] = await db
     .select()
     .from(convTurn)
-    .where(eq(convTurn.conversationId, conversationId))
+    .where(and(eq(convTurn.conversationId, conversationId), eq(convTurn.kind, 'reply')))
     .orderBy(desc(convTurn.createdAt))
     .limit(1)
   return t ?? null
@@ -279,11 +283,31 @@ async function cardTaskOf(db: Db, taskId: string): Promise<CardTask | null> {
   return t && t.kind === 'conv_draft' ? t : null
 }
 
+/** A press on the task of a client quiet for 7 days: close the conversation, or remind him further (FR-CONV-12). */
+async function onDormantPress(d: CommandDeps, t: CardTask, action: TaskAction): Promise<string> {
+  if (t.state !== 'open') return COMMAND_TEXTS.done
+  const [row] = await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId))
+  if (!row) return COMMAND_TEXTS.done
+  if (action === 'close') {
+    await close(d.db, row.conversationId)
+    await d.decideDormant?.(row.id, 'close')
+    return COMMAND_TEXTS.closed
+  }
+  if (action === 'remind') {
+    if (!(await closeCard(d.db, t.id, 'remind'))) return COMMAND_TEXTS.done
+    await d.decideDormant?.(row.id, 'remind')
+    return COMMAND_TEXTS.remindOn
+  }
+  return COMMAND_TEXTS.notUnderstood
+}
+
 /** A press on a conversation card (C5 actions: good, edit, send, take, return, close). */
 export async function onConvPress(
   d: CommandDeps,
   p: { taskId: string; action: TaskAction },
 ): Promise<string> {
+  const [dormant] = await d.db.select().from(task).where(eq(task.id, p.taskId))
+  if (dormant?.kind === 'conv_dormant') return onDormantPress(d, dormant, p.action)
   const t = await cardTaskOf(d.db, p.taskId)
   const [turn] = t ? await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId)) : []
   if (!t || !turn) return COMMAND_TEXTS.done

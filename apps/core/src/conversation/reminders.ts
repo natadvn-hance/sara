@@ -1,77 +1,256 @@
-import { moscowHoursEnd } from './time'
+import { DBOS } from '@dbos-inc/dbos-sdk'
+import { and, eq, like, notLike } from 'drizzle-orm'
+import { deal, task } from '../db/schema'
+import { TransitionError, transition } from '../domain/deal'
+import { getSetting } from '../settings/store'
+import {
+  dormantStep,
+  fallbackStep,
+  groundStep,
+  isLadderMessage,
+  ladderTexts,
+  type Planned,
+  planNext,
+  type RemindDeps,
+  sendStep,
+  writeStep,
+} from './reminderSteps'
+import { getConversation } from './store'
+import type { ConversationRow, StoredMessage } from './types'
+
+export {
+  type NextReminder,
+  nextReminder,
+  type ReminderStep,
+  type ReminderTone,
+  reminderFallback,
+} from './reminderLadder'
+export type { RemindDeps } from './reminderSteps'
 
 /**
- * Reminders to a client who went quiet after our side's message (FR-CONV-12, M4 design 5.11). This file is the
- * ladder and the ready texts; the durable process `convRemind` lives below them.
+ * Reminders to a client who went quiet after our side's message (FR-CONV-12, M4 design 5.11): the durable process
+ * `convRemind`, one per message of ours that the client did not answer. It sleeps until the step is due, looks at
+ * the chat again and goes only if nobody wrote since; in shadow it only records the draft. The ladder itself is in
+ * reminderLadder.ts, the checks and the send in reminderSteps.ts.
  */
 
-const HOUR_MS = 3600_000
-const DAY_MS = 24 * HOUR_MS
+let deps: RemindDeps | null = null
 
-export type ReminderStep = 1 | 2 | 'dormant' | 3 | 4
-export type ReminderTone = 'check_in' | 'friendly'
-
-export type NextReminder = {
-  at: Date
-  step: ReminderStep
-  tone: ReminderTone
-  /** Whether the client read our message; it shapes the text, never the time. */
-  read: boolean
+const d = (): RemindDeps => {
+  if (!deps) throw new Error('reminders are not configured')
+  return deps
 }
 
-/** A reminder never goes within this long after the one before it. */
-const MIN_GAP_MS = DAY_MS
+export function setRemindDeps(x: RemindDeps): void {
+  deps = x
+}
 
-/** Moscow hours without reminders to clients (the setting's default). */
-const DEFAULT_QUIET = { from: 23, to: 9 }
+export const remindWorkflowId = (conversationId: string, anchor: string) =>
+  `conv-remind:${conversationId}:${anchor}`
 
-/**
- * The next step of the ladder (design 5.11), counted from our side's last message: a day, three days, and on the
- * seventh day the client is dormant and Boris gets one task. Only when Boris says «Напоминать дальше» the ladder goes
- * on: 10 days after the dormant day, then 30 days after that, the last one friendly (old Sara's ladder since 12.09).
- * `sent` is how many reminders of the ladder are done. A time inside the quiet hours moves to the morning, a time
- * already past is now, and two reminders keep a day between them. Null: nothing more to say.
- */
-export function nextReminder(i: {
-  lastOursAt: string
-  sent: number
-  read: boolean
-  continued: boolean
-  now: Date
-  /** When the reminder before this one went. */
-  lastSentAt?: string | null
-  /** Moscow hours without reminders to clients (`conv.reminder_quiet`). */
-  quiet?: { from: number; to: number }
-}): NextReminder | null {
-  const from = new Date(i.lastOursAt).getTime()
-  if (Number.isNaN(from)) return null
-  const plan: Record<number, { step: ReminderStep; after: number; tone: ReminderTone }> = {
-    0: { step: 1, after: DAY_MS, tone: 'check_in' },
-    1: { step: 2, after: 3 * DAY_MS, tone: 'check_in' },
-    2: i.continued
-      ? { step: 3, after: 17 * DAY_MS, tone: 'check_in' }
-      : { step: 'dormant', after: 7 * DAY_MS, tone: 'check_in' },
-    3: { step: 4, after: 47 * DAY_MS, tone: 'friendly' },
+/** Steps of the ladder: a day, three days, dormant, ten days, thirty days; the loop stops long before this. */
+const MAX_PLANS = 8
+/** A model that gave no text is asked again every so often until the reminder is that late (design 5.11). */
+const FALLBACK_AFTER_MS = 3 * 3600_000
+const RETRY_EVERY_MS = 10 * 60_000
+/** Boris has this long to answer the task of a dormant client; with no answer the ladder ends. */
+const DORMANT_WAIT_S = 30 * 24 * 3600
+const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
+
+/** The text of a reminder: the model's, written again until the time is up, then the ready text of old Sara. */
+async function obtainText(k: number, rowId: string, p: Planned, read: boolean): Promise<string> {
+  const deadline = (await DBOS.now()) + (d().fallbackAfterMs ?? FALLBACK_AFTER_MS)
+  for (let a = 0; ; a++) {
+    const left = deadline - (await DBOS.now())
+    if (left <= 0) break
+    const w = await DBOS.runStep(
+      () => writeStep(d(), rowId, conversationIdOf(rowId), p, read, left),
+      { name: `write-${k}-${a}` },
+    )
+    if (w.text) return w.text
+    const wait = Math.min(d().retryEveryMs ?? RETRY_EVERY_MS, deadline - (await DBOS.now()))
+    if (wait > 0) await DBOS.sleep(wait)
   }
-  const p = i.continued || i.sent <= 2 ? plan[i.sent] : undefined
-  if (!p) return null
-  let due = from + p.after
-  const sentAt = i.lastSentAt ? new Date(i.lastSentAt).getTime() : Number.NaN
-  if (p.step !== 'dormant' && !Number.isNaN(sentAt)) due = Math.max(due, sentAt + MIN_GAP_MS)
-  let at = new Date(Math.max(due, i.now.getTime()))
-  // The dormant day is a task for Boris, whose notices have their own quiet; only a message to the client waits.
-  if (p.step !== 'dormant') at = moscowHoursEnd(at, i.quiet ?? DEFAULT_QUIET) ?? at
-  return { at, step: p.step, tone: p.tone, read: i.read }
+  const f = await DBOS.runStep(() => fallbackStep(d(), rowId, conversationIdOf(rowId), p), {
+    name: `fallback-${k}`,
+    ...DB_STEP,
+  })
+  return f.text
+}
+
+/** `conv-remind:<conversation>:<message>:<step>` → the conversation (a uuid has no colons). */
+const conversationIdOf = (rowId: string) => rowId.split(':')[1] ?? ''
+
+async function runRemind(conversationId: string, anchor: string): Promise<void> {
+  const wf = remindWorkflowId(conversationId, anchor)
+  let sent = 0
+  let continued = false
+  let lastSentAt: string | null = null
+  for (let k = 0; k < MAX_PLANS; k++) {
+    const next = await DBOS.runStep(
+      () => planNext(d(), conversationId, anchor, { sent, continued, lastSentAt }),
+      { name: `plan-${k}`, ...DB_STEP },
+    )
+    if (!next) return
+    const wait = Date.parse(next.at) - (await DBOS.now())
+    if (wait > 0) await DBOS.sleep(wait)
+    const rowId = `${wf}:${next.step}`
+    const g = await DBOS.runStep(() => groundStep(d(), rowId, conversationId, anchor, next), {
+      name: `ground-${k}`,
+      ...DB_STEP,
+    })
+    if (!g.go) {
+      // The client wrote, our side wrote, a pause: the ladder ends. A step only skipped (a running turn, an
+      // unreadable chat, a pause of sending) is not repeated later, the next step comes at its own time.
+      if (g.end || next.step === 'dormant') return
+      sent++
+      continue
+    }
+    if (next.step === 'dormant') {
+      const task = await DBOS.runStep(() => dormantStep(d(), rowId, conversationId, g.shadow), {
+        name: `dormant-${k}`,
+        ...DB_STEP,
+      })
+      // Shadow has nobody to ask: the ladder ends at the dormant day.
+      if (!task.asked) return
+      const answer = await DBOS.recv<string>('decision', {
+        timeoutSeconds: d().dormantWaitS ?? DORMANT_WAIT_S,
+      })
+      if (answer !== 'remind') return
+      continued = true
+      continue
+    }
+    const text = await obtainText(k, rowId, next, g.read)
+    const result = await DBOS.runStep(
+      () => sendStep(d(), rowId, conversationId, anchor, next, text),
+      { name: `send-${k}`, ...DB_STEP },
+    )
+    if (result.end) return
+    if (result.outcome === 'sent' || result.outcome === 'drafted' || result.outcome === 'uncertain')
+      lastSentAt = new Date(await DBOS.now()).toISOString()
+    sent++
+  }
+}
+
+const remindWorkflow = DBOS.registerWorkflow(runRemind, { name: 'convRemind' })
+
+/**
+ * Starts the process for our message the client did not answer: `conv-remind:<conversation>:<message>`, so a repeat
+ * start returns the process there is. Nothing starts while conversations or reminders are switched off.
+ */
+export async function startReminder(
+  conversationId: string,
+  lastOursMessageId: string,
+): Promise<void> {
+  const { db } = d()
+  if (!(await getSetting(db, 'pipeline.conversations'))) return
+  if (!(await getSetting(db, 'conv.reminders'))) return
+  await DBOS.startWorkflow(remindWorkflow, {
+    workflowID: remindWorkflowId(conversationId, lastOursMessageId),
+  })(conversationId, lastOursMessageId)
+}
+
+const OPEN = ['PENDING', 'ENQUEUED', 'DELAYED'] as const
+
+/** Stops the waiting reminder processes of a conversation, but the one of `keep`; returns how many it stopped. */
+export async function cancelReminders(
+  conversationId: string,
+  o: { keep?: string } = {},
+): Promise<number> {
+  const open = await DBOS.listWorkflows({
+    workflow_id_prefix: `conv-remind:${conversationId}:`,
+    status: [...OPEN],
+  })
+  const ids = open.map((w) => w.workflowID).filter((id) => id !== o.keep)
+  if (ids.length > 0) await DBOS.cancelWorkflows(ids)
+  return ids.length
 }
 
 /**
- * The ready text of old Sara (followUpTemplates.js, 06.10.2026): it goes when the model gives no text for 3 hours
- * past the time, because a reminder must go out for sure. Gender-neutral on purpose, the account is Hance.
+ * The task for Boris about a quiet client is moot once the client or our side wrote: it is closed. The task of the
+ * process `keep` (the one that goes on) stays.
  */
-export function reminderFallback(clientName: string | null, tone: ReminderTone): string {
-  const first = (clientName ?? '').trim().split(/\s+/)[0]
-  const greeting = first ? `${first}, здравствуйте.` : 'Здравствуйте.'
-  return tone === 'friendly'
-    ? `${greeting} Если вопрос ещё открыт, пишите в любой момент: помогу разобраться, с чего начать. Хорошего дня!`
-    : `${greeting} Если задача ещё актуальна, давайте обсудим детали: подскажу, с чего начать. Удобно созвониться на 15 минут?`
+async function resolveDormantTasks(conversationId: string, keep?: string) {
+  await d()
+    .db.update(task)
+    .set({ state: 'resolved', resolution: 'answered', resolvedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(task.kind, 'conv_dormant'),
+        like(task.entityId, `conv-remind:${conversationId}:%`),
+        keep ? notLike(task.entityId, `${keep}:%`) : undefined,
+        eq(task.state, 'open'),
+      ),
+    )
+}
+
+/** A client who was dormant and wrote again is in the conversation again. */
+async function wakeDeal(conv: ConversationRow) {
+  if (!conv.dealId) return
+  const [x] = await d().db.select({ stage: deal.stage }).from(deal).where(eq(deal.id, conv.dealId))
+  if (x?.stage !== 'dormant') return
+  try {
+    await transition(d().db, {
+      dealId: conv.dealId,
+      to: 'talking',
+      actor: 'sara',
+      reason: 'клиент снова написал',
+      correlationId: conv.id,
+    })
+  } catch (e) {
+    if (!(e instanceof TransitionError)) throw e
+  }
+}
+
+/**
+ * What the chat as read says about reminders (called whenever a chat is read, from the events and the 10-minute
+ * check): a client's message, or a message of ours that is not one of the ladder's own, cancels the waiting process
+ * of the old last message; our message last starts the process of it. Unclear authors stop everything.
+ */
+export async function syncReminders(
+  conv: ConversationRow,
+  messages: StoredMessage[],
+): Promise<void> {
+  if (!deps) return
+  const { db } = d()
+  const last = messages.findLast((m) => m.side !== 'system')
+  if (!last) return
+  if (last.side !== 'specialist') {
+    await cancelReminders(conv.id)
+    if (last.side === 'client') {
+      await resolveDormantTasks(conv.id)
+      await wakeDeal(conv)
+    }
+    return
+  }
+  const fresh = (await getConversation(db, conv.id)) ?? conv
+  const on =
+    (await getSetting(db, 'pipeline.conversations')) &&
+    (await getSetting(db, 'conv.reminders')) &&
+    !fresh.closedAt &&
+    fresh.owner === 'sara'
+  if (!on) {
+    await cancelReminders(conv.id)
+    return
+  }
+  // The ladder's own reminders stand in the chat as our side's messages and are not a new beginning.
+  const ladder = await ladderTexts(db, conv.id)
+  const anchor = messages.findLast((m) => m.side === 'specialist' && !isLadderMessage(m, ladder))
+  if (!anchor) return
+  const wf = remindWorkflowId(conv.id, anchor.platformMessageId)
+  if ((await cancelReminders(conv.id, { keep: wf })) > 0) await resolveDormantTasks(conv.id, wf)
+  await startReminder(conv.id, anchor.platformMessageId)
+}
+
+/** Boris's answer on the dormant task reaches the process that waits for it (a process that is gone is fine). */
+export async function decideDormant(
+  reminderTurnId: string,
+  decision: 'remind' | 'close',
+): Promise<void> {
+  const wf = reminderTurnId.slice(0, reminderTurnId.lastIndexOf(':'))
+  try {
+    await DBOS.send(wf, decision, 'decision', `dormant:${reminderTurnId}:${decision}`)
+  } catch (e) {
+    if ((e as Error).name !== 'DBOSNonExistentWorkflowError') throw e
+  }
 }

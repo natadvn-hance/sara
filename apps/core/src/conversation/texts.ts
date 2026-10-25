@@ -1,4 +1,4 @@
-import type { ChatAuthor, Tone } from '@sara/shared'
+import { type ChatAuthor, plural, type Tone } from '@sara/shared'
 
 /** Texts of the conversation module for Boris (NFR-UX-1: plain Russian, no long dash). */
 
@@ -109,6 +109,18 @@ export const CONV_TEXTS = {
       } пишет: ${quote(words)}`,
     ),
 
+  /** The task for Boris when a client has been quiet for 7 days (FR-CONV-12, M4 design 5.11). */
+  dormant: (name: string | null, orderTitle: string | null, reminders: number) =>
+    hyphenated(
+      [
+        `😴 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: молчит 7 дней.`,
+        reminders > 0
+          ? `Напоминала ему ${reminders} ${plural(reminders, ['раз', 'раза', 'раз'])}, ответа нет.`
+          : 'Ответа нет.',
+        'Закрыть разговор или напоминать дальше: ещё через 10 суток, потом через 30?',
+      ].join('\n'),
+    ),
+
   buttons: {
     good: 'Хорошо',
     edit: 'Изменить',
@@ -116,5 +128,6 @@ export const CONV_TEXTS = {
     take: 'Беру сам',
     close: 'Закрыть',
     giveBack: 'Вернуть Саре',
+    remind: 'Напоминать дальше',
   },
 }
