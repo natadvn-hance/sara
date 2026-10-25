@@ -167,11 +167,12 @@ async function hear(
   await stamp(turnId, 'heard')
   if (conv.closedAt) return { gate: 'closed', quietLeftS: 0 }
   if (conv.owner === 'boris' && conv.ownerReason === 'take') return { gate: 'take', quietLeftS: 0 }
-  if (r.unclear) return { gate: 'unclear', quietLeftS: 0 }
-  const at = r.messages.findIndex((m) => m.platformMessageId === anchor)
+  const after = sinceAnchor(r.messages, anchor)
+  // A message whose side the node could not tell stops the turn, also one that an earlier reading stored.
+  if (after.some((m) => m.side === 'unknown')) return { gate: 'unclear', quietLeftS: 0 }
   // After the switch our side's message ends the turn. In shadow it is old Sara's or Boris's answer, which the
   // turn's draft is compared with: the turn goes on and the comparison closes it (design 5.9).
-  if (!v1Writes && at >= 0 && r.messages.slice(at).some((m) => m.side === 'specialist'))
+  if (!v1Writes && after.some((m) => m.side === 'specialist'))
     return { gate: 'answered', quietLeftS: 0 }
   const quietLeftS = quietLeftSeconds(
     conv,
@@ -184,6 +185,12 @@ async function hear(
     new Date(),
   )
   return { gate: 'go', quietLeftS }
+}
+
+/** The chat from the turn's first message on. */
+const sinceAnchor = (messages: StoredMessage[], anchor: string) => {
+  const at = messages.findIndex((m) => m.platformMessageId === anchor)
+  return at >= 0 ? messages.slice(at) : []
 }
 
 async function policySettings(db: Db, accountId: string): Promise<PolicySettings> {
@@ -355,15 +362,15 @@ async function reread(
   conversationId: string,
   anchor: string,
   covered: string[],
-): Promise<'same' | 'more' | 'answered'> {
+): Promise<'same' | 'more' | 'answered' | 'unclear'> {
   const { db } = d()
   const conv = await getConversation(db, conversationId)
   if (!conv) return 'answered'
   const v1Writes = await getSetting(db, 'conv.v1_writes')
   const r = await syncChat(d(), conv, new Date(), { v1Writes })
   await applyOwnerRule(db, conv, r.added, { v1Writes })
-  const at = r.messages.findIndex((m) => m.platformMessageId === anchor)
-  const after = at >= 0 ? r.messages.slice(at) : r.messages
+  const after = sinceAnchor(r.messages, anchor)
+  if (after.some((m) => m.side === 'unknown')) return 'unclear'
   if (after.some((m) => m.side === 'specialist')) return 'answered'
   const known = new Set(covered)
   return after.some((m) => m.side === 'client' && !known.has(m.platformMessageId)) ? 'more' : 'same'
@@ -503,8 +510,8 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
         name: `reread-${round}`,
         ...DB_STEP,
       })
-      if (seen === 'answered') {
-        outcome = 'answered'
+      if (seen === 'answered' || seen === 'unclear') {
+        outcome = seen
         break
       }
       if (seen === 'more' && round < MAX_ROUNDS) continue

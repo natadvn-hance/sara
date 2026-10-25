@@ -7,9 +7,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { sendTurnCard } from '../../src/conversation/cards'
 import { compareAfterTurn } from '../../src/conversation/compare'
 import { createConversationEvents } from '../../src/conversation/events'
+import { rowOf } from '../../src/conversation/store'
 import { moscowHour } from '../../src/conversation/time'
 import { pokeTurn, setTurnDeps, startTurnFor, type TurnDeps } from '../../src/conversation/turn'
-import { conversation, convTurn, event } from '../../src/db/schema'
+import { account, conversation, convTurn, event } from '../../src/db/schema'
 import { createGateway } from '../../src/gateway/gateway'
 import { createSecretStore } from '../../src/secrets/store'
 import { setSetting } from '../../src/settings/store'
@@ -39,6 +40,7 @@ let outcomes: { turnId: string; conversationId: string; outcome: string; at: str
 let forwards: string[]
 let sends: { turnId: string; round: number }[]
 let sendAnswer: 'confirmed' | 'changed' = 'confirmed'
+let pause = 200
 let onCard: () => Promise<void> = async () => {}
 let onSend: () => Promise<void> = async () => {}
 let mindFails = false
@@ -119,7 +121,7 @@ beforeAll(async () => {
       await onSend()
       return answer
     },
-    pauseMs: () => 200,
+    pauseMs: () => pause,
     stepRetry: { maxAttempts: 2, intervalSeconds: 0.2, backoffRate: 1 },
     unreadableRetry: { tries: 2, everyMs: 100 },
     onOutcome: async (o) => {
@@ -150,6 +152,7 @@ beforeEach(async () => {
   forwards = []
   sends = []
   sendAnswer = 'confirmed'
+  pause = 200
   onCard = async () => {}
   onSend = async () => {}
   mindFails = false
@@ -201,6 +204,39 @@ async function clientWrites(id: string, text: string) {
       platform_message_id: id,
       sent_at: new Date().toISOString(),
       author: 'client',
+    }),
+  )
+}
+
+/** Runs `act` while the turn waits out its human pause (the pause is long enough for the test to act). */
+async function duringPause(act: () => Promise<void>) {
+  pause = 2500
+  const until = Date.now() + 20000
+  while (Date.now() < until) {
+    const [t] = await db.select().from(convTurn)
+    if (t?.state === 'decided') break
+    await sleep(30)
+  }
+  await act()
+}
+
+/** A turn after the switch that would send its own reply. */
+async function afterTheSwitch() {
+  await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'outbound.messages', true, 'system')
+  await setSetting(db, 'conv.autonomy', { process: 'self' } as never, 'system')
+}
+
+/** A message from a side the node could not tell, stored by the event path before the turn reads the chat again. */
+async function unknownSideWrites(id: string, text: string) {
+  profi.chat.push(chatMsg(id, 'unknown', text, new Date(Date.now() + 1000).toISOString()))
+  await events()(
+    ev('profi.specialist_message', {
+      chat_id: CHAT,
+      order_id: CHAT,
+      platform_message_id: id,
+      sent_at: new Date().toISOString(),
+      author: 'unknown',
     }),
   )
 }
@@ -400,6 +436,28 @@ describe('the turn workflow', () => {
     expect(log).toContain('[имя 1]')
     expect(log).not.toContain('Анна')
   }, 30000)
+
+  it('FR-CONV-2: a message of an unknown side stored before the turn reads the chat still stops the turn', async () => {
+    await afterTheSwitch()
+    const at = Date.now()
+    profi.chat.push(chatMsg('m-2', 'client', 'Как начнём?', new Date(at).toISOString()))
+    await unknownSideWrites('m-3', 'что-то странное')
+    const [c] = await db.select().from(conversation)
+    await startTurnFor(rowOf(c as never))
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('unclear')
+    expect(cards).toHaveLength(0)
+    expect(sends).toHaveLength(0)
+  }, 30000)
+
+  it('FR-CONV-2: a message of an unknown side during the pause stops the turn before it sends', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Как начнём?')
+    await duringPause(() => unknownSideWrites('m-3', 'что-то странное'))
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('unclear')
+    expect(sends).toHaveLength(0)
+  }, 40000)
 
   it('FR-CONV-11: a client Boris took is forwarded to him without the model', async () => {
     await clientWrites('m-0', 'Привет')
