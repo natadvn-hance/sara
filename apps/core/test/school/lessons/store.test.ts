@@ -117,7 +117,7 @@ describe('lessons', () => {
     const l = await createLesson(db, newLesson('conv-turn:1'))
     const [p] = await db.select().from(mindProposal)
     expect(p?.lessonId).toBe(l.id)
-    expect((p?.change as MindChange).recordId).toBe(`e-l-${l.n}`)
+    expect((p?.change as MindChange | undefined)?.recordId).toBe(`e-l-${l.n}`)
     expect(p?.content).toContain('## Борис')
   })
 
