@@ -204,6 +204,19 @@ export function DirectionPage({ accountId }: { accountId: string }) {
         ) : null}
       </Card>
 
+      <div>
+        <a
+          className="inline-flex min-h-11 items-center rounded-md bg-accent px-4 font-medium text-white hover:opacity-90"
+          href={`/accounts/${encodeURIComponent(accountId)}/direction/onboarding`}
+          onClick={(e) => {
+            e.preventDefault()
+            go(`/accounts/${encodeURIComponent(accountId)}/direction/onboarding`)
+          }}
+        >
+          {d.onboarding?.open ? 'Продолжить настройку' : 'Изменить с Claude'}
+        </a>
+      </div>
+
       <Card>
         <h2 className="font-display text-lg">Отклик и кейсы</h2>
         <p>

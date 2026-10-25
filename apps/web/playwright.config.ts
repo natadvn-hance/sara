@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { defineConfig } from '@playwright/test'
+import { ABOUT, IDEAL, STOPS } from '../core/test/helpers/onboarding'
 import { dbUrl } from './e2e/dbUrl'
 
 const ROOT = resolve(import.meta.dirname, '../..')
@@ -36,6 +37,12 @@ export default defineConfig({
         SARA_TEST_CLAUDE_ENV: JSON.stringify({
           FAKE_CLAUDE_MODE: 'ok',
           FAKE_CLAUDE_OUTPUT: '{"ok":true}',
+          // Each onboarding role answers the same way every time; the panel tests read those answers.
+          FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({
+            'onboarding-about': ABOUT,
+            'onboarding-stops': STOPS,
+            'onboarding-ideal': IDEAL,
+          }),
         }),
       },
     },
