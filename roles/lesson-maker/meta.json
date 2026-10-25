@@ -1,0 +1,8 @@
+{
+  "name": "lesson-maker",
+  "version": 1,
+  "model": "haiku",
+  "fallbackModel": "sonnet",
+  "priority": "P3",
+  "timeoutMs": 60000
+}
