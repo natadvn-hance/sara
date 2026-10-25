@@ -75,6 +75,59 @@ describe('the code checks of a reply', () => {
     ])
   })
 
+  it('FR-CONV-4: an invented time, date or phone in a reply fails facts.numbers', () => {
+    for (const text of [
+      'Встретимся 27.10 в 15:00 в офисе.',
+      'Сделаем к 01.11.',
+      'Наш телефон 8 918 123-45-67.',
+      'Звоните по 123-45-67.',
+      'Работаем с 9:00 до 18:00.',
+      'Скидка 10-15-20%.',
+    ])
+      expect(ids({ text }), text).toContain('facts.numbers')
+    // «в 3 дня» is a term, not a clock time, so it is a plain number: not in the record, it fails.
+    expect(
+      ids({
+        text: 'Сделаем лендинг в 3 дня.',
+        knowledgeTexts: { 'k-price-landing': 'Лендинг от 50 000 рублей.' },
+      }),
+    ).toEqual(['facts.numbers'])
+    // The reason says what it was, not a bare digit.
+    expect(
+      checkReplyText(input({ text: 'Встретимся 27.10 в 15:00.' })).map((x) => x.detail),
+    ).toEqual(expect.arrayContaining(['дата 27.10 не из разума', 'время 15:00 не из разума']))
+    expect(checkReplyText(input({ text: 'Наш телефон 8 918 123-45-67.' }))[0]?.detail).toBe(
+      'телефон 8 918 123-45-67 не из разума',
+    )
+  })
+
+  it('FR-CONV-4: a phone, a time or a date the client named, or the cited knowledge holds, passes', () => {
+    // The same phone written another way, the same time and day.
+    expect(
+      ids({
+        text: 'Записала ваш номер 8 (918) 123-45-67, передам Борису.',
+        clientTurnText: 'Мой номер +79181234567',
+      }),
+    ).toEqual([])
+    expect(
+      ids({ text: 'Поняла, в 15:00 вам удобно.', clientTurnText: 'Могу завтра в 15:00' }),
+    ).toEqual([])
+    expect(ids({ text: 'До 27.10 успеем.', clientTurnText: 'Нужно к 27.10' })).toEqual([])
+    const knowledgeTexts = {
+      'k-price-landing': 'Работаем с 9:00 до 18:00, мини-лендинг за 3 дня.',
+    }
+    expect(ids({ text: 'Мы работаем с 9:00 до 18:00.', knowledgeTexts })).toEqual([])
+    expect(ids({ text: 'Мини-лендинг сделаем в 3 дня.', knowledgeTexts })).toEqual([])
+    // A phone in the records is not the client's: only what they wrote or the cited record holds.
+    expect(ids({ text: 'Наш телефон 8 800 555-35-35.' })).toEqual(['facts.numbers'])
+    expect(
+      ids({
+        text: 'Наш телефон 8 800 555-35-35.',
+        knowledgeTexts: { 'k-price-landing': 'Бесплатная линия: 8 (800) 555-35-35' },
+      }),
+    ).toEqual([])
+  })
+
   it('FR-CONV-3: a reply without any mind id fails facts.none', () => {
     expect(checkReplyText(input({ factIds: [] }))).toEqual([
       { id: 'facts.none', detail: 'в ответе нет ни одного номера записи разума' },
@@ -142,7 +195,9 @@ describe('the code checks of a reply', () => {
       'Созвонимся в 15:00?',
       'Давайте созвонимся в 11 утра.',
     ])
-      expect(ids({ text }), text).toEqual(['promise.call'])
+      expect(ids({ text, clientTurnText: 'Могу в 15:00 или в 11 утра' }), text).toEqual([
+        'promise.call',
+      ])
     for (const text of [
       'Удобно созвониться?',
       'Давайте созвонимся, когда вам удобно?',
