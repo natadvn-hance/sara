@@ -815,9 +815,10 @@ export function OnboardingPage({ accountId }: { accountId: string }) {
         <Card>
           <p role="status">
             {saved.version === null
-              ? `Правила не изменились, новая версия не нужна.${saved.profile ? ' Отклик, кейсы и скорость сохранены.' : ''}`
-              : `Правила сохранены: v${saved.version}.${saved.profile ? ' Отклик, кейсы и скорость тоже.' : ''}`}
+              ? 'Правила не изменились, новая версия не нужна.'
+              : `Правила сохранены: v${saved.version}`}
           </p>
+          {saved.profile ? <p>Отклик, кейсы и скорость тоже сохранены.</p> : null}
         </Card>
       ) : q.data.onboarding ? (
         <Wizard
