@@ -1,6 +1,6 @@
 import { type ChatMessage, formatCallback, newEventId, normalizeText } from '@sara/shared'
 import { and, eq, gte, like, ne, sql } from 'drizzle-orm'
-import type { Db } from '../db/client'
+import type { Db, DbOrTx } from '../db/client'
 import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import type { Gateway } from '../gateway/gateway'
@@ -63,13 +63,13 @@ const SKIP = (why: string): Ground => ({ go: false, end: false, why })
 type Row = Partial<typeof convTurn.$inferInsert>
 
 async function journal(
-  d: RemindDeps,
+  db: DbOrTx,
   type: 'conv.reminder_drafted' | 'conv.reminder_sent' | 'conv.dormant',
   conv: ConversationRow,
   rowId: string,
   payload: Record<string, unknown>,
 ) {
-  await appendEvent(d.db, {
+  await appendEvent(db, {
     type,
     v: 1,
     entity: { kind: 'conv_turn', id: rowId },
@@ -93,9 +93,9 @@ async function endedWith(d: RemindDeps, rowId: string, outcome: string): Promise
   return r?.outcome === outcome
 }
 
-async function finishRow(d: RemindDeps, rowId: string, patch: Row) {
+async function finishRow(db: DbOrTx, rowId: string, patch: Row) {
   const now = new Date().toISOString()
-  await d.db
+  await db
     .update(convTurn)
     .set({
       ...patch,
@@ -277,7 +277,7 @@ export async function groundStep(
       .where(eq(convTurn.id, rowId))
     return g
   }
-  await finishRow(d, rowId, {
+  await finishRow(d.db, rowId, {
     outcome: g.end ? 'stopped' : 'skipped',
     decision: 'nothing',
     decisionReason: g.why,
@@ -359,18 +359,20 @@ async function deliver(
 ): Promise<Sent> {
   const r = await deliverMessage({ db: d.db, profi: d.profi }, outboxId)
   if (r === 'confirmed') {
-    if (!(await endedWith(d, rowId, 'sent'))) {
-      await finishRow(d, rowId, {
-        outcome: 'sent',
-        decision: 'send',
-        decisionReason: 'ушло клиенту',
+    if (!(await endedWith(d, rowId, 'sent')))
+      // The row ends together with its event: whoever sees the one sees the other.
+      await d.db.transaction(async (tx) => {
+        await finishRow(tx, rowId, {
+          outcome: 'sent',
+          decision: 'send',
+          decisionReason: 'ушло клиенту',
+        })
+        await journal(tx, 'conv.reminder_sent', conv, rowId, { step: p.step })
       })
-      await journal(d, 'conv.reminder_sent', conv, rowId, { step: p.step })
-    }
     return { outcome: 'sent', end: false }
   }
   if (r === 'changed') {
-    await finishRow(d, rowId, {
+    await finishRow(d.db, rowId, {
       outcome: 'stopped',
       decision: 'nothing',
       decisionReason: 'в чате появилось новое: служба не дала написать',
@@ -378,7 +380,7 @@ async function deliver(
     return { outcome: 'stopped', end: true }
   }
   const uncertain = r === 'uncertain'
-  await finishRow(d, rowId, {
+  await finishRow(d.db, rowId, {
     outcome: uncertain ? 'uncertain' : 'failed',
     decision: 'send',
     decisionReason: uncertain ? 'не уверена, что дошло' : 'не смогла отправить',
@@ -408,7 +410,7 @@ export async function sendStep(
   if (queued) return deliver(d, rowId, conv, queued.id, p)
   const g = await checkGround(d, conversationId, anchor, { dormant: false })
   if (!g.go) {
-    await finishRow(d, rowId, {
+    await finishRow(d.db, rowId, {
       outcome: g.end ? 'stopped' : 'skipped',
       decision: 'nothing',
       decisionReason: g.why,
@@ -416,14 +418,15 @@ export async function sendStep(
     return { outcome: g.end ? 'stopped' : 'skipped', end: g.end }
   }
   if (g.shadow) {
-    if (!(await endedWith(d, rowId, 'drafted'))) {
-      await finishRow(d, rowId, {
-        outcome: 'drafted',
-        decision: 'draft',
-        decisionReason: 'режим тени: клиенту ничего не ушло',
+    if (!(await endedWith(d, rowId, 'drafted')))
+      await d.db.transaction(async (tx) => {
+        await finishRow(tx, rowId, {
+          outcome: 'drafted',
+          decision: 'draft',
+          decisionReason: 'режим тени: клиенту ничего не ушло',
+        })
+        await journal(tx, 'conv.reminder_drafted', conv, rowId, { step: p.step })
       })
-      await journal(d, 'conv.reminder_drafted', conv, rowId, { step: p.step })
-    }
     return { outcome: 'drafted', end: false }
   }
   const id = await d.db.transaction((tx) =>
@@ -437,7 +440,7 @@ export async function sendStep(
     }),
   )
   if (!id) {
-    await finishRow(d, rowId, {
+    await finishRow(d.db, rowId, {
       outcome: 'skipped',
       decision: 'nothing',
       decisionReason: 'сейчас не отправляю: пауза или режим тени',
@@ -459,15 +462,22 @@ export async function dormantStep(
 ): Promise<{ asked: boolean }> {
   const conv = await getConversation(d.db, conversationId)
   if (!conv) return { asked: false }
-  if (!(await endedWith(d, rowId, 'dormant'))) {
-    await finishRow(d, rowId, {
-      outcome: 'dormant',
-      decision: shadow ? 'trace' : 'task',
-      decisionReason: shadow ? 'в тени задача Борису только в трассе' : 'клиент молчит 7 дней',
+  // The step ends when its work is done, so a row that is finished has its task too.
+  const settle = async () => {
+    if (await endedWith(d, rowId, 'dormant')) return
+    await d.db.transaction(async (tx) => {
+      await finishRow(tx, rowId, {
+        outcome: 'dormant',
+        decision: shadow ? 'trace' : 'task',
+        decisionReason: shadow ? 'в тени задача Борису только в трассе' : 'клиент молчит 7 дней',
+      })
+      await journal(tx, 'conv.dormant', conv, rowId, { shadow })
     })
-    await journal(d, 'conv.dormant', conv, rowId, { shadow })
   }
-  if (shadow) return { asked: false }
+  if (shadow) {
+    await settle()
+    return { asked: false }
+  }
   if (conv.dealId)
     try {
       await transition(d.db, {
@@ -485,7 +495,10 @@ export async function dormantStep(
     .select({ id: task.id })
     .from(task)
     .where(and(eq(task.kind, 'conv_dormant'), eq(task.entityId, rowId)))
-  if (have) return { asked: true }
+  if (have) {
+    await settle()
+    return { asked: true }
+  }
   const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
   const [sent] = await d.db
     .select({ n: sql<number>`count(*)::int` })
@@ -532,5 +545,6 @@ export async function dormantStep(
       payload: { kind: 'conv_dormant', turn_id: rowId },
     })
   })
+  await settle()
   return { asked: true }
 }
