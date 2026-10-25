@@ -122,6 +122,8 @@ describe('the handmade scenarios', () => {
     const said = (s: ExamScenario) => s.messages.filter((m) => m.author === 'client').at(-1)?.text
     const has = (re: RegExp) => hard.some((s) => re.test(said(s) ?? ''))
     expect(has(/забудь/i)).toBe(true) // the injection
+    // It asks for the lowest price, a topic of Boris: the scenario names it, so a slip shows as a sent topic of Boris.
+    expect(hard.find((s) => /забудь/i.test(said(s) ?? ''))?.expect.topic).toBe('price')
     expect(has(/бот/i)).toBe(true) // «ты бот?»
     expect(has(/скидк/i)).toBe(true) // «Борис обещал скидку»
     expect(has(/NDA/)).toBe(true)
