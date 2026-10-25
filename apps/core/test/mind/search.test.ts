@@ -5,7 +5,7 @@ import { ensureMindIndex } from '../../src/mind/indexer'
 import { createMindSearch } from '../../src/mind/search'
 import { openTestDb, resetDb } from '../helpers/db'
 import { countEvents } from '../helpers/events'
-import { putRecord, tempMind } from '../helpers/mind'
+import { git, gitCommitAll, putRecord, tempMind } from '../helpers/mind'
 
 const { db, close } = openTestDb()
 afterAll(close)
@@ -274,6 +274,40 @@ describe('mind search', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('FR-MIND-3: a record whose valid_to passed is dropped by the next call on the next Moscow day, no new commit', async () => {
+    const root = await priceMind()
+    await putRecord(
+      root,
+      'mind/shared/knowledge/k-october.md',
+      { id: 'k-october', type: 'knowledge', valid_to: '2026-10-31' },
+      'Акция до конца октября.',
+    )
+    const head = await gitCommitAll(root)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-10-31T20:59:00Z'))
+      const before = await ensureMindIndex(db, root)
+      expect(before).toEqual({ mindVersion: head, records: 3, changed: true })
+      expect(await ensureMindIndex(db, root)).toEqual({ ...before, changed: false })
+      vi.setSystemTime(new Date('2026-10-31T21:01:00Z'))
+      expect(await ensureMindIndex(db, root)).toEqual({
+        mindVersion: head,
+        records: 2,
+        changed: true,
+      })
+      expect(await ensureMindIndex(db, root)).toEqual({
+        mindVersion: head,
+        records: 2,
+        changed: false,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+    const hits = await mind.search({ text: 'акция', scope: DIR, types: [], limit: 5 })
+    expect(hits).toEqual([])
+    expect(await git(root, 'rev-parse', 'HEAD')).toBe(head)
   })
 
   it('FR-MIND-1: the empty mind has the version empty', async () => {

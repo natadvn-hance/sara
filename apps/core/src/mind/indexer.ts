@@ -48,6 +48,10 @@ function toRow(r: MindRecord, mindVersion: string) {
 /**
  * Rebuilds core.mind_index from the mind folder when its version changed (FR-MIND-2), in one transaction. An empty
  * index counts as changed; so does a record that came into or went out of force since the last build.
+ *
+ * Call it at startup and then periodically (the app does it every hour): a record leaves the index at the end of its
+ * `valid_to` day and enters it on its `valid_from` day by Moscow, and no new commit announces that. The no-change path
+ * stays cheap for this: it reads the folder, compares the ids and the version and writes nothing.
  */
 export async function ensureMindIndex(
   db: Db,
