@@ -15,6 +15,8 @@ export const TASK_ACTIONS = [
   'razbor',
   'good',
   'close',
+  /** M5: «Все да» under a batch of lessons. */
+  'all',
 ] as const
 export type TaskAction = (typeof TASK_ACTIONS)[number]
 

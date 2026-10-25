@@ -15,4 +15,10 @@ export type Notifier = {
     rows: { text: string; callbackData: string }[][],
     o?: { loud?: boolean },
   ): Promise<{ messageId: number }>
+  /** Replaces a sent message's text and buttons, without a sound (M5: a lesson batch after each press). */
+  editText(
+    messageId: number,
+    text: string,
+    rows?: { text: string; callbackData: string }[][],
+  ): Promise<void>
 }

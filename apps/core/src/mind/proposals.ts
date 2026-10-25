@@ -3,7 +3,15 @@ import type { Db, DbOrTx } from '../db/client'
 import { mindProposal } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 
-export type ProposalKind = 'example' | 'knowledge' | 'scenario' | 'other'
+export type ProposalKind =
+  | 'example'
+  | 'knowledge'
+  | 'scenario'
+  | 'other'
+  // M5: drafts of the night teacher and the starting mind.
+  | 'understanding'
+  | 'speech'
+  | 'judgment'
 
 /**
  * Keeps a file Sara proposes for the mind (FR-MIND-3). The core never writes into the mind folder: a developer
@@ -11,7 +19,19 @@ export type ProposalKind = 'example' | 'knowledge' | 'scenario' | 'other'
  */
 export async function proposeMind(
   db: DbOrTx,
-  p: { path: string; content: string; kind: ProposalKind; source: string },
+  p: {
+    path: string
+    content: string
+    kind: ProposalKind
+    source: string
+    // M5 (ADR-025): the lesson Boris says «да» to, and what the mind writer builds the file from.
+    lessonId?: string
+    action?: 'create' | 'update' | 'outdate'
+    recordId?: string
+    section?: string | null
+    baseVersion?: number | null
+    change?: unknown
+  },
 ): Promise<boolean> {
   const id = newEventId()
   return db.transaction(async (tx) => {
@@ -37,7 +57,10 @@ export async function proposeMind(
   })
 }
 
-/** Writes the new proposals as files under `toDir` and marks them exported. Part B writes the body. */
+/**
+ * Writes the new proposals as files under `toDir` and marks them exported. Part B writes the body; it skips rows with
+ * a `lesson_id` (M5 writes those itself after Boris's «да», ADR-025) and declined ones.
+ */
 export async function exportProposals(_db: Db, _toDir: string): Promise<number> {
   throw new Error('mind proposals export is not built')
 }

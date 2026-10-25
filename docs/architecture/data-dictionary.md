@@ -113,14 +113,17 @@
 | Таблица | Поля | Класс | Смысл |
 |---|---|---|---|
 | `mind_index` | `record_id`, `path`, `type`, `scope`, `topic`, `tones`, `stages`, `title`, `body`, `example_client`, `example_boris`, `version`, `mind_version`, `tsv` (полнотекстовый по-русски), `embedding` (vector 384) | Н (обезличено) | индекс подтверждённых записей разума |
-| `mind_gap` (M4) | `id`, `turn_id`, `text`, `topic`, `question_id` | Н | чего не хватило ходу (FR-MIND-4) |
-| `mind_proposal` (M4) | `id`, `path` (уникален), `content`, `kind`, `source`, `state` (`new`, `exported`, `accepted`, `declined`), `exported_at` | Н (обезличено) | предложения в разум до «да» Бориса (FR-MIND-3) |
-| `lesson` | `id`, `source` (`edit`, `training`, `interview`), `source_ref`, `before`, `after`, `insight`, `decision` (`yes`, `no`, `skip`), `decided_at`, `mind_commit` | Н (обезличено) | уроки |
-| `persona`, `scenario` | `id`, `archetype`, `description`, `source_refs` | Н (обезличено) | материалы тренажёра |
-| `training_session` | `id`, `mode`, `scenario_id`, `started_at`, `finished_at`, `similarity`, `lessons_count` | Н | тренировки |
-| `autonomy` | `topic`, `direction_id`, `level` (`self`, `draft`, `call`), `approvals_in_row`, `last_change_at` | Н | самостоятельность |
-| `exam_run`, `exam_result` | `id`, `mind_version`, `roles_version`, `scenario_set`, `started_at`, `finished_at`, `score`, `s1`, `s2`, `s3`, `passed`, `compared_to`; по сценарию: ход, текст, проверки, оценка судьи, тяжесть, итог | Н | экзамены |
-| `sim_dialog` | `id`, `persona_id`, `created_at`, `found_gap` | Н | сгенерированные диалоги, никогда не знание |
+| `mind_gap` (M4) | `id`, `turn_id` (ход, `teacher:…` или `sim:…`), `text`, `topic`, `question_id`, `lesson_id` (M5: урок интервью, закрывший пробел) | Н | чего не хватило (FR-MIND-4) |
+| `mind_proposal` (M4) | `id`, `path` (уникален), `content`, `kind`, `source`, `state` (`new`, `exported`, `accepted`, `declined`), `exported_at`; M5: `lesson_id`, `action` (`create`, `update`, `outdate`), `record_id`, `section`, `base_version`, `change` (jsonb, из чего писатель собирает файл), `decided_at`, `commit_id`, `reject_reason` | Н (обезличено) | предложения в разум до «да» Бориса (FR-MIND-3) |
+| `lesson` (M5) | `id`, `n` (порядковый номер, из него номера записей), `source` (`edit`, `say`, `compare`, `training`, `interview`, `teacher`, `review`, `history`, `import`), `source_ref` (уникален с `source`), `scope`, `topic`, `tone`, `question_type`, `client_text`, `before`, `after`, `insight`, `kind`, `state` (`new`, `ready`, `asked`, `yes`, `no`, `skip`, `dropped`), `in_place`, `sim`, `attempts`, `batch_id`, `task_id`, `reason`, `model_call_id`, `commit_id`, `created_at`, `decided_at` | П (обезличено, 2 года) | уроки (FR-TRAIN-6) |
+| `lesson_batch` (M5) | `id`, `lesson_ids`, `task_id`, `telegram_message_id`, `sent_at`, `closed_at`, `commit_id` | Н | пачка уроков в Telegram |
+| `mind_commit` (M5) | `id` (строка `Sara-Commit`), `sha`, `kind` (`accept`, `revert`, `sync`), `proposal_ids`, `lesson_ids`, `mind_version_before`, `reverts_id`, `created_at`, `pushed_at` | Н | коммиты писателя разума (ADR-025) |
+| `persona` (M5) | `id` (`p-…`), `archetype`, `niche`, `task`, `mood`, `style`, `questions`, `topics`, `order`, `difficulty`, `hard`, `source_refs` (не пуст, проверка в базе), `handmade`, `active`, `built_at`, `run_id` | Н (обезличено) | персоны тренажёра (FR-TRAIN-2) |
+| `training_session` (M5) | `id`, `mode`, `persona_id`, `via`, `started_at`, `finished_at`, `ended_by`, `items_count`, `avg_similarity`, `lessons_yes`, `mind_version` | Н | тренировки; слепой тест недели это режим `blind` |
+| `training_item` (M5) | `id`, `session_id`, `mode`, `state`, `persona_id`, `chat_id`, `source_ref`, `dialog`, `client_text`, `sara_text`, `sara_plan`, `boris_text`, `real_boris_text`, `similarity`, `verdict`, `topic`, `tone`, `question_type`, `blind_week`, `blind_flip`, `judge`, `lesson_id`, `model_call_ids`, `mind_version`, `prepared_at`, `answered_at` | П для реальных чатов («Угадай Бориса», слепой тест), иначе Н | карточки тренировки |
+| `autonomy_counter` (M5) | `topic`, `scope` (ключ), `streak`, `last_edit_at`, `last_substantial_at`, `last_reason`, `last_turn_id`, `trainer_good`, `trainer_total`, `proposed_at`, `proposal_task_id`, `snoozed_until`, `updated_at` | Н | серии одобрений; сам уровень темы в настройке `conv.autonomy` (M4) |
+| `exam_run`, `exam_result` | `id`, `mind_version`, `roles_version`, `scenario_set`, `started_at`, `finished_at`, `score`, `s1`, `s2`, `s3`, `passed`, `compared_to`, M5: `kind` (`deploy`, `weekly`, `golden`), `trigger`; по сценарию: ход, текст, проверки, оценка судьи, тяжесть, итог | Н | экзамены |
+| `sim_dialog` (M5) | `id`, `run_id`, `persona_id`, `client_messages` (только реплики клиента с темой), `gaps`, `created_at` (30 дней) | Н | сгенерированные диалоги, никогда не знание (FR-TRAIN-9) |
 
 ## 4. Сроки хранения и удаление
 
@@ -150,7 +153,10 @@ erDiagram
   task }o--|| deal : "о ком"
   outbox ||--o| spend : "оплатило"
   lesson }o--o| mind_index : "изменило"
-  training_session }o--|| scenario : "по сценарию"
-  scenario }o--|| persona : "персона"
+  training_session ||--o{ training_item : "карточки"
+  training_session }o--o| persona : "персона"
+  lesson }o--o| lesson_batch : "в пачке"
+  lesson ||--o{ mind_proposal : "предлагает"
+  mind_commit ||--o{ mind_proposal : "записал"
   exam_run ||--o{ exam_result : "итоги"
 ```

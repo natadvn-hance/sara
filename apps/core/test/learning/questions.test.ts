@@ -14,6 +14,7 @@ afterAll(close)
 let sent: string[] = []
 let nextId = 500
 const notifier: Notifier = {
+  editText: async () => {},
   sendLeadCard: async () => ({ messageId: nextId++ }),
   sendText: async (t) => {
     sent.push(t)

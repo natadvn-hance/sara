@@ -1,7 +1,7 @@
 import { newEventId } from '@sara/shared'
 import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { lead, leadLabel, question, task } from '../db/schema'
+import { lead, leadLabel, lesson, lessonBatch, question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
@@ -10,7 +10,14 @@ import type { Notifier } from '../notify/notifier'
  * The «почему?» kinds, edit_draft: Sara's request for a new bid text after «Изменить», and edit_price: her request
  * for the «Стоимость услуги» after «Откликнуться» without one (entity: the task for both).
  */
-export type QuestionKind = 'why_skip' | 'why_want' | 'why_decline' | 'edit_draft' | 'edit_price'
+export type QuestionKind =
+  | 'why_skip'
+  | 'why_want'
+  | 'why_decline'
+  | 'edit_draft'
+  | 'edit_price'
+  // M5: «почему нет?» after «нет» on a lesson (entity: the lesson)
+  | 'why_lesson'
 export type QuestionRow = typeof question.$inferSelect
 /** Boris's words that answer an edit_draft or edit_price request. */
 export type DraftAnswer = { question: QuestionRow; text: string; voice: boolean; at: Date }
@@ -24,7 +31,7 @@ export const QUESTIONS_PER_DAY = 3
 /** A message without a reply may answer an open question this recent. */
 const ANSWER_WINDOW_MS = 30 * 60_000
 
-type WhyKind = Exclude<QuestionKind, 'edit_draft' | 'edit_price'>
+type WhyKind = 'why_skip' | 'why_want' | 'why_decline'
 
 const textOf = (kind: WhyKind, title: string) =>
   kind === 'why_skip'
@@ -79,6 +86,22 @@ export async function askForDraft(
   await d.db.insert(question).values({ id, kind, entityId: q.taskId, askedAt: now.toISOString() })
   const text = what === 'price' ? TEXTS.askPrice(q.title) : TEXTS.askDraft(q.title)
   await send(d, id, text, { kind, entityId: q.taskId }, now)
+}
+
+/**
+ * A question that follows Boris's own press (M5: «почему нет?» after «нет» on a lesson): never counted toward the
+ * day's «почему?», answered by a reply or by the next message within 30 minutes.
+ */
+export async function askOwnQuestion(
+  d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
+  q: { kind: 'why_lesson'; entityId: string; text: string },
+  now: Date,
+): Promise<void> {
+  const id = newEventId()
+  await d.db
+    .insert(question)
+    .values({ id, kind: q.kind, entityId: q.entityId, askedAt: now.toISOString() })
+  await send(d, id, q.text, q, now)
 }
 
 /** Sends a question whose row is already taken; a send that fails removes the row, so it answers nothing. */
@@ -168,13 +191,31 @@ export async function openQuestion(
     .orderBy(desc(question.askedAt))
   const edits = recent.filter((q) => (DRAFT_KINDS as string[]).includes(q.kind))
   const whys = recent.filter((q) => !(DRAFT_KINDS as string[]).includes(q.kind))
-  if (edits.length === 0) return whys[0] ?? null
+  if (edits.length === 0) {
+    // «Почему нет?» on two lessons, or on a lesson and a lead: a plain answer is never put on one of them by a guess.
+    const aboutLesson = whys.some((q) => q.kind === 'why_lesson')
+    if (aboutLesson && new Set(whys.map((q) => `${q.kind}:${q.entityId}`)).size > 1)
+      return { ambiguous: [...whys].reverse() }
+    return whys[0] ?? null
+  }
   if (whys.length === 0 && new Set(edits.map((q) => q.entityId)).size === 1) return edits[0] ?? null
   return { ambiguous: recent.reverse() }
 }
 
-/** What a question is about, for a note to Boris: the lead's title (null for the proposal's «почему?»). */
+/**
+ * What a question is about, for a note to Boris: the lead's title, «урок N» by the lesson's number in its batch (null
+ * for the proposal's «почему?»).
+ */
 export async function titleOf(db: Db, q: QuestionRow): Promise<string | null> {
+  if (q.kind === 'why_lesson') {
+    const [b] = await db
+      .select({ ids: lessonBatch.lessonIds })
+      .from(lesson)
+      .innerJoin(lessonBatch, eq(lessonBatch.id, lesson.batchId))
+      .where(eq(lesson.id, q.entityId))
+    const i = ((b?.ids as string[] | undefined) ?? []).indexOf(q.entityId) + 1
+    return i > 0 ? `урок ${i}` : null
+  }
   if (q.kind === 'why_decline') return null
   const leadId = (DRAFT_KINDS as string[]).includes(q.kind)
     ? (await db.select({ id: task.entityId }).from(task).where(eq(task.id, q.entityId)))[0]?.id
@@ -216,6 +257,8 @@ export async function markAnswered(
       .set({ reason: a.text, voice: a.voice })
       .where(eq(leadLabel.leadId, q.entityId))
   }
+  if (q.kind === 'why_lesson')
+    await tx.update(lesson).set({ reason: a.text }).where(eq(lesson.id, q.entityId))
   await appendEvent(tx, {
     type: 'question.answered',
     v: 1,

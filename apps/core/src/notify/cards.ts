@@ -116,6 +116,7 @@ export const TEXTS = {
       title ? `почему пропустил «${title}»` : 'почему пропустил',
     why_want: (title: string | null) => (title ? `почему взял бы «${title}»` : 'почему взял бы'),
     why_decline: (_title: string | null) => 'почему не надо поправку правил',
+    why_lesson: (title: string | null) => (title ? `почему нет: ${title}` : 'почему нет по уроку'),
   },
   notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
   voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',

@@ -264,6 +264,15 @@ export function createTelegramRuntime(d: {
         })
         return { messageId: m.message_id }
       },
+      async editText(messageId, text, rows) {
+        await bot.api.editMessageText(await chat(), messageId, text, {
+          reply_markup: {
+            inline_keyboard: (rows ?? []).map((r) =>
+              r.map((b) => ({ text: b.text, callback_data: b.callbackData })),
+            ),
+          },
+        })
+      },
     },
   }
 }
