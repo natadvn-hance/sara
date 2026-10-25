@@ -1,7 +1,8 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import {
   CheckerOutput,
+  CONV_STAGES,
   ExaminerOutput,
   InterlocutorOutput,
   MOVES,
@@ -10,13 +11,14 @@ import {
 } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
 import { loadRole } from '../../src/gateway/roles'
+import { checkerDossierOf, interlocutorInputOf, type Scene } from '../helpers/evalScenes'
 
 const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 
 /** The M4 roles: their meta (design 5.14, plan D2 and D3) and the schema each answers with. */
 const M4_ROLES = {
   interlocutor: {
-    meta: { version: 2, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
+    meta: { version: 3, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
     schema: InterlocutorOutput,
   },
   checker: {
@@ -28,7 +30,7 @@ const M4_ROLES = {
     schema: ReminderOutput,
   },
   examiner: {
-    meta: { version: 1, model: 'sonnet', fallbackModel: 'opus', priority: 'P3', timeoutMs: 120000 },
+    meta: { version: 2, model: 'sonnet', fallbackModel: 'opus', priority: 'P3', timeoutMs: 120000 },
     schema: ExaminerOutput,
   },
 } as const
@@ -57,6 +59,26 @@ describe('the M4 roles', () => {
     expect(none).toMatch(/call_boris и urgent/)
   })
 
+  it('FR-CONV-4: the Interlocutor role states what the code checks and names the input as the engine builds it', async () => {
+    const role = await readFile(join(ROLES, 'interlocutor/role.md'), 'utf8')
+    // The length rule of robotic.length, and the numbers of the examples that the facts check would reject.
+    expect(role).toMatch(/длиннее 40 знаков, ответ не длиннее четырёх её длин/)
+    expect(role).toMatch(/числа, цены и сроки из образцов в свой текст не переноси/i)
+    // The authors, the flags and the stages as prompt.ts prints them.
+    for (const word of ['Сара (старая)', 'Профи.ру', 'наша сторона', 'Новый день', 'Ночь по Москве'])
+      expect(role, word).toContain(word)
+    for (const stage of CONV_STAGES) expect(role, stage).toContain(stage)
+    expect(role).not.toContain('Сара v1')
+  })
+
+  it('FR-CONV-4: the examiner does not judge facts it has no records for, and its example holds no invented number', async () => {
+    const role = await readFile(join(ROLES, 'examiner/role.md'), 'utf8')
+    expect(role).not.toMatch(/которых нет в переписке и записях/)
+    expect(role).toMatch(/Записей разума у тебя нет/)
+    for (const line of role.split('\n').filter((l) => l.startsWith('Пример.')))
+      expect(line.replace(/На \d:/g, ''), line).not.toMatch(/\d/)
+  })
+
   it('FR-CONV-3: every M4 role explains each output field in the schema order', async () => {
     for (const name of NAMES) {
       const lines = (await readFile(join(ROLES, name, 'role.md'), 'utf8')).split('\n')
@@ -71,6 +93,24 @@ describe('the M4 roles', () => {
         at.every((n, k) => k === 0 || n > (at[k - 1] ?? -1)),
         `${name}: ${at}`,
       ).toBe(true)
+    }
+  })
+
+  it('FR-CONV-3: the stored sample inputs are what the real formatters build from their scenes', async () => {
+    // UPDATE_EVAL_SAMPLES=1 rewrites the stored text after a change of prompt.ts, then the test checks it again.
+    const update = process.env.UPDATE_EVAL_SAMPLES === '1'
+    for (const [role, field, build] of [
+      ['interlocutor', 'input', interlocutorInputOf],
+      ['checker', 'dossierText', checkerDossierOf],
+    ] as const) {
+      const file = join(ROLES, role, 'evals/samples.json')
+      const list = await samples(role)
+      if (update) {
+        for (const s of list) s[field] = build(s.scene as Scene)
+        await writeFile(file, `${JSON.stringify(list, null, 2)}\n`)
+      }
+      for (const s of list)
+        expect(s[field], `${role}: ${s.title}`).toBe(build(s.scene as Scene))
     }
   })
 
