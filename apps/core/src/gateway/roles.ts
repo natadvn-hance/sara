@@ -15,6 +15,12 @@ export type RoleName =
   | 'onboarding-about'
   | 'onboarding-stops'
   | 'onboarding-ideal'
+  | 'trainer-client'
+  | 'trainer-coach'
+  | 'lesson-maker'
+  | 'teacher'
+  | 'persona-builder'
+  | 'dialog-generator'
 
 export async function loadRole(
   rolesDir: string,

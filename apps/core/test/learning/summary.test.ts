@@ -12,6 +12,7 @@ afterAll(close)
 type Sent = { text: string; rows: { text: string; callbackData: string }[][] }
 let sent: Sent[] = []
 const notifier: Notifier = {
+  editText: async () => {},
   sendLeadCard: async () => ({ messageId: 1 }),
   sendText: async (text) => {
     sent.push({ text, rows: [] })

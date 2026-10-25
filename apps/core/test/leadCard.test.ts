@@ -18,6 +18,7 @@ let texts: { text: string; html: boolean }[] = []
 /** Sends that fail from now on (Telegram not answering). */
 let failSends = 0
 const notifier: Notifier = {
+  editText: async () => {},
   sendLeadCard: async (c) => {
     cards.push(c)
     return { messageId: 10 + cards.length }

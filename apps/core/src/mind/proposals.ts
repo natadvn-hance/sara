@@ -1,12 +1,20 @@
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { newEventId } from '@sara/shared'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { mindProposal } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 
-export type ProposalKind = 'example' | 'knowledge' | 'scenario' | 'other'
+export type ProposalKind =
+  | 'example'
+  | 'knowledge'
+  | 'scenario'
+  | 'other'
+  // M5: drafts of the night teacher and the starting mind.
+  | 'understanding'
+  | 'speech'
+  | 'judgment'
 
 /**
  * Keeps a file Sara proposes for the mind (FR-MIND-3). The core never writes into the mind folder: a developer
@@ -14,7 +22,19 @@ export type ProposalKind = 'example' | 'knowledge' | 'scenario' | 'other'
  */
 export async function proposeMind(
   db: DbOrTx,
-  p: { path: string; content: string; kind: ProposalKind; source: string },
+  p: {
+    path: string
+    content: string
+    kind: ProposalKind
+    source: string
+    // M5 (ADR-025): the lesson Boris says «да» to, and what the mind writer builds the file from.
+    lessonId?: string
+    action?: 'create' | 'update' | 'outdate'
+    recordId?: string
+    section?: string | null
+    baseVersion?: number | null
+    change?: unknown
+  },
 ): Promise<boolean> {
   const id = newEventId()
   return db.transaction(async (tx) => {
@@ -74,7 +94,8 @@ async function assertClone(root: string): Promise<void> {
  * export skips them. `toDir` must be an existing folder with `.git`. Only `mind/proposals/` and `exam/` are written: a
  * path into `mind/shared/`, `mind/directions/`, `.git/` or out of the clone stops the export before anything is written
  * (the confirmed mind changes only by `mind accept`). A file that is already there is never overwritten: its path goes
- * to `report.existing`, the proposal stays `new`, the others are still written.
+ * to `report.existing`, the proposal stays `new`, the others are still written. A proposal of an M5 lesson is never
+ * exported: Sara's writer writes it after Boris's «да» (ADR-025, request R9).
  */
 export async function exportProposals(
   db: Db,
@@ -86,7 +107,7 @@ export async function exportProposals(
   const rows = await db
     .select()
     .from(mindProposal)
-    .where(eq(mindProposal.state, 'new'))
+    .where(and(eq(mindProposal.state, 'new'), isNull(mindProposal.lessonId)))
     .orderBy(asc(mindProposal.createdAt), asc(mindProposal.id))
   const files = rows.map((r) => exportPath(root, r.path))
   let written = 0
