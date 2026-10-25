@@ -53,6 +53,41 @@ describe('the code checks of a reply', () => {
       expect(ids({ text })).toEqual([])
   })
 
+  it('FR-CONV-4: a scale word does not turn a small number of the records into a price', () => {
+    // The record says «Предоплата 30%» and «2-3 недели»: 30 thousand and 2 thousand are other numbers.
+    expect(ids({ text: 'Реклама от 30 тысяч.' })).toEqual(['facts.numbers'])
+    expect(ids({ text: 'Сделаем за 2 тысячи.' })).toEqual(['facts.numbers'])
+    // The client's «3 точки» is not 3 thousand roubles.
+    expect(ids({ text: 'Реклама от 3 тыс. рублей.', clientTurnText: 'Нужно 3 точки' })).toEqual([
+      'facts.numbers',
+    ])
+    // A percent is not a plain number: 30% is not 30, and 30 is not 30%.
+    expect(ids({ text: 'Предоплата 30 рублей.' })).toEqual(['facts.numbers'])
+    expect(
+      ids({
+        text: 'Скидка 30%.',
+        knowledgeTexts: { 'k-price-landing': 'Срок 30 дней.' },
+      }),
+    ).toEqual(['facts.numbers'])
+    expect(ids({ text: 'Предоплата 30 процентов.' })).toEqual([])
+  })
+
+  it('FR-CONV-4: a scale word at the end of a range belongs to both numbers', () => {
+    const knowledgeTexts = { 'k-price-landing': 'Лендинг стоит от 50 000 до 70 000 рублей.' }
+    for (const text of [
+      'Лендинг стоит 50-70 тысяч.',
+      'Лендинг от 50 до 70 тысяч рублей.',
+      'Лендинг 50-70 тыс.',
+      'Лендинг 50 - 70 тыс. рублей.',
+      'Лендинг от 50 или 70 тысяч рублей.',
+    ])
+      expect(ids({ text, knowledgeTexts }), text).toEqual([])
+    // Each number keeps its own scale when it has one; a range of plain numbers stays plain.
+    expect(ids({ text: 'Лендинг от 50 до 90 тысяч.', knowledgeTexts })).toEqual(['facts.numbers'])
+    expect(ids({ text: 'Срок 2-3 недели.' })).toEqual([])
+    expect(ids({ text: 'Срок 2-3 тысячи.' })).toEqual(['facts.numbers', 'facts.numbers'])
+  })
+
   it('FR-CONV-4: a number the client named in this turn is allowed', () => {
     const text = 'Понимаю, бюджет 120 000.\n\nУдобно созвониться и обсудить детали?'
     expect(ids({ text, clientTurnText: 'Бюджет 120 000, успеете?' })).toEqual([])
