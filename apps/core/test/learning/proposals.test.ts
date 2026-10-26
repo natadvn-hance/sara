@@ -27,6 +27,7 @@ let sent: Sent[] = []
 let nextId = 700
 const notifier: Notifier = {
   sendLeadCard: async () => ({ messageId: nextId++ }),
+  closeLeadCard: async () => {},
   sendText: async (text) => {
     sent.push({ text, rows: [] })
     return { messageId: nextId++ }

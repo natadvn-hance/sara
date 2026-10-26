@@ -1,6 +1,6 @@
 import { newEventId } from '@sara/shared'
-import { eq } from 'drizzle-orm'
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { and, eq } from 'drizzle-orm'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { event, lead, leadScore, task } from '../src/db/schema'
 import { seedDirection } from '../src/direction/store'
 import type { Gateway } from '../src/gateway/gateway'
@@ -10,6 +10,15 @@ import type { Notifier } from '../src/notify/notifier'
 import { analystAnswer } from './helpers/analyst'
 import { openTestDb, resetDb } from './helpers/db'
 
+// The wait for Boris's decision is a durable process the unit tests do not launch: only its calls are watched.
+const delivered: { taskId: string; action: string }[] = []
+vi.mock('../src/workflows/decisionWait', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/workflows/decisionWait')>()),
+  deliverDecision: async (taskId: string, action: string) => {
+    delivered.push({ taskId, action })
+  },
+}))
+
 const { db, close } = openTestDb()
 afterAll(close)
 
@@ -17,10 +26,17 @@ let cards: LeadCard[] = []
 let texts: { text: string; html: boolean }[] = []
 /** Sends that fail from now on (Telegram not answering). */
 let failSends = 0
+/** Cards edited as closed (message number and card), and the message numbers Telegram refuses to edit. */
+let closedCards: { messageId: number; card: LeadCard }[] = []
+let brokenEdits = new Set<number>()
 const notifier: Notifier = {
   sendLeadCard: async (c) => {
     cards.push(c)
     return { messageId: 10 + cards.length }
+  },
+  closeLeadCard: async (messageId, card) => {
+    if (brokenEdits.has(messageId)) throw new Error('message to edit not found')
+    closedCards.push({ messageId, card })
   },
   sendText: async (text, o) => {
     if (failSends > 0) {
@@ -55,6 +71,9 @@ beforeEach(async () => {
   cards = []
   texts = []
   failSends = 0
+  closedCards = []
+  brokenEdits = new Set()
+  delivered.length = 0
   pipeline = createLeadPipeline({
     db,
     gateway: {} as Gateway,
@@ -117,7 +136,7 @@ async function openLead(
 const events = async () => (await db.select({ type: event.type }).from(event)).map((e) => e.type)
 
 describe('the card built from a lead', () => {
-  it('FR-LEAD-7: a reminder card has the whole order, the client and the разбор from the lead row', async () => {
+  it('FR-LEAD-7: a first card that never went out is delivered plain, with the whole order, the client and the разбор from the lead row', async () => {
     const taskId = await openLead('91001')
     await pipeline.onReminder(taskId)
     expect(cards).toHaveLength(1)
@@ -130,7 +149,6 @@ describe('the card built from a lead', () => {
       clientName: 'Ирина',
       text: 'Нужен сайт для клиники.\nУслуги, врачи, запись.',
       clientInfo: CLIENT,
-      reminder: true,
       analysis: {
         hiddenNeed: ANSWER.hidden_need,
         risk: ANSWER.risk,
@@ -138,8 +156,10 @@ describe('the card built from a lead', () => {
         reading: ANSWER.reading,
       },
     })
+    expect(cards[0]?.reminder).toBeFalsy()
     const text = leadCardText(cards[0] as LeadCard)
-    expect(text).toContain('<b>⏰ Сайт для клиники</b>')
+    expect(text).toContain('<b>🔔 Сайт для клиники</b>')
+    expect(text).not.toContain('Заявка ждёт решения')
     expect(text).toContain('Отзывы: +3 / −1 · «Перестала отвечать»')
     expect(text).toContain('https://profi.ru/backoffice/n.php?o=91001')
   })
@@ -158,7 +178,7 @@ describe('the card built from a lead', () => {
       draftAnalysis: null,
       clientInfo: null,
     })
-    await expect(pipeline.onReminder(taskId)).resolves.toBeUndefined()
+    await expect(pipeline.resendCard(taskId)).resolves.toBeUndefined()
     const c = cards[0] as LeadCard
     expect(c.clientInfo).toBeNull()
     expect(c.analysis).toBeNull()
@@ -172,7 +192,7 @@ describe('the card built from a lead', () => {
       draftAnalysis: { hidden_need: 5 },
       clientInfo: { reviews: 'много' },
     })
-    await expect(pipeline.onReminder(taskId)).resolves.toBeUndefined()
+    await expect(pipeline.resendCard(taskId)).resolves.toBeUndefined()
     expect(cards[0]?.analysis).toBeNull()
     expect(cards[0]?.clientInfo).toBeNull()
   })
@@ -185,8 +205,234 @@ describe('the card built from a lead', () => {
         condition: ANSWER.condition,
       },
     })
-    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
     expect(cards[0]?.analysis).toMatchObject({ hiddenNeed: ANSWER.hidden_need, reading: null })
+  })
+})
+
+describe('the messages of a card are all written down (FR-LEAD-7)', () => {
+  const sentOf = async (taskId: string) =>
+    (
+      await db
+        .select({ payload: event.payload })
+        .from(event)
+        .where(and(eq(event.type, 'card.sent'), eq(event.entityId, taskId)))
+        .orderBy(event.recordedAt, event.id)
+    ).map((e) => e.payload as { via: string; message_id: number })
+
+  it('FR-LEAD-7: a first card that never went out is written down as sent again, with its message number, and kept on the task', async () => {
+    const taskId = await openLead('91101')
+    await pipeline.onReminder(taskId)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.telegramMessageId).toBe(11)
+    expect(await sentOf(taskId)).toMatchObject([{ via: 'resend', message_id: 11 }])
+    // It is no reminder: Boris gets his card once, and the journal has no reminder.
+    expect(await events()).not.toContain('task.reminded')
+  })
+
+  it('FR-LEAD-7: a card sent again is written down with its message number', async () => {
+    const taskId = await openLead('91102')
+    await pipeline.resendCard(taskId)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.telegramMessageId).toBe(11)
+    expect(await sentOf(taskId)).toMatchObject([{ via: 'resend', message_id: 11 }])
+  })
+
+  it('FR-LEAD-7: the card of a task that is not open is not sent and not written down', async () => {
+    const taskId = await openLead('91103', {}, 'resolved')
+    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
+    expect(cards).toHaveLength(0)
+    expect(await sentOf(taskId)).toEqual([])
+  })
+})
+
+describe('a lead card comes once (FR-LEAD-7)', () => {
+  const journal = async () =>
+    (
+      await db
+        .select({ type: event.type, entityId: event.entityId, payload: event.payload })
+        .from(event)
+        .orderBy(event.recordedAt, event.id)
+    ).map((e) => `${e.type}:${e.entityId}:${JSON.stringify(e.payload)}`)
+
+  /** What the cards left in the journal (the direction seed has its own events). */
+  const cardEvents = async () =>
+    (await events()).filter((t) => t === 'card.sent' || t === 'task.reminded')
+
+  it('FR-LEAD-7: a delivered card plus the wait for the decision running out sends nothing and journals no task.reminded and no new card.sent', async () => {
+    const taskId = await openLead('91201')
+    // The card went out (its message number is on the task and in the journal).
+    await pipeline.resendCard(taskId)
+    const sent = cards.length
+    const before = await journal()
+    // The wait ran out: the reminder step calls this, once now, and again as a replayed run would.
+    await pipeline.onReminder(taskId)
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(sent)
+    expect(texts).toEqual([])
+    expect(await journal()).toEqual(before)
+    expect(await events()).not.toContain('task.reminded')
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t).toMatchObject({ state: 'open', telegramMessageId: 11 })
+  })
+
+  it('FR-LEAD-7: a card that kept only its message number on the task (sent before the journal knew it) is not sent again', async () => {
+    const taskId = await openLead('91202')
+    await db.update(task).set({ telegramMessageId: 7 }).where(eq(task.id, taskId))
+    await pipeline.onReminder(taskId)
+    expect(cards).toEqual([])
+    expect(await events()).not.toContain('card.sent')
+    expect(await events()).not.toContain('task.reminded')
+  })
+
+  it('FR-LEAD-7: a card that kept only its card.sent in the journal is not sent again', async () => {
+    const taskId = await openLead('91203')
+    await pipeline.resendCard(taskId)
+    await db.update(task).set({ telegramMessageId: null }).where(eq(task.id, taskId))
+    const sent = cards.length
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(sent)
+    expect((await events()).filter((t) => t === 'card.sent')).toHaveLength(1)
+    expect(await events()).not.toContain('task.reminded')
+  })
+
+  it('FR-LEAD-7: a first card that never went out arrives once, plain, written down as sent again; the next wait sends nothing more', async () => {
+    const taskId = await openLead('91204')
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.reminder).toBeFalsy()
+    expect(leadCardText(cards[0] as LeadCard)).toContain('<b>🔔 Сайт для клиники</b>')
+    expect(await cardEvents()).toEqual(['card.sent'])
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.telegramMessageId).toBe(11)
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(1)
+    expect(await cardEvents()).toEqual(['card.sent'])
+  })
+
+  it('FR-LEAD-7: a task that is no longer open, or does not exist, gets nothing from the wait', async () => {
+    const taskId = await openLead('91205', {}, 'resolved')
+    await pipeline.onReminder(taskId)
+    await pipeline.onReminder(newEventId())
+    expect(cards).toEqual([])
+    expect(await cardEvents()).toEqual([])
+  })
+})
+
+describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
+  const eventsOf = async (type: string) =>
+    (
+      await db.select().from(event).where(eq(event.type, type)).orderBy(event.recordedAt, event.id)
+    ).map((e) => ({
+      entityKind: e.entityKind,
+      entityId: e.entityId,
+      actor: e.actor,
+      payload: e.payload,
+    }))
+  const taskRow = async (id: string) => (await db.select().from(task).where(eq(task.id, id)))[0]
+  const leadRow = async (id: string) => (await db.select().from(lead).where(eq(lead.id, id)))[0]
+
+  it('FR-LEAD-5: an open task is ended as skipped for the reason «closed», the lead is closed, the wait is released', async () => {
+    const taskId = await openLead('93001')
+    await pipeline.closeOnSite(taskId, 'recheck')
+    expect(await taskRow(taskId)).toMatchObject({ state: 'resolved', resolution: 'skip' })
+    expect((await taskRow(taskId))?.resolvedAt).not.toBeNull()
+    expect((await leadRow('93001'))?.status).toBe('closed')
+    expect(await eventsOf('task.resolved')).toEqual([
+      {
+        entityKind: 'task',
+        entityId: taskId,
+        actor: 'sara',
+        payload: { action: 'skip', reason: 'closed' },
+      },
+    ])
+    expect(await eventsOf('lead.closed_on_site')).toEqual([
+      { entityKind: 'lead', entityId: '93001', actor: 'sara', payload: { via: 'recheck' } },
+    ])
+    expect(delivered).toEqual([{ taskId, action: 'skip' }])
+  })
+
+  it('FR-LEAD-5: every message of the card is edited once: the one of the task and each one the journal knows', async () => {
+    const taskId = await openLead('93002')
+    // Two cards went out (the first and one sent again): the task keeps the last, the journal has both.
+    await pipeline.resendCard(taskId)
+    await pipeline.resendCard(taskId)
+    expect((await taskRow(taskId))?.telegramMessageId).toBe(12)
+    await pipeline.closeOnSite(taskId, 'recheck')
+    expect(closedCards.map((c) => c.messageId).sort()).toEqual([11, 12])
+    // The card is the plain one, whichever message it replaces.
+    for (const c of closedCards) {
+      expect(c.card).toMatchObject({ taskId, orderId: '93002', title: 'Сайт для клиники' })
+      expect(c.card.reminder).toBeFalsy()
+    }
+  })
+
+  it('FR-LEAD-5: a task that kept only its message number from before the journal knew it is edited too', async () => {
+    const taskId = await openLead('93003')
+    await db.update(task).set({ telegramMessageId: 7 }).where(eq(task.id, taskId))
+    await pipeline.closeOnSite(taskId, 'recheck')
+    expect(closedCards.map((c) => c.messageId)).toEqual([7])
+  })
+
+  it('FR-LEAD-5: a task without any card message is still closed, with nothing to edit', async () => {
+    const taskId = await openLead('93004')
+    await pipeline.closeOnSite(taskId, 'recheck')
+    expect(closedCards).toEqual([])
+    expect(await taskRow(taskId)).toMatchObject({ state: 'resolved', resolution: 'skip' })
+  })
+
+  it('FR-LEAD-5: a message Telegram will not edit does not stop the closing of the others', async () => {
+    const taskId = await openLead('93005')
+    await pipeline.resendCard(taskId)
+    await pipeline.resendCard(taskId)
+    await pipeline.resendCard(taskId)
+    brokenEdits = new Set([12])
+    await expect(pipeline.closeOnSite(taskId, 'recheck')).resolves.toBeUndefined()
+    expect(closedCards.map((c) => c.messageId).sort()).toEqual([11, 13])
+    expect(await taskRow(taskId)).toMatchObject({ state: 'resolved', resolution: 'skip' })
+  })
+
+  it('FR-LEAD-5: a task Boris already decided is left alone by a recheck: no edit, no event, the lead as it was', async () => {
+    const taskId = await openLead('93006', { status: 'skipped' }, 'resolved')
+    await db.update(task).set({ telegramMessageId: 7 }).where(eq(task.id, taskId))
+    await pipeline.closeOnSite(taskId, 'recheck')
+    expect(closedCards).toEqual([])
+    expect(await eventsOf('lead.closed_on_site')).toEqual([])
+    expect(await eventsOf('task.resolved')).toEqual([])
+    expect(delivered).toEqual([])
+    expect(await taskRow(taskId)).toMatchObject({ state: 'resolved', resolution: 'skip' })
+    expect((await leadRow('93006'))?.status).toBe('skipped')
+  })
+
+  it('FR-LEAD-5: a bid that ended ORDER_CLOSED closes the card of the task Boris pressed, and keeps what he pressed', async () => {
+    const taskId = await openLead('93007', { status: 'bid_queued' })
+    await db.update(task).set({ state: 'resolved', resolution: 'bid' }).where(eq(task.id, taskId))
+    await db.update(task).set({ telegramMessageId: 9 }).where(eq(task.id, taskId))
+    await pipeline.closeOnSite(taskId, 'press')
+    expect(closedCards.map((c) => c.messageId)).toEqual([9])
+    expect(await taskRow(taskId)).toMatchObject({ state: 'resolved', resolution: 'bid' })
+    expect(await eventsOf('task.resolved')).toEqual([])
+    expect(delivered).toEqual([])
+    expect((await leadRow('93007'))?.status).toBe('closed')
+    expect(await eventsOf('lead.closed_on_site')).toEqual([
+      { entityKind: 'lead', entityId: '93007', actor: 'sara', payload: { via: 'press' } },
+    ])
+  })
+
+  it('FR-LEAD-5: closing twice changes nothing the second time', async () => {
+    const taskId = await openLead('93008')
+    await pipeline.resendCard(taskId)
+    await pipeline.closeOnSite(taskId, 'recheck')
+    await pipeline.closeOnSite(taskId, 'recheck')
+    expect(closedCards).toHaveLength(1)
+    expect(await eventsOf('lead.closed_on_site')).toHaveLength(1)
+    expect(delivered).toHaveLength(1)
+  })
+
+  it('FR-LEAD-5: a task that does not exist is no error', async () => {
+    await expect(pipeline.closeOnSite(newEventId(), 'recheck')).resolves.toBeUndefined()
+    expect(closedCards).toEqual([])
   })
 })
 
@@ -233,7 +479,7 @@ describe('the «Разбор» press', () => {
   it('FR-LEAD-7: a long order text, cut on the card, comes whole in the message', async () => {
     const text = `Начало заявки. ${'Подробности и ещё подробности. '.repeat(300)}Конец заявки.`
     const taskId = await openLead('92004', { text })
-    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
     expect((cards[0] as LeadCard).text).toBe(text)
     expect(leadCardText(cards[0] as LeadCard)).toContain('…</blockquote>')
     await pipeline.onPress({ taskId, action: 'razbor' })

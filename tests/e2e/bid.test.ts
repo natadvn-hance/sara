@@ -128,6 +128,7 @@ beforeEach(async () => {
   analystPrice = 30000
   await resetDb(db)
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.answers.length = 0
   fake.bids.length = 0
   fake.setFee(null)
@@ -256,6 +257,33 @@ describe('the node refuses (B1)', () => {
     expect((await taskOf(id))?.state).toBe('resolved')
     const [o] = await db.select().from(outbox)
     expect(o).toMatchObject({ state: 'failed', errorClass: 'ORDER_CLOSED' })
+  })
+
+  it('FR-LEAD-5: a press that ended ORDER_CLOSED closes the card in place: the closed line, no buttons', async () => {
+    const id = await cardFor()
+    const card = cards().at(-1)
+    fake.refuseNext('ORDER_CLOSED')
+    press()
+    await until(() => said(TEXTS.bidRefused(TITLE, 'ORDER_CLOSED')))
+    await until(() => tg.edited.length === 1)
+    expect(tg.edited[0]).toMatchObject({
+      message_id: card?.message_id,
+      reply_markup: { inline_keyboard: [] },
+    })
+    expect(tg.edited[0]?.text).toContain(TEXTS.closedOnSite)
+    // What Boris pressed stays: the task is his decision, the bid is the failed one.
+    expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
+    expect(await payloads('lead.closed_on_site', id)).toEqual([{ via: 'press' }])
+    expect((await leadOf(id))?.status).toBe('closed')
+  })
+
+  it('FR-LEAD-8: a bid refused for another reason leaves the card as it is', async () => {
+    await cardFor()
+    fake.refuseNext('NO_MONEY')
+    press()
+    await until(() => said(TEXTS.bidRefused(TITLE, 'NO_MONEY')))
+    await settle()
+    expect(tg.edited).toHaveLength(0)
   })
 })
 

@@ -611,17 +611,35 @@ describe('the laid-out card', () => {
     await until(() => tg.answers.some((x) => x.text === 'Прислала разбор'))
   })
 
-  it('FR-LEAD-7: the reminder card has the same layout and its «Разбор» works', async () => {
+  it('FR-LEAD-7: a first card that failed arrives once, plain, and its «Разбор» works', async () => {
     const id = orderId()
-    await fake.emitOrder({ order_id: id })
-    await until(() => cards().length === 1)
+    // Telegram does not answer while the order is handled: the card cannot go out, the lead and its task stay.
+    await app.bot.stop()
+    try {
+      await fake.emitOrder({ order_id: id })
+      await until(
+        async () =>
+          (await db.select().from(event).where(eq(event.type, 'notify.failed'))).length === 1,
+      )
+    } finally {
+      await app.bot.start(tg.token)
+    }
     const [t] = await db.select().from(task).where(eq(task.entityId, id))
+    expect(t?.telegramMessageId).toBeNull()
+    expect(cards()).toHaveLength(0)
+    // The wait for the decision ran out: the card that never reached Boris is delivered, once.
     await app.pipeline.onReminder(t?.id ?? '')
-    await until(() => cards().length === 2)
-    expect(cards()[1]?.text.startsWith('<b>⏰ ')).toBe(true)
-    expect(cards()[1]?.text).toContain('<i>Заявка ждёт решения</i>')
-    expect(cards()[1]?.parse_mode).toBe('HTML')
-    tg.pushPress(111, button(cards()[1], 'razbor'))
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.text.startsWith('<b>🔔 ')).toBe(true)
+    expect(cards()[0]?.text).not.toContain('Заявка ждёт решения')
+    expect(cards()[0]?.parse_mode).toBe('HTML')
+    expect(await eventsOf('card.sent', t?.id ?? '')).toMatchObject([{ payload: { via: 'resend' } }])
+    expect(await eventsOf('task.reminded', t?.id ?? '')).toEqual([])
+    // Boris has it now: the next wait sends nothing.
+    await app.pipeline.onReminder(t?.id ?? '')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(cards()).toHaveLength(1)
+    tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
   })
 })

@@ -32,7 +32,10 @@ export type LeadCard = {
   score?: { value: number; version: number; reason: string } | null
   /** The Scorer did not answer: the card comes anyway, marked. */
   unscored?: boolean
-  /** The same card again as a reminder, with the buttons, so Boris can act on it. */
+  /**
+   * The layout with a line that the order waits for a decision. Sara sends no card as a reminder any more; only the
+   * length check of the «Разбор» message still builds it.
+   */
   reminder?: boolean
   /** The bid text with its greeting and the «Стоимость услуги» (FR-LEAD-6); none: the Analyst did not answer. */
   draft?: { text: string; priceRub: number | null } | null
@@ -166,6 +169,11 @@ export const TEXTS = {
     `С приветствием выходит ${n} ${plural(n, ['знак', 'знака', 'знаков'])}, а Профи.ру принимает до 500. Пришли текст короче.`,
   draftSaved: (title: string) => `Записала новый текст отклика для «${title}»`,
   draftLate: 'Заявка уже решена, текст не поменяла',
+  /** The last line of a card whose order closed on Profi.ru: the buttons are gone. */
+  closedOnSite: 'Заявка закрыта на Профи.ру, откликнуться уже нельзя',
+  /** Many waiting cards look closed at once: more likely the site changed than that all of them closed. */
+  recheckDoubt: (closed: number, checked: number) =>
+    `Похоже, Профи.ру поменял страницу заказа: ${closed} из ${checked} проверенных заявок выглядят закрытыми. Карточки не трогаю, посмотри сам.`,
 }
 
 /** Telegram takes at most this many characters in one message, counted after tags and entities are parsed. */
@@ -335,8 +343,8 @@ function draftLines(c: LeadCard): string[] {
   ]
 }
 
-/** `shown` is the part of the order text the card carries. */
-function cardHtml(c: LeadCard, shown: string): string {
+/** `shown` is the part of the order text the card carries; `last` is a block after the link (the closed line). */
+function cardHtml(c: LeadCard, shown: string, last: string | null = null): string {
   return [
     headLines(c),
     clientLines(c),
@@ -344,6 +352,7 @@ function cardHtml(c: LeadCard, shown: string): string {
     whyLines(c),
     draftLines(c),
     [linkLine(c.orderId)],
+    ...(last ? [[last]] : []),
   ]
     .map((block) => block.join('\n'))
     .join('\n\n')
@@ -358,22 +367,31 @@ function cutText(text: string, keep: number): string {
 
 /**
  * The lead card as Telegram HTML, within one message: when it is too long, the order text is shortened with «…»
- * (`textCut`) and «Разбор» brings it whole.
+ * (`textCut`) and «Разбор» brings it whole. `closed`: the order closed on Profi.ru, the card ends with that line
+ * (counted in the length) and is no reminder any more.
  */
-export function renderLeadCard(c: LeadCard): { html: string; textCut: boolean } {
+export function renderLeadCard(
+  card: LeadCard,
+  o: { closed?: boolean } = {},
+): { html: string; textCut: boolean } {
+  const c = o.closed ? { ...card, reminder: false } : card
+  const last = o.closed ? `<b>${TEXTS.closedOnSite}</b>` : null
   const text = c.text.trim() || NO_TEXT
-  let html = cardHtml(c, text)
+  let html = cardHtml(c, text, last)
   if (telegramTextLength(html) <= FIT) return { html, textCut: false }
   let keep = text.length
   for (let i = 0; i < 10; i++) {
     keep = Math.max(0, keep - (telegramTextLength(html) - FIT) - 1)
-    html = cardHtml(c, cutText(text, keep))
+    html = cardHtml(c, cutText(text, keep), last)
     if (telegramTextLength(html) <= FIT) break
   }
   return { html, textCut: true }
 }
 
 export const leadCardText = (c: LeadCard): string => renderLeadCard(c).html
+
+/** The card of an order that closed on Profi.ru: the same card with the closed line last, and no buttons. */
+export const closedLeadCardText = (c: LeadCard): string => renderLeadCard(c, { closed: true }).html
 
 const READING_PARTS = [
   ['said', 'Что говорит клиент'],

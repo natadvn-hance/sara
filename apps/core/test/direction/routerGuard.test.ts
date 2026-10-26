@@ -134,6 +134,7 @@ describe('pressing «Откликнуться»', () => {
     sendLeadCard: async () => ({ messageId: 1 }),
     sendText: async () => ({ messageId: 2 }),
     sendButtons: async () => ({ messageId: 3 }),
+    closeLeadCard: async () => {},
   }
   let pipeline: LeadPipeline
   beforeEach(async () => {

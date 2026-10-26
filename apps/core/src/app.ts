@@ -28,6 +28,7 @@ import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
+import { type CardRecheck, startCardRecheck } from './leads/recheck'
 import { handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
 import { ensureMindIndex } from './mind/indexer'
@@ -56,6 +57,8 @@ export type RunningApp = {
   secrets: SecretStore
   bot: BotControl
   pipeline: LeadPipeline
+  /** The look at waiting cards (FR-LEAD-5); tests drive it with tick(at). */
+  recheck: CardRecheck
   close(): Promise<void>
 }
 
@@ -72,6 +75,8 @@ export type StartOptions = {
   learningTickMs?: number
   /** How often the school's jobs run (default a minute). */
   schoolTickMs?: number
+  /** How often waiting cards are looked at again (default 10 minutes); tests call recheck.tick instead. */
+  recheckTickMs?: number
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -145,6 +150,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
     reconcileDelaysMs: o.reconcileDelaysMs ?? [5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
+    closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
@@ -272,6 +278,15 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     config.accounts.map((a) => a.id),
   )
 
+  // Waiting cards whose order closed on Profi.ru lose their buttons (FR-LEAD-5).
+  const recheck = startCardRecheck({
+    db,
+    profi,
+    notifier: bot.notifier,
+    close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
+    tickMs: o.recheckTickMs,
+  })
+
   return {
     url,
     app,
@@ -279,7 +294,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     secrets,
     bot,
     pipeline: lp,
+    recheck,
     async close() {
+      recheck.stop()
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()

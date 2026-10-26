@@ -22,6 +22,10 @@ export const EVENT_TYPES = [
   'lead.labeled',
   'lead.stale',
   'lead.page_read',
+  /** The order of a waiting card closed on Profi.ru: its card was closed (via: a recheck or a press that failed). */
+  'lead.closed_on_site',
+  /** Too many waiting cards looked closed at once: none was closed, Boris was told (closed, checked). */
+  'lead.recheck_doubt',
   'lead.held',
   'lead.drafted',
   'draft.edited',

@@ -22,6 +22,8 @@ export type OutboxDeps = {
   reconcileDelaysMs: number[]
   /** Called when a bid that was not pressed gives the order back to Boris: resend its card. */
   resendCard(taskId: string): Promise<void>
+  /** Called when a bid ended ORDER_CLOSED: the card of that order is closed in Telegram (FR-LEAD-5). */
+  closeCard(taskId: string): Promise<void>
 }
 
 let deps: OutboxDeps | null = null
@@ -375,6 +377,18 @@ async function backToBoris(outboxId: string, p: BidPayload, reason: string): Pro
         ? TEXTS.bidRefused(p.title, reason)
         : TEXTS.bidDearer(p.title, p.priceRub, null)
     await DBOS.runStep(() => tell(text, p), { name: 'tellRefused' })
+    // The card stays in the chat with its buttons: it is closed in place (a new step, behind a patch, so a run
+    // recorded before it ends as it began).
+    if (reason === 'ORDER_CLOSED' && p.taskId && (await DBOS.patch('close-card-on-order-closed'))) {
+      const taskId = p.taskId
+      await DBOS.runStep(
+        () =>
+          d()
+            .closeCard(taskId)
+            .catch(() => {}),
+        { name: 'closeCard' },
+      )
+    }
     return
   }
   await DBOS.runStep(() => giveBack(outboxId, p, reason), { name: 'giveBack', ...DB_STEP })

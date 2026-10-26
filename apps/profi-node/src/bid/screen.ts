@@ -5,6 +5,11 @@ export type OrderScreen = {
   open: boolean
   /** The page carries a disabled bid block: the site's own word that the order takes no bids. A missing form is not. */
   disabled: boolean
+  /**
+   * The answer carries no form, no bid forms, no tariff and no price, and no bid of ours: the shape of an order the
+   * client closed, read live (order 95385373). A form without a tariff is a changed layout, not this.
+   */
+  bare: boolean
   /** What a bid costs this account now (with a discount it is «1»); null when the answer has no price. */
   feeRub: number | null
   /** This account already bid on the order. */
@@ -68,6 +73,12 @@ export function orderScreenFromAnswer(
     orderId,
     open: !s.disabledBidBlock && (!!s.form || !!slide),
     disabled: !!s.disabledBidBlock,
+    bare:
+      !s.form &&
+      (s.bidForms ?? []).length === 0 &&
+      !s.tariffsBlock &&
+      !s.price &&
+      s.hasBid !== true,
     feeRub: rub(s.price?.value) ?? rub(slide?.paymentInfo?.value),
     hasBid: typeof s.hasBid === 'boolean' ? s.hasBid : null,
     submitText: text(s.form?.buttons?.submit) ?? text(slide?.buttons?.submit),

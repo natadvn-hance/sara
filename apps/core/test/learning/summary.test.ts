@@ -13,6 +13,7 @@ type Sent = { text: string; rows: { text: string; callbackData: string }[][] }
 let sent: Sent[] = []
 const notifier: Notifier = {
   sendLeadCard: async () => ({ messageId: 1 }),
+  closeLeadCard: async () => {},
   sendText: async (text) => {
     sent.push({ text, rows: [] })
     return { messageId: 2 }

@@ -28,6 +28,7 @@ export const SETTINGS = {
     }),
     default: { completed: [] as SetupStep[], later: [] as SetupStep[] },
   },
+  /** FR-LEAD-7: minutes after which a card that never went out is delivered once; no card is sent again (Boris, 26.10.2026). */
   'reminder.decision_after_min': { schema: z.number().int().positive(), default: 30 },
   /** FR-LEAD-9: bids a Moscow day; old Sara's 10. */
   'money.daily_bids': { schema: z.number().int().positive(), default: 10 },

@@ -8,7 +8,7 @@ import { appendEvent } from '../journal/journal'
 import { quietNow } from '../leads/cardFlow'
 import type { BorisMessage } from '../learning/inbox'
 import { bindChat, boundChat } from './binding'
-import { leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
+import { closedLeadCardText, leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
 import type { Notifier } from './notifier'
 
 type SendOptions = NonNullable<Parameters<Bot['api']['sendMessage']>[2]>
@@ -196,6 +196,34 @@ export function createTelegramRuntime(d: {
     }
   }
 
+  /**
+   * A message of Telegram HTML edited in place, with the buttons taken away. As for a send, markup Telegram refuses
+   * goes as plain text. Any other refusal (the message was deleted, or already shows this) is logged, never thrown:
+   * one message that cannot be edited must not stop the others.
+   */
+  async function closeHtml(messageId: number, html: string): Promise<void> {
+    const to = await chat()
+    const opts = {
+      reply_markup: { inline_keyboard: [] },
+      link_preview_options: { is_disabled: true },
+    }
+    try {
+      await bot.api.editMessageText(to, messageId, html, { ...opts, parse_mode: 'HTML' })
+    } catch (err) {
+      try {
+        if (!(err instanceof GrammyError) || !/can't parse entities/i.test(err.description))
+          throw err
+        await bot.api.editMessageText(to, messageId, plainFallback(html), opts)
+      } catch (e) {
+        console.error(
+          'telegram did not edit the closed card',
+          messageId,
+          e instanceof Error ? e.message.slice(0, 200) : e,
+        )
+      }
+    }
+  }
+
   /** FR-NOTIF-2: without sound at the quiet hours, unless the message is urgent. */
   const silentNow = async (loud?: boolean) => !loud && (await quietNow(d.db, new Date()))
 
@@ -250,6 +278,9 @@ export function createTelegramRuntime(d: {
           ...(silent && { disable_notification: true }),
         })
         return { messageId: m.message_id }
+      },
+      async closeLeadCard(messageId, c) {
+        await closeHtml(messageId, closedLeadCardText(c))
       },
       async sendText(text, o) {
         const silent = await silentNow(o?.loud)

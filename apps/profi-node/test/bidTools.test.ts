@@ -186,6 +186,25 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     expect((await tools().getOrder({ account_id: ACCOUNT, order_id: id })).open).toBe(false)
   }, 60000)
 
+  it('FR-LEAD-5: an order whose answer is bare (no form, tariff or price, no bid of ours), as a closed one is read live, reads open: false', async () => {
+    const id = site.addOrder({ bare: true })
+    await seen(id)
+    expect(await tools().getOrder({ account_id: ACCOUNT, order_id: id })).toMatchObject({
+      from_page: true,
+      open: false,
+    })
+  }, 60000)
+
+  it('FR-LEAD-5: a bare answer of an order this account bid on is not a closed order', async () => {
+    const id = site.addOrder({ bare: true, hasBid: true })
+    await seen(id)
+    expect(await tools().getOrder({ account_id: ACCOUNT, order_id: id })).toMatchObject({
+      from_page: true,
+      open: true,
+      has_bid: true,
+    })
+  }, 60000)
+
   it('FR-LEAD-5: get_order says its numbers come from the page when it read the page', async () => {
     const id = site.addOrder({ price: 71 })
     await seen(id)

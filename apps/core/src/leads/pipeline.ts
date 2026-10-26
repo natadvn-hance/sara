@@ -8,7 +8,7 @@ import {
   ProfiOrder,
   type TaskAction,
 } from '@sara/shared'
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull, ne } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
 import { getProfile } from '../direction/profile'
@@ -60,8 +60,18 @@ export type LeadPipelineDeps = {
 export type LeadPipeline = {
   onOrderSeen(e: EventEnvelope): Promise<void>
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
+  /**
+   * The wait for Boris's decision ran out. A card comes once and never again on Sara's own (Boris, 26.10.2026): a
+   * delivered card gets nothing here. A first card that never went out is delivered now, once, plain.
+   */
   onReminder(taskId: string): Promise<void>
   resendCard(taskId: string): Promise<void>
+  /**
+   * The order of this card closed on Profi.ru. `recheck`: the waiting task is ended as skipped (closed) and every
+   * message of its card is edited (the closed line, no buttons); a task Boris decided meanwhile is left alone.
+   * `press`: Boris's bid ended ORDER_CLOSED; his task stays as he decided it, only the card is closed.
+   */
+  closeOnSite(taskId: string, via: 'recheck' | 'press'): Promise<void>
   /** Boris's answer to the request after «Изменить»: the new bid text; the reply goes back to him. */
   onDraftText(a: DraftAnswer): Promise<string>
 }
@@ -83,13 +93,13 @@ const ev = (
     | 'lead.skipped'
     | 'lead.stale'
     | 'lead.page_read'
+    | 'lead.closed_on_site'
     | 'lead.held'
     | 'lead.drafted'
     | 'draft.edited'
     | 'draft.priced'
     | 'task.created'
     | 'task.resolved'
-    | 'task.reminded'
     | 'card.sent',
   entity: { kind: string; id: string },
   correlationId: string,
@@ -595,7 +605,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
     )
   } catch (err) {
-    // The lead and its task stay; the reminder later brings the card back with its buttons.
+    // The lead and its task stay; the reminder later delivers the card once, with its buttons.
     const reason = err instanceof Error ? err.message.slice(0, 200) : 'card was not sent'
     await DBOS.runStep(
       () =>
@@ -661,34 +671,112 @@ async function cardOfFound(
 }
 
 /** The lead card for an open task. */
-async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard | null> {
+async function cardOfTask(taskId: string): Promise<LeadCard | null> {
   const found = await leadOfTask(taskId)
   if (!found || found.task.state !== 'open') return null
-  return cardOfFound(found, reminder)
+  return cardOfFound(found, false)
 }
 
 /**
- * A card went out: the task keeps the new message (the one Boris sees last) and the journal the moment, which
- * the speed report reads for the order's own card (via 'order').
+ * A card went out: the task keeps the new message (the one Boris sees last) and the journal the moment and the
+ * message number. The speed report reads only the order's own card (via 'order'); the daily cap counts tasks.
  */
 function cardSent(
   taskId: string,
   correlationId: string,
   messageId: number,
-  via: 'order' | 'summary' | 'edit',
+  via: 'order' | 'summary' | 'edit' | 'resend',
 ): Promise<void> {
   return d().db.transaction(async (tx) => {
     await tx.update(task).set({ telegramMessageId: messageId }).where(eq(task.id, taskId))
+    // The message number is kept so every message of the card can be found again (a closed order, FR-LEAD-5).
     await appendEvent(
       tx,
-      ev('card.sent', { kind: 'task', id: taskId }, correlationId, 'sara', { via }),
+      ev('card.sent', { kind: 'task', id: taskId }, correlationId, 'sara', {
+        via,
+        message_id: messageId,
+      }),
     )
   })
 }
 
+/**
+ * Every message the card of this task went out as (its first card and the cards sent again), edited as closed.
+ * The numbers come from the journal (card.sent) and from the task, which also holds those sent before the journal
+ * kept them. One message Telegram will not edit never stops the others.
+ */
+async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>) {
+  const sent = await d()
+    .db.select({ payload: event.payload })
+    .from(event)
+    .where(
+      and(
+        eq(event.type, 'card.sent'),
+        eq(event.entityKind, 'task'),
+        eq(event.entityId, found.task.id),
+      ),
+    )
+  const [now] = await d()
+    .db.select({ messageId: task.telegramMessageId })
+    .from(task)
+    .where(eq(task.id, found.task.id))
+  const ids = new Set<number>()
+  for (const e of sent) {
+    const id = (e.payload as { message_id?: unknown }).message_id
+    if (typeof id === 'number') ids.add(id)
+  }
+  if (now?.messageId != null) ids.add(now.messageId)
+  if (ids.size === 0) return
+  const card = await cardOfFound(found, false)
+  for (const id of [...ids].sort((a, b) => a - b)) {
+    try {
+      await d().notifier.closeLeadCard(id, card)
+    } catch (err) {
+      console.error(
+        'card not closed',
+        found.task.id,
+        id,
+        err instanceof Error ? err.message.slice(0, 200) : err,
+      )
+    }
+  }
+}
+
+/**
+ * Boris has the card of this task: its message number is on the task, or the journal wrote a card down for it. The
+ * journal alone is enough (a number lost from the task), and so is the number alone (a card from before the journal
+ * kept them).
+ */
+async function cardDelivered(taskId: string): Promise<boolean> {
+  const [t] = await d()
+    .db.select({ messageId: task.telegramMessageId })
+    .from(task)
+    .where(eq(task.id, taskId))
+  if (t?.messageId != null) return true
+  const [sent] = await d()
+    .db.select({ id: event.id })
+    .from(event)
+    .where(
+      and(eq(event.type, 'card.sent'), eq(event.entityKind, 'task'), eq(event.entityId, taskId)),
+    )
+    .limit(1)
+  return sent != null
+}
+
+/** The plain card of an open task, sent again now (silent in the quiet hours); a task not open gets nothing. */
+async function resendCardOf(taskId: string): Promise<void> {
+  const card = await cardOfTask(taskId)
+  if (!card) return
+  const m = await d().notifier.sendLeadCard(card, {
+    silent: await quietNow(d().db, new Date()),
+  })
+  const found = await leadOfTask(taskId)
+  if (found) await cardSent(taskId, found.lead.correlationId, m.messageId, 'resend')
+}
+
 /** The card of an open task, sent now. */
 async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> {
-  const card = await cardOfTask(taskId, false)
+  const card = await cardOfTask(taskId)
   const found = card ? await leadOfTask(taskId) : null
   if (card && found) {
     const m = await d().notifier.sendLeadCard(card)
@@ -891,8 +979,8 @@ async function bringCard(
     // A held order that has its draft (a race with the cap, an order held before drafts waited): the card goes at once.
     await sendCard(decisionId, 'summary')
   } else {
-    // A dropped or held order has no draft yet: the press is answered now, the card follows its draft (a reminder
-    // brings it back if this fails).
+    // A dropped or held order has no draft yet: the press is answered now, the card follows its draft (if this
+    // fails, the reminder delivers it once).
     void draftThenCard(l, decisionId).catch((err) =>
       console.error('want card failed', err instanceof Error ? err.message.slice(0, 200) : err),
     )
@@ -1074,22 +1162,57 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     async onReminder(taskId) {
-      const card = await cardOfTask(taskId, true)
-      if (!card) return
-      await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
-      const found = await leadOfTask(taskId)
-      if (found) {
-        await appendEvent(
-          d().db,
-          ev('task.reminded', { kind: 'task', id: taskId }, found.lead.correlationId, 'sara'),
-        )
-      }
+      // Boris has the card: he is not sent it again, and nothing is journaled.
+      if (await cardDelivered(taskId)) return
+      // The first card never went out (Telegram was down): it is delivered now, once, as the plain card.
+      await resendCardOf(taskId)
     },
 
-    async resendCard(taskId) {
-      const card = await cardOfTask(taskId, false)
-      if (card)
-        await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
+    resendCard: resendCardOf,
+
+    async closeOnSite(taskId, via) {
+      const found = await leadOfTask(taskId)
+      if (!found) return
+      const { lead: l } = found
+      const ended = await d().db.transaction(async (tx) => {
+        const rows = await tx
+          .update(task)
+          .set({ state: 'resolved', resolution: 'skip', resolvedAt: new Date().toISOString() })
+          .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+          .returning({ id: task.id })
+        // Decided meanwhile: a recheck leaves it all alone. After a failed press the task is Boris's own decision
+        // (the bid he pressed) and stays, but its card is closed all the same.
+        if (rows.length === 0 && via === 'recheck') return null
+        if (rows.length > 0) {
+          await appendEvent(
+            tx,
+            ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'sara', {
+              action: 'skip',
+              reason: 'closed',
+            }),
+          )
+        }
+        await tx
+          .update(lead)
+          .set({ status: 'closed' })
+          .where(and(eq(lead.id, l.id), ne(lead.status, 'bid_sent')))
+        await appendEvent(
+          tx,
+          ev('lead.closed_on_site', { kind: 'lead', id: l.id }, l.correlationId, 'sara', { via }),
+        )
+        return { here: rows.length > 0 }
+      })
+      if (!ended) return
+      if (ended.here) {
+        await deliverDecision(taskId, 'skip').catch((err) =>
+          console.error(
+            'decision wait not released',
+            taskId,
+            err instanceof Error ? err.message.slice(0, 200) : err,
+          ),
+        )
+      }
+      await closeCardMessages(found)
     },
 
     onDraftText,

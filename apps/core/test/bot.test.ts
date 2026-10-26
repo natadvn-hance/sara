@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { createFakeTelegram, type FakeTelegram } from '../../../tests/fakes/telegramApi'
 import { boundChat } from '../src/notify/binding'
 import { createBotControl } from '../src/notify/botControl'
-import type { LeadCard } from '../src/notify/cards'
+import { type LeadCard, TEXTS } from '../src/notify/cards'
 import { createTelegramRuntime, type TelegramRuntime } from '../src/notify/telegram'
 import { getMe } from '../src/notify/telegramApi'
 import { setSetting } from '../src/settings/store'
@@ -163,6 +163,71 @@ describe('telegram bot', () => {
     expect(m?.text.length).toBeLessThanOrEqual(4096)
     expect(m?.text.endsWith('https://profi.ru/backoffice/n.php?o=90001')).toBe(true)
     expect(m?.link_preview_options).toEqual({ is_disabled: true })
+  })
+
+  it('FR-LEAD-5: the card of a closed order is edited in place: the closed line is added and the buttons go', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    const { messageId } = await bot.notifier.sendLeadCard(CARD)
+    await bot.notifier.closeLeadCard(messageId, CARD)
+    expect(tg.edited).toHaveLength(1)
+    const e = tg.edited[0]
+    expect(e).toMatchObject({
+      chat_id: 111,
+      message_id: messageId,
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: { inline_keyboard: [] },
+    })
+    expect(e?.text.endsWith(`<b>${TEXTS.closedOnSite}</b>`)).toBe(true)
+    expect(e?.text).toContain('<b>🔔 Сайт</b>')
+    // No new message came.
+    expect(tg.sent).toHaveLength(2)
+  })
+
+  it('FR-LEAD-5: a closed card of a very long order text is edited within 4096 characters', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    const long = { ...CARD, text: 'Очень длинная заявка. '.repeat(1000) }
+    const { messageId } = await bot.notifier.sendLeadCard(long)
+    await bot.notifier.closeLeadCard(messageId, long)
+    expect(tg.edited).toHaveLength(1)
+    expect(tg.edited[0]?.text).toContain('…</blockquote>')
+    expect(tg.edited[0]?.text.endsWith(`<b>${TEXTS.closedOnSite}</b>`)).toBe(true)
+  })
+
+  it('FR-LEAD-5: should Telegram refuse the markup, the closed card is edited as plain text, buttons gone', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    const { messageId } = await bot.notifier.sendLeadCard(CARD)
+    tg.setRejectHtml(true)
+    await bot.notifier.closeLeadCard(messageId, CARD)
+    expect(tg.edited).toHaveLength(1)
+    expect(tg.edited[0]?.parse_mode).toBeUndefined()
+    expect(tg.edited[0]?.text).toContain(TEXTS.closedOnSite)
+    expect(tg.edited[0]?.text).not.toMatch(/<\/?(b|i|a|blockquote)\b/)
+    expect(tg.edited[0]?.reply_markup).toEqual({ inline_keyboard: [] })
+  })
+
+  it('FR-LEAD-5: a message Telegram will not edit (deleted, or already closed) is logged, never thrown', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    const { messageId } = await bot.notifier.sendLeadCard(CARD)
+    tg.setEditError(messageId, 'message to edit not found')
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(bot.notifier.closeLeadCard(messageId, CARD)).resolves.toBeUndefined()
+      expect(log).toHaveBeenCalled()
+      expect(tg.edited).toHaveLength(0)
+      // «message is not modified»: the same closing a second time.
+      tg.setEditError(messageId, null)
+      await bot.notifier.closeLeadCard(messageId, CARD)
+      expect(tg.edited).toHaveLength(1)
+      await expect(bot.notifier.closeLeadCard(messageId, CARD)).resolves.toBeUndefined()
+      expect(tg.edited).toHaveLength(1)
+    } finally {
+      log.mockRestore()
+    }
   })
 
   it('FR-NOTIF-2: a silent lead card goes with disable_notification, a usual one without', async () => {
