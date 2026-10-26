@@ -1,6 +1,6 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import { type CaseChoice, newEventId, type Topic } from '@sara/shared'
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account, chatMessage, convTurn, mindGap } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
@@ -45,6 +45,8 @@ export type TurnDeps = {
   compare?(turnId: string): Promise<void>
   /** Retries of the card and forward steps; tests shorten them. */
   stepRetry?: { maxAttempts: number; intervalSeconds: number; backoffRate?: number }
+  /** After the switch a card Telegram would not take is tried again every 10 minutes, 6 times; tests shorten it. */
+  cardRetry?: { tries: number; everyMs: number }
   /** How often and how long an unreadable chat is retried; tests shorten it. */
   unreadableRetry?: { tries: number; everyMs: number }
   /** Every finished turn's fate, for whoever follows turns (M6 meetings); its failure never stops the turn. */
@@ -66,11 +68,20 @@ export function setTurnDeps(x: TurnDeps): void {
   deps = x
 }
 
-export const turnWorkflowId = (conversationId: string, anchor: string) =>
-  `conv-turn:${conversationId}:${anchor}`
+/**
+ * `conv-turn:<conversation>:<anchor>`; a turn whose card never reached Boris leaves its client turn unanswered, and the
+ * client's next message starts the next attempt at the same anchor under `#<n>` (a finished process is never rerun).
+ */
+export const turnWorkflowId = (conversationId: string, anchor: string, attempt = 0) =>
+  attempt > 0
+    ? `conv-turn:${conversationId}:${anchor}#${attempt}`
+    : `conv-turn:${conversationId}:${anchor}`
 
 /** A turn plans again at most this many times when the client writes before the reply goes (FR-CONV-6). */
 const MAX_ROUNDS = 3
+/** After the switch a card Telegram would not take is tried again every 10 minutes, 6 times (as the reminders' cards). */
+const CARD_TRIES = 6
+const CARD_RETRY_MS = 10 * 60_000
 /** Night holds before a turn gives up and drafts. */
 const MAX_HOLDS = 2
 /** Wake-ups while waiting for the client to finish; the wait itself is capped by conv.max_wait_s. */
@@ -443,6 +454,7 @@ const OUTCOME_EVENT = {
   unclear: 'conv.turn_cancelled',
   closed: 'conv.turn_cancelled',
   failed: 'conv.turn_failed',
+  card_lost: 'conv.turn_failed',
 } as const
 type Outcome = keyof typeof OUTCOME_EVENT
 
@@ -461,10 +473,13 @@ async function handoff(
   // A turn that covered nothing (Boris's client, an unclear author, a failure) still covers what it saw; only a
   // turn that our side's message cancelled does not, that message already ends the client turn.
   const through =
-    covered.at(-1) ??
-    (outcome !== 'answered'
-      ? untilOurs(messages, anchor).findLast((m) => m.side === 'client')?.platformMessageId
-      : undefined)
+    // After the switch the card is the client's only way to an answer: when it did not reach Boris the words stay open.
+    outcome === 'card_lost'
+      ? undefined
+      : (covered.at(-1) ??
+        (outcome !== 'answered'
+          ? untilOurs(messages, anchor).findLast((m) => m.side === 'client')?.platformMessageId
+          : undefined))
   // The mark only moves forward: «Вернуть» or another turn may have moved it further while this one ran.
   const at = (id: string | null | undefined) =>
     id ? messages.findIndex((m) => m.platformMessageId === id) : -1
@@ -489,13 +504,57 @@ async function storedMessages(db: Db, conversationId: string): Promise<StoredMes
   return rows.map(storedOf)
 }
 
+/** The card of a turn could not be told to Boris in all the tries: the journal says the client has no answer. */
+async function journalCardLost(turnId: string): Promise<void> {
+  const [t] = await d().db.select().from(convTurn).where(eq(convTurn.id, turnId))
+  const conv = t ? await getConversation(d().db, t.conversationId) : null
+  if (!conv) return
+  await appendEvent(d().db, {
+    type: 'notify.failed',
+    v: 1,
+    entity: { kind: 'conv_turn', id: turnId },
+    account_id: conv.accountId,
+    actor: 'sara',
+    occurred_at: new Date().toISOString(),
+    causation_id: null,
+    correlation_id: conv.id,
+    reason: 'карточка не дошла: клиент без ответа',
+    payload: { channel: 'telegram', what: 'conv_card_lost' },
+  })
+}
+
+/** Whether the switch is made (old Sara no longer writes): then the card is the client's only way to an answer. */
+async function afterSwitch(): Promise<boolean> {
+  return !(await getSetting(d().db, 'conv.v1_writes'))
+}
+
+/**
+ * The card of a decided turn to Boris. In shadow a card that cannot be sent ends the turn as failed (the cards only
+ * teach). After the switch it is the client's only way to an answer, so it is tried again every 10 minutes, 6 times;
+ * if it still does not go, the turn ends as `card_lost`: the client's words stay unhandled, the journal says so, and
+ * his next message starts the next attempt.
+ */
+async function sendCard(turnId: string, name: string): Promise<'ok' | 'failed' | 'lost'> {
+  const first = await tried(turnId, name, () => d().card(turnId), notifyStep())
+  if (first.ok) return 'ok'
+  if (!(await DBOS.runStep(() => afterSwitch(), { name: `${name}-live`, ...DB_STEP })))
+    return 'failed'
+  for (let a = 1; a < (d().cardRetry?.tries ?? CARD_TRIES); a++) {
+    await DBOS.sleep(d().cardRetry?.everyMs ?? CARD_RETRY_MS)
+    const again = await tried(turnId, `${name}-r${a}`, () => d().card(turnId), notifyStep())
+    if (again.ok) return 'ok'
+  }
+  await DBOS.runStep(() => journalCardLost(turnId), { name: `${name}-lost`, ...DB_STEP })
+  return 'lost'
+}
+
 /**
  * One turn of the conversation: Sara's answer to one client turn (FR-CONV-3, M4 design 5.5, 5.7). It waits while the
  * client writes, plans in one step, holds at night, and after the switch pauses like a human, rereads the chat and
  * sends; in shadow it ends with a card for Boris. It never answers over our side's message (FR-CONV-6).
  */
-async function runTurn(conversationId: string, anchor: string): Promise<void> {
-  const turnId = turnWorkflowId(conversationId, anchor)
+async function runTurn(conversationId: string, anchor: string, attempt = 0): Promise<void> {
+  const turnId = turnWorkflowId(conversationId, anchor, attempt)
   const startedAt = await DBOS.runStep(() => startRow(turnId, conversationId, anchor), {
     name: 'start',
     ...DB_STEP,
@@ -538,8 +597,7 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
         name: 'unreadable',
         ...DB_STEP,
       })
-      await tried(turnId, 'card-unreadable', () => d().card(turnId), notifyStep())
-      outcome = 'failed'
+      outcome = (await sendCard(turnId, 'card-unreadable')) === 'lost' ? 'card_lost' : 'failed'
       break
     }
     // The turn starts for real when the client has finished writing: the moment others measure from (M6).
@@ -571,8 +629,7 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       )
       if (!read.ok) {
         // The chat cannot be read to check: nothing is sent, Boris gets the draft.
-        outcome = 'failed'
-        await tried(turnId, `card-${round}`, () => d().card(turnId), notifyStep())
+        outcome = (await sendCard(turnId, `card-${round}`)) === 'lost' ? 'card_lost' : 'failed'
         break
       }
       const seen = read.value.seen
@@ -591,13 +648,8 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
         break
       }
       if (seen === 'held') {
-        const held = await tried(
-          turnId,
-          `reread-card-${round}`,
-          () => d().card(turnId),
-          notifyStep(),
-        )
-        outcome = held.ok ? 'drafted' : 'failed'
+        const held = await sendCard(turnId, `reread-card-${round}`)
+        outcome = held === 'ok' ? 'drafted' : held === 'lost' ? 'card_lost' : 'failed'
         break
       }
       if (seen === 'more' && round < MAX_ROUNDS) continue
@@ -610,8 +662,7 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
           break
         }
         if (sent.ok && sent.value === 'changed' && round < MAX_ROUNDS) continue
-        outcome = 'failed'
-        await tried(turnId, `card-${round}`, () => d().card(turnId), notifyStep())
+        outcome = (await sendCard(turnId, `card-${round}`)) === 'lost' ? 'card_lost' : 'failed'
         break
       }
     }
@@ -619,14 +670,17 @@ async function runTurn(conversationId: string, anchor: string): Promise<void> {
       outcome = 'no_reply'
       break
     }
-    const card = await tried(turnId, `card-${round}`, () => d().card(turnId), notifyStep())
-    outcome = !card.ok
-      ? 'failed'
-      : plan.action === 'call_boris'
-        ? 'called_boris'
-        : plan.action === 'forward'
-          ? 'forwarded'
-          : 'drafted'
+    const card = await sendCard(turnId, `card-${round}`)
+    outcome =
+      card === 'lost'
+        ? 'card_lost'
+        : card === 'failed'
+          ? 'failed'
+          : plan.action === 'call_boris'
+            ? 'called_boris'
+            : plan.action === 'forward'
+              ? 'forwarded'
+              : 'drafted'
     break
   }
   const next = await DBOS.runStep(() => handoff(turnId, conversationId, anchor, outcome, covered), {
@@ -660,19 +714,39 @@ async function pendingAnchor(conv: ConversationRow): Promise<string | null> {
   return turnMessageIds(await storedMessages(d().db, conv.id), fresh.handledThrough)[0] ?? null
 }
 
+/**
+ * Which attempt of the client turn at `anchor` is the current one: every earlier turn of it whose card never reached
+ * Boris (`card_lost`) leaves it unanswered, and the client's next message starts the next attempt.
+ */
+async function attemptOf(conversationId: string, anchor: string): Promise<number> {
+  const rows = await d()
+    .db.select({ id: convTurn.id })
+    .from(convTurn)
+    .where(
+      and(
+        eq(convTurn.conversationId, conversationId),
+        eq(convTurn.kind, 'reply'),
+        eq(convTurn.anchorMessageId, anchor),
+        eq(convTurn.outcome, 'card_lost'),
+      ),
+    )
+  return rows.length
+}
+
 /** The client wrote: the turn of that client turn starts, or the running one wakes (a repeat start is a no-op). */
 export async function startTurnFor(conv: ConversationRow): Promise<void> {
   const anchor = await pendingAnchor(conv)
   if (!anchor) return
-  const workflowID = turnWorkflowId(conv.id, anchor)
-  await DBOS.startWorkflow(convTurnWorkflow, { workflowID })(conv.id, anchor)
+  const attempt = await attemptOf(conv.id, anchor)
+  const workflowID = turnWorkflowId(conv.id, anchor, attempt)
+  await DBOS.startWorkflow(convTurnWorkflow, { workflowID })(conv.id, anchor, attempt)
   await poke(workflowID)
 }
 
 /** Typing or a new message wakes a waiting turn early (FR-CONV-7). */
 export async function pokeTurn(conv: ConversationRow): Promise<void> {
   const anchor = await pendingAnchor(conv)
-  if (anchor) await poke(turnWorkflowId(conv.id, anchor))
+  if (anchor) await poke(turnWorkflowId(conv.id, anchor, await attemptOf(conv.id, anchor)))
 }
 
 /** DBOS's code of a send to a workflow that does not exist (DBOSNonExistentWorkflowError). */

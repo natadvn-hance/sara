@@ -32,7 +32,7 @@ export function turnStats(rows: Row[]) {
     noReply: rows.filter((r) => r.outcome === 'no_reply').length,
     cancelled: rows.filter((r) => r.outcome === 'answered' || r.outcome === 'unclear').length,
     sent: rows.filter((r) => r.outcome === 'sent').length,
-    failed: rows.filter((r) => r.outcome === 'failed').length,
+    failed: rows.filter((r) => r.outcome === 'failed' || r.outcome === 'card_lost').length,
     cards: rows.filter((r) => r.cardMessageId !== null).length,
     compared,
     avg,

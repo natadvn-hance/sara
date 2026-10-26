@@ -39,6 +39,7 @@ let cliLog = ''
 let cards: string[]
 let outcomes: { turnId: string; conversationId: string; outcome: string; at: string }[] = []
 let forwards: string[]
+let cardRetryOverride: TurnDeps['cardRetry']
 let sends: { turnId: string; round: number }[]
 let sendExpects: (string | null | undefined)[]
 let sendAnswer: 'confirmed' | 'changed' = 'confirmed'
@@ -130,6 +131,9 @@ beforeAll(async () => {
     },
     pauseMs: () => pause,
     stepRetry: { maxAttempts: 2, intervalSeconds: 0.2, backoffRate: 1 },
+    get cardRetry() {
+      return cardRetryOverride
+    },
     unreadableRetry: { tries: 2, everyMs: 100 },
     onOutcome: async (o) => {
       outcomes.push(o)
@@ -158,6 +162,7 @@ beforeEach(async () => {
   cards = []
   outcomes = []
   forwards = []
+  cardRetryOverride = undefined
   sends = []
   sendExpects = []
   sendAnswer = 'confirmed'
@@ -641,6 +646,59 @@ describe('the turn workflow', () => {
     await clientWrites('m-3', 'Ещё вопрос')
     const rows = await turnsDone(2)
     expect(rows.find((r) => r.anchorMessageId === 'm-3')?.outcome).toBe('drafted')
+  }, 40000)
+
+  it('FR-CONV-7: after the switch a card Telegram does not take at once is tried again, and the turn is still drafted', async () => {
+    await afterTheSwitch()
+    await setSetting(db, 'conv.autopilot', false, 'system')
+    cardRetryOverride = { tries: 3, everyMs: 150 }
+    let calls = 0
+    onCard = async () => {
+      // The first try (two calls of its step) fails, the second try goes through.
+      if (++calls <= 2) throw new Error('telegram is down')
+    }
+    await clientWrites('m-2', 'Как начнём?')
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('drafted')
+    expect(cards).toHaveLength(3)
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBe('m-2')
+  }, 40000)
+
+  it('FR-CONV-7: a card that never goes after the switch does not drop the client: he stays unanswered, an alert is journaled, his next message gets the turn', async () => {
+    await afterTheSwitch()
+    await setSetting(db, 'conv.autopilot', false, 'system')
+    cardRetryOverride = { tries: 3, everyMs: 100 }
+    onCard = async () => {
+      throw new Error('telegram is down')
+    }
+    await clientWrites('m-2', 'Как начнём?')
+    const [lost] = await turnsDone(1)
+    expect(lost?.outcome).toBe('card_lost')
+    expect(await countEvents(db, 'conv.turn_failed')).toBe(1)
+    // The client's words are not marked as handled, and the journal says nobody got the card.
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBeNull()
+    const alerts = await db.select().from(event).where(eq(event.type, 'notify.failed'))
+    expect(alerts.some((a) => /карточка не дошла/.test(a.reason ?? ''))).toBe(true)
+    // Telegram is back and the client writes again: a turn of its own answers both messages.
+    onCard = async () => {}
+    await clientWrites('m-3', 'Ещё вопрос')
+    const rows = await turnsDone(2)
+    const again = rows.find((r) => r.id !== lost?.id)
+    expect(again?.outcome).toBe('drafted')
+    expect(again?.messageIds).toEqual(['m-2', 'm-3'])
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBe('m-3')
+  }, 60000)
+
+  it('FR-CONV-7: in shadow a card that cannot be sent is not waited for: the turn fails at once, as before', async () => {
+    cardRetryOverride = { tries: 3, everyMs: 5000 }
+    onCard = async () => {
+      throw new Error('telegram is down')
+    }
+    const started = Date.now()
+    await clientWrites('m-2', 'Как начнём?')
+    const [t] = await turnsDone(1)
+    expect(t?.outcome).toBe('failed')
+    expect(Date.now() - started).toBeLessThan(9000)
   }, 40000)
 
   it('FR-CONV-7: a forward that cannot be sent ends the turn as failed after the handoff', async () => {
