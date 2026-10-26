@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, go } from '../api'
+import { afterLogin, api, go } from '../api'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
@@ -22,7 +22,7 @@ export function LoginPage() {
           onClick={async () => {
             try {
               await api('/api/login', { password })
-              go('/')
+              go(afterLogin())
             } catch (e) {
               setError(e instanceof Error ? e.message : String(e))
             }

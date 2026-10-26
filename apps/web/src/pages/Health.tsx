@@ -17,6 +17,16 @@ export function HealthPage() {
   return (
     <main className="mx-auto grid max-w-xl gap-4 px-4 py-6">
       <h1 className="font-display text-2xl">Состояние системы</h1>
+      <a
+        href="/accounts"
+        className="font-medium text-accent underline-offset-4 hover:underline"
+        onClick={(e) => {
+          e.preventDefault()
+          go('/accounts')
+        }}
+      >
+        Аккаунты и какие заказы отбирать
+      </a>
       {!q.data ? <p>Проверяю…</p> : null}
       {q.data?.checks.map((c) => (
         <Card key={c.id}>
