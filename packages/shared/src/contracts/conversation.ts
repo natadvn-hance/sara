@@ -180,6 +180,25 @@ export const CHECK_SEVERITY = {
 export type CheckId = keyof typeof CHECK_SEVERITY
 export const CHECK_IDS = Object.keys(CHECK_SEVERITY) as CheckId[]
 
+/** A case of Hance invented for an exam scenario, in the shape the case search gives (cases in a conversation). */
+export const ExamCase = z
+  .object({
+    id: z.string().regex(/^k-case-[a-z0-9-]+$/),
+    title: z.string().min(1),
+    summary: z.string().min(1),
+    role: z.string().nullable().default(null),
+    /** The result of the case, or null when none is recorded. */
+    result: z.string().nullable().default(null),
+    /** The items of «Как показывать клиенту». */
+    show_rules: z.array(z.string().min(1)).default([]),
+    /** False when the company may not be named (NDA). */
+    name_open: z.boolean(),
+    /** True only when the numbers of the result may be named. */
+    numbers_open: z.boolean(),
+  })
+  .strict()
+export type ExamCase = z.infer<typeof ExamCase>
+
 /** A message of an exam scenario; a specialist message of unknown voice stays `unknown` (ADR-024). */
 const ExamMessage = z
   .object({
@@ -201,6 +220,8 @@ export const ExamScenario = z
       tone: z.enum(TONES),
       archetype: z.string().nullable(),
       hard: z.boolean(),
+      /** The scenario holds a phone, an e-mail or a link on purpose, as a trap (handmade ones are otherwise free of them). */
+      trap: z.boolean().default(false),
     }),
     golden: z.boolean(),
     order: z.object({
@@ -211,6 +232,11 @@ export const ExamScenario = z
       city: z.string(),
     }),
     client_name: z.string().nullable(),
+    /**
+     * The cases of Hance this scenario offers the Interlocutor under «Кейсы»: invented, in the scenario's own data, so
+     * the exam does not depend on the cases of the mind. A scenario without them offers none.
+     */
+    cases: z.array(ExamCase).default([]),
     /** The bid that opened the chat and whose it was; null when the scenario does not need it. */
     bid: z
       .object({ text: z.string().min(1), author: z.enum(CHAT_AUTHORS) })
@@ -227,6 +253,8 @@ export const ExamScenario = z
       move: z.enum(MOVES),
       urgent: z.boolean().optional(),
       topic: z.enum(TOPICS).optional(),
+      /** `needed`: the reply must tell one of the scenario's cases; `none`: it must tell no case at all. */
+      case: z.enum(['needed', 'none']).optional(),
       /** Whether the reply must start with a greeting (true) or must not (false); absent: by the new day rule. */
       greeting: z.boolean().optional(),
       must_not_contain: z.array(z.string()).default([]),

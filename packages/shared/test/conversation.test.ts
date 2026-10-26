@@ -218,6 +218,43 @@ describe('M4 contracts', () => {
     ).toBe(true)
   })
 
+  it('FR-TRAIN-8: a scenario carries its own invented cases, a trap mark and the case it expects', () => {
+    const parsed = ExamScenario.parse(scenario)
+    expect(parsed.cases).toEqual([])
+    expect(parsed.tags.trap).toBe(false)
+    expect(parsed.expect.case).toBeUndefined()
+    const withCase = {
+      ...scenario,
+      tags: { ...scenario.tags, trap: true },
+      cases: [
+        {
+          id: 'k-case-x1',
+          title: 'Лиса-Клиник: онлайн-запись, Краснодар',
+          summary: 'Сделали сайт с онлайн-записью.',
+          role: 'Сайт и аналитика.',
+          result: 'Заявок стало больше.',
+          show_rules: ['Компанию можно называть.'],
+          name_open: true,
+          numbers_open: false,
+        },
+      ],
+      expect: { ...scenario.expect, case: 'needed' },
+    }
+    const full = ExamScenario.parse(withCase)
+    expect(full.cases[0]?.id).toBe('k-case-x1')
+    expect(full.expect.case).toBe('needed')
+    expect(
+      ExamScenario.safeParse({ ...withCase, expect: { move: 'reply', case: 'maybe' } }).success,
+    ).toBe(false)
+    const [first] = withCase.cases
+    expect(
+      ExamScenario.safeParse({ ...withCase, cases: [{ ...first, id: 'case-1' }] }).success,
+    ).toBe(false)
+    expect(
+      ExamScenario.safeParse({ ...withCase, cases: [{ ...first, extra: true }] }).success,
+    ).toBe(false)
+  })
+
   it('FR-CONV-10: specialist message, typing and read events carry no text', () => {
     expect(PROFI_EVENT_PAYLOADS['profi.specialist_message'].safeParse(ref).success).toBe(true)
     expect(

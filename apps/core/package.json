@@ -15,7 +15,9 @@
     "mind": "tsx src/mind/cli.ts",
     "report:conv": "tsx src/conversation/reportCli.ts",
     "history:export": "tsx src/history/exportCli.ts",
-    "report:school": "tsx src/school/reportCli.ts"
+    "report:school": "tsx src/school/reportCli.ts",
+    "exam": "tsx src/exam/cli.ts",
+    "exam:build": "tsx src/exam/cli.ts build"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "5.3.0",
