@@ -33,6 +33,12 @@ const ANSWERS = {
   'onboarding-cases': CASES_ANSWER,
 }
 const NAMES = ['Андрей', 'Мария', 'Олег']
+// The samples as they are kept: the voice rules took the period off the end of each paragraph (rule 4).
+const SAMPLES = [
+  'Понимаю, для вас важно быстро начать запись\n\nКогда хотите открыть запись онлайн?',
+  'Похоже, сайт нужен без долгого запуска\n\nЧто для вас главное в первый месяц?',
+  'Задача ясна: нужен понятный первый шаг\n\nКакой срок для вас критичен?',
+]
 beforeEach(async () => {
   await resetDb(db)
   await seedDirection(db, ACC)
@@ -72,10 +78,12 @@ describe('step 5: the format and three sample bids', { timeout: 60000 }, () => {
     expect(r.ok).toBe(true)
     const samples = await samplesOf()
     expect(samples).toHaveLength(3)
-    expect(samples.map((s) => s.greeting).sort()).toEqual(
-      ['Андрей, добрый день!', 'Мария, добрый день!', 'Олег, добрый день!'].sort(),
-    )
-    expect(samples[0]?.body).toBe(FORMAT_ANSWER.samples[0])
+    // The greeting follows the hour in Moscow (rule 5): the name, then the part of the day of this moment.
+    for (const [i, name] of NAMES.entries())
+      expect(samples.find((s) => s.lead_id === `97200${i}`)?.greeting).toMatch(
+        new RegExp(`^${name}, (доброе утро|добрый день|добрый вечер)!$`),
+      )
+    expect(samples[0]?.body).toBe(SAMPLES[0])
     const proposal = (await getOnboarding(db, ACC))?.steps['5']?.proposal
     expect(proposal?.understood).toBe(FORMAT_ANSWER.understood)
   })
@@ -156,7 +164,7 @@ describe('step 5: the format and three sample bids', { timeout: 60000 }, () => {
     const confirmed = (await getOnboarding(db, ACC))?.steps['5']?.confirmed as {
       reply_format: { examples: string[] }
     }
-    expect(confirmed.reply_format.examples).toEqual(FORMAT_ANSWER.samples)
+    expect(confirmed.reply_format.examples).toEqual(SAMPLES)
   })
 
   it('FR-ACC-3: a sample longer than the format allows is asked again, then a miss', async () => {
@@ -248,7 +256,7 @@ describe('finishing with the profile', { timeout: 60000 }, () => {
     const p = await getProfile(db, ACC)
     expect(p).toMatchObject({ speed: 'fast', cases: [CASE] })
     expect(p.reply_format?.max_chars).toBe(400)
-    expect(p.reply_format?.examples).toEqual(FORMAT_ANSWER.samples)
+    expect(p.reply_format?.examples).toEqual(SAMPLES)
   })
 
   it('FR-ACC-3: finishing saves the profile and the rules version in one transaction', async () => {
@@ -381,6 +389,37 @@ describe('the review of step 5: names, contacts and links never get through', {
       { lead_id: first?.lead_id ?? '', body: 'ж'.repeat(385) },
     ])
     expect(r).toEqual({ ok: false, error: 'too_long' })
+  })
+
+  it('FR-ACC-3: a sample is held to the format with the longest greeting of the day, whatever the hour it was made at', async () => {
+    await stepFive()
+    const first = (await samplesOf())[0]
+    // «Андрей, добрый вечер!» is the longest of the three: 21 and 2 for the empty line.
+    const fits = 400 - 'Андрей, добрый вечер!'.length - 2
+    expect(first?.greeting.startsWith('Андрей, ')).toBe(true)
+    const over = await confirmFormat(db, ACC, [
+      { lead_id: first?.lead_id ?? '', body: 'ж'.repeat(fits + 1) },
+    ])
+    expect(over).toEqual({ ok: false, error: 'too_long' })
+    const exact = await confirmFormat(db, ACC, [
+      { lead_id: first?.lead_id ?? '', body: 'ж'.repeat(fits) },
+    ])
+    expect(exact.ok).toBe(true)
+  })
+
+  it('NFR-UX-1: a sample of the direction has no dash, no hyphen in a common word, no final period and no emoji', async () => {
+    const dash = String.fromCharCode(0x2014)
+    const f = await fakeGateway(db, {
+      ...ANSWERS,
+      'onboarding-format': {
+        ...FORMAT_ANSWER,
+        samples: [`Понимаю ${dash} что-то важное 🤝.\n\nКогда запуск?`, 'б', 'в'],
+      },
+    })
+    await startOnboarding(db, ACC, 'edit')
+    for (const n of [1, 2, 3] as const) await skipStep(db, ACC, n)
+    await submitStep({ db, gateway: f.gateway }, ACC, 5, { say: 'формат' })
+    expect((await samplesOf())[0]?.body).toBe('Понимаю что то важное\n\nКогда запуск?')
   })
 
   it('FR-ACC-3: what Boris edited stays in the step when he comes back to it', async () => {

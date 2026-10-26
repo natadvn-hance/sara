@@ -10,6 +10,7 @@ import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { bidTextDetail } from './draft'
 
 export type OutboxDeps = {
   db: Db
@@ -24,6 +25,8 @@ export type OutboxDeps = {
   resendCard(taskId: string): Promise<void>
   /** Called when a bid ended ORDER_CLOSED: the card of that order is closed in Telegram (FR-LEAD-5). */
   closeCard(taskId: string): Promise<void>
+  /** The clock of the greeting: a bid is greeted at the moment it is sent (Moscow time of day). Tests fix it. */
+  now?: () => Date
 }
 
 let deps: OutboxDeps | null = null
@@ -38,7 +41,10 @@ function d(): OutboxDeps {
 export type BidPayload = {
   leadId: string
   accountId: string
+  /** The draft as it was when Boris pressed: its greeting is the one of that hour and is built again when the bid is sent. */
   text: string
+  /** The client's name on the board, for a draft with no greeting of its own; absent in rows from before 26.10.2026. */
+  clientName?: string
   correlationId: string
   title: string
   /** What the bid itself costs on Profi.ru, as on the card Boris pressed: the most the node may pay. */
@@ -335,11 +341,33 @@ async function attempt(
   // The pause is read again right before the node is called: Boris may have set it while the bid waited.
   if (!(await getSetting(d().db, 'outbound.bids')))
     return mayBeOnSite || ranBefore ? { kind: 'uncertain' } : { kind: 'paused' }
+  // Greeted and tidied at this very moment, not at the press: the hour may have changed since the card (rule 5).
+  // The text is built before the node is called, outside the try below: an error of ours here pressed nothing, so the
+  // order goes back to Boris at once and is never reported as «unsure» (that would make him look for a bid that is not there).
+  let sent: ReturnType<typeof bidTextDetail>
+  try {
+    sent = bidTextDetail(p.text, p.clientName ?? '', d().now?.() ?? new Date())
+  } catch (e) {
+    console.error('bid text failed', e instanceof Error ? e.message.slice(0, 200) : e)
+    return { kind: 'refused', errorClass: 'INTERNAL' }
+  }
+  // Only an old draft that fills the whole form loses something of its greeting; the journal notes it, never with the name.
+  if (sent.fallback) {
+    await appendEvent(
+      d().db,
+      ev(
+        'outbox.attempted',
+        p,
+        { kind: 'outbox', id: row.id },
+        { attempt: n + 1, greeting: sent.fallback },
+      ),
+    ).catch(() => {})
+  }
   try {
     const r = await d().profi.submitBid({
       account_id: p.accountId,
       order_id: p.leadId,
-      text: p.text,
+      text: sent.text,
       price_rub: p.servicePriceRub ?? null,
       // The fee on the card Boris pressed: the node pays no more than that.
       max_fee_rub: p.priceRub,

@@ -84,6 +84,14 @@ describe('the lead card layout', () => {
     ])
   })
 
+  it('FR-LEAD-6: a note on the draft stands under it, in italics, before the price', () => {
+    const text = leadCardText({ ...card, draft: { ...DRAFT, note: TEXTS.greetingNameDropped } })
+    expect(text).toContain(
+      `Понимаю задачу.</blockquote>\n<i>${TEXTS.greetingNameDropped}</i>\nСтоимость услуги:`,
+    )
+    expect(leadCardText({ ...card, draft: { ...DRAFT, note: null } })).not.toContain('<i>')
+  })
+
   it('FR-LEAD-7: the head says what the client budget and the bid fee are when they are unknown', () => {
     const lines = leadCardText({ ...card, budgetText: null, bidPriceRub: 0 }).split('\n')
     expect(lines[1]).toBe('Краснодар · бюджет не указан · цена отклика пока неизвестна')

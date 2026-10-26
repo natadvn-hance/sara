@@ -21,8 +21,13 @@ const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = { verdict: 'fit', reason: 'Нужен сайт', tags: ['сайт'], confidence: 0.9 }
 const BODY = 'Понимаю, клинике важно быстро начать запись.\n\nКогда хотите открыть запись онлайн?'
 const ANALYST = analystAnswer(BODY)
+/** The body in the draft: no period at the end of a paragraph (rule 4). */
+const CLEAN = 'Понимаю, клинике важно быстро начать запись\n\nКогда хотите открыть запись онлайн?'
+/** 12:00 in Moscow: the greeting follows the hour (rule 5), so the tests fix it. */
+const NOON = new Date('2026-10-26T09:00:00Z')
+let moment = NOON
 /** The sample order 90000001: client Ирина, budget «до 150 000 ₽». */
-const DRAFT = `Ирина, добрый день!\n\n${BODY}`
+const DRAFT = `Ирина, добрый день!\n\n${CLEAN}`
 /** Sara's note after a new text; the sample order 90000001 is «Сайт для стоматологической клиники». */
 const SAVED = 'Записала новый текст отклика для «Сайт для стоматологической клиники»'
 const NBSP = ' '
@@ -105,6 +110,7 @@ beforeAll(async () => {
       retryDelaysMs: [50, 50, 50, 50, 50],
       learningTickMs: 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
+      now: () => moment,
     },
   )
   fake.setCoreEventsUrl(`${app.url}/internal/profi/events`)
@@ -121,6 +127,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
+  moment = NOON
   await rm(claudeLog, { force: true })
   byRole = { sorter: FIT, scorer: scorerAnswer(70), analyst: ANALYST }
   await resetDb(db)
@@ -179,6 +186,45 @@ describe('the draft on the card', () => {
     const call = log.find((c) => c.args.some((a) => a.endsWith('analyst/role.md')))
     expect(call?.stdin).toContain('clinic_site: Сайт клиники')
     expect(call?.stdin).not.toContain('hance.example')
+  })
+
+  it('FR-LEAD-6: the first card shows the bid as it will be sent: the case line is tidied like the rest', async () => {
+    const dash = String.fromCharCode(0x2014)
+    await saveProfile(
+      db,
+      'hance-marketing',
+      {
+        reply_format: {
+          parts: [{ id: 'understanding', title: 'Понимание', hint: 'Про ситуацию клиента' }],
+          max_chars: 500,
+          tone: [],
+          examples: [],
+          max_cases: 1,
+        },
+        cases: [
+          {
+            id: 'clinic_site',
+            title: `Сайт-визитка ${dash} для клиники`,
+            url: 'https://hance.example/cases/clinic-site',
+            summary: 'Запись онлайн',
+            tags: ['сайт'],
+            show_when: 'Нужен сайт услуг',
+            never_when: null,
+          },
+        ],
+      },
+      'boris',
+    )
+    byRole = { ...byRole, analyst: { ...ANALYST, case_ids: ['clinic_site'] } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const sent = 'Похожая работа: Сайт визитка для клиники, https://hance.example/cases/clinic-site'
+    expect(cards()[0]?.text).toContain(sent)
+    expect(cards()[0]?.text).not.toContain('Сайт-визитка')
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => fake.bids.length === 1)
+    expect(fake.bids[0]?.text).toBe(`${DRAFT}\n\n${sent}`)
   })
 
   it('FR-LEAD-6: a direction with no format and no cases drafts exactly as before', async () => {
@@ -241,7 +287,7 @@ describe('the draft on the card', () => {
     expect(stdins.length).toBeGreaterThanOrEqual(3)
     for (const stdin of stdins) expect(stdin).not.toContain('Ирина')
     expect(cards()[0]?.text).toContain(
-      'Ирина, добрый день!\n\nПонимаю, Ирина, вам важно быстро начать.\n\nКогда запуск?',
+      'Ирина, добрый день!\n\nПонимаю, Ирина, вам важно быстро начать\n\nКогда запуск?',
     )
   })
 
@@ -398,7 +444,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
       draftPriceRub: 90000,
     })
     expect((await eventsOf('draft.edited', id)).map((e) => e.payload)).toEqual([
-      { before: BODY, after: NEW, voice: false },
+      { before: CLEAN, after: NEW, voice: false },
     ])
     const journal = await db.select({ p: event.payload }).from(event)
     expect(JSON.stringify(journal)).not.toContain('Ирина')
@@ -416,14 +462,29 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await until(() => cards().length === 1)
     const ask = await pressEdit(cards()[0])
     tg.pushText(111, `Понимаю. ${'а'.repeat(590)}`, ask)
+    // The greeting changes with the hour: the count is the one of the longest, the evening one, and says so at noon.
     await until(() =>
-      said('С приветствием выходит 620 знаков, а Профи.ру принимает до 500. Пришли текст короче.'),
+      said(
+        'С вечерним приветствием выходит 621 знак, а Профи.ру принимает до 500. Пришли текст короче.',
+      ),
     )
     expect((await leadOf(id))?.draftText).toBe(DRAFT)
     expect(cards()).toHaveLength(1)
     tg.pushText(111, NEW)
     await until(() => said(SAVED))
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
+  })
+
+  it('FR-LEAD-6: in the evening the same too long edit is counted with the greeting Boris sees', async () => {
+    moment = new Date('2026-10-26T15:00:00Z')
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const ask = await pressEdit(cards()[0])
+    tg.pushText(111, `Понимаю. ${'а'.repeat(590)}`, ask)
+    await until(() =>
+      said('С приветствием выходит 621 знак, а Профи.ру принимает до 500. Пришли текст короче.'),
+    )
   })
 
   it('FR-LEAD-7: after «Пропустить» a late edit changes nothing', async () => {

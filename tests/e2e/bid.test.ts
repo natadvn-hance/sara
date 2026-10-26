@@ -20,6 +20,13 @@ import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = '{"verdict":"fit","reason":"Нужен сайт","tags":["сайт"],"confidence":0.9}'
 const BODY = 'Понимаю задачу.\n\nКогда запуск?'
+// The draft keeps the body without the period at the end of a paragraph (rule 4).
+const CLEAN = 'Понимаю задачу\n\nКогда запуск?'
+// The greeting follows the hour in Moscow (rule 5): 12:00 unless a test moves the clock.
+const NOON = new Date('2026-10-26T09:00:00Z')
+let moment = NOON
+/** The clock breaks while it is true: a local error in the core, before the node is called. */
+let clockBroken = false
 const TITLE = 'Сайт для стоматологической клиники'
 const { db, close } = openTestDb()
 
@@ -109,6 +116,10 @@ beforeAll(async () => {
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
+      now: () => {
+        if (clockBroken) throw new Error('the clock is broken')
+        return moment
+      },
     },
   )
   fake.setCoreEventsUrl(`${app.url}/internal/profi/events`)
@@ -125,6 +136,8 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
+  moment = NOON
+  clockBroken = false
   analystPrice = 30000
   await resetDb(db)
   tg.sent.length = 0
@@ -166,7 +179,7 @@ describe('the service price (K2)', () => {
     await until(() => said(TEXTS.priceSaved(TITLE)))
     expect(await leadOf(id)).toMatchObject({
       draftPriceRub: 5000,
-      draftText: `Ирина, добрый день!\n\n${BODY}`,
+      draftText: `Ирина, добрый день!\n\n${CLEAN}`,
     })
     expect(await payloads('draft.priced', id)).toEqual([
       { before: null, after: 5000, voice: false },
@@ -186,7 +199,7 @@ describe('the service price (K2)', () => {
     await until(() => said(TEXTS.priceNotFound))
     expect(await leadOf(id)).toMatchObject({
       draftPriceRub: null,
-      draftText: `Ирина, добрый день!\n\n${BODY}`,
+      draftText: `Ирина, добрый день!\n\n${CLEAN}`,
     })
     const [q] = await db.select().from(question).where(eq(question.kind, 'edit_price'))
     expect(q?.answeredAt).toBeNull()
@@ -203,7 +216,7 @@ describe('the service price (K2)', () => {
     tg.pushText(111, 'Сделаем за неделю.\n\nцена 7 000')
     await until(() => said(TEXTS.draftAndPriceSaved(TITLE)))
     expect(await leadOf(id)).toMatchObject({
-      draftText: 'Ирина, добрый день!\n\nСделаем за неделю.',
+      draftText: 'Ирина, добрый день!\n\nСделаем за неделю',
       draftPriceRub: 7000,
     })
     expect(await payloads('draft.priced', id)).toEqual([
@@ -445,6 +458,140 @@ describe('the text at the press (M8)', () => {
       .set({ draftText: 'Ирина, добрый день!\n\nДругой текст.' })
       .where(eq(lead.id, id))
     await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
-    expect(fake.bids[0]?.text).toBe('Ирина, добрый день!\n\nДругой текст.')
+    expect(fake.bids[0]?.text).toBe('Ирина, добрый день!\n\nДругой текст')
   }, 20000)
+})
+
+describe('the greeting and the voice of the bid at the moment it is sent (FR-LEAD-6, NFR-UX-1)', () => {
+  const sentOk = () => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен'))
+
+  it('FR-LEAD-6: a bid pressed at 11:59 Moscow time greets «доброе утро»', async () => {
+    moment = new Date('2026-10-26T08:59:00Z')
+    await cardFor()
+    press()
+    await until(sentOk)
+    expect(fake.bids[0]?.text).toBe(`Ирина, доброе утро!\n\n${CLEAN}`)
+  })
+
+  it('FR-LEAD-6: a bid pressed at 12:00 Moscow time greets «добрый день»', async () => {
+    moment = new Date('2026-10-26T09:00:00Z')
+    await cardFor()
+    press()
+    await until(sentOk)
+    expect(fake.bids[0]?.text).toBe(`Ирина, добрый день!\n\n${CLEAN}`)
+  })
+
+  it('FR-LEAD-6: a card made in the morning and pressed in the evening sends «добрый вечер»; the card said the morning', async () => {
+    moment = new Date('2026-10-26T07:00:00Z')
+    const id = await cardFor()
+    const card = tg.sent.filter((m) => m.reply_markup).at(-1)
+    expect(card?.text).toContain('Ирина, доброе утро!')
+    expect(card?.text).not.toContain('Ирина, добрый вечер!')
+    moment = new Date('2026-10-26T15:00:00Z')
+    press()
+    await until(sentOk)
+    expect(fake.bids[0]?.text).toBe(`Ирина, добрый вечер!\n\n${CLEAN}`)
+    // The stored draft keeps the greeting it was made with.
+    expect((await leadOf(id))?.draftText).toBe(`Ирина, доброе утро!\n\n${CLEAN}`)
+  })
+
+  it('FR-LEAD-6: the greeting is built at each try of the press, so a bid held up past 12:00 greets «добрый день»', async () => {
+    moment = new Date('2026-10-26T08:59:00Z')
+    await cardFor()
+    const seen: string[] = []
+    fake.onSubmit((i) => {
+      seen.push(i.text.split('\n')[0] ?? '')
+      moment = new Date('2026-10-26T09:00:00Z')
+    })
+    fake.refuseNext('RATE_LIMITED', 1)
+    press()
+    await until(sentOk)
+    expect(seen).toEqual(['Ирина, доброе утро!', 'Ирина, добрый день!'])
+    expect(fake.bids).toHaveLength(1)
+    expect(fake.bids[0]?.text).toBe(`Ирина, добрый день!\n\n${CLEAN}`)
+  })
+
+  it('NFR-UX-1: dashes, hyphens in common words, final periods and emoji are gone; names and ranges stay', async () => {
+    const id = await cardFor()
+    const dash = String.fromCharCode(0x2014)
+    await db
+      .update(lead)
+      .set({
+        draftText: [
+          'Ирина, добрый день!',
+          `Сайт ${dash} это просто, что-то все-таки сделаем 🤝.`,
+          'Срок 2-3 недели, Санкт-Петербург, Wi-Fi, SEO-продвижение.',
+          'Когда запуск? 😊',
+        ].join('\n\n'),
+      })
+      .where(eq(lead.id, id))
+    press()
+    await until(sentOk)
+    expect(fake.bids[0]?.text).toBe(
+      [
+        'Ирина, добрый день!',
+        'Сайт это просто, что то все таки сделаем',
+        'Срок 2-3 недели, Санкт-Петербург, Wi-Fi, SEO продвижение',
+        'Когда запуск?',
+      ].join('\n\n'),
+    )
+  })
+
+  it('FR-LEAD-6: an old draft of 500 sent in the evening loses the name; the journal says so, without the name', async () => {
+    const id = await cardFor()
+    const body = 'а'.repeat(500 - 'Ирина, добрый день!'.length - 2)
+    await db
+      .update(lead)
+      .set({ draftText: `Ирина, добрый день!\n\n${body}` })
+      .where(eq(lead.id, id))
+    moment = new Date('2026-10-26T15:00:00Z')
+    press()
+    await until(sentOk)
+    expect(fake.bids[0]?.text).toBe(`Добрый вечер!\n\n${body}`)
+    const noted = await db
+      .select({ payload: event.payload })
+      .from(event)
+      .where(eq(event.type, 'outbox.attempted'))
+    expect(noted.map((e) => e.payload)).toEqual([{ attempt: 1, greeting: 'name_dropped' }])
+  })
+
+  it('NFR-REL-4: a local error while the text is built is «nothing pressed»: the order goes back to Boris, never «unsure»', async () => {
+    const id = await cardFor()
+    clockBroken = true
+    press()
+    await until(() => said(TEXTS.bidRefused(TITLE, 'INTERNAL')))
+    clockBroken = false
+    await settle()
+    expect(fake.bids).toHaveLength(0)
+    expect(said(TEXTS.bidUncertain)).toBe(false)
+    expect(await db.select().from(outbox)).toHaveLength(0)
+    expect((await taskOf(id))?.state).toBe('open')
+    expect(await payloads('bid.failed', id)).toEqual([{ reason: 'INTERNAL', given_back: true }])
+    // The card in his hands works again (the resend of a card may have met the broken clock too): the bid goes.
+    press()
+    await until(sentOk)
+    expect(fake.bids).toHaveLength(1)
+  }, 30000)
+
+  it('FR-LEAD-6: a normal bid leaves no note about its greeting', async () => {
+    await cardFor()
+    moment = new Date('2026-10-26T15:00:00Z')
+    press()
+    await until(sentOk)
+    expect(await count('outbox.attempted')).toBe(0)
+  })
+
+  it('FR-LEAD-6: the text sent holds the 500 characters of the form with the longest greeting of the day', async () => {
+    const id = await cardFor()
+    const body = 'а'.repeat(500 - 'Ирина, добрый вечер!'.length - 2)
+    await db
+      .update(lead)
+      .set({ draftText: `Ирина, добрый день!\n\n${body}` })
+      .where(eq(lead.id, id))
+    moment = new Date('2026-10-26T15:00:00Z')
+    press()
+    await until(sentOk)
+    expect(fake.bids[0]?.text).toBe(`Ирина, добрый вечер!\n\n${body}`)
+    expect(fake.bids[0]?.text.length).toBe(500)
+  })
 })

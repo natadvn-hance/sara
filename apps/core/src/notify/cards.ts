@@ -38,7 +38,7 @@ export type LeadCard = {
    */
   reminder?: boolean
   /** The bid text with its greeting and the «Стоимость услуги» (FR-LEAD-6); none: the Analyst did not answer. */
-  draft?: { text: string; priceRub: number | null } | null
+  draft?: { text: string; priceRub: number | null; note?: string | null } | null
   /**
    * The Analyst's short разбор for the card (what the client really needs, the main risk, the condition) and its
    * full reading for «Разбор» (null: a lead whose reading was stored without it).
@@ -165,8 +165,13 @@ export const TEXTS = {
   priceNotFound: 'Не нашла цену в ответе. Пришли её числом, например «5000» или «цена 5000».',
   noPrice: 'Без стоимости услуги Профи.ру отклик не примет. Пришли цену ответом на мой вопрос.',
   noDraft: 'Сначала нажми «Изменить» и пришли текст отклика',
-  draftTooLong: (n: number) =>
-    `С приветствием выходит ${n} ${plural(n, ['знак', 'знака', 'знаков'])}, а Профи.ру принимает до 500. Пришли текст короче.`,
+  /** `evening`: the count is with the evening greeting, the longest of the day, and the one Boris sees now is shorter. */
+  draftTooLong: (n: number, evening = false) =>
+    `С ${evening ? 'вечерним ' : ''}приветствием выходит ${n} ${plural(n, ['знак', 'знака', 'знаков'])}, а Профи.ру принимает до 500. Пришли текст короче.`,
+  /** On the card of an old draft that fills the whole 500 characters (made before the greeting followed the hour). */
+  greetingNameDropped: 'Имя в приветствии не поместилось в 500 знаков, отклик уйдёт без имени',
+  greetingKept:
+    'Приветствие по времени суток не поместилось в 500 знаков, отклик уйдёт с прежним приветствием',
   draftSaved: (title: string) => `Записала новый текст отклика для «${title}»`,
   draftLate: 'Заявка уже решена, текст не поменяла',
   /** The last line of a card whose order closed on Profi.ru: the buttons are gone. */
@@ -339,6 +344,7 @@ function draftLines(c: LeadCard): string[] {
   return [
     '<b>Черновик отклика</b>',
     `<blockquote>${clean(c.draft.text, CAP.draft)}</blockquote>`,
+    ...(c.draft.note ? [`<i>${c.draft.note}</i>`] : []),
     `Стоимость услуги: ${price}`,
   ]
 }

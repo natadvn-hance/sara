@@ -33,6 +33,9 @@ import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import {
   BID_TEXT_MAX,
+  bidLengthMax,
+  bidTextAt,
+  bidTextDetail,
   bodyOf,
   type Draft,
   type DraftMiss,
@@ -55,6 +58,8 @@ export type LeadPipelineDeps = {
   remindAfterMs: () => Promise<number>
   /** Card sending is retried, for example while the bot is starting (default 5 attempts from 2 s). */
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
+  /** The clock of the greeting a bid text carries (Moscow time of day); tests fix it. */
+  now?: () => Date
 }
 
 export type LeadPipeline = {
@@ -84,6 +89,8 @@ function d(): LeadPipelineDeps {
   if (!deps) throw new Error('lead pipeline is not configured')
   return deps
 }
+/** The moment the greeting of a bid text is built for. */
+const greetingMoment = (): Date => deps?.now?.() ?? new Date()
 
 const ev = (
   type:
@@ -247,7 +254,11 @@ async function draftFor(
     // The direction's format and cases for the Analyst; a profile that cannot be read leaves the draft as it was.
     const profile = await getProfile(d().db, opts.accountId).catch(() => null)
     const { accountId: _account, ...rest } = opts
-    return await writeDraft(d().gateway, o, { ...rest, ...(profile ? { profile } : {}) })
+    return await writeDraft(d().gateway, o, {
+      ...rest,
+      ...(profile ? { profile } : {}),
+      now: greetingMoment(),
+    })
   } catch (err) {
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
     return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
@@ -575,7 +586,14 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
-    draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
+    // The same text as every later card and as the bid: the greeting of this hour, the voice rules applied (the case
+    // lines the program put in are tidied too), so Boris never approves a text that is not the one to be sent.
+    draft: draft?.text
+      ? {
+          text: bidTextAt(draft.text, withPage.client_name, greetingMoment()),
+          priceRub: draft.priceRub,
+        }
+      : null,
     analysis: cardAnalysis(draft?.analysis),
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
@@ -665,9 +683,30 @@ async function cardOfFound(
     bidPriceRub: l.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
     reminder,
-    draft: l.draftText ? { text: l.draftText, priceRub: l.draftPriceRub } : null,
+    // The card shows the bid as it would go out now: the greeting of this hour, the voice rules applied. Nothing says
+    // that the greeting may change; it is built again when the bid is sent.
+    draft: l.draftText ? draftOnCard(l.draftText, l.clientName, l.draftPriceRub) : null,
     analysis: cardAnalysis(l.draftAnalysis),
   }
+}
+
+/**
+ * The draft as a card shows it: the bid as it would go out now, with a note when it had to give up the name or the
+ * hour in its greeting to fit the 500 characters (an old draft that fills the whole form).
+ */
+function draftOnCard(
+  stored: string,
+  clientName: string,
+  priceRub: number | null,
+): { text: string; priceRub: number | null; note: string | null } {
+  const { text, fallback } = bidTextDetail(stored, clientName, greetingMoment())
+  const note =
+    fallback === 'name_dropped'
+      ? TEXTS.greetingNameDropped
+      : fallback === 'greeting_kept'
+        ? TEXTS.greetingKept
+        : null
+  return { text, priceRub, note }
 }
 
 /** The lead card for an open task. */
@@ -898,9 +937,15 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   const said = priceOf(a.text, { bare: forPrice })
   // The price was asked for: words without one are not taken for a new text.
   if (forPrice && said.priceRub === null) return TEXTS.priceNotFound
-  const next = said.text === null ? null : editOf(said.text, l.clientName)
-  // Too long: the request stays open, the next text answers it.
-  if (next !== null && next.length > BID_TEXT_MAX) return TEXTS.draftTooLong(next.length)
+  const next = said.text === null ? null : editOf(said.text, l.clientName, greetingMoment())
+  // Too long: the request stays open, the next text answers it. The length is the one at the worst hour of the day
+  // (the evening greeting is the longest), so what fits now fits whenever the bid is sent.
+  if (next !== null) {
+    const longest = bidLengthMax(next, l.clientName)
+    // The count is with the evening greeting; when the greeting Boris sees now is shorter, the answer says so.
+    const shown = bidTextAt(next, l.clientName, greetingMoment()).length
+    if (longest > BID_TEXT_MAX) return TEXTS.draftTooLong(longest, longest !== shown)
+  }
   const saved = await d().db.transaction(async (tx) => {
     if (!(await markAnswered(tx, a.question, a))) return false
     await closeDraftRequests(tx, t.id, a.at)
@@ -1129,6 +1174,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
               leadId: l.id,
               accountId: l.accountId,
               text: now.draftText,
+              clientName: now.clientName,
               correlationId: l.correlationId,
               title: l.title,
               priceRub: now.bidPriceRub,

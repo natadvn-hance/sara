@@ -17,6 +17,7 @@ import { directionOnboarding, directionOverride, lead } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import type { RoleName } from '../gateway/roles'
 import { appendEvent } from '../journal/journal'
+import { greetingRoom } from '../leads/draft'
 import { rulesText } from '../leads/scorer'
 import { type CalibrationSummary, calibrationPassed, latestCalibration } from './calibration'
 import { type Contradiction, contradictions } from './contradictions'
@@ -557,10 +558,13 @@ export async function confirmFormat(
     }
     const format = ReplyFormat.safeParse({ ...proposal.data.reply_format, examples })
     if (!format.success) return { ok: false, error: 'invalid' }
-    // The sample is shown with its greeting, so the greeting counts against the format's length.
+    // The sample is shown with its greeting, so the greeting counts against the format's length: the longest it grows
+    // to in the day («добрый вечер»), as a bid is greeted again when it is sent.
     if (
       examples.some(
-        (e, n) => (samples[n]?.greeting.length ?? 0) + GAP + e.length > format.data.max_chars,
+        (e, n) =>
+          (samples[n] ? greetingRoom(samples[n].greeting) : 0) + GAP + e.length >
+          format.data.max_chars,
       )
     )
       return { ok: false, error: 'too_long' }
