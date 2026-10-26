@@ -172,6 +172,16 @@ describe('the send of a text as its own process', () => {
     expect(told[0]).toMatch(/^⚠️/)
   })
 
+  it('FR-CONV-12: a job with a time to wait for goes only after it', async () => {
+    const conv = await scene()
+    const j = await job(conv.id, { notBefore: new Date(Date.now() + 1500).toISOString() })
+    await startSendJob(j)
+    await sleep(700)
+    expect(sends).toHaveLength(0)
+    await until(finished(j.key))
+    expect(sends).toHaveLength(1)
+  })
+
   it('FR-OPS-1: a refusal of the outbox (a pause) is told as «не отправляю», nothing goes', async () => {
     const conv = await scene()
     await setSetting(db, 'outbound.messages', false, 'system')

@@ -4,9 +4,11 @@ import type { Db } from '../db/client'
 import { convTurn, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
+import { getSetting } from '../settings/store'
 import { SEND_TEXTS, type SendAfter, type SendOptions, type SendOutcome } from './sendTexts'
 import { getConversation } from './store'
 import { CONV_TEXTS, REMIND_TEXTS } from './texts'
+import { moscowHoursEnd } from './time'
 import type { ConversationRow } from './types'
 
 /**
@@ -235,11 +237,17 @@ async function release(
   // One press takes the card, and the row is taken once however many cards point at it.
   if (!(await closeCard(d.db, t.id, o.how))) return REMIND_TEXTS.alreadyDone
   if (!(await move(d.db, row.id, 'carded', { outcome: 'sending' }))) return REMIND_TEXTS.alreadyDone
-  return d.sendText(row.conversationId, o.text, o.author, {
+  // A press at night: no reminder goes to a client in the quiet hours, it waits for the end of them (the send process
+  // sleeps until then) and Boris is told so.
+  const quiet = await getSetting(d.db, 'conv.reminder_quiet')
+  const hold = moscowHoursEnd(new Date(), quiet)
+  const answer = await d.sendText(row.conversationId, o.text, o.author, {
     key: o.key,
     after: { kind: 'reminder', rowId: row.id, taskId: t.id, how: o.how },
     ground: { anchor: row.anchorMessageId },
+    ...(hold && { notBefore: hold.toISOString() }),
   })
+  return hold && answer === SEND_TEXTS.sending ? REMIND_TEXTS.held(quiet.to) : answer
 }
 
 /** A press on the card of a reminder: «Отправить» or «Не надо» (the «Изменить» question is asked by the caller). */

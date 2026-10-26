@@ -202,6 +202,8 @@ export const CONV_TEXTS = {
 
 /** What Boris is told when he answers the card of a reminder (FR-CONV-12). */
 export const REMIND_TEXTS = {
+  /** A press at night: the reminder goes at the end of the quiet hours, as every reminder does. */
+  held: (hour: number) => `Сейчас тихие часы: напоминание уйдёт в ${hour}:00 по Москве.`,
   declined: 'Хорошо, это напоминание клиенту не отправляю.',
   gone: (why: string) => `Напоминание уже не нужно: ${why}. Клиенту ничего не отправила.`,
   notNow: (why: string) =>

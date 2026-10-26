@@ -179,7 +179,7 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
     }
     const text = await obtainText(k, conversationId, rowId, next, g.read)
     // The text may have taken hours: a reminder never goes in the quiet hours, it waits for the morning.
-    const hold = await DBOS.runStep(async () => quietUntil(d(), new Date()), {
+    const hold = await DBOS.runStep(async () => quietUntil(d(), new Date(), conversationId), {
       name: `quiet-${k}`,
       ...DB_STEP,
     })

@@ -161,6 +161,7 @@ const live = async () => {
 /** The waits after the first reminder shortened to nothing: the whole ladder runs at once (the first still waits for its day). */
 const instant = () => {
   deps.waitsMs = { second: 0, third: 0, silent: 0 }
+  deps.minGapMs = 0
 }
 
 async function useGateway(byRole: Record<string, unknown>, env: Record<string, string> = {}) {
@@ -405,6 +406,29 @@ describe('a reminder after the switch', () => {
     expect(Math.abs(at - (wentAt + 2 * DAY))).toBeLessThan(10_000)
   })
 
+  it('FR-CONV-12: the second reminder keeps a day from the first that went, even when its own wait is over', async () => {
+    await live()
+    deps.waitsMs = { second: 0 }
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const wf = remindWorkflowId(conv.id, 'm-1')
+    const quietStep = async () =>
+      ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === 'quiet-1')
+    await until(async () => (await quietStep()) !== undefined)
+    const wentAt = Date.parse(String((await rows())[0]?.finishedAt))
+    const until1 = Date.parse(
+      String(
+        (await quietStep())?.output && ((await quietStep())?.output as { until?: string }).until,
+      ),
+    )
+    // A day after the first went, not a moment after: nothing else goes meanwhile.
+    expect(Math.abs(until1 - (wentAt + DAY))).toBeLessThan(10_000)
+    await sleep(500)
+    expect(sends).toHaveLength(1)
+    expect(await statusOf(wf)).toBe('PENDING')
+  })
+
   it('FR-CONV-12: «Закрыть» on the silence task closes the conversation', async () => {
     await live()
     instant()
@@ -465,6 +489,7 @@ describe('a reminder after the switch', () => {
     deps.fallbackAfterMs = 600
     // The second may follow the first at once; the third keeps its three days.
     deps.waitsMs = { second: 0 }
+    deps.minGapMs = 0
     // Our message 4 days ago: the first and the second reminders are due.
     const conv = await scene(quiet(4 * DAY))
     await startReminder(conv.id, 'm-1')

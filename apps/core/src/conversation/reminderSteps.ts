@@ -40,6 +40,8 @@ export type RemindDeps = {
   retryEveryMs?: number
   /** The waits after the first reminder (2, 3 and 3 days, each from the step before); tests shorten them. */
   waitsMs?: Waits
+  /** The least time between two reminders that really went out (default a day); tests shorten it. */
+  minGapMs?: number
   /** How often the silence task is tried again while something stands in its way (default an hour). */
   dormantRetryEveryMs?: number
   /** How often it is tried again after a failure, a Telegram outage say (default 10 minutes). */
@@ -191,13 +193,17 @@ export async function planNext(
 }
 
 /**
- * The texts of the reminders this conversation's ladder sent: they stand in the chat as our side's messages. Those that
- * went by themselves (the key of their process), those Boris sent with «Отправить» on the card of a reminder (the key
- * of the card's task) and his own version of a reminder (what he wrote after «Изменить»).
+ * The reminders this conversation's ladder sent, as the chat shows them: they stand there as our side's messages. Those
+ * that went by themselves (the key of their process), those Boris sent with «Отправить» on the card of a reminder (the
+ * key of the card's task) and his own version of a reminder (what he wrote after «Изменить»). `confirmedAt` is when the
+ * service confirmed the message; null for a text that is only known as his version.
  */
-export async function ladderTexts(db: Db, conversationId: string): Promise<Set<string>> {
+async function ladderRows(
+  db: Db,
+  conversationId: string,
+): Promise<{ text: string; confirmedAt: string | null }[]> {
   const own = await db
-    .select({ payload: outbox.payload })
+    .select({ payload: outbox.payload, confirmedAt: outbox.confirmedAt })
     .from(outbox)
     .where(
       and(
@@ -206,7 +212,7 @@ export async function ladderTexts(db: Db, conversationId: string): Promise<Set<s
       ),
     )
   const pressed = await db
-    .select({ payload: outbox.payload })
+    .select({ payload: outbox.payload, confirmedAt: outbox.confirmedAt })
     .from(outbox)
     .innerJoin(task, eq(outbox.idempotencyKey, sql`'msg:send:' || ${task.id}::text`))
     .where(and(eq(outbox.kind, 'message'), like(task.entityId, `conv-remind:${conversationId}:%`)))
@@ -220,12 +226,40 @@ export async function ladderTexts(db: Db, conversationId: string): Promise<Set<s
         isNotNull(convTurn.borisText),
       ),
     )
-  return new Set(
-    [
-      ...[...own, ...pressed].map((r) => (r.payload as { text?: string }).text ?? ''),
-      ...edited.map((r) => r.text ?? ''),
-    ].map(normalizeText),
-  )
+  const editedTexts = new Set(edited.map((r) => normalizeText(r.text ?? '')))
+  const conv = await getConversation(db, conversationId)
+  // His version went through the outbox under his own key: it is found by its text in this chat.
+  const sentEdited =
+    conv && editedTexts.size > 0
+      ? (
+          await db
+            .select({ payload: outbox.payload, confirmedAt: outbox.confirmedAt })
+            .from(outbox)
+            .where(
+              and(eq(outbox.kind, 'message'), sql`${outbox.payload}->>'chatId' = ${conv.chatId}`),
+            )
+        ).filter((r) => editedTexts.has(normalizeText((r.payload as { text?: string }).text ?? '')))
+      : []
+  return [
+    ...[...own, ...pressed, ...sentEdited].map((r) => ({
+      text: normalizeText((r.payload as { text?: string }).text ?? ''),
+      confirmedAt: r.confirmedAt,
+    })),
+    ...edited.map((r) => ({ text: normalizeText(r.text ?? ''), confirmedAt: null })),
+  ]
+}
+
+/** The texts of the reminders this conversation's ladder sent: they stand in the chat as our side's messages. */
+export async function ladderTexts(db: Db, conversationId: string): Promise<Set<string>> {
+  return new Set((await ladderRows(db, conversationId)).map((r) => r.text))
+}
+
+/** When the last reminder of the ladder really went out (the service confirmed it), or null if none did. */
+export async function lastReminderWentAt(db: Db, conversationId: string): Promise<number | null> {
+  const times = (await ladderRows(db, conversationId))
+    .map((r) => (r.confirmedAt ? Date.parse(r.confirmedAt) : Number.NaN))
+    .filter((t) => !Number.isNaN(t))
+  return times.length > 0 ? Math.max(...times) : null
 }
 
 /**
@@ -384,14 +418,27 @@ export async function giveUpDormant(d: RemindDeps, rowId: string, why: string): 
   })
 }
 
+/** The least time between two reminders that really went out: a late press never puts two close together. */
+const MIN_GAP_MS = 24 * 3600_000
+
 /**
- * Whether it is the quiet hours of reminders now (`conv.reminder_quiet`) and when they end. The planned time was
- * outside them, but getting the text can take hours (a limit wait, a rewrite, the ready text), so a reminder due at
- * 22:30 could be sent at 01:30: the time is looked at again right before the send.
+ * How long a reminder still waits right before it goes, or null if it may go now. The planned time was outside the
+ * quiet hours (`conv.reminder_quiet`), but getting the text can take hours (a limit wait, a rewrite, the ready text),
+ * so a reminder due at 22:30 could be sent at 01:30: the time is looked at again here. And a day must have passed
+ * since the last reminder that really went out (Boris may have pressed a card late, after the wait of the next step
+ * was already running), so two reminders never reach a client 2 hours apart.
  */
-export async function quietUntil(d: RemindDeps, now: Date): Promise<{ until: string | null }> {
-  const end = moscowHoursEnd(now, await getSetting(d.db, 'conv.reminder_quiet'))
-  return { until: end ? end.toISOString() : null }
+export async function quietUntil(
+  d: RemindDeps,
+  now: Date,
+  conversationId: string,
+): Promise<{ until: string | null }> {
+  const went = await lastReminderWentAt(d.db, conversationId)
+  const gapEnd = went === null ? 0 : went + (d.minGapMs ?? MIN_GAP_MS)
+  const at = new Date(Math.max(now.getTime(), gapEnd))
+  const end = moscowHoursEnd(at, await getSetting(d.db, 'conv.reminder_quiet'))
+  const until = end ?? (at.getTime() > now.getTime() ? at : null)
+  return { until: until ? until.toISOString() : null }
 }
 
 /** The model's try at the text, in one step so a replay does not ask it again. Never throws: no text is the answer. */

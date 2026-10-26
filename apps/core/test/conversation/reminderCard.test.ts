@@ -8,11 +8,13 @@ import {
   isLadderMessage,
   ladderTexts,
   type Planned,
+  quietUntil,
   type RemindDeps,
   sendStep,
 } from '../../src/conversation/reminderSteps'
 import { sendTextNow } from '../../src/conversation/sendJob'
 import type { SendOptions } from '../../src/conversation/sendTexts'
+import { moscowHour, moscowHoursEnd } from '../../src/conversation/time'
 import { convTurn, deal, mindProposal, outbox, question, task } from '../../src/db/schema'
 import { type ProfiClient, ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
@@ -543,5 +545,107 @@ describe('the silence task', () => {
     expect((cards.at(-1)?.text ?? '').split('\n')[0]).toBe(
       '😴 Анна, заказ «Сайт для клиники»: клиент молчит после трёх напоминаний.',
     )
+  })
+})
+
+describe('the time of a reminder that goes by a press', () => {
+  /** A reminder of the ladder that went `agoMs` ago: its outbox row stands, confirmed. */
+  async function wentAgo(convId: string, agoMs: number, key = `msg:conv-remind:${convId}:m-1:1`) {
+    await db.insert(outbox).values({
+      id: newEventId(),
+      kind: 'message',
+      idempotencyKey: key,
+      payload: { accountId: 'hance-marketing', chatId: CHAT, text: TEXT, author: 'sara' },
+      state: 'confirmed',
+      confirmedAt: new Date(Date.now() - agoMs).toISOString(),
+    })
+  }
+  /** Quiet hours that do not cover the next two days' worth of tests: they are far from now. */
+  const awayFromNow = async () => {
+    const h = moscowHour(new Date())
+    await setSetting(db, 'conv.reminder_quiet', { from: (h + 6) % 24, to: (h + 7) % 24 }, 'system')
+  }
+
+  it('FR-CONV-12: a reminder keeps a day from the one that really went out, a late press cannot squeeze two together', async () => {
+    const { conv } = await scene()
+    await awayFromNow()
+    await wentAgo(conv.id, 2 * HOUR)
+    const r = await quietUntil(deps, new Date(), conv.id)
+    const at = Date.parse(r.until ?? '')
+    expect(Math.abs(at - (Date.now() - 2 * HOUR + 24 * HOUR))).toBeLessThan(5000)
+  })
+
+  it('FR-CONV-12: a day passed since the last reminder, or none went: no extra wait', async () => {
+    const { conv } = await scene()
+    await awayFromNow()
+    expect((await quietUntil(deps, new Date(), conv.id)).until).toBeNull()
+    await wentAgo(conv.id, 30 * HOUR)
+    expect((await quietUntil(deps, new Date(), conv.id)).until).toBeNull()
+  })
+
+  it('FR-CONV-12: a reminder sent by a press and one Boris changed count as sent too; a card nobody pressed does not', async () => {
+    const { conv, rowId } = await scene()
+    await awayFromNow()
+    // The card is there, nothing went: no wait.
+    await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)
+    expect((await quietUntil(deps, new Date(), conv.id)).until).toBeNull()
+    // Boris pressed «Отправить» an hour ago: the next reminder is a day after it.
+    const t = await taskOf(rowId)
+    await wentAgo(conv.id, HOUR, `msg:send:${t?.id}`)
+    const r = await quietUntil(deps, new Date(), conv.id)
+    expect(Math.abs(Date.parse(r.until ?? '') - (Date.now() - HOUR + 24 * HOUR))).toBeLessThan(5000)
+  })
+
+  it('FR-CONV-12: when the day is over inside the quiet hours the reminder waits for the morning', async () => {
+    const { conv } = await scene()
+    // The day since the last reminder (which went 2 hours ago) ends 22 hours from now: inside the quiet hours.
+    const h = moscowHour(new Date())
+    const quiet = { from: (h + 20) % 24, to: (h + 23) % 24 }
+    await setSetting(db, 'conv.reminder_quiet', quiet, 'system')
+    await wentAgo(conv.id, 2 * HOUR)
+    const r = await quietUntil(deps, new Date(), conv.id)
+    const dayLater = new Date(Date.now() - 2 * HOUR + 24 * HOUR)
+    expect(r.until).toBe(moscowHoursEnd(dayLater, quiet)?.toISOString())
+  })
+
+  it('FR-CONV-12: a press in the quiet hours holds the reminder until 9:00 Moscow, and says so', async () => {
+    const { taskId } = await carded()
+    const h = moscowHour(new Date())
+    const quiet = { from: (h + 23) % 24, to: (h + 2) % 24 }
+    await setSetting(db, 'conv.reminder_quiet', quiet, 'system')
+    const seen: (SendOptions | undefined)[] = []
+    const held = await onConvPress(
+      {
+        db,
+        notifier: { sendText: async () => ({ messageId: 900 }) },
+        // The bot's send answers at once and goes on by itself; this one only records what it was told.
+        sendText: async (_c, _t, _a, o) => {
+          seen.push(o)
+          return 'Отправляю…'
+        },
+      },
+      { taskId, action: 'send' },
+    )
+    expect(seen[0]?.notBefore).toBe(moscowHoursEnd(new Date(), quiet)?.toISOString())
+    expect(held).toBe(`Сейчас тихие часы: напоминание уйдёт в ${quiet.to}:00 по Москве.`)
+  })
+
+  it('FR-CONV-12: a press in the daytime goes at once, with no time to wait for', async () => {
+    const { taskId } = await carded()
+    await awayFromNow()
+    const seen: (SendOptions | undefined)[] = []
+    const answer = await onConvPress(
+      {
+        db,
+        notifier: { sendText: async () => ({ messageId: 900 }) },
+        sendText: async (_c, _t, _a, o) => {
+          seen.push(o)
+          return 'Отправляю…'
+        },
+      },
+      { taskId, action: 'send' },
+    )
+    expect(seen[0]?.notBefore).toBeUndefined()
+    expect(answer).toBe('Отправляю…')
   })
 })
