@@ -92,6 +92,41 @@ export const SETTINGS = {
   'conv.reminders': { schema: z.boolean(), default: true },
   /** FR-MIND-2: local vectors beside the full-text search, when they proved cheap. */
   'mind.vectors': { schema: z.boolean(), default: false },
+  /** M5: the school's jobs and lesson batches; off until the deploy turns it on, as pipeline.*. */
+  'school.on': { schema: z.boolean(), default: false },
+  /** NFR-COST-2: Moscow hours of the night school. */
+  'school.night': {
+    schema: hours.refine((h) => h.from !== h.to, { message: 'ночь не может быть сутками' }),
+    default: { from: 1, to: 7 },
+  },
+  /** NFR-COST-2: units a night (haiku 1, sonnet 4, opus 20). */
+  'school.night_units': { schema: z.number().int().positive(), default: 400 },
+  /** NFR-COST-2: more units on the weekly exam night, for its own jobs only. */
+  'school.weekly_units': { schema: z.number().int().nonnegative(), default: 700 },
+  /** FR-TRAIN-8, FR-SPEECH-4: the day the weekly exam's night ends on (0 Sunday, the night from Saturday). */
+  'school.weekly_day': { schema: z.number().int().min(0).max(6), default: 0 },
+  /** FR-TRAIN-9: made-up dialogs a night, five a call. */
+  'school.generator_dialogs': { schema: z.number().int().positive(), default: 50 },
+  /** FR-TRAIN-6: lessons in one Telegram batch. */
+  'school.lesson_batch': { schema: z.number().int().positive(), default: 5 },
+  /** FR-TRAIN-6: lesson batches a Moscow day. */
+  'school.batches_per_day': { schema: z.number().int().positive(), default: 2 },
+  /** FR-TRAIN-7: the teacher skips a night while this many cards wait for Boris. */
+  'school.cards_waiting_max': { schema: z.number().int().positive(), default: 15 },
+  /** FR-NOTIF-3: messages the school sends of its own accord a Moscow day; the rest go to the evening summary. */
+  'school.messages_per_day': { schema: z.number().int().positive(), default: 3 },
+  /** FR-TRAIN-8: the exam judge agreed with Boris on 20 golden items; set by the code. */
+  'school.judge_trusted': { schema: z.boolean(), default: false },
+  /** FR-AUTO-3: approvals in a row before Sara proposes a topic. */
+  'auto.approvals_to_promote': { schema: z.number().int().positive(), default: 10 },
+  /** FR-AUTO-3: ratings of the topic in the trainer within 14 days... */
+  'auto.trainer_checks': { schema: z.number().int().positive(), default: 5 },
+  /** ...and how many of them «так и отправила бы». */
+  'auto.trainer_good': { schema: z.number().int().positive(), default: 4 },
+  /** FR-AUTO-4: below this similarity (%) Boris's edit is substantial. */
+  'auto.substantial_below': { schema: z.number().int().min(1).max(100), default: 70 },
+  /** FR-AUTO-2: after the switch a reply wholly from a confirmed understanding goes by itself. */
+  'auto.from_understanding': { schema: z.boolean(), default: true },
 } as const
 
 export type SettingKey = keyof typeof SETTINGS
