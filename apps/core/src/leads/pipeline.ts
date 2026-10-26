@@ -8,7 +8,7 @@ import {
   ProfiOrder,
   type TaskAction,
 } from '@sara/shared'
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull, ne } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
 import { getProfile } from '../direction/profile'
@@ -61,6 +61,12 @@ export type LeadPipeline = {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onReminder(taskId: string): Promise<void>
   resendCard(taskId: string): Promise<void>
+  /**
+   * The order of this card closed on Profi.ru. `recheck`: the waiting task is ended as skipped (closed) and every
+   * message of its card is edited (the closed line, no buttons); a task Boris decided meanwhile is left alone.
+   * `press`: Boris's bid ended ORDER_CLOSED; his task stays as he decided it, only the card is closed.
+   */
+  closeOnSite(taskId: string, via: 'recheck' | 'press'): Promise<void>
   /** Boris's answer to the request after «Изменить»: the new bid text; the reply goes back to him. */
   onDraftText(a: DraftAnswer): Promise<string>
 }
@@ -82,6 +88,7 @@ const ev = (
     | 'lead.skipped'
     | 'lead.stale'
     | 'lead.page_read'
+    | 'lead.closed_on_site'
     | 'lead.held'
     | 'lead.drafted'
     | 'draft.edited'
@@ -678,6 +685,48 @@ function cardSent(
   })
 }
 
+/**
+ * Every message the card of this task went out as (its first card, reminders, cards sent again), edited as closed.
+ * The numbers come from the journal (card.sent) and from the task, which also holds those sent before the journal
+ * kept them. One message Telegram will not edit never stops the others.
+ */
+async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>) {
+  const sent = await d()
+    .db.select({ payload: event.payload })
+    .from(event)
+    .where(
+      and(
+        eq(event.type, 'card.sent'),
+        eq(event.entityKind, 'task'),
+        eq(event.entityId, found.task.id),
+      ),
+    )
+  const [now] = await d()
+    .db.select({ messageId: task.telegramMessageId })
+    .from(task)
+    .where(eq(task.id, found.task.id))
+  const ids = new Set<number>()
+  for (const e of sent) {
+    const id = (e.payload as { message_id?: unknown }).message_id
+    if (typeof id === 'number') ids.add(id)
+  }
+  if (now?.messageId != null) ids.add(now.messageId)
+  if (ids.size === 0) return
+  const card = await cardOfFound(found, false)
+  for (const id of [...ids].sort((a, b) => a - b)) {
+    try {
+      await d().notifier.closeLeadCard(id, card)
+    } catch (err) {
+      console.error(
+        'card not closed',
+        found.task.id,
+        id,
+        err instanceof Error ? err.message.slice(0, 200) : err,
+      )
+    }
+  }
+}
+
 /** The card of an open task, sent now. */
 async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> {
   const card = await cardOfTask(taskId, false)
@@ -1083,6 +1132,51 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       })
       const found = await leadOfTask(taskId)
       if (found) await cardSent(taskId, found.lead.correlationId, m.messageId, 'resend')
+    },
+
+    async closeOnSite(taskId, via) {
+      const found = await leadOfTask(taskId)
+      if (!found) return
+      const { lead: l } = found
+      const ended = await d().db.transaction(async (tx) => {
+        const rows = await tx
+          .update(task)
+          .set({ state: 'resolved', resolution: 'skip', resolvedAt: new Date().toISOString() })
+          .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+          .returning({ id: task.id })
+        // Decided meanwhile: a recheck leaves it all alone. After a failed press the task is Boris's own decision
+        // (the bid he pressed) and stays, but its card is closed all the same.
+        if (rows.length === 0 && via === 'recheck') return null
+        if (rows.length > 0) {
+          await appendEvent(
+            tx,
+            ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'sara', {
+              action: 'skip',
+              reason: 'closed',
+            }),
+          )
+        }
+        await tx
+          .update(lead)
+          .set({ status: 'closed' })
+          .where(and(eq(lead.id, l.id), ne(lead.status, 'bid_sent')))
+        await appendEvent(
+          tx,
+          ev('lead.closed_on_site', { kind: 'lead', id: l.id }, l.correlationId, 'sara', { via }),
+        )
+        return { here: rows.length > 0 }
+      })
+      if (!ended) return
+      if (ended.here) {
+        await deliverDecision(taskId, 'skip').catch((err) =>
+          console.error(
+            'decision wait not released',
+            taskId,
+            err instanceof Error ? err.message.slice(0, 200) : err,
+          ),
+        )
+      }
+      await closeCardMessages(found)
     },
 
     onDraftText,

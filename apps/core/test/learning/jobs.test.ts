@@ -11,6 +11,7 @@ afterAll(close)
 let sent: string[] = []
 const notifier: Notifier = {
   sendLeadCard: async () => ({ messageId: 1 }),
+  closeLeadCard: async () => {},
   sendText: async (t) => {
     sent.push(t)
     return { messageId: 2 }

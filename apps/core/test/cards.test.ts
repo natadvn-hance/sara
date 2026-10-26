@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   analysisMessages,
+  closedLeadCardText,
   type LeadCard,
   leadCardKeyboard,
   leadCardText,
@@ -346,6 +347,56 @@ describe('the lead card length', () => {
     })
     expect(telegramTextLength(r.html)).toBeLessThanOrEqual(4096)
     expect(r.html.endsWith(LINK)).toBe(true)
+  })
+})
+
+describe('the card of an order closed on Profi.ru', () => {
+  const CLOSED = `<b>${TEXTS.closedOnSite}</b>`
+
+  it('FR-LEAD-5: the closed card is the same card with the closed line as its last line', () => {
+    const open = leadCardText(full)
+    const closed = closedLeadCardText(full)
+    expect(closed).toBe(`${open}\n\n${CLOSED}`)
+    expect(closed.split('\n').at(-1)).toBe(CLOSED)
+    expect(TEXTS.closedOnSite).toBe('Заявка закрыта на Профи.ру, откликнуться уже нельзя')
+  })
+
+  it('FR-LEAD-5: a reminder copy closes as the plain card, without «Заявка ждёт решения»', () => {
+    const closed = closedLeadCardText({ ...full, reminder: true })
+    expect(closed).not.toContain('Заявка ждёт решения')
+    expect(closed).not.toContain('⏰')
+    expect(closed.endsWith(CLOSED)).toBe(true)
+  })
+
+  it('FR-LEAD-5: a long order text is cut so the closed line still fits within 4096 characters', () => {
+    const long = 'Очень длинная заявка. '.repeat(500)
+    const r = renderLeadCard({ ...full, text: long }, { closed: true })
+    expect(r.textCut).toBe(true)
+    expect(telegramTextLength(r.html)).toBeLessThanOrEqual(4096 - 100)
+    expect(r.html.endsWith(CLOSED)).toBe(true)
+    expect(r.html).toContain(LINK)
+    // A card that was just under the limit before the closed line is cut a little more, never over.
+    for (const n of [3000, 3300, 3400, 3500, 3600, 3700, 3900]) {
+      const edge = renderLeadCard({ ...full, text: 'я'.repeat(n) }, { closed: true })
+      expect(telegramTextLength(edge.html)).toBeLessThanOrEqual(4096 - 100)
+      expect(edge.html.endsWith(CLOSED)).toBe(true)
+    }
+  })
+
+  it('FR-LEAD-5: the closed line is not on an open card, and the open card is as it was', () => {
+    expect(leadCardText(full)).not.toContain(TEXTS.closedOnSite)
+    expect(renderLeadCard(full)).toEqual(renderLeadCard(full, {}))
+  })
+
+  it('NFR-UX-1: the texts of a closed order have no long dash', () => {
+    for (const t of [closedLeadCardText(full), TEXTS.closedOnSite, TEXTS.recheckDoubt(3, 4)])
+      expect(t).not.toContain(DASH)
+  })
+
+  it('FR-LEAD-5: the warning about a changed order page says how many looked closed, in plain words', () => {
+    expect(TEXTS.recheckDoubt(3, 4)).toBe(
+      'Похоже, Профи.ру поменял страницу заказа: 3 из 4 проверенных заявок выглядят закрытыми. Карточки не трогаю, посмотри сам.',
+    )
   })
 })
 

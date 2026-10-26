@@ -117,6 +117,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
     reconcileDelaysMs: o.reconcileDelaysMs ?? [5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
+    closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   const accountEvents = createProfiEventDispatcher({

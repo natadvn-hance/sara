@@ -2,6 +2,8 @@
 import { createServer } from 'node:http'
 
 export type SentMessage = {
+  /** The number the fake gave the message when it was sent. */
+  message_id?: number
   chat_id: number
   text: string
   parse_mode?: string
@@ -10,11 +12,23 @@ export type SentMessage = {
   disable_notification?: boolean
 }
 
+/** A message the bot edited (editMessageText); `reply_markup` with no rows is the buttons taken away. */
+export type EditedMessage = {
+  chat_id: number
+  message_id: number
+  text: string
+  parse_mode?: string
+  link_preview_options?: { is_disabled?: boolean }
+  reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] }
+}
+
 export type FakeTelegram = {
   apiRoot: string
   token: string
   username: string
   sent: SentMessage[]
+  /** Edits Telegram accepted, in order (refused ones are not here). */
+  edited: EditedMessage[]
   answers: { callback_query_id: string; text?: string }[]
   pushStart(chatId: number): void
   pushPress(chatId: number, data: string): string
@@ -26,8 +40,10 @@ export type FakeTelegram = {
   setFileBroken(on: boolean): void
   /** Simulates another program polling the same bot: getUpdates answers 409. */
   setConflict(on: boolean): void
-  /** Every HTML message is refused like markup Telegram cannot parse (plain messages go through). */
+  /** Every HTML message, and every HTML edit, is refused like markup Telegram cannot parse (plain ones go through). */
   setRejectHtml(on: boolean): void
+  /** editMessageText of this message answers an error like Telegram's (a deleted message, say); null clears it. */
+  setEditError(messageId: number, description: string | null): void
   /** sendMessage answers this many ms late: the message is in `sent` at once, the caller waits (a slow Telegram). */
   setSendDelay(ms: number): void
   close(): Promise<void>
@@ -91,6 +107,10 @@ export const FAKE_TOKEN = '123456789:AAFakeTokenForTestsOnly_abcdefghijklmnop'
 
 export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   const sent: SentMessage[] = []
+  const edited: EditedMessage[] = []
+  /** What each message shows now (text and buttons), so an edit that changes nothing is refused like Telegram does. */
+  const shown = new Map<number, string>()
+  const editErrors = new Map<number, string>()
   const answers: { callback_query_id: string; text?: string }[] = []
   const updates: Record<string, unknown>[] = []
   let nextUpdate = 1
@@ -167,10 +187,44 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
               }),
             )
           }
-          sent.push(params)
+          const id = nextMessage++
+          sent.push({ ...params, message_id: id })
+          shown.set(id, JSON.stringify([params.text, params.reply_markup ?? null]))
           if (sendDelayMs > 0) await new Promise((r) => setTimeout(r, sendDelayMs))
           return reply({
-            message_id: nextMessage++,
+            message_id: id,
+            date: now(),
+            chat: { id: params.chat_id, type: 'private' },
+            text: params.text,
+          })
+        }
+        case 'editMessageText': {
+          const id = Number(params.message_id)
+          const problem =
+            editErrors.get(id) ??
+            (params.parse_mode === 'HTML'
+              ? rejectHtml
+                ? "can't parse entities: unsupported start tag at byte offset 0"
+                : htmlProblem(String(params.text))
+              : String(params.text).length > 4096
+                ? 'message is too long'
+                : null) ??
+            (shown.get(id) === JSON.stringify([params.text, params.reply_markup ?? null])
+              ? 'message is not modified: the new text and buttons are the same as the current ones'
+              : null)
+          if (problem) {
+            return res.writeHead(400, { 'content-type': 'application/json' }).end(
+              JSON.stringify({
+                ok: false,
+                error_code: 400,
+                description: `Bad Request: ${problem}`,
+              }),
+            )
+          }
+          edited.push(params)
+          shown.set(id, JSON.stringify([params.text, params.reply_markup ?? null]))
+          return reply({
+            message_id: id,
             date: now(),
             chat: { id: params.chat_id, type: 'private' },
             text: params.text,
@@ -208,6 +262,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     token: FAKE_TOKEN,
     username: 'sara_dev_bot',
     sent,
+    edited,
     answers,
     pushStart(chatId) {
       updates.push({
@@ -299,6 +354,10 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     },
     setRejectHtml(on) {
       rejectHtml = on
+    },
+    setEditError(messageId, description) {
+      if (description === null) editErrors.delete(messageId)
+      else editErrors.set(messageId, description)
     },
     setSendDelay(ms) {
       sendDelayMs = ms
