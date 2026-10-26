@@ -46,7 +46,25 @@ export type HealthCheck = {
   fix: string | null
 }
 
+const AFTER_LOGIN = 'sara.afterLogin'
+
+/** Where the login sends Boris back to: the page he was on when the pult asked for the password. */
+export function afterLogin(): string {
+  try {
+    const p = window.sessionStorage.getItem(AFTER_LOGIN)
+    window.sessionStorage.removeItem(AFTER_LOGIN)
+    return p?.startsWith('/') && !p.startsWith('/login') ? p : '/'
+  } catch {
+    return '/'
+  }
+}
+
 export function go(path: string): void {
+  if (path === '/login' && !window.location.pathname.startsWith('/login')) {
+    try {
+      window.sessionStorage.setItem(AFTER_LOGIN, window.location.pathname)
+    } catch {}
+  }
   window.history.pushState(null, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
