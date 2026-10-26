@@ -257,10 +257,19 @@ export function createBidTools(o: {
       if (due > i.max_fee_rub) return await refuse(dearer(due, i.max_fee_rub))
       if (wallet < due)
         return await refuse(fail('NO_MONEY', `В кошельке ${wallet} ₽, а к оплате ${due} ₽`))
-      if (pay.way === 'other')
-        return await refuse(
-          fail('UNSAFE_PAYMENT', 'Профи.ру просит оплату не с кошелька, отклик не нажат'),
+      if (pay.way === 'other') {
+        // The footer's own words (amounts and the way only) say which way it was, so a new wallet label can be taught.
+        const words = pay.wayText ?? 'способ не показан'
+        console.error(
+          `UNSAFE_PAYMENT ${id}: в форме «${words}», к оплате ${due} ₽, в кошельке ${wallet} ₽`,
         )
+        return await refuse(
+          fail(
+            'UNSAFE_PAYMENT',
+            `Профи.ру просит оплату не с кошелька («${words}»), отклик не нажат`,
+          ),
+        )
+      }
       const filled = await fillForm(page, { priceRub: price, text: i.text })
       if (filled === 'no_field')
         return await refuse(fail('LAYOUT_CHANGED', 'Поля формы отклика не нашлись'))
