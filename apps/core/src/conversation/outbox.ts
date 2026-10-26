@@ -5,7 +5,6 @@ import { chatMessage, convTurn, outbox, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
-import { SEND_TEXTS } from './sendTexts'
 import { getConversation } from './store'
 
 export { SEND_TEXTS, type SendOptions } from './sendTexts'

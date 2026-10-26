@@ -1,5 +1,5 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type ChatMessage, newEventId } from '@sara/shared'
+import type { ChatMessage } from '@sara/shared'
 import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onConvPress } from '../../src/conversation/commands'
@@ -417,11 +417,8 @@ describe('a reminder after the switch', () => {
       ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === 'quiet-1')
     await until(async () => (await quietStep()) !== undefined)
     const wentAt = Date.parse(String((await rows())[0]?.finishedAt))
-    const until1 = Date.parse(
-      String(
-        (await quietStep())?.output && ((await quietStep())?.output as { until?: string }).until,
-      ),
-    )
+    const held = ((await quietStep())?.output ?? {}) as { until?: string }
+    const until1 = Date.parse(String(held.until))
     // A day after the first went, not a moment after: nothing else goes meanwhile.
     expect(Math.abs(until1 - (wentAt + DAY))).toBeLessThan(10_000)
     await sleep(500)

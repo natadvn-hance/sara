@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { sendTurnCard } from '../../src/conversation/cards'
 import {
-  close,
   giveBack,
   onConvEdit,
   onConvPress,
