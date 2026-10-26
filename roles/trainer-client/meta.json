@@ -1,0 +1,8 @@
+{
+  "name": "trainer-client",
+  "version": 1,
+  "model": "haiku",
+  "fallbackModel": "sonnet",
+  "priority": "P1",
+  "timeoutMs": 60000
+}
