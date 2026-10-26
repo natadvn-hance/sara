@@ -74,6 +74,8 @@ export function decide(i: DecideInput): Decision {
   if (would === 'draft') return done('draft')
   if (i.settings.accountPaused) return done('draft', 'аккаунт на паузе')
   if (!i.settings.outboundMessages) return done('draft', 'пауза «Пишет клиентам»')
+  // Drafts mode: Sara sends nothing by herself, only Boris's press does (queueMessage holds the same line).
+  if (!i.settings.autopilot) return done('draft', 'отправлю по твоему нажатию')
   const end = i.plan.output?.urgent ? null : moscowHoursEnd(i.now, i.settings.night)
   if (end) return done('hold', 'ночь: отвечу утром', end.toISOString())
   return done('send')

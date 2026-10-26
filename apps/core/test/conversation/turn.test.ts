@@ -232,6 +232,7 @@ async function duringPause(act: () => Promise<void>) {
 /** A turn after the switch that would send its own reply. */
 async function afterTheSwitch() {
   await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'conv.autopilot', true, 'system')
   await setSetting(db, 'outbound.messages', true, 'system')
   await setSetting(db, 'conv.autonomy', { process: 'self' } as never, 'system')
 }
@@ -411,9 +412,7 @@ describe('the turn workflow', () => {
   }, 40000)
 
   it('FR-CONV-6: the client writing during the pause makes the turn plan again with the whole turn', async () => {
-    await setSetting(db, 'conv.v1_writes', false, 'system')
-    await setSetting(db, 'outbound.messages', true, 'system')
-    await setSetting(db, 'conv.autonomy', { process: 'self' } as never, 'system')
+    await afterTheSwitch()
     let once = true
     onSend = async () => {}
     await clientWrites('m-2', 'Как начнём?')
@@ -430,9 +429,7 @@ describe('the turn workflow', () => {
   }, 30000)
 
   it('FR-CONV-6: the service refusing a changed chat makes the turn plan again', async () => {
-    await setSetting(db, 'conv.v1_writes', false, 'system')
-    await setSetting(db, 'outbound.messages', true, 'system')
-    await setSetting(db, 'conv.autonomy', { process: 'self' } as never, 'system')
+    await afterTheSwitch()
     sendAnswer = 'changed'
     onSend = async () => {
       sendAnswer = 'confirmed'
@@ -550,6 +547,31 @@ describe('the turn workflow', () => {
     const [t] = await turnsDone(1)
     expect(t).toMatchObject({ outcome: 'drafted', decision: 'draft' })
     expect(t?.decisionReason).toBe('пауза «Пишет клиентам»')
+    expect(cards).toHaveLength(1)
+    expect(sends).toHaveLength(0)
+  }, 40000)
+
+  it('FR-CONV-5: with the autopilot off the reply is a draft for Boris’s press, nothing is sent', async () => {
+    await afterTheSwitch()
+    await setSetting(db, 'conv.autopilot', false, 'system')
+    await clientWrites('m-2', 'Как начнём?')
+    const [t] = await turnsDone(1)
+    expect(t).toMatchObject({
+      outcome: 'drafted',
+      decision: 'draft',
+      decisionReason: 'отправлю по твоему нажатию',
+    })
+    expect(cards).toHaveLength(1)
+    expect(sends).toHaveLength(0)
+  }, 40000)
+
+  it('FR-CONV-5: the autopilot switched off during the pause makes the reply a draft', async () => {
+    await afterTheSwitch()
+    await clientWrites('m-2', 'Как начнём?')
+    await duringPause(() => setSetting(db, 'conv.autopilot', false, 'boris'))
+    const [t] = await turnsDone(1)
+    expect(t).toMatchObject({ outcome: 'drafted', decision: 'draft' })
+    expect(t?.decisionReason).toBe('отправлю по твоему нажатию')
     expect(cards).toHaveLength(1)
     expect(sends).toHaveLength(0)
   }, 40000)

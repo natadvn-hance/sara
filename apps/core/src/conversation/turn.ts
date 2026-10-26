@@ -211,6 +211,7 @@ async function policySettings(db: Db, accountId: string): Promise<PolicySettings
   const [a] = await db.select().from(account).where(eq(account.id, accountId))
   return {
     v1Writes: await getSetting(db, 'conv.v1_writes'),
+    autopilot: await getSetting(db, 'conv.autopilot'),
     outboundMessages: await getSetting(db, 'outbound.messages'),
     accountPaused: a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false,
     night: await getSetting(db, 'conv.night'),
@@ -422,7 +423,9 @@ async function reread(
       ? 'аккаунт на паузе'
       : !settings.outboundMessages
         ? 'пауза «Пишет клиентам»'
-        : null
+        : !settings.autopilot
+          ? 'отправлю по твоему нажатию'
+          : null
   if (why) {
     await stamp(turnId, 'reread', { decision: 'draft', decisionReason: why })
     return stop('held')

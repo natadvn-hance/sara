@@ -58,6 +58,7 @@ async function callsOf(role: string): Promise<{ args: string[]; stdin: string }[
 
 const settings: PolicySettings = {
   v1Writes: true,
+  autopilot: false,
   outboundMessages: false,
   accountPaused: false,
   night: { from: 23, to: 8 },
