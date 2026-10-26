@@ -496,6 +496,41 @@ describe('profi.send_message on the chat page (M4)', () => {
     expect(site.presses).toEqual([])
   }, 60000)
 
+  it('FR-CONV-9: a press deadline: typing that outlasts the budget is UNCERTAIN before the press, and the draft is cleared', async () => {
+    const slow = {
+      charMs: [60, 60] as [number, number],
+      lookMs: [0, 0] as [number, number],
+      budgetMs: 100000,
+    }
+    expect(
+      await failure(tools({ pressBudgetMs: 1500, typing: slow }).sendMessage(msg(REPLY))),
+    ).toBe('UNCERTAIN')
+    expect(site.presses).toEqual([])
+    expect(fieldAtEnd).toBe('')
+    // Nothing was pressed, so nothing is written: the same call may try again.
+    expect(await attempts()).toHaveLength(0)
+  }, 60000)
+
+  it('FR-CONV-9: the core hanging up in the middle of typing stops it, nothing is sent and the draft is cleared', async () => {
+    const slow = {
+      charMs: [60, 60] as [number, number],
+      lookMs: [0, 0] as [number, number],
+      budgetMs: 100000,
+    }
+    const gone = new AbortController()
+    const t0 = Date.now()
+    const call = tools({ typing: slow }).sendMessage(msg(REPLY), gone.signal)
+    // The typing has begun by now (the page is open and read), and is far from finished.
+    await new Promise((r) => setTimeout(r, 900))
+    gone.abort()
+    expect(await failure(call)).toBe('RATE_LIMITED')
+    // It stopped at the next chunk instead of typing the rest (the whole text takes about 3 seconds here).
+    expect(Date.now() - t0).toBeLessThan(2400)
+    expect(site.presses).toEqual([])
+    expect(fieldAtEnd).toBe('')
+    expect(await attempts()).toHaveLength(0)
+  }, 60000)
+
   it('FR-CONV-9: the box with the text typed is mapped once, never the text itself', async () => {
     const t = tools()
     await t.sendMessage(msg(REPLY))

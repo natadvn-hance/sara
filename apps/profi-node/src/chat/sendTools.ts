@@ -73,6 +73,11 @@ export function createSendTools(o: {
   queueMs?: number
   /** How long after the press the new message is looked for. */
   confirmMs?: number
+  /**
+   * The last moment to press, counted from the arrival of the call: the core waits 4 minutes, and its answer must
+   * still come after the press and its look (the message permit carries no deadline of its own).
+   */
+  pressBudgetMs?: number
   /** How long a freshly opened chat may take to show its first bubble or its field. */
   boxMs?: number
   /** The pause between the two readings that must agree, and between two looks after the press. */
@@ -82,6 +87,8 @@ export function createSendTools(o: {
 }): Pick<ProfiToolsImpl, 'sendMessage'> {
   const queueMs = o.queueMs ?? 150_000
   const confirmMs = o.confirmMs ?? 15_000
+  // 4 minutes of the core's wait, less the look after the press and half a minute.
+  const pressBudgetMs = o.pressBudgetMs ?? 240_000 - confirmMs - 30_000
   const boxMs = o.boxMs ?? 15_000
   const stableMs = o.stableMs ?? 1000
   const pollMs = o.pollMs ?? 500
@@ -189,16 +196,27 @@ export function createSendTools(o: {
     await field.fill('', { timeout: 3000 }).catch(() => {})
   }
 
-  async function typeIn(page: Page, field: Locator, text: string) {
+  /** Ten letters at a time, by whole characters: an emoji is never cut between two keys. */
+  async function typeIn(
+    page: Page,
+    field: Locator,
+    text: string,
+    stop: () => ProfiToolError | null,
+  ) {
     const cap = Math.max(1, Math.floor(typing.budgetMs / Math.max(text.length, 1)))
     const lines = text.split(/\r\n?|\n/)
     for (const [n, line] of lines.entries()) {
       // A line break goes in as inserted text: an Enter key might send the half-written message.
       if (n > 0) await page.keyboard.insertText('\n')
-      for (let at = 0; at < line.length; at += 10)
-        await field.pressSequentially(line.slice(at, at + 10), {
+      const letters = Array.from(line)
+      for (let at = 0; at < letters.length; at += 10) {
+        // Between two pieces: the core may have hung up, the press deadline may have passed, the tab may be gone.
+        const halt = stop()
+        if (halt) throw halt
+        await field.pressSequentially(letters.slice(at, at + 10).join(''), {
           delay: Math.min(Math.round(between(typing.charMs)), cap),
         })
+      }
     }
   }
 
@@ -249,6 +267,7 @@ export function createSendTools(o: {
     t: Tab,
     i: SendMessageInput,
     aborted: () => boolean,
+    deadline: number,
   ): Promise<SendMessageOutput> {
     const page = await openChat(r, t, i.chat_id)
     const read = await readStable(r, page, i.chat_id, i.expect_last_message_id === null)
@@ -283,6 +302,12 @@ export function createSendTools(o: {
           'Вкладка аккаунта перестала ходить на сайт, сообщение не отправлено',
         )
       if (aborted()) return fail('RATE_LIMITED', 'Ядро перестало ждать, сообщение не отправлено')
+      // Past the last moment to press nothing is pressed, and the core is told it may have to look: it has stopped
+      // waiting by now, or is about to.
+      if (Date.now() > deadline)
+        return uncertain(
+          'Срок нажатия прошёл, сообщение не отправлено: смотреть чат перед повтором',
+        )
       return null
     }
     const early = stop()
@@ -296,7 +321,7 @@ export function createSendTools(o: {
       await field.click({ timeout: 5000 })
       await sleep(between(typing.lookMs))
       if ((await field.inputValue()) !== '') await clearDraft(field)
-      await typeIn(page, field, i.text)
+      await typeIn(page, field, i.text, stop)
       let got = await field.inputValue()
       // The field did not take it as typed: old Sara's way, the whole text at once.
       if (got !== want) {
@@ -439,6 +464,7 @@ export function createSendTools(o: {
         throw fail('INTERNAL', 'Разрешение ядра не подходит к сообщению')
       const r = runtime(i.account_id)
       const aborted = () => signal?.aborted === true
+      const deadline = Date.now() + pressBudgetMs
 
       // A key seen before is answered from the database, never by a refusal: what it pressed may be in the chat, and
       // a plain failure here would send a person to type the same message again (as for submit_bid).
@@ -483,7 +509,7 @@ export function createSendTools(o: {
               'RATE_LIMITED',
               'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), сообщение не набрано',
             )
-          return send(r, t, i, aborted)
+          return send(r, t, i, aborted, deadline)
         },
         () => fail('RATE_LIMITED', 'Ядро перестало ждать, сообщение не набрано'),
       )
