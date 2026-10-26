@@ -301,6 +301,20 @@ describe('isGreetingForm and leadingGreeting (FR-SPEECH-3, rule 5)', () => {
       expect(isGreetingForm(text), text).toBe(true)
   })
 
+  it('FR-SPEECH-3: a name before the greeting takes the morning, the day and the evening alike («Татьяна, доброе утро!»)', () => {
+    for (const text of [
+      'Татьяна, доброе утро!',
+      'Татьяна, добрый день!',
+      'Татьяна, добрый вечер!',
+      'Татьяна,доброе утро!',
+      'Татьяна, Доброе утро!',
+    ])
+      expect(isGreetingForm(text), text).toBe(true)
+    expect(isGreetingForm('Татьяна, доброе утро!', new Date('2026-10-26T08:59:00Z'))).toBe(true)
+    expect(isGreetingForm('Татьяна, добрый вечер!', new Date('2026-10-26T15:00:00Z'))).toBe(true)
+    expect(isGreetingForm('Татьяна, доброе утро!', new Date('2026-10-26T15:00:00Z'))).toBe(false)
+  })
+
   it('FR-SPEECH-3: other openers and greetings with something after them are not a form', () => {
     for (const text of [
       '',
