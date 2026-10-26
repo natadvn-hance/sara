@@ -5,7 +5,10 @@ import { chatMessage, convTurn, outbox, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { SEND_TEXTS } from './sendTexts'
 import { getConversation } from './store'
+
+export { SEND_TEXTS, type SendOptions } from './sendTexts'
 
 export type MessagePayload = {
   accountId: string
@@ -167,7 +170,7 @@ export async function deliverMessage(
 }
 
 /** The last message the core has of a chat: what the node must still see when it types (CHAT_CHANGED). */
-async function lastSeen(db: Db, conversationId: string): Promise<string | null> {
+export async function lastSeen(db: Db, conversationId: string): Promise<string | null> {
   const rows = await db
     .select({ id: chatMessage.platformMessageId })
     .from(chatMessage)
@@ -199,46 +202,4 @@ export async function sendTurnReply(
     }),
   )
   return id ? deliverMessage(d, id) : 'failed'
-}
-
-export const SEND_TEXTS = {
-  sent: 'Отправила клиенту.',
-  changed: 'Клиент успел дописать: текст не ушёл. Посмотри новые сообщения и пришли текст ещё раз.',
-  notNow: 'Сейчас не отправляю: включён режим тени или пауза «Пишет клиентам».',
-  failed: 'Не смогла отправить: проверь вход в Профи.ру. Текст сохранила.',
-  uncertain: 'Не уверена, что сообщение дошло. Проверь чат в Профи.ру, повторно не отправляю.',
-}
-
-/**
- * What a text sent now may be told: the last message of the chat it was written for (the service refuses a chat that
- * moved on), and the key that makes a repeat of the same request (a Telegram update delivered twice, a retried API
- * call) one message; left out, every call is a new message.
- */
-export type SendOptions = { expectLast?: string | null; key?: string }
-
-/** A text from Boris or his «Отправить» on a draft, sent now after the switch; the answer is for Boris. */
-export async function sendTextNow(
-  d: { db: Db; profi: ProfiClient },
-  conversationId: string,
-  text: string,
-  author: 'sara' | 'boris',
-  o: SendOptions = {},
-): Promise<string> {
-  const conv = await getConversation(d.db, conversationId)
-  if (!conv) return SEND_TEXTS.failed
-  const expectLast =
-    o.expectLast !== undefined ? o.expectLast : await lastSeen(d.db, conversationId)
-  const id = await d.db.transaction((tx) =>
-    queueMessage(tx, {
-      key: o.key ?? `say:${newEventId()}`,
-      accountId: conv.accountId,
-      chatId: conv.chatId,
-      text,
-      author,
-      expectLast,
-    }),
-  )
-  if (!id) return SEND_TEXTS.notNow
-  const r = await deliverMessage(d, id)
-  return r === 'confirmed' ? SEND_TEXTS.sent : SEND_TEXTS[r]
 }

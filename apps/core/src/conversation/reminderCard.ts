@@ -4,8 +4,7 @@ import type { Db } from '../db/client'
 import { convTurn, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
-import { SEND_TEXTS } from './outbox'
-import type { Ground } from './reminderSteps'
+import { SEND_TEXTS, type SendAfter, type SendOptions, type SendOutcome } from './sendTexts'
 import { getConversation } from './store'
 import { CONV_TEXTS, REMIND_TEXTS } from './texts'
 import type { ConversationRow } from './types'
@@ -25,16 +24,15 @@ type CardStep = 1 | 2 | 3
 
 export type ReminderCardDeps = { db: Db; notifier: Pick<Notifier, 'sendButtons'> }
 
-/** What a press needs: the way to send a text now and the reread of the chat that decides whether it still may go. */
+/** What a press needs: the way to send a text (it reads the chat again first and settles the card, sendJob.ts). */
 export type ReminderPressDeps = {
   db: Db
   sendText?(
     conversationId: string,
     text: string,
     author: 'sara' | 'boris',
-    o?: { expectLast?: string | null; key?: string },
+    o?: SendOptions,
   ): Promise<string>
-  remindGround?(conversationId: string, anchor: string): Promise<Ground>
 }
 
 /** The reminder rows of a conversation whose card still waits for Boris are no longer meant when a newer one comes. */
@@ -155,11 +153,71 @@ async function move(db: Db, rowId: string, from: string, patch: Partial<Row>): P
   return rows.length > 0
 }
 
+type ReminderAfter = Extract<SendAfter, { kind: 'reminder' }>
+
 /**
- * Boris's text goes to the client from the card of a reminder, once: the chat is read again first (a client who wrote,
- * our side who wrote, a pause: nothing goes), the card and the row are taken by one press, and the service is told
- * the last message the reread saw (CHAT_CHANGED if the chat moved on meanwhile). `how` is the card's resolution:
- * `send` for «Отправить» (Sara's text, queueMessage knows the key), `edit` for his own text.
+ * How the send of a reminder card ended: the card and the trace row say it, and the text is for Boris. A reread that
+ * says wait (a pause) opens the card again; one that says the ladder is over (he wrote, Boris wrote, the chat was
+ * closed) closes it as moot.
+ */
+export async function settleReminder(
+  db: Db,
+  a: ReminderAfter,
+  outcome: SendOutcome,
+): Promise<string> {
+  if (outcome.kind === 'not_now') {
+    await db
+      .update(task)
+      .set({ state: 'open', resolution: null, resolvedAt: null })
+      .where(eq(task.id, a.taskId))
+    await move(db, a.rowId, 'sending', { outcome: 'carded' })
+    return REMIND_TEXTS.notNow(outcome.why)
+  }
+  if (outcome.kind === 'gone') {
+    await db.update(task).set({ resolution: 'stale' }).where(eq(task.id, a.taskId))
+    await move(db, a.rowId, 'sending', {
+      outcome: 'stopped',
+      decision: 'nothing',
+      decisionReason: outcome.why,
+    })
+    return REMIND_TEXTS.gone(outcome.why)
+  }
+  const answer = outcome.answer
+  const by = a.how === 'send' ? 'по нажатию Бориса' : 'с текстом Бориса'
+  if (answer === SEND_TEXTS.sent) {
+    await move(db, a.rowId, 'sending', {
+      outcome: 'sent',
+      decision: 'send',
+      decisionReason: `ушло клиенту ${by}`,
+    })
+    const [row] = await db.select().from(convTurn).where(eq(convTurn.id, a.rowId))
+    if (row) await journalSent({ db }, row)
+    return REMIND_TEXTS.sent
+  }
+  if (answer === SEND_TEXTS.changed) {
+    await db.update(task).set({ resolution: 'stale' }).where(eq(task.id, a.taskId))
+    await move(db, a.rowId, 'sending', {
+      outcome: 'stopped',
+      decision: 'nothing',
+      decisionReason: 'в чате появилось новое: служба не дала написать',
+    })
+    return REMIND_TEXTS.stale
+  }
+  const uncertain = answer === SEND_TEXTS.uncertain
+  await move(db, a.rowId, 'sending', {
+    outcome: uncertain ? 'uncertain' : 'failed',
+    decision: 'send',
+    decisionReason: uncertain ? 'не уверена, что дошло' : 'не смогла отправить',
+  })
+  return answer
+}
+
+/**
+ * Boris's text goes to the client from the card of a reminder, once: the card and the row are taken by one press, and
+ * the send (sendJob.ts) reads the chat again before anything goes (a client who wrote, our side who wrote, a pause:
+ * nothing goes and the card is settled for it), tells the service the last message the reread saw (CHAT_CHANGED if
+ * the chat moved on meanwhile) and settles the card by how it ended. `how` is the card's resolution: `send` for
+ * «Отправить» (Sara's text, queueMessage knows the key), `edit` for his own text.
  */
 async function release(
   d: ReminderPressDeps,
@@ -168,52 +226,15 @@ async function release(
   o: { text: string; author: 'sara' | 'boris'; key: string; how: 'send' | 'edit' },
 ): Promise<string> {
   if (t.state !== 'open' || row.outcome !== 'carded') return REMIND_TEXTS.alreadyDone
-  if (!d.sendText || !d.remindGround) return REMIND_TEXTS.notNow('не могу проверить чат')
-  const g = await d.remindGround(row.conversationId, row.anchorMessageId)
-  if (!g.go) {
-    if (!g.end) return REMIND_TEXTS.notNow(g.why)
-    // The ladder is over for this client (he wrote, Boris wrote, the chat was closed): this card is moot.
-    await closeCard(d.db, t.id, 'stale')
-    await move(d.db, row.id, 'carded', {
-      outcome: 'stopped',
-      decision: 'nothing',
-      decisionReason: g.why,
-    })
-    return REMIND_TEXTS.gone(g.why)
-  }
+  if (!d.sendText) return REMIND_TEXTS.notNow('не могу проверить чат')
   // One press takes the card, and the row is taken once however many cards point at it.
   if (!(await closeCard(d.db, t.id, o.how))) return REMIND_TEXTS.alreadyDone
   if (!(await move(d.db, row.id, 'carded', { outcome: 'sending' }))) return REMIND_TEXTS.alreadyDone
-  const answer = await d.sendText(row.conversationId, o.text, o.author, {
-    expectLast: g.lastId ?? undefined,
+  return d.sendText(row.conversationId, o.text, o.author, {
     key: o.key,
+    after: { kind: 'reminder', rowId: row.id, taskId: t.id, how: o.how },
+    ground: { anchor: row.anchorMessageId },
   })
-  const by = o.how === 'send' ? 'по нажатию Бориса' : 'с текстом Бориса'
-  if (answer === SEND_TEXTS.sent) {
-    await move(d.db, row.id, 'sending', {
-      outcome: 'sent',
-      decision: 'send',
-      decisionReason: `ушло клиенту ${by}`,
-    })
-    await journalSent(d, row)
-    return REMIND_TEXTS.sent
-  }
-  if (answer === SEND_TEXTS.changed) {
-    await d.db.update(task).set({ resolution: 'stale' }).where(eq(task.id, t.id))
-    await move(d.db, row.id, 'sending', {
-      outcome: 'stopped',
-      decision: 'nothing',
-      decisionReason: 'в чате появилось новое: служба не дала написать',
-    })
-    return REMIND_TEXTS.stale
-  }
-  const uncertain = answer === SEND_TEXTS.uncertain
-  await move(d.db, row.id, 'sending', {
-    outcome: uncertain ? 'uncertain' : 'failed',
-    decision: 'send',
-    decisionReason: uncertain ? 'не уверена, что дошло' : 'не смогла отправить',
-  })
-  return answer
 }
 
 /** A press on the card of a reminder: «Отправить» or «Не надо» (the «Изменить» question is asked by the caller). */

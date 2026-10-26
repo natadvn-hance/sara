@@ -12,7 +12,8 @@ import {
   say,
   take,
 } from '../../src/conversation/commands'
-import { type SendOptions, sendTextNow } from '../../src/conversation/outbox'
+import { sendTextNow } from '../../src/conversation/sendJob'
+import type { SendOptions } from '../../src/conversation/sendTexts'
 import { ensureConversation, getConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
 import {

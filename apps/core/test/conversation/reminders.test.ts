@@ -3,7 +3,6 @@ import { type ChatMessage, newEventId } from '@sara/shared'
 import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onConvPress } from '../../src/conversation/commands'
-import { sendTextNow } from '../../src/conversation/outbox'
 import { checkGround } from '../../src/conversation/reminderSteps'
 import {
   openReminders,
@@ -15,6 +14,7 @@ import {
   startReminder,
   syncReminders,
 } from '../../src/conversation/reminders'
+import { sendTextNow } from '../../src/conversation/sendJob'
 import { syncChat } from '../../src/conversation/sync'
 import { moscowHour, moscowHoursEnd } from '../../src/conversation/time'
 import {
@@ -512,8 +512,14 @@ describe('a reminder in drafts mode', () => {
       {
         db,
         notifier: { sendText: async () => ({ messageId: 1 }) },
-        sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
-        remindGround: (c, a) => checkGround(deps, c, a, { dormant: false }),
+        sendText: (c, text, author, o) =>
+          sendTextNow(
+            { db, profi, ground: (cv, a) => checkGround(deps, cv, a, { dormant: false }) },
+            c,
+            text,
+            author,
+            o,
+          ),
       },
       { taskId, action },
     )

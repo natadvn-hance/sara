@@ -11,8 +11,8 @@ import { proposeMind } from '../mind/proposals'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { clientNames } from './dossier'
-import { SEND_TEXTS, type SendOptions } from './outbox'
-import { editReminder, onReminderPress, type ReminderPressDeps } from './reminderCard'
+import { editReminder, onReminderPress } from './reminderCard'
+import { type SendOptions, STALE_DRAFT } from './sendTexts'
 import { getConversation, updateConversation } from './store'
 import { CONV_TEXTS } from './texts'
 
@@ -26,8 +26,6 @@ export type CommandDeps = {
     author: 'sara' | 'boris',
     o?: SendOptions,
   ): Promise<string>
-  /** The chat read again before the text of a reminder card goes: whether the reminder is still wanted (FR-CONV-12). */
-  remindGround?: ReminderPressDeps['remindGround']
 }
 
 export const COMMAND_TEXTS = {
@@ -50,7 +48,7 @@ export const COMMAND_TEXTS = {
     'Не уверена, что прошлая отправка дошла. Проверь чат в Профи.ру, повторно не отправляю.',
   answeredYourself:
     'Ты уже ответил сам: в чате есть твоё сообщение после слов клиента. Черновик не отправляю.',
-  stale: 'Черновик устарел: клиент успел дописать. Текст не ушёл, посмотри новые сообщения.',
+  stale: STALE_DRAFT,
   /** A typed «да» never sends: only the button does (the review of the drafts mode). */
   pressSend: 'Нажми «Отправить», и уйдёт',
   pressGood: 'Нажми «Хорошо», и отмечу, что черновик годный',
@@ -345,13 +343,11 @@ export async function onConvPress(
       const claimed = await closeCard(d.db, t.id, 'send')
       if (!claimed) return COMMAND_TEXTS.done
       const covered = ((turn.messageIds as string[] | null) ?? []).at(-1)
-      const answer = await d.sendText(conversationId, turn.text, 'sara', {
+      return d.sendText(conversationId, turn.text, 'sara', {
         expectLast: covered ?? undefined,
         key: `send:${t.id}`,
+        after: { kind: 'draft', taskId: t.id },
       })
-      if (answer !== SEND_TEXTS.changed) return answer
-      await d.db.update(task).set({ resolution: 'stale' }).where(eq(task.id, t.id))
-      return COMMAND_TEXTS.stale
     }
     default:
       return COMMAND_TEXTS.notUnderstood

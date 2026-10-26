@@ -223,6 +223,11 @@ describe('a conversation end to end', () => {
     expect(actions?.map((a) => a.split(':')[2])).toEqual(['send', 'edit', 'take', 'close'])
     tg.pushPress(BORIS, button('send'))
     await until(() => fake.messages.length === 1)
+    // The press was answered at once, and the result came later as a message of its own.
+    await until(() => tg.answers.some((a) => a.text === 'Отправляю…'))
+    await until(() =>
+      tg.sent.some((m) => m.text.startsWith('✅') && m.text.includes('Отправила клиенту')),
+    )
     tg.pushPress(BORIS, button('send'))
     await settle()
     expect(fake.messages).toHaveLength(1)

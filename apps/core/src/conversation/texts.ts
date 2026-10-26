@@ -128,6 +128,12 @@ export const CONV_TEXTS = {
       } пишет: ${quote(words)}`,
     ),
 
+  /** How a send that ran on its own ended, as a new message to Boris (the press was answered at once). */
+  sendResult: (name: string | null, orderTitle: string | null, text: string) =>
+    hyphenated(
+      `${/^Отправила/.test(text) ? '✅' : '⚠️'} ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: ${text}`,
+    ),
+
   /** The task for Boris when a client is silent three days after the third reminder (FR-CONV-12, M4 design 5.11). */
   dormant: (name: string | null, orderTitle: string | null) =>
     hyphenated(

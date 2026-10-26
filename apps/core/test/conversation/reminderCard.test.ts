@@ -2,7 +2,6 @@ import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { onConvPress, onConvReply } from '../../src/conversation/commands'
-import { sendTextNow } from '../../src/conversation/outbox'
 import {
   checkGround,
   isLadderMessage,
@@ -11,6 +10,8 @@ import {
   type RemindDeps,
   sendStep,
 } from '../../src/conversation/reminderSteps'
+import { sendTextNow } from '../../src/conversation/sendJob'
+import type { SendOptions } from '../../src/conversation/sendTexts'
 import { convTurn, mindProposal, outbox, question, task } from '../../src/db/schema'
 import { type ProfiClient, ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
@@ -103,9 +104,14 @@ const actions = (c: Card | undefined) => c?.rows.flat().map((b) => b.callbackDat
 const commandDeps = () => ({
   db,
   notifier: { sendText: async () => ({ messageId: 900 }) },
-  sendText: (c: string, text: string, author: 'sara' | 'boris', o?: never) =>
-    sendTextNow({ db, profi }, c, text, author, o),
-  remindGround: (c: string, a: string) => checkGround(deps, c, a, { dormant: false }),
+  sendText: (c: string, text: string, author: 'sara' | 'boris', o?: SendOptions) =>
+    sendTextNow(
+      { db, profi, ground: (cv, a) => checkGround(deps, cv, a, { dormant: false }) },
+      c,
+      text,
+      author,
+      o,
+    ),
 })
 const press = (taskId: string, action: 'send' | 'edit' | 'skip') =>
   onConvPress(commandDeps(), { taskId, action })
@@ -381,12 +387,20 @@ describe('Boris answers the card of a reminder', () => {
 
   it('FR-CONV-12: a press that cannot reread the chat sends nothing', async () => {
     const { taskId } = await carded()
+    // The send has no way to read the chat: the reminder is not sent and the card is open again.
     const answer = await onConvPress(
-      { db, notifier: { sendText: async () => ({ messageId: 900 }) }, sendText: async () => 'x' },
+      {
+        db,
+        notifier: { sendText: async () => ({ messageId: 900 }) },
+        sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
+      },
       { taskId, action: 'send' },
     )
     expect(answer).toMatch(/не могу проверить чат/)
     expect(sends).toHaveLength(0)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.state).toBe('open')
+    expect(await press(taskId, 'send')).toBe('Отправила напоминание клиенту.')
   })
 })
 
