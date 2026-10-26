@@ -27,7 +27,16 @@ export type FakeChat = {
    * What the send button does with text in the field: the message appears at once (works), after a while (late), or
    * never although the press went through (swallowed).
    */
-  send?: 'works' | 'late' | 'swallowed'
+  send?:
+    | 'works'
+    | 'late'
+    | 'swallowed'
+    // The bubble shows at once with a temporary id and a sending mark, then the site refuses it (it goes away)...
+    | 'optimistic_fail'
+    // ...or takes it (the bubble gets its real id and loses the mark)...
+    | 'optimistic_ok'
+    // ...or a bubble with the real-looking id is drawn and then goes away by itself.
+    | 'vanishing'
   /** Pressing Enter in the field sends too, as in many messengers. */
   enterSends?: boolean
   /** The id the next bubble gets. */
@@ -70,13 +79,15 @@ const field = document.querySelector('textarea')
 const main = document.getElementById('main')
 let next = ${JSON.stringify(c.nextId ?? 'new-1')}
 const morph = () => { if (main && field) main.dataset.mode = field.value ? 'send' : 'mic' }
-const add = (text) => {
+const add = (text, id, pending) => {
   const el = document.createElement('div')
-  el.className = 'cw_msg ' + SIDE.specialist
-  el.setAttribute('data-message-content-id', next)
+  el.className = 'cw_msg ' + SIDE.specialist + (pending ? ' cw_pending' : '')
+  if (pending) el.setAttribute('data-status', 'sending')
+  el.setAttribute('data-message-content-id', id || next)
   el.innerHTML = '<div class="cw_xeDn2R"><div class="cw_BFgZYK"></div></div><span class="cw_time">12:01</span>'
   el.querySelector('.cw_BFgZYK').textContent = text
   document.getElementById('list').appendChild(el)
+  return el
 }
 async function submit() {
   const text = field.value
@@ -87,6 +98,13 @@ async function submit() {
   await fetch('/__press?chat=${chatId}&how=' + how, { method: 'POST', body: text })
   if (how === 'swallowed') return
   if (how === 'late') await new Promise((r) => setTimeout(r, 1500))
+  if (how === 'optimistic_fail') { const el = add(text, 'tmp-1', true); setTimeout(() => el.remove(), 900); return }
+  if (how === 'optimistic_ok') {
+    const el = add(text, 'tmp-1', true)
+    setTimeout(() => { el.setAttribute('data-message-content-id', next); el.classList.remove('cw_pending'); el.removeAttribute('data-status') }, 800)
+    return
+  }
+  if (how === 'vanishing') { const el = add(text); setTimeout(() => el.remove(), 400); return }
   add(text)
 }
 if (field) {
@@ -141,7 +159,7 @@ export async function serveFakeProfi(page: Page, site: FakeProfi): Promise<void>
       site.presses.push({ chat: id, how, text })
       const chat = site.chats.get(id)
       // The site keeps the message unless it swallowed it: a reload of the page shows it.
-      if (chat && how !== 'swallowed') {
+      if (chat && !['swallowed', 'optimistic_fail', 'vanishing'].includes(how)) {
         const at = chat.nextId ?? 'new-1'
         chat.messages.push({ id: at, side: 'specialist', text })
         chat.nextId = `new-${Number(at.replace(/\D/g, '')) + 1}`

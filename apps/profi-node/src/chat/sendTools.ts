@@ -1,6 +1,11 @@
-import type { MessageAuthor, SendMessageInput, SendMessageOutput } from '@sara/shared'
+import {
+  type MessageAuthor,
+  normalizeText,
+  type SendMessageInput,
+  type SendMessageOutput,
+} from '@sara/shared'
 import { verifyMessagePermit } from '@sara/shared/permit'
-import type { Locator, Page } from 'playwright'
+import type { Locator, Page, Response } from 'playwright'
 import type { NodeDb } from '../db/client'
 import { anonymousChatUrl, CHAT_INPUT, CHAT_SEND_PATH, readChatFormMap } from '../eyes/chatFormMap'
 import type { Eyes } from '../eyes/eyes'
@@ -37,8 +42,6 @@ const fail = (c: ConstructorParameters<typeof ProfiToolError>[0], m: string) =>
   new ProfiToolError(c, m)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const between = ([a, b]: [number, number]) => a + Math.random() * Math.max(0, b - a)
-/** The words of a bubble and of the typed text compared as a person reads them: line breaks and spaces are one. */
-const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
 
 // Old Sara's last check before a client's chat (src/analyzer/clientText.js assertSendable, 30.09.2026: a reminder
 // reached a client as {"message": ...}): text shaped like protocol is never typed, whatever produced it.
@@ -82,6 +85,8 @@ export function createSendTools(o: {
   boxMs?: number
   /** The pause between the two readings that must agree, and between two looks after the press. */
   stableMs?: number
+  /** After the new bubble is first seen: how long it must still be there, under the same number, to count. */
+  settleMs?: number
   pollMs?: number
   typing?: Partial<Typing>
 }): Pick<ProfiToolsImpl, 'sendMessage'> {
@@ -91,6 +96,7 @@ export function createSendTools(o: {
   const pressBudgetMs = o.pressBudgetMs ?? 240_000 - confirmMs - 30_000
   const boxMs = o.boxMs ?? 15_000
   const stableMs = o.stableMs ?? 1000
+  const settleMs = o.settleMs ?? 1500
   const pollMs = o.pollMs ?? 500
   const typing: Typing = {
     charMs: [30, 80],
@@ -187,7 +193,9 @@ export function createSendTools(o: {
     // The message the core saw is no longer on the page: there is nothing to measure a new one against.
     if (after !== null && from === 0) return null
     return (
-      messages.slice(from).find((m) => m.author === 'specialist' && norm(m.text) === norm(text)) ??
+      messages
+        .slice(from)
+        .find((m) => m.author === 'specialist' && normalizeText(m.text) === normalizeText(text)) ??
       null
     )
   }
@@ -377,12 +385,14 @@ export function createSendTools(o: {
         if (twin?.result) return twin.result as SendMessageOutput
         return await look(r, t, i, twin?.expectLastMessageId ?? i.expect_last_message_id)
       }
+      const watch = watchSend(page)
       try {
         await button.click({ timeout: 5000 })
       } catch {
+        watch.stop()
         throw stillUnknown()
       }
-      return await confirm(r, page, i, new Set(read.messages.map((m) => m.id)))
+      return await confirm(r, page, i, new Set(read.messages.map((m) => m.id)), watch)
     } catch (e) {
       if (e instanceof ProfiToolError) throw e
       if (pressed) throw stillUnknown()
@@ -398,7 +408,64 @@ export function createSendTools(o: {
   }
 
   /**
-   * After the press: a new bubble of our side with this text within confirmMs, else UNCERTAIN (never a retry).
+   * How the bubble looks now: a mark of sending or of a refusal on it (never in the words it carries: a text may say
+   * «ошибка»), or gone. Guessed from attributes, classes and the little words around the text until the live page
+   * shows how a sending or refused bubble is drawn.
+   */
+  function bubbleState(page: Page, id: string): Promise<'ok' | 'pending' | 'failed' | 'gone'> {
+    return page.evaluate(
+      ({ bubble, id }) => {
+        const el = [...document.querySelectorAll(bubble)].find(
+          (e) => e.getAttribute('data-message-content-id') === id,
+        )
+        if (!el) return 'gone' as const
+        const rest = el.cloneNode(true) as HTMLElement
+        for (const t of rest.querySelectorAll('.cw_xeDn2R .cw_BFgZYK')) t.remove()
+        const marks = [el, ...rest.querySelectorAll('*')]
+          .flatMap((e) => [
+            ...e.classList,
+            ...[...e.attributes]
+              .filter((a) => a.name !== 'data-message-content-id' && a.name !== 'class')
+              .map((a) => `${a.name}=${a.value}`),
+          ])
+          .join(' ')
+        const words = rest.textContent ?? ''
+        if (/(error|fail|reject|retry|unsent|undeliver)/i.test(marks)) return 'failed' as const
+        if (/(не отправлен|не доставлен|ошибк|повторить)/i.test(words)) return 'failed' as const
+        if (/(pending|sending|aria-busy=true|loading|spinner)/i.test(marks))
+          return 'pending' as const
+        if (/отправляется/i.test(words)) return 'pending' as const
+        return 'ok' as const
+      },
+      { bubble: BUBBLE, id },
+    )
+  }
+
+  /**
+   * What the page asks of the site after the press (a request that changes something: its way, its address without
+   * numbers and query, the status of the answer), kept for calibrating the send. The site's own answer to the send
+   * is not trusted yet: its address and shape are not known, only the page decides until a live capture shows them.
+   */
+  function watchSend(page: Page) {
+    const requests: { method: string; path: string; status: number }[] = []
+    const onResponse = (res: Response) => {
+      try {
+        const method = res.request().method()
+        if (['GET', 'HEAD', 'OPTIONS'].includes(method) || requests.length >= 10) return
+        requests.push({
+          method,
+          path: new URL(res.url()).pathname.replace(/\d{5,}/g, '0'),
+          status: res.status(),
+        })
+      } catch {}
+    }
+    page.on('response', onResponse)
+    return { requests, stop: () => void page.off('response', onResponse) }
+  }
+
+  /**
+   * After the press: a new bubble of our side with this text that is not still sending or refused, and is still
+   * there, under the same number, on a second look settleMs later; else UNCERTAIN (never a retry within confirmMs).
    * `before`: the bubbles that stood in the chat when it was read before typing; none of them is the new one.
    */
   async function confirm(
@@ -406,23 +473,52 @@ export function createSendTools(o: {
     page: Page,
     i: SendMessageInput,
     before: Set<string>,
+    watch: ReturnType<typeof watchSend>,
   ): Promise<SendMessageOutput> {
-    const until = Date.now() + confirmMs
-    for (;;) {
-      try {
-        const parsed = await o.parsers.fromChatDom(page, i.chat_id, { waitMs: 1000 })
-        const found = messagesOf(parsed).find(
-          (m) => m.author === 'specialist' && norm(m.text) === norm(i.text) && !before.has(m.id),
-        )
-        if (found) {
-          await r.eyes.onChatRead(i.chat_id, parsed).catch(() => {})
-          return await keepResult(i, found.id)
-        }
-      } catch {}
-      if (Date.now() >= until) break
-      await sleep(pollMs)
+    const started = Date.now()
+    const until = started + confirmMs
+    const ours = (m: Seen) =>
+      m.author === 'specialist' && normalizeText(m.text) === normalizeText(i.text)
+    let sent: string | null = null
+    try {
+      for (;;) {
+        try {
+          const first = messagesOf(await o.parsers.fromChatDom(page, i.chat_id, { waitMs: 1000 }))
+          const found = first.find((m) => ours(m) && !before.has(m.id))
+          if (found && (await bubbleState(page, found.id)) === 'ok') {
+            // One look is not enough: a bubble drawn at once may be taken back when the site refuses the message.
+            await sleep(settleMs)
+            const parsed = await o.parsers.fromChatDom(page, i.chat_id, { waitMs: 0 })
+            const again = messagesOf(parsed).find((m) => m.id === found.id && ours(m))
+            if (again && (await bubbleState(page, again.id)) === 'ok') {
+              await r.eyes.onChatRead(i.chat_id, parsed).catch(() => {})
+              sent = again.id
+              break
+            }
+          }
+        } catch {}
+        if (Date.now() >= until) break
+        await sleep(pollMs)
+      }
+    } finally {
+      watch.stop()
+      // For calibration only (the way and status of what the page asked, never a body or a text).
+      await r.eyes
+        .onRaw({
+          kind: 'dom',
+          url: anonymousChatUrl(page.url()),
+          body: {
+            what: 'chat_send',
+            found: sent !== null,
+            ms: Date.now() - started,
+            requests: watch.requests,
+          },
+          receivedAt: new Date().toISOString(),
+        })
+        .catch(() => {})
     }
-    throw stillUnknown()
+    if (sent === null) throw stillUnknown()
+    return keepResult(i, sent)
   }
 
   /**

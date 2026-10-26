@@ -106,6 +106,7 @@ const tools = (o: Partial<Parameters<typeof createSendTools>[0]> = {}) =>
       ],
     ]),
     stableMs: 50,
+    settleMs: 200,
     pollMs: 100,
     confirmMs: 3000,
     boxMs: 3000,
@@ -325,6 +326,48 @@ describe('profi.send_message on the chat page (M4)', () => {
     const out = await tools({ confirmMs: 5000 }).sendMessage(msg(REPLY))
     expect(out).toEqual({ found_on_page: true, platform_message_id: 'new-1' })
     expect(site.presses).toHaveLength(1)
+  }, 60000)
+
+  it('FR-CONV-9: a bubble that is still sending, and then refused, is not a sent message', async () => {
+    c1().send = 'optimistic_fail'
+    expect(await failure(tools({ confirmMs: 2500, settleMs: 200 }).sendMessage(msg(REPLY)))).toBe(
+      'UNCERTAIN',
+    )
+    expect(site.presses).toHaveLength(1)
+    const [row] = await attempts()
+    expect(row?.result).toBeNull()
+  }, 60000)
+
+  it('FR-CONV-9: a bubble with a temporary id counts only once it has its real id and no sending mark', async () => {
+    c1().send = 'optimistic_ok'
+    const out = await tools({ confirmMs: 4000, settleMs: 200 }).sendMessage(msg(REPLY))
+    expect(out).toEqual({ found_on_page: true, platform_message_id: 'new-1' })
+  }, 60000)
+
+  it('FR-CONV-9: a bubble that is gone on the second look is not a sent message', async () => {
+    c1().send = 'vanishing'
+    expect(await failure(tools({ confirmMs: 1500, settleMs: 800 }).sendMessage(msg(REPLY)))).toBe(
+      'UNCERTAIN',
+    )
+  }, 60000)
+
+  it('FR-CONV-9: the words «ошибка» or «отправляется» inside our own text do not make a sent bubble a failed one', async () => {
+    const text = 'Ирина, ошибка в смете исправлена, договор отправляется сегодня.'
+    const out = await tools().sendMessage(msg(text))
+    expect(out.platform_message_id).toBe('new-1')
+  }, 60000)
+
+  it('FR-CONV-9: the requests the page made after the press are kept for calibration, without their bodies', async () => {
+    await tools().sendMessage(msg(REPLY))
+    const kept = (await db.select().from(rawEvent)).filter(
+      (r) => (r.body as { what?: string }).what === 'chat_send',
+    )
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.body).toMatchObject({
+      found: true,
+      requests: [{ method: 'POST', path: '/__press', status: 204 }],
+    })
+    expect(JSON.stringify(kept[0])).not.toContain('40 000')
   }, 60000)
 
   it('FR-CONV-9: a text with line breaks goes in whole, and no Enter key sends it half-way', async () => {
