@@ -13,6 +13,7 @@
     "direction": "tsx src/direction/cli.ts",
     "score:eval": "tsx src/leads/scoreEvalCli.ts",
     "mind": "tsx src/mind/cli.ts",
+    "report:conv": "tsx src/conversation/reportCli.ts",
     "history:export": "tsx src/history/exportCli.ts",
     "report:school": "tsx src/school/reportCli.ts"
   },

@@ -1,5 +1,17 @@
 import { newEventId } from '@sara/shared'
-import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { lead, leadLabel, question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -13,7 +25,14 @@ import type { Notifier } from '../notify/notifier'
 export type QuestionKind = 'why_skip' | 'why_want' | 'why_decline' | 'edit_draft' | 'edit_price'
 export type QuestionRow = typeof question.$inferSelect
 /** Boris's words that answer an edit_draft or edit_price request. */
-export type DraftAnswer = { question: QuestionRow; text: string; voice: boolean; at: Date }
+export type DraftAnswer = {
+  question: QuestionRow
+  text: string
+  voice: boolean
+  /** The message's number in Telegram, when the answer came from there. */
+  messageId?: number
+  at: Date
+}
 
 const WHY_KINDS: QuestionKind[] = ['why_skip', 'why_want', 'why_decline']
 /** Sara's requests for the bid itself: an answer to one becomes the bid's text or price. */
@@ -163,6 +182,9 @@ export async function openQuestion(
         isNotNull(question.telegramMessageId),
         gte(question.askedAt, new Date(a.at.getTime() - ANSWER_WINDOW_MS).toISOString()),
         stillWanted,
+        // Boris's version of a reply to a client is taken only as a reply to its question (or to its card):
+        // after the switch it goes to the client as it is.
+        ne(question.kind, 'conv_edit'),
       ),
     )
     .orderBy(desc(question.askedAt))

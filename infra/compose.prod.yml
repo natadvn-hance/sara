@@ -28,7 +28,8 @@ services:
       SARA_NODE_TOKEN: ${SARA_NODE_TOKEN}
       SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET}
       SARA_ACCOUNTS: ${SARA_ACCOUNTS}
-    volumes: [sara-data:/data]
+    # The mind: a clone of natadvn-hance/sara-mind on the host, read only for the core (RB-17).
+    volumes: [sara-data:/data, /opt/sara-mind:/data/mind:ro]
     depends_on: [postgres]
     networks: [edge, internal]
 

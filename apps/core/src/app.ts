@@ -1,4 +1,6 @@
 import { join } from 'node:path'
+import type { TaskAction } from '@sara/shared'
+import { eq } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
 import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
@@ -7,8 +9,18 @@ import type { AppDeps } from './api/deps'
 import { buildServer } from './api/server'
 import { requireSession } from './auth/session'
 import type { Config } from './config'
+import { forwardTurn, sendTurnCard } from './conversation/cards'
+import { onConvEdit, onConvPress, onConvReply } from './conversation/commands'
+import { compareAfterTurn, compareTurn } from './conversation/compare'
+import { startConvDaySummary } from './conversation/daySummary'
+import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
+import { sendTextNow, sendTurnReply } from './conversation/outbox'
+import { startReconcile } from './conversation/reconcile'
+import { registerConversationRoutes } from './conversation/routes'
+import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
+import { task } from './db/schema'
 import { applyAmendments } from './direction/amendments'
 import { seedProfile } from './direction/profile'
 import { resumeRuns } from './direction/runs'
@@ -34,6 +46,9 @@ import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
+
+/** How often the mind index is checked for records that came into force or went out of it by their dates. */
+const MIND_REFRESH_MS = 3600_000
 
 export type RunningApp = {
   url: string
@@ -72,6 +87,17 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
 
   let pipeline: LeadPipeline | null = null
+  const commandDeps = (): Parameters<typeof onConvPress>[0] => ({
+    db,
+    notifier: bot.notifier,
+    sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
+  })
+  // A press on a conversation card goes to the conversation, every other press to the lead pipeline.
+  const onPress = async (p: { taskId: string; action: TaskAction }) => {
+    const [t] = await db.select({ kind: task.kind }).from(task).where(eq(task.id, p.taskId))
+    if (t?.kind.startsWith('conv_')) return onConvPress(commandDeps(), p)
+    return pipeline ? pipeline.onPress(p) : 'Сара ещё запускается'
+  }
   const transcriber = createTranscriber({
     ffmpegBin: config.ffmpegBin,
     whisperBin: config.whisperBin,
@@ -81,7 +107,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const bot = createBotControl({
     db,
     apiRoot: config.telegramApiRoot,
-    onPress: (p) => (pipeline ? pipeline.onPress(p) : Promise.resolve('Сара ещё запускается')),
+    onPress,
     onMessage: (m) =>
       handleBorisMessage(
         {
@@ -89,6 +115,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
           transcriber,
           onDraftText: (a) =>
             pipeline ? pipeline.onDraftText(a) : Promise.resolve('Сара ещё запускается'),
+          onCardReply: (r) => onConvReply(commandDeps(), r),
+          onConvEdit: (a) => onConvEdit(commandDeps(), a),
         },
         m,
       ),
@@ -125,6 +153,39 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
+  // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
+  const mind = createMindSearch(db)
+  const refreshMind = () =>
+    ensureMindIndex(db, config.mindDir).catch((e) =>
+      console.error('mind index failed', e instanceof Error ? e.message : e),
+    )
+  await refreshMind()
+  // Records that come into force or go out of it by their dates are picked up without a restart.
+  const mindTimer = setInterval(() => void refreshMind(), MIND_REFRESH_MS)
+  mindTimer.unref()
+  const cardDeps = { db, notifier: bot.notifier }
+  setTurnDeps({
+    db,
+    profi,
+    gateway,
+    mind,
+    card: async (id) => {
+      await sendTurnCard(cardDeps, id)
+    },
+    forward: (id) => forwardTurn(cardDeps, id),
+    // In shadow the turn never reaches a send; after the switch it goes through the message outbox.
+    send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
+    compare: (id) => compareAfterTurn(cardDeps, id),
+  })
+  const conversationDeps: ConversationEventDeps = {
+    db,
+    profi,
+    notifier: bot.notifier,
+    onTurnNeeded: (c) => startTurnFor(c),
+    onTyping: (c) => pokeTurn(c),
+    onSpecialist: (c, added) => compareTurn(cardDeps, c.id, added),
+  }
+  const conversationEvents = createConversationEvents(conversationDeps)
   const accountEvents = createProfiEventDispatcher({
     db,
     notifier: bot.notifier,
@@ -162,7 +223,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     nodeToken: config.nodeToken,
     onEvent: (e) =>
       routeProfiEvent(
-        { db, onOrderSeen: (x) => lp.onOrderSeen(x), onAccountEvent: accountEvents },
+        {
+          db,
+          onOrderSeen: (x) => lp.onOrderSeen(x),
+          onAccountEvent: accountEvents,
+          onConversationEvent: conversationEvents,
+        },
         e,
       ),
   })
@@ -189,6 +255,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     publicUrl: config.publicUrl,
   }
   registerSchoolRoutes(app, school)
+  registerConversationRoutes(app, commandDeps())
   const url = await app.listen({ port: config.port, host: config.host })
 
   const token = await secrets.get('telegram_bot_token')
@@ -205,6 +272,11 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     tickMs: o.learningTickMs,
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
+  const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
+  const reconcile = startReconcile(
+    conversationDeps,
+    config.accounts.map((a) => a.id),
+  )
 
   // Waiting cards whose order closed on Profi.ru lose their buttons (FR-LEAD-5).
   const recheck = startCardRecheck({
@@ -227,6 +299,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       recheck.stop()
       learning.stop()
       schoolJobs.stop()
+      reconcile.stop()
+      clearInterval(mindTimer)
+      conversationSummary.stop()
       gateway.stop()
       await bot.stop()
       await app.close()

@@ -2,7 +2,6 @@ import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { checkReplyText } from '../../src/conversation/check/codeChecks'
-import { planTurn } from '../../src/conversation/engine'
 import { event, mindProposal, outbox } from '../../src/db/schema'
 import { isBidRow, resumeQueuedOutbox } from '../../src/leads/outbox'
 import { proposeMind } from '../../src/mind/proposals'
@@ -66,6 +65,5 @@ describe('M4 part 0', () => {
     expect(
       await mind.search({ text: 'цена', scope: 'shared', types: ['knowledge'], limit: 5 }),
     ).toEqual([])
-    await expect(planTurn({} as never, {} as never)).rejects.toThrow(/not built/)
   })
 })

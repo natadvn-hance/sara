@@ -132,6 +132,7 @@ describe('walking skeleton', () => {
       'profi.order_seen',
       'lead.found',
       'model.called',
+      'lead.routed',
       'lead.page_read',
       'model.called',
       'lead.drafted',

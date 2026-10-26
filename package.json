@@ -33,6 +33,7 @@
     "report:shadow": "pnpm --filter @sara/core report:shadow",
     "direction:show": "pnpm --filter @sara/core direction show",
     "direction:rollback": "pnpm --filter @sara/core direction rollback",
+    "report:conv": "pnpm --filter @sara/core report:conv",
     "history:export": "pnpm --filter @sara/core history:export",
     "report:school": "pnpm --filter @sara/core report:school"
   },

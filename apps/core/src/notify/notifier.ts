@@ -20,4 +20,10 @@ export type Notifier = {
     rows: { text: string; callbackData: string }[][],
     o?: { loud?: boolean },
   ): Promise<{ messageId: number }>
+  /** Changes a sent message without a sound (M4: the shadow card gets the real reply); rows keep its buttons. */
+  editText?(
+    messageId: number,
+    text: string,
+    rows?: { text: string; callbackData: string }[][],
+  ): Promise<void>
 }

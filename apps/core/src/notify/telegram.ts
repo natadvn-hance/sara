@@ -42,6 +42,9 @@ function chatOf(ctx: Context): number | undefined {
 }
 
 /** The bot obeys only the chat bound by the first /start (threat model T9). */
+const keyboard = (rows: { text: string; callbackData: string }[][]) =>
+  rows.map((r) => r.map((b) => ({ text: b.text, callback_data: b.callbackData })))
+
 export function createTelegramRuntime(d: {
   token: string
   apiRoot?: string
@@ -110,6 +113,7 @@ export function createTelegramRuntime(d: {
         text: ctx.message.text,
         voicePath: null,
         replyToMessageId: ctx.message.reply_to_message?.message_id ?? null,
+        messageId: ctx.message.message_id,
         at: new Date(),
       }),
     )
@@ -120,6 +124,7 @@ export function createTelegramRuntime(d: {
     if (!onMessage) return
     const fileId = ctx.message.voice.file_id
     const replyTo = ctx.message.reply_to_message?.message_id ?? null
+    const messageId = ctx.message.message_id
     // Recognition takes seconds: it runs on its own, so the bot keeps answering presses meanwhile.
     void (async () => {
       const base = d.voiceDir ?? tmpdir()
@@ -139,6 +144,7 @@ export function createTelegramRuntime(d: {
             text: null,
             voicePath: path,
             replyToMessageId: replyTo,
+            messageId,
             at: new Date(),
           }),
         )
@@ -294,6 +300,16 @@ export function createTelegramRuntime(d: {
           },
         })
         return { messageId: m.message_id }
+      },
+      async editText(messageId, text, rows) {
+        await bot.api
+          .editMessageText(await chat(), messageId, text, {
+            ...(rows && { reply_markup: { inline_keyboard: keyboard(rows) } }),
+          })
+          .catch((e: unknown) => {
+            // The same text again is not an error worth a retry.
+            if (!String((e as Error).message).includes('message is not modified')) throw e
+          })
       },
     },
   }

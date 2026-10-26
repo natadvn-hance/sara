@@ -27,7 +27,7 @@ export type FakeTelegram = {
   token: string
   username: string
   sent: SentMessage[]
-  /** Edits Telegram accepted, in order (refused ones are not here). */
+  /** Edits Telegram accepted, in order (refused ones are not here): closed cards, the M4 shadow card. */
   edited: EditedMessage[]
   answers: { callback_query_id: string; text?: string }[]
   pushStart(chatId: number): void

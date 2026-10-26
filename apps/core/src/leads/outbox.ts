@@ -1,8 +1,9 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import { type EventType, newEventId, type ProfiErrorClass } from '@sara/shared'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, or, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { lead, outbox, task } from '../db/schema'
+import { lostRoute } from '../direction/router'
 import { createDeal } from '../domain/deal'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
@@ -90,18 +91,26 @@ const legacyWorkflowIdOf = (leadId: string) => `outbox:${keyOf(leadId)}`
 export async function recordBid(
   tx: DbOrTx,
   p: BidPayload,
-): Promise<{ outboxId: string; created: boolean }> {
+): Promise<{ outboxId: string | null; created: boolean }> {
+  // An order another direction won is not this account's to bid on, whatever the card in front of Boris says.
+  if (await lostRoute(tx, p.leadId, p.accountId)) return { outboxId: null, created: false }
   const id = newEventId()
   const rows = await tx
     .insert(outbox)
     .values({ id, kind: 'bid', idempotencyKey: keyOf(p.leadId), payload: p })
-    .onConflictDoNothing({ target: outbox.idempotencyKey })
+    // Any unique rule: the key, and the one bid per order of the table itself.
+    .onConflictDoNothing()
     .returning({ id: outbox.id })
   if (rows.length === 0) {
     const [existing] = await tx
       .select({ id: outbox.id })
       .from(outbox)
-      .where(eq(outbox.idempotencyKey, keyOf(p.leadId)))
+      .where(
+        or(
+          eq(outbox.idempotencyKey, keyOf(p.leadId)),
+          and(eq(outbox.kind, 'bid'), sql`${outbox.payload}->>'leadId' = ${p.leadId}`),
+        ),
+      )
     return { outboxId: existing?.id ?? id, created: false }
   }
   await appendEvent(tx, ev('outbox.queued', p, { kind: 'outbox', id }))

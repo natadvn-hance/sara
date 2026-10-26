@@ -222,6 +222,30 @@ describe('scoring in the lead pipeline', () => {
     ).toHaveLength(1)
   })
 
+  it('FR-LEAD-4: an order nobody won (dropped) that Boris wants after all can still be bid on', async () => {
+    await setSetting(db, 'outbound.bids', true, 'boris')
+    byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(50) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(async () => (await statusOf(id)) === 'scored_out')
+    await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())
+    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
+    const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
+      ?.inline_keyboard[0]?.[0]
+    tg.pushPress(111, want?.callback_data ?? '')
+    await until(() =>
+      cards().some((m) =>
+        m.reply_markup?.inline_keyboard[0]?.some((b) => b.callback_data.endsWith(':bid')),
+      ),
+    )
+    const bid = cards()
+      .flatMap((m) => m.reply_markup?.inline_keyboard.flat() ?? [])
+      .find((b) => b.callback_data.endsWith(':bid'))
+    tg.pushPress(111, bid?.callback_data ?? '')
+    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    expect(fake.bids.some((b) => b.idempotency_key === `bid:${id}`)).toBe(true)
+  }, 30000)
+
   it('FR-MIND-3: «Применить» pressed in Telegram makes the proposed rules active', async () => {
     const proposalId = '0192f3c4-5b6a-7c8d-9e0f-aabbccddeeff'
     const taskId = '0192f3c4-5b6a-7c8d-9e0f-ffeeddccbbaa'
