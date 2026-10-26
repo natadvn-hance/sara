@@ -143,6 +143,35 @@ describe('profi client and event intake', () => {
     expect(deadline).toBeLessThan(started + 400)
   })
 
+  it('NFR-REL-4: send_message waits as long as the tab does, not the SDK’s own minute', async () => {
+    const m = {
+      account_id: 'hance-marketing',
+      chat_id: '95147898',
+      text: 'Добрый день',
+      expect_last_message_id: null,
+      idempotency_key: 'msg:slow:1',
+    }
+    // The node's tab queue, the typing and the check take their time: a slow but good answer is still the answer.
+    const patient = createProfiClient({ url: fake.url, permitSecret: 'permit', tabTimeoutMs: 2500 })
+    fake.delaySend(600)
+    const first = await patient.sendMessage(m)
+    expect(first).toMatchObject({ found_on_page: true })
+    // An answer later than the tab's wait is a lost one (UNCERTAIN), at the tab's time and not at the SDK's 60 s.
+    const impatient = createProfiClient({ url: fake.url, permitSecret: 'permit', tabTimeoutMs: 400 })
+    fake.delaySend(2500)
+    const started = Date.now()
+    const err = await impatient
+      .sendMessage({
+        ...m,
+        expect_last_message_id: first.platform_message_id,
+        idempotency_key: 'msg:slow:2',
+      })
+      .catch((e) => e)
+    fake.delaySend(0)
+    expect(err).toMatchObject({ errorClass: 'UNCERTAIN' })
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+
   it('C2: get_order reads the order and whether this account bid', async () => {
     const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
     await fake.emitOrder({ order_id: '1' })

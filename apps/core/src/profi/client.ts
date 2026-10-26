@@ -38,7 +38,9 @@ export type ProfiClient = {
 
 /**
  * How long a tool that works in the account tab is waited for: the tab may first finish the feed check and the chat
- * walk (#79). The SDK's own minute gave up while the bid still waited in the node's queue.
+ * walk (#79). The SDK's own minute gave up while the bid still waited in the node's queue. A message waits the same:
+ * the tab's queue (up to 150 s), the typing (up to 25 s) and the check that it stands in the chat (up to 15 s) can
+ * together take minutes, and a slow send that succeeded must not look like a lost answer.
  */
 const TAB_TIMEOUT_MS = 4 * 60_000
 /** The node presses nothing in the last half minute of the wait: its answer could no longer arrive in time. */
@@ -66,7 +68,7 @@ export function createProfiClient(o: {
    * minute check and other orders, so it can take far longer than the 60 s the protocol allows by default.
    */
   getOrderTimeoutMs?: number
-  /** How long submit_bid is waited for (default 4 minutes); tests wait less. */
+  /** How long submit_bid and send_message are waited for (default 4 minutes); tests wait less. */
   tabTimeoutMs?: number
 }): ProfiClient {
   const tabMs = o.tabTimeoutMs ?? TAB_TIMEOUT_MS
@@ -141,6 +143,7 @@ export function createProfiClient(o: {
           }),
         },
         SendMessageOutput,
+        tabMs,
       ),
   }
 }

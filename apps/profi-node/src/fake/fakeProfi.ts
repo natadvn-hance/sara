@@ -71,6 +71,8 @@ export type FakeProfi = {
   onSubmit(hook: ((i: SubmitBidInput) => Promise<void> | void) | null): void
   /** session_health answers only after this many milliseconds. */
   delayHealth(ms: number): void
+  /** send_message works (and answers) only after this many milliseconds: a tab that is busy; 0 is at once. */
+  delaySend(ms: number): void
   close(): Promise<void>
 }
 
@@ -118,6 +120,7 @@ export async function createFakeProfi(o: {
   let refusal: { errorClass: ProfiErrorClass; times: number } | null = null
   let hook: ((i: SubmitBidInput) => Promise<void> | void) | null = null
   let healthDelay = 0
+  let sendDelay = 0
   // Orders with this account's bid on the fake site.
   const onSite = new Set<string>()
 
@@ -240,6 +243,7 @@ export async function createFakeProfi(o: {
       return out
     },
     async sendMessage(i: SendMessageInput) {
+      if (sendDelay > 0) await new Promise((r) => setTimeout(r, sendDelay))
       const m = { accountId: i.account_id, chatId: i.chat_id, text: i.text, key: i.idempotency_key }
       if (!verifyMessagePermit(o.permitSecret, m, i.permit)) {
         throw new ProfiToolError('INTERNAL', 'permit does not match this message')
@@ -403,6 +407,9 @@ export async function createFakeProfi(o: {
     },
     delayHealth(ms) {
       healthDelay = ms
+    },
+    delaySend(ms) {
+      sendDelay = ms
     },
     close: server.close,
   }
