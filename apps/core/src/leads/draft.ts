@@ -122,6 +122,9 @@ export function bodyOf(text: string): string {
 /** What the voice rules make of a text (3, 4, 8, 15): no emoji, no dashes, no hyphen in a common word, no final period, one empty line. */
 const plain = (s: string) => fixClientText(removeEmoji(s))
 
+/** A text as the body of a bid: the voice rules applied, an opening greeting sentence taken off (for a sample of the direction). */
+export const bidBodyOf = (text: string): string => bodyOf(plain(text))
+
 /** The model's body behind the code's greeting; a greeting the model wrote anyway goes, it never knows the name. */
 export function draftOf(body: string, clientName: string, now: Date = new Date()): string {
   return `${greetingOf(clientName, now)}\n\n${bodyOf(plain(body))}`

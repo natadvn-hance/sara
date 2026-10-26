@@ -19,6 +19,8 @@ const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = '{"verdict":"fit","reason":"Нужен сайт","tags":["сайт"],"confidence":0.9}'
 /** The Analyst's draft and price, so «Откликнуться» has a text and a «Стоимость услуги» to send. */
 const ANALYST = { analyst: analystAnswer('Понимаю задачу.\n\nКогда запуск?', 30000) }
+/** 12:00 in Moscow: the greeting of a bid follows the hour (rule 5), so the test fixes it. */
+const NOON = new Date('2026-10-26T09:00:00Z')
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram
@@ -84,6 +86,7 @@ beforeAll(async () => {
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
+      now: () => NOON,
     },
   )
   fake.setCoreEventsUrl(`${app.url}/internal/profi/events`)
@@ -283,7 +286,7 @@ describe('held orders in the summary', () => {
     const card = tg.sent.at(-1)
     expect(card?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
     expect(card?.text).toContain(
-      '<b>Черновик отклика</b>\n<blockquote>Ирина, добрый день!\n\nПонимаю задачу.',
+      '<b>Черновик отклика</b>\n<blockquote>Ирина, добрый день!\n\nПонимаю задачу\n\nКогда запуск?',
     )
     const [l] = await db.select().from(lead).where(eq(lead.id, held))
     expect(l?.status).toBe('queued')
@@ -327,7 +330,7 @@ describe('held orders in the summary', () => {
     expect(tg.answers[0]?.text).toBe('Прислала карточку заявки')
     // The card is already out when the press is answered.
     expect(cards()).toHaveLength(3)
-    expect(cards().at(-1)?.text).toContain('Черновик из прошлого.')
+    expect(cards().at(-1)?.text).toContain('Черновик из прошлого')
     expect(await analystCalls(held)).toBe(0)
   })
 

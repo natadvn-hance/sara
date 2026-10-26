@@ -77,6 +77,8 @@ export type StartOptions = {
   schoolTickMs?: number
   /** How often waiting cards are looked at again (default 10 minutes); tests call recheck.tick instead. */
   recheckTickMs?: number
+  /** The clock of the greeting of a bid (default the real one); tests fix the hour. */
+  now?: () => Date
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -140,6 +142,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       o.remindAfterMs ??
       (async () => (await getSetting(db, 'reminder.decision_after_min')) * 60_000),
     notifyRetry: o.notifyRetry,
+    now: o.now,
   })
   const lp = pipeline
   setOutboxDeps({
@@ -151,6 +154,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     reconcileDelaysMs: o.reconcileDelaysMs ?? [5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
+    now: o.now,
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.

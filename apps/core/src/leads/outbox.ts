@@ -10,6 +10,7 @@ import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { bidTextAt } from './draft'
 
 export type OutboxDeps = {
   db: Db
@@ -24,6 +25,8 @@ export type OutboxDeps = {
   resendCard(taskId: string): Promise<void>
   /** Called when a bid ended ORDER_CLOSED: the card of that order is closed in Telegram (FR-LEAD-5). */
   closeCard(taskId: string): Promise<void>
+  /** The clock of the greeting: a bid is greeted at the moment it is sent (Moscow time of day). Tests fix it. */
+  now?: () => Date
 }
 
 let deps: OutboxDeps | null = null
@@ -38,7 +41,10 @@ function d(): OutboxDeps {
 export type BidPayload = {
   leadId: string
   accountId: string
+  /** The draft as it was when Boris pressed: its greeting is the one of that hour and is built again when the bid is sent. */
   text: string
+  /** The client's name on the board, for a draft with no greeting of its own; absent in rows from before 26.10.2026. */
+  clientName?: string
   correlationId: string
   title: string
   /** What the bid itself costs on Profi.ru, as on the card Boris pressed: the most the node may pay. */
@@ -339,7 +345,8 @@ async function attempt(
     const r = await d().profi.submitBid({
       account_id: p.accountId,
       order_id: p.leadId,
-      text: p.text,
+      // Greeted and tidied at this very moment, not at the press: the hour may have changed since the card (rule 5).
+      text: bidTextAt(p.text, p.clientName ?? '', d().now?.() ?? new Date()),
       price_rub: p.servicePriceRub ?? null,
       // The fee on the card Boris pressed: the node pays no more than that.
       max_fee_rub: p.priceRub,

@@ -49,6 +49,9 @@ const notifier: Notifier = {
   sendButtons: async () => ({ messageId: 1 }),
 }
 let pipeline: LeadPipeline
+/** The Moscow hour of the greeting a card carries; 12:00 unless a test moves it. */
+const NOON = new Date('2026-10-26T09:00:00Z')
+let moment = NOON
 
 const ANSWER = analystAnswer('Понимаю задачу.')
 const ANALYSIS = {
@@ -80,7 +83,9 @@ beforeEach(async () => {
     notifier,
     profi: { sessionHealth: async () => ({ alive: true, balance_rub: 5000 }) } as never,
     remindAfterMs: async () => 3_600_000,
+    now: () => moment,
   })
+  moment = NOON
 })
 
 /** A lead with an open decision task; `over` sets the columns a test cares about. */
@@ -162,6 +167,29 @@ describe('the card built from a lead', () => {
     expect(text).not.toContain('Заявка ждёт решения')
     expect(text).toContain('Отзывы: +3 / −1 · «Перестала отвечать»')
     expect(text).toContain('https://profi.ru/backoffice/n.php?o=91001')
+  })
+
+  it('FR-LEAD-6: a draft made in the morning shows the greeting of the hour the card is sent at', async () => {
+    const taskId = await openLead('91010', { draftText: 'Ирина, доброе утро!\n\nПонимаю задачу' })
+    moment = new Date('2026-10-26T15:00:00Z')
+    await pipeline.resendCard(taskId)
+    expect(cards[0]?.draft?.text).toBe('Ирина, добрый вечер!\n\nПонимаю задачу')
+    expect(leadCardText(cards[0] as LeadCard)).toContain('Ирина, добрый вечер!')
+    moment = new Date('2026-10-26T08:59:00Z')
+    await pipeline.onReminder(taskId)
+    expect(cards[1]?.draft?.text).toBe('Ирина, доброе утро!\n\nПонимаю задачу')
+    // The card never rewrites the stored draft: the greeting is built again when the bid is sent.
+    const [row] = await db.select().from(lead).where(eq(lead.id, '91010'))
+    expect(row?.draftText).toBe('Ирина, доброе утро!\n\nПонимаю задачу')
+  })
+
+  it('NFR-UX-1: the card shows the bid as it will go out: no dash, no final period, no emoji', async () => {
+    const dash = String.fromCharCode(0x2014)
+    const taskId = await openLead('91011', {
+      draftText: `Ирина, добрый день!\n\nСайт ${dash} это просто 🤝.\n\nКогда запуск?`,
+    })
+    await pipeline.resendCard(taskId)
+    expect(cards[0]?.draft?.text).toBe('Ирина, добрый день!\n\nСайт это просто\n\nКогда запуск?')
   })
 
   it('FR-LEAD-7: a card sent again is the same layout without the reminder line', async () => {

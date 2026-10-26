@@ -93,6 +93,8 @@ beforeAll(async () => {
     learningTickMs: 3_600_000,
     remindAfterMs: async () => remindMs,
     notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
+    // 12:00 in Moscow: the greeting of a bid follows the hour (rule 5), so the test fixes it.
+    now: () => new Date('2026-10-26T09:00:00Z'),
   })
   fake.setCoreEventsUrl(`${app.url}/internal/profi/events`)
   await app.secrets.set('claude_oauth_token', 'tok')

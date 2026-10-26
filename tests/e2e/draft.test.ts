@@ -21,8 +21,12 @@ const ROOT = resolve(import.meta.dirname, '../..')
 const FIT = { verdict: 'fit', reason: 'Нужен сайт', tags: ['сайт'], confidence: 0.9 }
 const BODY = 'Понимаю, клинике важно быстро начать запись.\n\nКогда хотите открыть запись онлайн?'
 const ANALYST = analystAnswer(BODY)
+/** The body in the draft: no period at the end of a paragraph (rule 4). */
+const CLEAN = 'Понимаю, клинике важно быстро начать запись\n\nКогда хотите открыть запись онлайн?'
+/** 12:00 in Moscow: the greeting follows the hour (rule 5), so the tests fix it. */
+const NOON = new Date('2026-10-26T09:00:00Z')
 /** The sample order 90000001: client Ирина, budget «до 150 000 ₽». */
-const DRAFT = `Ирина, добрый день!\n\n${BODY}`
+const DRAFT = `Ирина, добрый день!\n\n${CLEAN}`
 /** Sara's note after a new text; the sample order 90000001 is «Сайт для стоматологической клиники». */
 const SAVED = 'Записала новый текст отклика для «Сайт для стоматологической клиники»'
 const NBSP = ' '
@@ -105,6 +109,7 @@ beforeAll(async () => {
       retryDelaysMs: [50, 50, 50, 50, 50],
       learningTickMs: 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
+      now: () => NOON,
     },
   )
   fake.setCoreEventsUrl(`${app.url}/internal/profi/events`)
@@ -241,7 +246,7 @@ describe('the draft on the card', () => {
     expect(stdins.length).toBeGreaterThanOrEqual(3)
     for (const stdin of stdins) expect(stdin).not.toContain('Ирина')
     expect(cards()[0]?.text).toContain(
-      'Ирина, добрый день!\n\nПонимаю, Ирина, вам важно быстро начать.\n\nКогда запуск?',
+      'Ирина, добрый день!\n\nПонимаю, Ирина, вам важно быстро начать\n\nКогда запуск?',
     )
   })
 
@@ -398,7 +403,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
       draftPriceRub: 90000,
     })
     expect((await eventsOf('draft.edited', id)).map((e) => e.payload)).toEqual([
-      { before: BODY, after: NEW, voice: false },
+      { before: CLEAN, after: NEW, voice: false },
     ])
     const journal = await db.select({ p: event.payload }).from(event)
     expect(JSON.stringify(journal)).not.toContain('Ирина')
@@ -417,7 +422,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     const ask = await pressEdit(cards()[0])
     tg.pushText(111, `Понимаю. ${'а'.repeat(590)}`, ask)
     await until(() =>
-      said('С приветствием выходит 620 знаков, а Профи.ру принимает до 500. Пришли текст короче.'),
+      said('С приветствием выходит 621 знак, а Профи.ру принимает до 500. Пришли текст короче.'),
     )
     expect((await leadOf(id))?.draftText).toBe(DRAFT)
     expect(cards()).toHaveLength(1)

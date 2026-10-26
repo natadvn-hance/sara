@@ -14,7 +14,7 @@ import { calibrationItem, directionRun, lead } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import { hasTag, redact } from '../gateway/redact'
 import { namesToHide } from '../leads/clientName'
-import { bodyOf, greetingOf } from '../leads/draft'
+import { bidBodyOf, greetingOf, longestGreeting } from '../leads/draft'
 import { sorterInput } from '../leads/sorter'
 import type { Profile, ProfilePatch } from './profile'
 import { orderOfLead } from './trial'
@@ -243,9 +243,12 @@ export async function proposeFormat(
       // The tags stay as the model wrote them: a sample that holds one carries a client's data or name.
       if (hasTag(o.understood) || o.samples.some(hasTag))
         return 'В ответе остались метки в квадратных скобках. Напиши словами, без меток, образцы без имён и контактов.'
+      // The greeting changes with the hour (rule 5), so the room is the longest one of the day, «добрый вечер»: a
+      // sample that fits now fits whenever a bid is sent.
       const long = o.samples.findIndex(
         (s, n) =>
-          greetingOf(leads[n]?.clientName ?? '').length + GAP + s.length > o.reply_format.max_chars,
+          longestGreeting(leads[n]?.clientName ?? '').length + GAP + bidBodyOf(s).length >
+          o.reply_format.max_chars,
       )
       return long >= 0
         ? `Образец ${long + 1} вместе с приветствием длиннее потолка max_chars ${o.reply_format.max_chars}.`
@@ -259,7 +262,7 @@ export async function proposeFormat(
     return {
       lead_id: l?.id ?? '',
       greeting: greetingOf(l?.clientName ?? ''),
-      body: bodyOf(body.replace(DASHES, '-')),
+      body: bidBodyOf(body),
     }
   })
   return {
@@ -278,7 +281,7 @@ export function cleanExample(
   text: string,
   names: string[],
 ): { ok: true; text: string } | { ok: false; error: 'empty' | 'has_name' | 'has_contact' } {
-  const body = bodyOf(text.trim().replace(DASHES, '-'))
+  const body = bidBodyOf(text)
   if (!body) return { ok: false, error: 'empty' }
   const hidden = redact(body, names)
   if (hidden.counts.name > 0) return { ok: false, error: 'has_name' }
