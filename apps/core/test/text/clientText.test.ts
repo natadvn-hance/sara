@@ -16,6 +16,7 @@ import {
 // Long and medium dashes are written by code, never typed (CI forbids the long one in files).
 const LONG = String.fromCharCode(0x2014)
 const MEDIUM = String.fromCharCode(0x2013)
+const ANY_DASH = new RegExp(`[${MEDIUM}${LONG}]`)
 const NBSP = String.fromCharCode(0xa0)
 
 describe('fixClientText: the final period of a paragraph (FR-SPEECH-3, rule 4)', () => {
@@ -183,7 +184,7 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
 
   it('NFR-UX-1: the fixed text holds no long or medium dash at all', () => {
     const out = fixClientText(`А ${LONG} б ${MEDIUM} в, г${LONG}д, 1${MEDIUM}2, ${LONG}е`)
-    expect(out).not.toMatch(/[–—]/)
+    expect(out).not.toMatch(ANY_DASH)
   })
 })
 
@@ -451,7 +452,7 @@ describe('voiceIssues: a clean reply (FR-SPEECH-3)', () => {
       expect(CHECK_IDS).toContain(i.id)
       expect(i.id.startsWith('voice.')).toBe(true)
       expect(i.detail).toMatch(/[а-яё]/i)
-      expect(i.detail).not.toMatch(/[–—]/)
+      expect(i.detail).not.toMatch(ANY_DASH)
     }
     expect(new Set(issues.map((i) => i.id)).size).toBe(issues.length)
   })
