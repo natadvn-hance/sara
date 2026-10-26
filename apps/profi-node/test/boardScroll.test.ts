@@ -58,10 +58,22 @@ function pagedBoard(n = 30, pageSize = 5) {
   for (let i = 0; i < n; i++) site.addOrder({ subject: `Заказ ${i}` })
   site.boardPageSize = pageSize
 }
-const seen = async () =>
+const seenNow = async () =>
   (await db.select().from(outboxNode)).filter(
     (r) => (r.payload as { type: string }).type === 'profi.order_seen',
   ).length
+/** The eyes store a page's orders after its answer arrives, so the count is read once it stops moving. */
+const seen = async () => {
+  let last = await seenNow()
+  let steadySince = Date.now()
+  const end = Date.now() + 5000
+  while (Date.now() < end && Date.now() - steadySince < 300) {
+    await new Promise((r) => setTimeout(r, 50))
+    const now = await seenNow()
+    if (now !== last) [last, steadySince] = [now, Date.now()]
+  }
+  return last
+}
 
 const insurance = (
   o: { board?: Parameters<typeof startInsurance>[0]['board']; canNavigate?: () => boolean } = {},
