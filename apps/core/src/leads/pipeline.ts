@@ -585,7 +585,14 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
     unscored: !scored,
-    draft: draft?.text ? { text: draft.text, priceRub: draft.priceRub } : null,
+    // The same text as every later card and as the bid: the greeting of this hour, the voice rules applied (the case
+    // lines the program put in are tidied too), so Boris never approves a text that is not the one to be sent.
+    draft: draft?.text
+      ? {
+          text: bidTextAt(draft.text, withPage.client_name, greetingMoment()),
+          priceRub: draft.priceRub,
+        }
+      : null,
     analysis: cardAnalysis(draft?.analysis),
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }

@@ -186,6 +186,45 @@ describe('the draft on the card', () => {
     expect(call?.stdin).not.toContain('hance.example')
   })
 
+  it('FR-LEAD-6: the first card shows the bid as it will be sent: the case line is tidied like the rest', async () => {
+    const dash = String.fromCharCode(0x2014)
+    await saveProfile(
+      db,
+      'hance-marketing',
+      {
+        reply_format: {
+          parts: [{ id: 'understanding', title: 'Понимание', hint: 'Про ситуацию клиента' }],
+          max_chars: 500,
+          tone: [],
+          examples: [],
+          max_cases: 1,
+        },
+        cases: [
+          {
+            id: 'clinic_site',
+            title: `Сайт-визитка ${dash} для клиники`,
+            url: 'https://hance.example/cases/clinic-site',
+            summary: 'Запись онлайн',
+            tags: ['сайт'],
+            show_when: 'Нужен сайт услуг',
+            never_when: null,
+          },
+        ],
+      },
+      'boris',
+    )
+    byRole = { ...byRole, analyst: { ...ANALYST, case_ids: ['clinic_site'] } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const sent = 'Похожая работа: Сайт визитка для клиники, https://hance.example/cases/clinic-site'
+    expect(cards()[0]?.text).toContain(sent)
+    expect(cards()[0]?.text).not.toContain('Сайт-визитка')
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => fake.bids.length === 1)
+    expect(fake.bids[0]?.text).toBe(`${DRAFT}\n\n${sent}`)
+  })
+
   it('FR-LEAD-6: a direction with no format and no cases drafts exactly as before', async () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
