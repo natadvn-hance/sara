@@ -4,6 +4,7 @@
  * Long and medium dashes are written below as escapes, never as the characters (CI forbids the long one in files).
  */
 
+import type { CheckId, Tone } from '@sara/shared'
 import { NOT_NAMES } from '../conversation/check/phrases'
 import { firstName } from '../leads/clientName'
 
@@ -265,4 +266,267 @@ export function isShortReply(text: string): boolean {
     sentences.length <= SHORT_REPLY_SENTENCES &&
     bare.replace(/\s+/g, ' ').trim().length <= SHORT_REPLY_CHARS
   )
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Rules 6, 7, 8, 12, 14: what a reply must not promise, say or show
+
+export type VoiceIssueId = Extract<CheckId, `voice.${string}`>
+export type VoiceIssue = { id: VoiceIssueId; detail: string }
+
+export type VoiceInput = {
+  text: string
+  /** The first message of a conversation (a first reply after the bid): one question at most. */
+  firstMessage: boolean
+  /** The client's tone as the Interlocutor read it; null when it did not. */
+  tone: Tone | null
+  /** The reply brings bad news: a refusal, a delay, «не успеем». */
+  badNews: boolean
+  /** Our earlier messages of this conversation, for the repeat of a phrase. */
+  ourPrevious: string[]
+  name: string | null
+}
+
+const B = String.raw`(?<!\p{L})`
+const E = String.raw`(?!\p{L})`
+
+// Verbs of Boris's own work in the first person future («пришлю», «подготовим»): any object makes the promise.
+const SEND_OR_PREPARE =
+  'пришлю|пришлем|вышлю|вышлем|отправлю|отправим|скину|скинем|кину|кинем|закину|закинем|перешлю|перешлем|' +
+  'подготовлю|подготовим|составлю|составим|сформирую|сформируем|накидаю|накидаем|набросаю|набросаем|' +
+  'нарисую|нарисуем|посчитаю|посчитаем|рассчитаю|рассчитаем|прикину|прикинем|оценю|оценим'
+// «Сделаю расчёт», «КП за два дня»: a document of Boris's with a verb of making or a term. «Сделаем сайт» is the service.
+const DOCUMENT = String.raw`кп|коммерческ\p{L}+\s+предложени\p{L}*|предложени\p{L}*|смет\p{L}*|расчет\p{L}*|презентаци\p{L}*|оценк\p{L}*`
+const MAKE = 'сделаю|сделаем|соберу|соберем'
+// «Посмотрю сайт», «изучу ваши соцсети»: looking at something of the client's. «Посмотрю задачу» is not one.
+const LOOK =
+  'посмотрю|посмотрим|изучу|изучим|проанализирую|проанализируем|проверю|проверим|разберу|разберем'
+const LOOK_AT = String.raw`сайт\p{L}*|страниц\p{L}*|аккаунт\p{L}*|профил\p{L}*|соцсет\p{L}*|конкурент\p{L}*|материал\p{L}*|бриф\p{L}*|заявк\p{L}*|проект\p{L}*|макет\p{L}*|лендинг\p{L}*|кабинет\p{L}*|рекламн\p{L}*|кампани\p{L}*|выдач\p{L}*|презентаци\p{L}*|смет\p{L}*|документ\p{L}*`
+const TERM = String.raw`\d+|один|два|две|три|четыре|пять|шесть|семь|ден\p{L}*|дн\p{L}*|час\p{L}*|недел\p{L}*|месяц\p{L}*|завтра|сегодня|послезавтра|пятниц\p{L}*|понедельник\p{L}*|вторник\p{L}*|сред\p{L}*|четверг\p{L}*|суббот\p{L}*|воскресен\p{L}*`
+
+const PROMISES = [
+  new RegExp(`${B}(?:${SEND_OR_PREPARE})${E}`, 'u'),
+  new RegExp(String.raw`${B}(?:${MAKE})(?:\s+\p{L}+){0,2}?\s+(?:${DOCUMENT})${E}`, 'u'),
+  new RegExp(String.raw`${B}(?:${LOOK})(?:\s+\p{L}+){0,2}?\s+(?:${LOOK_AT})${E}`, 'u'),
+  new RegExp(
+    String.raw`${B}(?:${DOCUMENT})(?:\s+\p{L}+){0,3}?\s+(?:за|через|в\s+течени\p{L}*|к|до|не\s+позднее)\s+(?:\p{L}+\s+){0,2}?(?:${TERM})${E}`,
+    'u',
+  ),
+]
+/** «Веду лично», «займусь лично», «буду вести проект лично»: a verb of leading and the word «лично» in one sentence. */
+const LEAD_VERB = new RegExp(
+  String.raw`${B}(?:веду|ведем|займусь|займемся|возьму|возьмем|проконтролирую|проконтролируем|курирую|курируем|(?:буду|будем|будет)\s+(?:лично\s+)?(?:вести|курировать|контролировать|заниматься|сопровождать))${E}`,
+  'u',
+)
+const PERSONALLY = new RegExp(`${B}лично${E}`, 'u')
+
+function promiseIssue(text: string): VoiceIssue | null {
+  const folded = fold(text)
+  for (const re of PROMISES) {
+    const m = re.exec(folded)
+    if (m) return promised(m[0])
+  }
+  for (const sentence of folded.split(/[.!?…;\n]+/)) {
+    const verb = LEAD_VERB.exec(sentence)
+    if (verb && PERSONALLY.test(sentence)) return promised(sentence.trim().slice(0, 60))
+  }
+  return null
+}
+const promised = (quote: string): VoiceIssue => ({
+  id: 'voice.promise_action',
+  detail: `обещание действия Бориса: «${quote}». Такой ответ уйдёт Борису черновиком`,
+})
+
+// Past forms and short adjectives of a woman speaking (folded). Sara writes in Boris's name: «понял», «рад».
+const FEMININE_VERBS = new Set(
+  [
+    'поняла заметила посмотрела подготовила сделала увидела прочитала изучила проверила уточнила отправила написала ' +
+      'ответила рассмотрела учла приняла подумала решила нашла обсудила записала отметила посчитала собрала получила ' +
+      'передала связалась договорилась согласилась обратила оценила разобралась проанализировала ознакомилась ' +
+      'спросила узнала выяснила составила приготовила прислала вернулась подключилась успела смогла начала закончила ' +
+      'предложила рекомендовала посоветовала подсказала показала объяснила рассказала назвала предупредила старалась ' +
+      'постаралась хотела ждала думала',
+  ].flatMap((line) => line.split(' ')),
+)
+const FEMININE_ADJECTIVES = new Set([
+  'рада',
+  'согласна',
+  'уверена',
+  'благодарна',
+  'признательна',
+  'готова',
+])
+/** A feminine subject of a third party before the verb: «команда сделала», «она поняла», «которая сделала». */
+const FEMININE_SUBJECTS = new Set(
+  (
+    'она которая эта та ваша наша моя ее команда студия компания фирма система платформа площадка реклама кампания ' +
+    'работа задача версия страница заявка клиника школа организация служба поддержка биржа нейросеть'
+  ).split(' '),
+)
+/** Words that may stand between «я» and the adjective or verb, or open a clause before it. */
+const FILLERS = new Set(
+  (
+    'я уже тоже также еще вот все пока очень так искренне действительно вообще всегда безусловно конечно да ну же ' +
+    'и а но не бы быстро внимательно подробно сразу только сегодня вчера сейчас ничего спасибо отлично хорошо итак ' +
+    'тогда кстати'
+  ).split(' '),
+)
+const PAST_FEMININE = /^\p{L}{2,}(?:ла|лась)$/u
+
+function feminineIssue(text: string): VoiceIssue | null {
+  for (const clause of fold(text).split(/[.!?;:,()\n…]+/)) {
+    const words = clause.match(/\p{L}+/gu) ?? []
+    for (const [k, word] of words.entries()) {
+      const before = words.slice(0, k)
+      const found = FEMININE_ADJECTIVES.has(word)
+        ? before.every((w) => FILLERS.has(w))
+        : FEMININE_VERBS.has(word)
+          ? !before.some((w) => FEMININE_SUBJECTS.has(w))
+          : PAST_FEMININE.test(word) && speaksOfHerself(before)
+      if (found)
+        return {
+          id: 'voice.feminine',
+          detail: `женский род от имени Бориса: «${word}», нужен мужской («понял», «рад»)`,
+        }
+    }
+  }
+  return null
+}
+/** «Я бы хотела», «я уже начала»: «я», up to two fillers, then the verb. */
+function speaksOfHerself(before: string[]): boolean {
+  let j = before.length - 1
+  for (
+    let steps = 0;
+    j >= 0 && before[j] !== 'я' && FILLERS.has(before[j] ?? '') && steps < 2;
+    steps++
+  )
+    j--
+  return before[j] === 'я'
+}
+
+/** A link with a query («hance.ru/?a=1») holds a question mark that is no question. */
+const LINK_WITH_QUERY = /\S*[/.]\S*\?[\p{L}\p{N}]\S*/gu
+
+function questionsIssue(text: string): VoiceIssue | null {
+  const count = (text.replace(LINK_WITH_QUERY, ' ').match(/\?+[!?]*/g) ?? []).length
+  return count > 1
+    ? {
+        id: 'voice.many_questions',
+        detail: `в первом сообщении вопросов: ${count}, а нужен один (остальные в следующих)`,
+      }
+    : null
+}
+
+const ALLOWED_EMOJI = new Set(['🤝', '🙏', '😊', '👍'])
+/** Tones in which a smile is out of place (the Tone list has no «formal»): the client is tense or in a hurry. */
+const SERIOUS_TONES: Partial<Record<Tone, string>> = {
+  irritation: 'раздражение',
+  rudeness: 'грубость',
+  hurry: 'спешка',
+  doubt: 'сомнение',
+  bargaining: 'торг',
+}
+// The glue of an emoji sequence: the variation selector 16, the zero width joiner, the skin tones. Built from
+// character codes: written as a plain class, a joiner in a class is a lint error and a trap for the reader.
+const VARIATION_16 = String.fromCharCode(0xfe0f)
+const JOINER = String.fromCharCode(0x200d)
+const EMOJI_MODIFIERS = new RegExp(`${VARIATION_16}|${JOINER}|[\\u{1F3FB}-\\u{1F3FF}]`, 'gu')
+const KEYCAP = String.fromCharCode(0x20e3)
+const EMOJI_SIGN = new RegExp(
+  `\\p{Extended_Pictographic}|\\p{Regional_Indicator}|[#*0-9]${KEYCAP}`,
+  'gu',
+)
+const NOT_EMOJI = new Set(['©', '®', '™'])
+const LIST_NUMBER = /^[ \t]*\d{1,2}\)/gm
+
+/** The emoji of a text, one sign each, without the glue of a sequence and without ©, ® and ™. */
+function emojiOf(text: string): string[] {
+  const signs = text.replace(EMOJI_MODIFIERS, '').match(EMOJI_SIGN) ?? []
+  return signs.filter((s) => !NOT_EMOJI.has(s))
+}
+
+/** The «)» that close no «(»: smiles. A number of a list line («1)») is no smile. */
+function smileBrackets(text: string): number {
+  let depth = 0
+  let smiles = 0
+  for (const ch of text.replace(LIST_NUMBER, (m) => ' '.repeat(m.length))) {
+    if (ch === '(') depth++
+    else if (ch === ')') {
+      if (depth > 0) depth--
+      else smiles++
+    }
+  }
+  return smiles
+}
+
+function emojiIssue(i: VoiceInput): VoiceIssue | null {
+  const emoji = emojiOf(i.text)
+  const smiles = smileBrackets(i.text)
+  const reasons: string[] = []
+  const serious = i.tone ? SERIOUS_TONES[i.tone] : undefined
+  if (emoji.length > 0 || smiles > 0) {
+    if (i.badNews) reasons.push('смайл или эмодзи при плохой новости')
+    if (serious) reasons.push(`смайл или эмодзи при тоне клиента «${serious}»`)
+  }
+  if (reasons.length === 0) {
+    if (smiles > 2) reasons.push(`скобок-смайлов ${smiles}, а можно не больше двух`)
+    const strange = [...new Set(emoji.filter((e) => !ALLOWED_EMOJI.has(e)))]
+    if (strange.length > 0)
+      reasons.push(`эмодзи ${strange.join(' ')} не из разрешённых (🤝 🙏 😊 👍)`)
+  }
+  return reasons.length > 0 ? { id: 'voice.emoji_tone', detail: reasons.join('; ') } : null
+}
+
+/** Words of a sentence as a key; the client's name does not count, so a repeat is found with or without it. */
+const sentenceKey = (s: string, own: string) =>
+  (fold(s).match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w !== own).join(' ')
+const SENTENCE_WORDS = 4
+
+function repeatIssue(i: VoiceInput, own: string): VoiceIssue | null {
+  const sentences = (text: string) =>
+    text
+      .split(/[.!?…\n]+/)
+      .map((raw) => ({ raw: raw.trim(), key: sentenceKey(raw, own) }))
+      .filter((s) => s.key.split(' ').length >= SENTENCE_WORDS)
+  const said = new Set(i.ourPrevious.flatMap((p) => sentences(p).map((s) => s.key)))
+  const again = sentences(i.text).find((s) => said.has(s.key))
+  return again
+    ? {
+        id: 'voice.signature_repeat',
+        detail: `повтор своей фразы из прошлых сообщений: «${again.raw}»`,
+      }
+    : null
+}
+
+function nameIssue(i: VoiceInput): VoiceIssue | null {
+  const own = i.name ? firstName(i.name) : null
+  if (!own || isShortReply(i.text) || startsWithName(i.text, i.name)) return null
+  // «Доброго дня, Анна!» opens with the name inside the greeting.
+  const greeting = leadingGreeting(i.text)
+  const greeted: string[] = greeting ? (fold(greeting).match(/[\p{L}-]+/gu) ?? []) : []
+  if (greeted.includes(fold(own))) return null
+  return {
+    id: 'voice.no_name',
+    detail: `ответ по существу начинается не с имени клиента («${own}»)`,
+  }
+}
+
+/**
+ * What in a reply breaks the voice of Boris's decisions of 26.10: a promise of an action that only Boris does
+ * (rule 12), more than one question in a first message (14), a smile in a tense talk or with bad news, other emoji
+ * than 🤝 🙏 😊 👍, more than two «)» (8), a phrase of ours said again (12), a woman's form in Boris's name (7), and a
+ * reply by the essence that does not start with the client's name (6). At most one issue of each kind, in that
+ * order of weight; nothing for an empty text.
+ */
+export function voiceIssues(i: VoiceInput): VoiceIssue[] {
+  if (!i.text.trim()) return []
+  const own = fold(i.name ? (firstName(i.name) ?? '') : '')
+  return [
+    promiseIssue(i.text),
+    feminineIssue(i.text),
+    nameIssue(i),
+    i.firstMessage ? questionsIssue(i.text) : null,
+    emojiIssue(i),
+    repeatIssue(i, own),
+  ].filter((x): x is VoiceIssue => x !== null)
 }

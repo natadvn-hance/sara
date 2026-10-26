@@ -1,3 +1,4 @@
+import { CHECK_IDS, type Tone } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
 import {
   fixClientText,
@@ -7,6 +8,8 @@ import {
   leadingGreeting,
   moscowPartOfDay,
   startsWithName,
+  type VoiceIssueId,
+  voiceIssues,
 } from '../../src/text/clientText'
 
 // Long and medium dashes are written by code, never typed (CI forbids the long one in files).
@@ -405,5 +408,304 @@ describe('isShortReply (FR-SPEECH-3, rule 6)', () => {
 
   it('FR-SPEECH-3: emoji are not counted as words or as characters', () => {
     expect(isShortReply(`${w(7)} ${w(7)} ${w(7)} ${w(7)} ${w(8)} 🤝🙏😊👍👍🏽`)).toBe(true)
+  })
+})
+
+type VoiceInput = Parameters<typeof voiceIssues>[0]
+
+const voice = (over: Partial<VoiceInput> = {}) =>
+  voiceIssues({
+    text: 'Анна, посмотрел задачу, сайт нужен к запуску',
+    firstMessage: false,
+    tone: null,
+    badNews: false,
+    ourPrevious: [],
+    name: 'Анна',
+    ...over,
+  })
+const voiceIds = (over: Partial<VoiceInput> = {}): VoiceIssueId[] => voice(over).map((i) => i.id)
+
+describe('voiceIssues: a clean reply (FR-SPEECH-3)', () => {
+  it("FR-SPEECH-3: a reply in Boris's voice has no issue", () => {
+    expect(voice()).toEqual([])
+    expect(
+      voice({
+        text: 'Анна, добрый день!\n\nПосмотрел задачу, сайт нужен к запуску?\n\nДоговорились 🤝',
+        firstMessage: true,
+        tone: 'neutral',
+      }),
+    ).toEqual([])
+  })
+
+  it('FR-SPEECH-3: an issue has a known id and a plain Russian detail without a long dash', () => {
+    const issues = voice({
+      text: 'Пришлю ссылку, поняла вас)))\n\nКто вы? Что нужно?',
+      firstMessage: true,
+      tone: 'irritation',
+      badNews: true,
+      ourPrevious: ['Пришлю ссылку, поняла вас)))'],
+    })
+    expect(issues.length).toBe(6)
+    for (const i of issues) {
+      expect(CHECK_IDS).toContain(i.id)
+      expect(i.id.startsWith('voice.')).toBe(true)
+      expect(i.detail).toMatch(/[а-яё]/i)
+      expect(i.detail).not.toMatch(/[–—]/)
+    }
+    expect(new Set(issues.map((i) => i.id)).size).toBe(issues.length)
+  })
+
+  it('FR-SPEECH-3: an empty text has nothing to say', () => {
+    expect(voice({ text: '' })).toEqual([])
+  })
+})
+
+describe('voiceIssues: voice.promise_action (rule 12)', () => {
+  it("FR-SPEECH-3: Boris's own actions promised in the reply are found", () => {
+    for (const text of [
+      'Анна, пришлю ссылку на примеры',
+      'Анна, пришлю КП сегодня',
+      'Анна, КП за два дня',
+      'Анна, кп за 2 дня сделаем',
+      'Анна, посмотрю сайт и напишу',
+      'Анна, посмотрю ваш сайт',
+      'Анна, веду лично',
+      'Анна, буду вести проект лично',
+      'Анна, подготовлю предложение',
+      'Анна, скину презентацию',
+      'Анна, вышлю расчёт',
+      'Анна, отправлю договор',
+      'Анна, сделаю расчёт стоимости',
+      'Анна, изучу ваши соцсети',
+      'Анна, составлю смету',
+      'Анна, коммерческое предложение будет через два дня',
+      'Анна, пришлём вам макет',
+      'Анна, смету подготовим к пятнице',
+      'Анна, займусь лично вашим проектом',
+    ])
+      expect(voiceIds({ text }), text).toContain('voice.promise_action')
+  })
+
+  it('FR-SPEECH-3: the detail quotes the promise', () => {
+    const [issue] = voice({ text: 'Анна, пришлю ссылку на примеры' })
+    expect(issue?.id).toBe('voice.promise_action')
+    expect(issue?.detail).toContain('пришлю')
+  })
+
+  it("FR-SPEECH-3: Sara speaking and doing her own work is not a promise of Boris's action", () => {
+    for (const text of [
+      'Анна, сделаем сайт под ключ',
+      'Анна, давайте обсудим детали',
+      'Анна, уточню у Бориса и вернусь',
+      'Анна, расскажу, как идёт работа',
+      'Анна, сайт делаем за 2-3 недели',
+      'Анна, посмотрим, что можно сделать',
+      'Анна, КП обычно делаем по итогам созвона',
+      'Анна, пришлите ссылку на ваш сайт',
+      'Анна, вы пришлёте примеры?',
+      'Анна, вы посмотрите сайт конкурента?',
+      'Анна, спасибо, что отправили бриф',
+      'Анна, напишу вам завтра',
+      'Анна, посмотрю задачу и отвечу',
+      'Анна, лично я бы выбрал первый вариант',
+    ])
+      expect(voiceIds({ text }), text).not.toContain('voice.promise_action')
+  })
+})
+
+describe('voiceIssues: voice.many_questions (rule 14)', () => {
+  it('FR-SPEECH-3: more than one question in the first message is an issue', () => {
+    expect(
+      voiceIds({ text: 'Анна, добрый день! Какой срок? Какой бюджет?', firstMessage: true }),
+    ).toContain('voice.many_questions')
+    expect(voiceIds({ text: 'Анна, что нужно?! Когда?!', firstMessage: true })).toContain(
+      'voice.many_questions',
+    )
+  })
+
+  it('FR-SPEECH-3: one question, a doubled mark, a link with a query or a later message is fine', () => {
+    expect(voiceIds({ text: 'Анна, какой срок?', firstMessage: true })).toEqual([])
+    expect(voiceIds({ text: 'Анна, какой срок??', firstMessage: true })).toEqual([])
+    expect(
+      voiceIds({ text: 'Анна, смотрите hance.ru/?a=1&b=2 какой срок?', firstMessage: true }),
+    ).toEqual([])
+    expect(voiceIds({ text: 'Анна, какой срок? Какой бюджет?', firstMessage: false })).toEqual([])
+  })
+})
+
+describe('voiceIssues: voice.emoji_tone (rule 8)', () => {
+  it('FR-SPEECH-3: the four emoji and one or two brackets are fine in an ordinary talk', () => {
+    for (const text of [
+      'Анна, договорились 🤝',
+      'Анна, спасибо 🙏',
+      'Анна, отлично 😊',
+      'Анна, принял 👍',
+      'Анна, принял 👍🏽',
+      'Анна, спасибо 🙏🏻',
+      'Анна, понял)',
+      'Анна, понял))',
+      'Анна, смотрите (пример ниже) и (второй)',
+      'Анна, вот что нужно:\n1) Раз\n2) Два\n3) Три',
+      'Анна, Hance™ делает сайты',
+    ])
+      expect(voiceIds({ text }), text).not.toContain('voice.emoji_tone')
+  })
+
+  it('FR-SPEECH-3: three or more brackets that close nothing are an issue', () => {
+    expect(voiceIds({ text: 'Анна, понял)))' })).toContain('voice.emoji_tone')
+    expect(voiceIds({ text: 'Анна, хорошо) договорились) жду)' })).toContain('voice.emoji_tone')
+    expect(voiceIds({ text: 'Анна, смотрите (пример) :)))' })).toContain('voice.emoji_tone')
+  })
+
+  it('FR-SPEECH-3: any other emoji is an issue', () => {
+    for (const e of ['🔥', '🚀', '😂', '❤️', '😉', '✅'])
+      expect(voiceIds({ text: `Анна, отлично ${e}` }), e).toContain('voice.emoji_tone')
+  })
+
+  it('FR-SPEECH-3: no emoji and no bracket in a tense talk', () => {
+    for (const tone of ['irritation', 'rudeness', 'hurry', 'doubt', 'bargaining'] as Tone[]) {
+      expect(voiceIds({ text: 'Анна, понимаю 🙏', tone }), tone).toContain('voice.emoji_tone')
+      expect(voiceIds({ text: 'Анна, понимаю)', tone }), tone).toContain('voice.emoji_tone')
+      expect(voiceIds({ text: 'Анна, понимаю', tone }), tone).not.toContain('voice.emoji_tone')
+    }
+  })
+
+  it('FR-SPEECH-3: a friendly or ordinary tone and an unknown tone allow the four emoji', () => {
+    for (const tone of ['neutral', 'joke', 'compliment', null] as (Tone | null)[])
+      expect(voiceIds({ text: 'Анна, договорились 🤝', tone }), String(tone)).toEqual([])
+  })
+
+  it('FR-SPEECH-3: no emoji and no bracket with bad news, in any tone', () => {
+    expect(voiceIds({ text: 'Анна, к сожалению, не успеем 🙏', badNews: true })).toContain(
+      'voice.emoji_tone',
+    )
+    expect(voiceIds({ text: 'Анна, к сожалению, не успеем)', badNews: true })).toContain(
+      'voice.emoji_tone',
+    )
+    expect(
+      voiceIds({ text: 'Анна, к сожалению, не успеем', badNews: true, tone: 'joke' }),
+    ).not.toContain('voice.emoji_tone')
+  })
+})
+
+describe('voiceIssues: voice.signature_repeat (rule 12)', () => {
+  const previous = ['Анна, давайте обсудим детали на созвоне. Жду вашего ответа на этой неделе']
+
+  it('FR-SPEECH-3: a sentence of four words or more that our earlier message already said is an issue', () => {
+    expect(
+      voiceIds({ text: 'Хорошо. Давайте обсудим детали на созвоне', ourPrevious: previous }),
+    ).toContain('voice.signature_repeat')
+    expect(
+      voiceIds({ text: 'Жду ВАШЕГО ответа на этой неделе!', ourPrevious: previous }),
+    ).toContain('voice.signature_repeat')
+  })
+
+  it("FR-SPEECH-3: letter case, ё, punctuation and the client's name do not hide a repeat", () => {
+    expect(
+      voiceIds({
+        text: 'Анна, всё понятно, жду ваш ответ',
+        ourPrevious: ['Все понятно жду ваш ответ!'],
+      }),
+    ).toContain('voice.signature_repeat')
+  })
+
+  it('FR-SPEECH-3: the detail quotes the repeated sentence', () => {
+    const issue = voice({
+      text: 'Хорошо. Давайте обсудим детали на созвоне',
+      ourPrevious: previous,
+    }).find((i) => i.id === 'voice.signature_repeat')
+    expect(issue?.detail).toContain('Давайте обсудим детали на созвоне')
+  })
+
+  it('FR-SPEECH-3: a short sentence, another sentence or no earlier message is no repeat', () => {
+    expect(voiceIds({ text: 'Анна, давайте обсудим детали', ourPrevious: previous })).toEqual([])
+    expect(
+      voiceIds({ text: 'Анна, давайте обсудим детали на созвоне завтра', ourPrevious: previous }),
+    ).toEqual([])
+    expect(voiceIds({ text: 'Анна, жду ответа', ourPrevious: previous })).toEqual([])
+    expect(voiceIds({ text: 'Анна, давайте обсудим детали на созвоне', ourPrevious: [] })).toEqual(
+      [],
+    )
+  })
+})
+
+describe('voiceIssues: voice.feminine (rule 7)', () => {
+  it('FR-SPEECH-3: a feminine form spoken as Boris is an issue', () => {
+    for (const text of [
+      'Анна, поняла вас',
+      'Анна, я посмотрела задачу',
+      'Анна, подготовила для вас расчет',
+      'Анна, заметила, что сайта пока нет',
+      'Анна, сделала предварительный разбор',
+      'Анна, я рада знакомству',
+      'Анна, рада помочь',
+      'Анна, я бы хотела уточнить',
+      'Анна, вашу задачу посмотрела',
+      'Анна, я уже договорилась с командой',
+      'Анна, все поняла',
+      'Анна, согласна, давайте так',
+      'Анна, я очень благодарна за ответ',
+    ])
+      expect(voiceIds({ text }), text).toContain('voice.feminine')
+  })
+
+  it('FR-SPEECH-3: the detail quotes the form', () => {
+    const issue = voice({ text: 'Анна, поняла вас' }).find((i) => i.id === 'voice.feminine')
+    expect(issue?.detail).toContain('поняла')
+  })
+
+  it('FR-SPEECH-3: masculine, plural and third-person forms are not an issue', () => {
+    for (const text of [
+      'Анна, понял вас',
+      'Анна, я посмотрел задачу',
+      'Анна, поняли, спасибо',
+      'Анна, вы уже посмотрели?',
+      'Анна, рад знакомству',
+      'Анна, наша команда сделала похожий проект',
+      'Анна, студия подготовила для них расчёт',
+      'Анна, компания заметила рост',
+      'Анна, она поняла задачу',
+      'Анна, смета готова',
+      'Анна, работа готова к запуску',
+      'Анна, школа, которая сделала сайт, довольна',
+      'Анна, задача была в том, чтобы выросли заявки',
+    ])
+      expect(voiceIds({ text }), text).not.toContain('voice.feminine')
+  })
+})
+
+describe('voiceIssues: voice.no_name (rule 6)', () => {
+  it('FR-SPEECH-3: a substantive reply that does not start with the known name is an issue', () => {
+    expect(voiceIds({ text: 'Понял вас, сайт нужен к запуску, давайте обсудим детали' })).toContain(
+      'voice.no_name',
+    )
+    expect(voiceIds({ text: 'Добрый день! Посмотрел задачу, сайт нужен к запуску' })).toContain(
+      'voice.no_name',
+    )
+    expect(voiceIds({ text: 'Доброе утро!\n\nПосмотрел задачу, сайт нужен к запуску' })).toContain(
+      'voice.no_name',
+    )
+  })
+
+  it('FR-SPEECH-3: a reply that starts with the name, or with a greeting that holds it, is fine', () => {
+    for (const text of [
+      'Анна, понял вас, сайт нужен к запуску, давайте обсудим детали',
+      'Анна, добрый день!\n\nПосмотрел задачу, сайт нужен к запуску',
+      'Доброго дня, Анна! Посмотрел задачу, сайт нужен к запуску',
+    ])
+      expect(voiceIds({ text }), text).not.toContain('voice.no_name')
+  })
+
+  it('FR-SPEECH-3: a short reply goes without the name', () => {
+    for (const text of ['Принял', 'Договорились 🤝', 'Отлично, жду'])
+      expect(voiceIds({ text }), text).toEqual([])
+  })
+
+  it('FR-SPEECH-3: without a known name there is nothing to demand', () => {
+    for (const name of [null, '', 'Клиент'])
+      expect(
+        voiceIds({ text: 'Понял вас, сайт нужен к запуску, давайте обсудим детали', name }),
+        String(name),
+      ).toEqual([])
   })
 })
