@@ -49,6 +49,8 @@ services:
       SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET}
       PROFI_DATA_DIR: /profiles
       PROFI_ACCOUNTS: ${PROFI_ACCOUNTS}
+      # Messages to clients through the chat page: off unless /opt/sara/.env says 1, and only after Boris's «да» (RB-23).
+      SARA_NODE_SEND_MESSAGES: ${SARA_NODE_SEND_MESSAGES:-}
     volumes: [profiles:/profiles]
     shm_size: 1gb
     depends_on: [postgres, socks-ip1]

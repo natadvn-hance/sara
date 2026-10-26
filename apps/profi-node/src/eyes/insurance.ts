@@ -1,4 +1,5 @@
 import type { AccountBrowser } from '../browser/accountBrowser'
+import { anonymousChatUrl, readChatFormMap } from './chatFormMap'
 import type { Eyes } from './eyes'
 import { readFormMap } from './formMap'
 import { BUBBLE, bubbleShapes, pageShape } from './pageShape'
@@ -155,6 +156,25 @@ export function startInsurance(o: {
     if (body) await keep(body)
   }
 
+  // The message box of the first chat page that has one, once: the field, the buttons and the attachments control,
+  // never a message or a draft. Sending types into this box (src/chat/sendTools.ts), and its first deploy records the
+  // real one so the selectors can be checked against it without pressing anything. A page without a box tries again.
+  let chatFormKept = false
+  async function keepChatFormMap() {
+    if (chatFormKept) return
+    try {
+      const body = await readChatFormMap(o.ab.page)
+      if (!body) return
+      await o.eyes.onRaw({
+        kind: 'dom',
+        url: anonymousChatUrl(o.ab.page.url()),
+        body,
+        receivedAt: new Date().toISOString(),
+      })
+      chatFormKept = true
+    } catch {}
+  }
+
   // The open chat page: its messages, and a record of its bubbles (never their text) for calibration (ST-M1-04).
   async function readChat(id: string) {
     const read = await o.parsers.fromChatDom(o.ab.page, id)
@@ -162,6 +182,7 @@ export function startInsurance(o: {
     // No bubble found: the page's outline shows what the chat is drawn with now.
     const shape = messages.length === 0 ? await pageShape(o.ab.page).catch(() => []) : undefined
     await keep({ chatId: id, messages, ...(shape ? { shape } : {}) })
+    await keepChatFormMap()
     await o.eyes.onChatRead(id, read)
   }
 

@@ -45,7 +45,8 @@ export type Parsers = {
   fromResponse(url: string, body: unknown): ParseResult
   fromHeaderDom(page: Page): Promise<Signal[]>
   fromChatsDom(page: Page): Promise<{ chatId: string; unread: number; lastAt: string | null }[]>
-  fromChatDom(page: Page, chatId: string): Promise<ParseResult>
+  /** `waitMs`: how long to wait for the first bubble (a sender that knows the chat may be empty does not wait long). */
+  fromChatDom(page: Page, chatId: string, o?: { waitMs?: number }): Promise<ParseResult>
 }
 
 const NONE: ParseResult = { recognized: false, signals: [] }

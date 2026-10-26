@@ -29,7 +29,8 @@ export type ProfiToolsImpl = {
   readChat(i: ReadChatInput): Promise<ReadChatOutput>
   /** `signal` aborts when the core stops waiting (its call timed out or was cancelled): nothing may be pressed then. */
   submitBid(i: SubmitBidInput, signal?: AbortSignal): Promise<SubmitBidOutput>
-  sendMessage(i: SendMessageInput): Promise<SendMessageOutput>
+  /** `signal` as for submitBid: once the core stopped waiting, nothing is typed or sent. */
+  sendMessage(i: SendMessageInput, signal?: AbortSignal): Promise<SendMessageOutput>
 }
 
 /** A tool failure the core understands (contract C2 error classes). */
@@ -73,7 +74,7 @@ function call(
     case 'profi.submit_bid':
       return impl.submitBid(data as SubmitBidInput, signal)
     case 'profi.send_message':
-      return impl.sendMessage(data as SendMessageInput)
+      return impl.sendMessage(data as SendMessageInput, signal)
   }
 }
 

@@ -29,6 +29,13 @@
       "when": 1792861239776,
       "tag": "0003_node_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793008477657,
+      "tag": "0004_message_attempt",
+      "breakpoints": true
     }
   ]
 }

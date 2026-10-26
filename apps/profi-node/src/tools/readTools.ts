@@ -148,12 +148,10 @@ export function createReadTools(o: {
       throw new ProfiToolError('INTERNAL', 'Откликов в M1 нет: служба только читает')
     },
 
-    // M4 is shadow: nothing goes to a client until the switch from old Sara (ADR-024).
+    // The read tools never write. The live service puts the sending tool over this one (src/chat/sendTools.ts), which
+    // stays off until the environment turns it on (ADR-024: nothing goes to a client before the switch from old Sara).
     async sendMessage() {
-      throw new ProfiToolError(
-        'INTERNAL',
-        'Служба не пишет в чаты: отправка сообщений ещё не построена',
-      )
+      throw new ProfiToolError('INTERNAL', 'Служба без инструмента отправки: в чаты она не пишет')
     },
   }
 }

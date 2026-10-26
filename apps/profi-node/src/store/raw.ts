@@ -1,7 +1,7 @@
 import { newEventId, type ProfiOrder } from '@sara/shared'
 import { and, eq, sql } from 'drizzle-orm'
 import type { NodeDbOrTx } from '../db/client'
-import { bidAttempt, rawEvent, rawMessage, rawOrder } from '../db/schema'
+import { bidAttempt, messageAttempt, rawEvent, rawMessage, rawOrder } from '../db/schema'
 
 export type RawKind = 'rtp' | 'response' | 'dom'
 
@@ -78,6 +78,56 @@ export async function savePress(
 
 export async function saveBidResult(db: NodeDbOrTx, key: string, result: unknown): Promise<void> {
   await db.update(bidAttempt).set({ result }).where(eq(bidAttempt.idempotencyKey, key))
+}
+
+export type MessageAttempt = {
+  accountId: string
+  chatId: string
+  expectLastMessageId: string | null
+  result: unknown
+}
+
+export async function findMessageAttempt(
+  db: NodeDbOrTx,
+  key: string,
+): Promise<MessageAttempt | null> {
+  const [r] = await db
+    .select({
+      accountId: messageAttempt.accountId,
+      chatId: messageAttempt.chatId,
+      expectLastMessageId: messageAttempt.expectLastMessageId,
+      result: messageAttempt.result,
+    })
+    .from(messageAttempt)
+    .where(eq(messageAttempt.idempotencyKey, key))
+  return r ?? null
+}
+
+/** Written before the send button is pressed: false when a press with this key was already written. */
+export async function saveMessagePress(
+  db: NodeDbOrTx,
+  p: { key: string; accountId: string; chatId: string; expectLastMessageId: string | null },
+): Promise<boolean> {
+  const rows = await db
+    .insert(messageAttempt)
+    .values({
+      idempotencyKey: p.key,
+      accountId: p.accountId,
+      chatId: p.chatId,
+      expectLastMessageId: p.expectLastMessageId,
+      pressedAt: new Date().toISOString(),
+    })
+    .onConflictDoNothing()
+    .returning({ key: messageAttempt.idempotencyKey })
+  return rows.length > 0
+}
+
+export async function saveMessageResult(
+  db: NodeDbOrTx,
+  key: string,
+  result: unknown,
+): Promise<void> {
+  await db.update(messageAttempt).set({ result }).where(eq(messageAttempt.idempotencyKey, key))
 }
 
 export type StoredMessage = {
