@@ -233,7 +233,7 @@ const NUMBER_DASH = new RegExp(
 const NUMBER_BEFORE = /(\d+(?:[ \u00a0]\d{3})*(?:[.,:]\d+)?)%?$/u
 const NUMBER_AFTER = /^\d+(?:[ \u00a0]\d{3})*(?:[.,:]\d+)?/u
 /** The value of a number as written («50 000», «1,5», «9:30»), to tell which of two is the greater. */
-function valueOf(written: string): number {
+function numberValue(written: string): number {
   const t = written.replace(/[ \u00a0]/g, '')
   if (t.includes(':')) {
     const [h, m] = t.split(':')
@@ -251,7 +251,7 @@ function numberDash(dash: string, at: number, whole: string): string {
   const left = NUMBER_BEFORE.exec(whole.slice(0, at))?.[1]
   const right = NUMBER_AFTER.exec(whole.slice(at + dash.length))?.[0]
   if (left === undefined || right === undefined) return '-'
-  return valueOf(left) < valueOf(right) ? '-' : ', '
+  return numberValue(left) < numberValue(right) ? '-' : ', '
 }
 const WORD_WITH_HYPHEN = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)+/gu
 
