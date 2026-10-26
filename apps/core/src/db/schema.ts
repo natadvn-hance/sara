@@ -112,16 +112,55 @@ export const task = core.table('task', {
   createdAt: ts('created_at').notNull().defaultNow(),
 })
 
-export const outbox = core.table('outbox', {
-  id: uuid('id').primaryKey(),
-  kind: text('kind').notNull(),
-  idempotencyKey: text('idempotency_key').notNull().unique(),
-  payload: jsonb('payload').notNull(),
-  state: text('state').notNull().default('queued'),
-  attempts: integer('attempts').notNull().default(0),
-  confirmedAt: ts('confirmed_at'),
-  errorClass: text('error_class'),
-  createdAt: ts('created_at').notNull().defaultNow(),
+export const outbox = core.table(
+  'outbox',
+  {
+    id: uuid('id').primaryKey(),
+    kind: text('kind').notNull(),
+    idempotencyKey: text('idempotency_key').notNull().unique(),
+    payload: jsonb('payload').notNull(),
+    state: text('state').notNull().default('queued'),
+    attempts: integer('attempts').notNull().default(0),
+    confirmedAt: ts('confirmed_at'),
+    errorClass: text('error_class'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  // Whatever the key, one order never has two bids (FR-LEAD-4): the database itself refuses the second.
+  (t) => [
+    uniqueIndex('outbox_one_bid_per_order')
+      .on(sql`(${t.payload}->>'leadId')`)
+      .where(sql`${t.kind} = 'bid'`),
+  ],
+)
+
+/** What each direction that judged an order said about it (FR-LEAD-4); the router picks one from these. */
+export const leadCandidate = core.table(
+  'lead_candidate',
+  {
+    orderId: text('order_id').notNull(),
+    accountId: text('account_id').notNull(),
+    /** Null when the Scorer gave no answer (the order then comes unscored). */
+    score: integer('score'),
+    /** show, drop or unscored. */
+    decision: text('decision').notNull(),
+    stopFactor: text('stop_factor'),
+    /** The score over this direction's own threshold: comparable between directions, the scores are not. */
+    margin: integer('margin'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orderId, t.accountId] })],
+)
+
+/** Which direction got the order: decided once and never reopened. No account means nobody fit. */
+export const leadRoute = core.table('lead_route', {
+  orderId: text('order_id').primaryKey(),
+  accountId: text('account_id'),
+  /** none or routed. */
+  state: text('state').notNull(),
+  needsChoice: boolean('needs_choice').notNull().default(false),
+  /** The other directions that fit, by account id. */
+  alternatives: jsonb('alternatives').notNull(),
+  decidedAt: ts('decided_at').notNull().defaultNow(),
 })
 
 export const modelCall = core.table('model_call', {

@@ -66,12 +66,14 @@
 | | `is_open` | bool | Н | заказ открыт |
 | | `seen_at` | timestamptz | Н | когда замечен |
 | | `routed_direction_id` | text | Н | выбранное направление |
-| | `status` | enum `new`, `sorted_out`, `scored_out`, `stale`, `closed`, `bid_already`, `held`, `queued`, `decided`, `bid_sent`, `skipped`, `expired` | Н | судьба заявки. `closed`: страница заказа показала, что он закрыт; `bid_already`: на него уже есть отклик с нашего аккаунта (оба без карточки) |
+| | `status` | enum `new`, `sorted_out`, `scored_out`, `unrouted`, `stale`, `closed`, `bid_already`, `held`, `queued`, `decided`, `bid_sent`, `skipped`, `expired` | Н | судьба заявки. `closed`: страница заказа показала, что он закрыт; `bid_already`: на него уже есть отклик с нашего аккаунта (оба без карточки); `unrouted`: заказ достался другому направлению или никому, хотя стоил карточки (направление в тени или в черновике), карточки нет |
 | | `draft_text` | text | П | текст отклика с приветствием: черновик Аналитика или правка Бориса; null, пока черновика нет (FR-LEAD-6) |
 | | `draft_price_rub` | int | Н | «Стоимость услуги» в отклике; null: её нет, и «Откликнуться» сначала спрашивает её у Бориса (поле обязательно на площадке). Борис задаёт её строкой «цена 5000» после «Изменить» или ответом на вопрос; правка пишется в журнал `draft.priced` |
 | | `draft_analysis` | jsonb | П | разбор Аналитика: шаги чтения заказа (`reading`: явное, неявные слои, чего хочет, кто это, риски, работа для нас) и короткий итог (`hidden_need`, `risk`, `condition`); null: разбора нет |
 | | `client_info` | jsonb | П | что страница заказа говорит о клиенте (контракт `ClientInfo`): на Профи.ру с какой даты, номер подтверждён, отзывы других специалистов и их теги; читается `profi.get_order`, когда заявка прошла Оценщика; null: страницу не читали или клиент не показан |
 | `lead_score` | `lead_id`, `direction_id`, `scoring_version_id`, `gates_passed` (bool), `score` (0-100), `reasons` (jsonb), `confidence`, `model_call_id` | | Н | оценка заявки направлением |
+| `lead_candidate` | `order_id`, `account_id` (вместе первичный ключ), `score` (null: Оценщик не ответил), `decision` (`show`, `drop`, `unscored`), `stop_factor`, `margin` (балл минус порог своих правил), `created_at` | | Н | голос каждого направления о заказе, пишется после оценки и для отсеянных тоже (FR-LEAD-4) |
+| `lead_route` | `order_id` (первичный ключ), `account_id` (null: заказ никому), `state` (`none`, `routed`), `needs_choice`, `alternatives` (jsonb), `decided_at` | | Н | какое направление получило заказ; решается один раз и не переоткрывается; на `outbox` для откликов частичный уникальный индекс по `payload->>'leadId'`: второй отклик на заказ база не примет |
 | `deal` | `id` | uuid | Н | клиент после отклика |
 | | `lead_id`, `account_id`, `direction_id` | | Н | связи |
 | | `chat_id` | text | Н | номер чата на площадке |

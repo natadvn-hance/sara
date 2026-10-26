@@ -12,6 +12,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
 import { getProfile } from '../direction/profile'
+import { lostRoute, routeOrder } from '../direction/router'
 import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
@@ -451,9 +452,20 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         }),
       { name: 'scored', ...DB_STEP },
     )
-    // Below the threshold or a stop factor: kept for the daily summary, nothing goes to Boris.
-    if (scored.decision === 'drop') return
   }
+
+  // The direction's vote is written for every order it judged, the dropped ones and the unscored too, and one
+  // direction gets the order (FR-LEAD-4). A run recorded before the router resumes along its old steps.
+  if (await DBOS.patch('router')) {
+    const route = await DBOS.runStep(
+      () => routeOrder(d().db, { orderId: order.order_id, accountId, correlationId, scored }),
+      { name: 'route', ...DB_STEP },
+    )
+    // An order another direction got, or none (a direction in the shadow or still a draft never wins): no card.
+    if (!route.mine) return
+  }
+  // Below the threshold or a stop factor: kept for the daily summary, nothing goes to Boris.
+  if (scored?.decision === 'drop') return
 
   // Only an order that passed the Sorter and the Scorer on what the board showed costs a visit of the one tab. A run
   // recorded before this step existed resumes along its old steps and keeps the board's data.
@@ -959,6 +971,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       // Paused or refused for money: nothing is decided, the card stays usable for a press later.
       let wallet: number | null = null
       if (action === 'bid' && found.task.state === 'open') {
+        // Before anything is closed or spent: the task stays open for whoever the order really belongs to.
+        if (await lostRoute(d().db, l.id, l.accountId)) return TEXTS.lostRoute
         if (!(await getSetting(d().db, 'outbound.bids'))) return TEXTS.bidsPausedPress
         // No text to send yet: the card waits for «Изменить», and the wallet need not be read.
         if (l.draftText === null) return TEXTS.noDraft
@@ -1023,18 +1037,22 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
             // Checked above; should the draft be gone, the whole decision rolls back rather than bid without it.
             if (now.draftText === null) throw new Error('a bid without its text')
             // Boris's decision and the intent to bid commit together: a crash cannot lose one of them.
-            outboxId = (
-              await recordBid(tx, {
-                leadId: l.id,
-                accountId: l.accountId,
-                text: now.draftText,
-                correlationId: l.correlationId,
-                title: l.title,
-                priceRub: now.bidPriceRub,
-                servicePriceRub: now.draftPriceRub,
-                taskId,
-              })
-            ).outboxId
+            const bid = await recordBid(tx, {
+              leadId: l.id,
+              accountId: l.accountId,
+              text: now.draftText,
+              correlationId: l.correlationId,
+              title: l.title,
+              priceRub: now.bidPriceRub,
+              servicePriceRub: now.draftPriceRub,
+              taskId,
+            })
+            // The order went to another direction after all: rolled back like a refused spend, the task stays open.
+            if (bid.outboxId === null) {
+              refusal = TEXTS.lostRoute
+              tx.rollback()
+            }
+            outboxId = bid.outboxId
           }
           return true
         })
