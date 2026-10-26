@@ -16,6 +16,7 @@ import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
+import { type CardRecheck, startCardRecheck } from './leads/recheck'
 import { handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
 import { ensureMindIndex } from './mind/indexer'
@@ -41,6 +42,8 @@ export type RunningApp = {
   secrets: SecretStore
   bot: BotControl
   pipeline: LeadPipeline
+  /** The look at waiting cards (FR-LEAD-5); tests drive it with tick(at). */
+  recheck: CardRecheck
   close(): Promise<void>
 }
 
@@ -57,6 +60,8 @@ export type StartOptions = {
   learningTickMs?: number
   /** How often the school's jobs run (default a minute). */
   schoolTickMs?: number
+  /** How often waiting cards are looked at again (default 10 minutes); tests call recheck.tick instead. */
+  recheckTickMs?: number
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -201,6 +206,15 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
 
+  // Waiting cards whose order closed on Profi.ru lose their buttons (FR-LEAD-5).
+  const recheck = startCardRecheck({
+    db,
+    profi,
+    notifier: bot.notifier,
+    close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
+    tickMs: o.recheckTickMs,
+  })
+
   return {
     url,
     app,
@@ -208,7 +222,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     secrets,
     bot,
     pipeline: lp,
+    recheck,
     async close() {
+      recheck.stop()
       learning.stop()
       schoolJobs.stop()
       gateway.stop()

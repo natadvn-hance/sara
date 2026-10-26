@@ -18,7 +18,8 @@ export function isStale(publishedAt: string | null | undefined, now: Date): bool
   return now.getTime() - new Date(publishedAt).getTime() > STALE_AFTER_MS
 }
 
-const mskHour = (d: Date) =>
+/** The hour of `d` in Moscow, 0 to 23. */
+export const mskHour = (d: Date) =>
   Number(
     new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Europe/Moscow',
