@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { fixClientText } from '../../src/text/clientText'
+import {
+  fixClientText,
+  greetingFor,
+  isGreetingForm,
+  leadingGreeting,
+  moscowPartOfDay,
+} from '../../src/text/clientText'
 
 // Long and medium dashes are written by code, never typed (CI forbids the long one in files).
 const LONG = String.fromCharCode(0x2014)
@@ -186,5 +192,136 @@ describe('fixClientText: emoji (FR-SPEECH-3, rule 15)', () => {
 
   it('FR-SPEECH-3: a text of only an emoji stays', () => {
     expect(fixClientText('🤝')).toBe('🤝')
+  })
+})
+
+describe('greetingFor: by Moscow time (FR-SPEECH-3, rule 5)', () => {
+  // Moscow is UTC+3 all year: 11:59 there is 08:59 UTC.
+  const at = (iso: string) => new Date(iso)
+
+  it('FR-SPEECH-3: before 12:00 in Moscow it is the morning, from 12:00 to 17:59 the day, from 18:00 the evening', () => {
+    expect(greetingFor(at('2026-10-26T08:59:00Z'), null)).toBe('Доброе утро!')
+    expect(greetingFor(at('2026-10-26T09:00:00Z'), null)).toBe('Добрый день!')
+    expect(greetingFor(at('2026-10-26T14:59:00Z'), null)).toBe('Добрый день!')
+    expect(greetingFor(at('2026-10-26T15:00:00Z'), null)).toBe('Добрый вечер!')
+  })
+
+  it('FR-SPEECH-3: the last millisecond before a boundary is still the earlier part of the day', () => {
+    expect(greetingFor(at('2026-10-26T08:59:59.999Z'), null)).toBe('Доброе утро!')
+    expect(greetingFor(at('2026-10-26T14:59:59.999Z'), null)).toBe('Добрый день!')
+  })
+
+  it('FR-SPEECH-3: midnight in Moscow is a new morning, though the UTC day is still the old one', () => {
+    expect(greetingFor(at('2026-10-26T20:59:59Z'), null)).toBe('Добрый вечер!')
+    expect(greetingFor(at('2026-10-26T21:00:00Z'), null)).toBe('Доброе утро!')
+    expect(greetingFor(at('2026-10-26T02:00:00Z'), null)).toBe('Доброе утро!')
+  })
+
+  it('FR-SPEECH-3: the boundaries are the same in winter and in summer (Moscow has no summer time)', () => {
+    for (const day of ['2026-01-15', '2026-07-15']) {
+      expect(greetingFor(at(`${day}T08:59:00Z`), null)).toBe('Доброе утро!')
+      expect(greetingFor(at(`${day}T09:00:00Z`), null)).toBe('Добрый день!')
+      expect(greetingFor(at(`${day}T14:59:00Z`), null)).toBe('Добрый день!')
+      expect(greetingFor(at(`${day}T15:00:00Z`), null)).toBe('Добрый вечер!')
+    }
+  })
+
+  it('FR-SPEECH-3: with a name it stands first and the greeting follows in lower case', () => {
+    expect(greetingFor(at('2026-10-26T08:00:00Z'), 'Анна')).toBe('Анна, доброе утро!')
+    expect(greetingFor(at('2026-10-26T12:00:00Z'), 'Анна')).toBe('Анна, добрый день!')
+    expect(greetingFor(at('2026-10-26T16:00:00Z'), 'Анна')).toBe('Анна, добрый вечер!')
+  })
+
+  it('FR-SPEECH-3: only the first name is used, a name in lower case is capitalized', () => {
+    expect(greetingFor(at('2026-10-26T12:00:00Z'), 'Анна Петровна')).toBe('Анна, добрый день!')
+    expect(greetingFor(at('2026-10-26T12:00:00Z'), 'анна')).toBe('Анна, добрый день!')
+    expect(greetingFor(at('2026-10-26T12:00:00Z'), 'Анна-Мария')).toBe('Анна-Мария, добрый день!')
+    expect(greetingFor(at('2026-10-26T12:00:00Z'), 'Анна(Юля)')).toBe('Анна, добрый день!')
+  })
+
+  it('FR-SPEECH-3: without a name, with an empty one or with the word Profi.ru shows instead, there is no name', () => {
+    for (const none of [null, '', '  ', 'Клиент', 'Заказчик', 'Пользователь'])
+      expect(greetingFor(at('2026-10-26T12:00:00Z'), none)).toBe('Добрый день!')
+  })
+
+  it('FR-SPEECH-3: the part of the day is named in one place', () => {
+    expect(moscowPartOfDay(at('2026-10-26T08:59:00Z'))).toBe('morning')
+    expect(moscowPartOfDay(at('2026-10-26T09:00:00Z'))).toBe('day')
+    expect(moscowPartOfDay(at('2026-10-26T15:00:00Z'))).toBe('evening')
+  })
+})
+
+describe('isGreetingForm and leadingGreeting (FR-SPEECH-3, rule 5)', () => {
+  it('FR-SPEECH-3: the forms Boris allows are recognised', () => {
+    for (const text of [
+      'Добрый день!',
+      'Доброе утро!',
+      'Добрый вечер!',
+      'Анна, добрый день!',
+      'Анна, доброе утро!',
+      'Анна, добрый вечер!',
+      'Доброго дня, Анна!',
+      'Доброго утра, Анна!',
+      'Доброго вечера, Анна!',
+      'Анна-Мария, добрый день!',
+      'Доброго дня!',
+      '[имя 1], добрый день!',
+      '  Добрый день!  ',
+      'Добрый день',
+    ])
+      expect(isGreetingForm(text), text).toBe(true)
+  })
+
+  it('FR-SPEECH-3: other openers and greetings with something after them are not a form', () => {
+    for (const text of [
+      '',
+      'Здравствуйте!',
+      'Анна, здравствуйте!',
+      'Привет!',
+      'Добрый день, Анна!',
+      'Добрый день! Посмотрел задачу',
+      'Добрый день, посмотрел задачу',
+      'Анна, посмотрел задачу',
+      'Понимаю, добрый день!',
+      'Добрый день всем!',
+      'Спокойной ночи!',
+      'Анна, добрый день!\n\nПосмотрел',
+    ])
+      expect(isGreetingForm(text), text).toBe(false)
+  })
+
+  it('FR-SPEECH-3: with a moment given, the part of the day must be the right one', () => {
+    const noon = new Date('2026-10-26T09:00:00Z')
+    expect(isGreetingForm('Добрый день!', noon)).toBe(true)
+    expect(isGreetingForm('Анна, добрый день!', noon)).toBe(true)
+    expect(isGreetingForm('Доброго дня, Анна!', noon)).toBe(true)
+    expect(isGreetingForm('Доброе утро!', noon)).toBe(false)
+    expect(isGreetingForm('Добрый вечер!', noon)).toBe(false)
+    expect(isGreetingForm('Доброго утра, Анна!', noon)).toBe(false)
+    const before = new Date('2026-10-26T08:59:00Z')
+    expect(isGreetingForm('Доброе утро!', before)).toBe(true)
+    expect(isGreetingForm('Добрый день!', before)).toBe(false)
+    const six = new Date('2026-10-26T15:00:00Z')
+    expect(isGreetingForm('Добрый вечер!', six)).toBe(true)
+    expect(isGreetingForm('Добрый день!', six)).toBe(false)
+  })
+
+  it('FR-SPEECH-3: whatever greetingFor builds, isGreetingForm recognises, at every hour', () => {
+    for (let hour = 0; hour < 24; hour++)
+      for (const name of [null, 'Анна', 'Анна-Мария']) {
+        const now = new Date(Date.UTC(2026, 9, 26, hour, 0, 0))
+        const greeting = greetingFor(now, name)
+        expect(isGreetingForm(greeting, now), greeting).toBe(true)
+      }
+  })
+
+  it('FR-SPEECH-3: leadingGreeting gives the greeting a text opens with and nothing otherwise', () => {
+    expect(leadingGreeting('Анна, добрый день!\n\nПосмотрел задачу')).toBe('Анна, добрый день!')
+    expect(leadingGreeting('Добрый день! Посмотрел задачу')).toBe('Добрый день!')
+    expect(leadingGreeting('Доброго дня, Анна! Смотрю')).toBe('Доброго дня, Анна!')
+    expect(leadingGreeting('Посмотрел задачу')).toBeNull()
+    expect(leadingGreeting('Здравствуйте! Посмотрел задачу')).toBeNull()
+    expect(leadingGreeting('Добрый день, посмотрел задачу')).toBeNull()
+    expect(leadingGreeting('')).toBeNull()
   })
 })
