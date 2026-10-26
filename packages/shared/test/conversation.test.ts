@@ -147,6 +147,26 @@ describe('M4 contracts', () => {
     for (const id of ['case.ad', 'case.link']) expect(CHECK_SEVERITY[id as 'case.ad']).toBe('S3')
   })
 
+  it('FR-SPEECH-3: the voice checks of Boris\'s decisions of 26.10 have their severities', () => {
+    expect(CHECK_SEVERITY['voice.promise_action']).toBe('S1')
+    expect(CHECK_SEVERITY['voice.feminine']).toBe('S2')
+    for (const id of [
+      'voice.no_name',
+      'voice.many_questions',
+      'voice.emoji_tone',
+      'voice.signature_repeat',
+    ])
+      expect(CHECK_SEVERITY[id as 'voice.no_name'], id).toBe('S3')
+    expect(CHECK_IDS.filter((id) => id.startsWith('voice.')).sort()).toEqual([
+      'voice.emoji_tone',
+      'voice.feminine',
+      'voice.many_questions',
+      'voice.no_name',
+      'voice.promise_action',
+      'voice.signature_repeat',
+    ])
+  })
+
   it('FR-CONV-4: the Checker, reminder and judge answers have their shapes', () => {
     expect(
       CheckerOutput.safeParse({

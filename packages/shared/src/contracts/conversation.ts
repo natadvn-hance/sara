@@ -176,6 +176,14 @@ export const CHECK_SEVERITY = {
   'case.ad': 'S3',
   'case.link': 'S3',
   'checker.case': 'S2',
+  // The voice of Hance (Boris's decisions of 26.10). A promise of Boris's own action goes to him as a draft (S1);
+  // the rest is a matter of style.
+  'voice.promise_action': 'S1',
+  'voice.feminine': 'S2',
+  'voice.no_name': 'S3',
+  'voice.many_questions': 'S3',
+  'voice.emoji_tone': 'S3',
+  'voice.signature_repeat': 'S3',
 } as const satisfies Record<string, 'S1' | 'S2' | 'S3'>
 export type CheckId = keyof typeof CHECK_SEVERITY
 export const CHECK_IDS = Object.keys(CHECK_SEVERITY) as CheckId[]
