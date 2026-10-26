@@ -46,17 +46,34 @@ async function event(
 const PRESS_KEY = /^send:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
 
 /**
- * Whether the key stands for Boris's press on «Отправить»: its card's task is there and he answered it with «send».
- * A key that only looks like one is no press, so the line of drafts mode cannot be crossed by naming a key.
+ * Whether the key stands for Boris's press on «Отправить» of the card this very message comes from: the task of a draft
+ * or reminder card is there, he answered it with «send», its turn (or reminder row) is of this conversation and holds
+ * exactly this text. A key that only looks like one, or the press of another card or text, is no press, so the line of
+ * drafts mode cannot be crossed by naming a key.
  */
-async function borisPressed(tx: DbOrTx, key: string): Promise<boolean> {
+async function borisPressed(
+  tx: DbOrTx,
+  key: string,
+  m: { accountId: string; chatId: string; text: string },
+): Promise<boolean> {
   const id = PRESS_KEY.exec(key)?.[1]
   if (!id) return false
   const [t] = await tx
-    .select({ id: task.id })
+    .select({ entityId: task.entityId })
     .from(task)
-    .where(and(eq(task.id, id), eq(task.state, 'resolved'), eq(task.resolution, 'send')))
-  return t !== undefined
+    .where(
+      and(
+        eq(task.id, id),
+        eq(task.kind, 'conv_draft'),
+        eq(task.state, 'resolved'),
+        eq(task.resolution, 'send'),
+      ),
+    )
+  if (!t) return false
+  const [turn] = await tx.select().from(convTurn).where(eq(convTurn.id, t.entityId))
+  if (!turn || turn.text !== m.text) return false
+  const conv = await getConversation(tx, turn.conversationId)
+  return conv?.accountId === m.accountId && conv.chatId === m.chatId
 }
 
 /**
@@ -74,7 +91,7 @@ export async function queueMessage(
   if (
     i.author === 'sara' &&
     !(await getSetting(tx, 'conv.autopilot')) &&
-    !(await borisPressed(tx, i.key))
+    !(await borisPressed(tx, i.key, i))
   )
     return null
   const { key, ...p } = i

@@ -5,6 +5,7 @@ import { convTurn, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
+import { sendHold } from './sendHold'
 import { SEND_TEXTS, type SendAfter, type SendOptions, type SendOutcome } from './sendTexts'
 import { getConversation } from './store'
 import { CONV_TEXTS, REMIND_TEXTS } from './texts'
@@ -234,6 +235,10 @@ async function release(
 ): Promise<string> {
   if (t.state !== 'open' || row.outcome !== 'carded') return REMIND_TEXTS.alreadyDone
   if (!d.sendText) return REMIND_TEXTS.notNow('не могу проверить чат')
+  // A pause, a paused or logged out account: the card is not taken for nothing, it stays for a later press.
+  if (await getSetting(d.db, 'conv.v1_writes')) return REMIND_TEXTS.notNow('режим тени')
+  const paused = await sendHold(d.db, row.conversationId, o.author)
+  if (paused) return REMIND_TEXTS.notNow(paused)
   // One press takes the card, and the row is taken once however many cards point at it.
   if (!(await closeCard(d.db, t.id, o.how))) return REMIND_TEXTS.alreadyDone
   if (!(await move(d.db, row.id, 'carded', { outcome: 'sending' }))) return REMIND_TEXTS.alreadyDone

@@ -1,5 +1,5 @@
 import { type Actor, formatCallback, newEventId, type TaskAction } from '@sara/shared'
-import { and, desc, eq, isNull, like } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, like, or } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, convTurn, outbox, question, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
@@ -12,6 +12,7 @@ import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { clientNames } from './dossier'
 import { editReminder, onReminderPress } from './reminderCard'
+import { holdText, sendHold } from './sendHold'
 import { type SendOptions, STALE_DRAFT } from './sendTexts'
 import { getConversation, updateConversation } from './store'
 import { CONV_TEXTS } from './texts'
@@ -241,6 +242,8 @@ export async function say(
   }
   await journal(d.db, 'conv.said', conversationId, 'boris')
   if ((await getSetting(d.db, 'conv.v1_writes')) || !d.sendText) return COMMAND_TEXTS.shadowSay
+  // His text answers the card of that turn: the draft behind it cannot go too.
+  if (t?.taskId) await closeCard(d.db, t.taskId, 'say')
   return d.sendText(conversationId, text, 'boris', { key })
 }
 
@@ -259,10 +262,26 @@ async function closeCard(db: Db, taskId: string, resolution: string): Promise<bo
  * sent, or unsure whether it went), or our side wrote in the chat after the client messages the draft answers.
  */
 async function sendRefusal(db: Db, turn: typeof convTurn.$inferSelect): Promise<string | null> {
+  // The turn's own reply (autopilot), and what a press on any card of this turn sent (`send:<card task>`).
+  const cards = await db
+    .select({ id: task.id })
+    .from(task)
+    .where(and(eq(task.entityKind, 'conv_turn'), eq(task.entityId, turn.id)))
+  const pressKeys = cards.map((c) => `msg:send:${c.id}`)
   const own = await db
     .select({ state: outbox.state })
     .from(outbox)
-    .where(and(eq(outbox.kind, 'message'), like(outbox.idempotencyKey, `msg:${turn.id}:%`)))
+    .where(
+      and(
+        eq(outbox.kind, 'message'),
+        pressKeys.length > 0
+          ? or(
+              like(outbox.idempotencyKey, `msg:${turn.id}:%`),
+              inArray(outbox.idempotencyKey, pressKeys),
+            )
+          : like(outbox.idempotencyKey, `msg:${turn.id}:%`),
+      ),
+    )
   if (own.some((r) => r.state === 'queued' || r.state === 'confirmed'))
     return COMMAND_TEXTS.alreadySent
   if (own.some((r) => r.state === 'uncertain')) return COMMAND_TEXTS.sendUncertain
@@ -336,6 +355,9 @@ export async function onConvPress(
     case 'send': {
       if (await getSetting(d.db, 'conv.v1_writes')) return COMMAND_TEXTS.shadowSend
       if (!turn.text || !d.sendText) return COMMAND_TEXTS.noDraft
+      // A pause, a paused or logged out account: the card is not taken for nothing, it stays for a later press.
+      const hold = await sendHold(d.db, conversationId, 'sara')
+      if (hold) return holdText(hold)
       const refusal = await sendRefusal(d.db, turn)
       if (refusal) return refusal
       // The press is taken once; the service is told the last client message this draft answers, so a chat that
@@ -491,6 +513,8 @@ async function onSayPress(d: CommandDeps, st: CardTask, action: TaskAction): Pro
   if (action !== 'send') return COMMAND_TEXTS.notUnderstood
   if (await getSetting(d.db, 'conv.v1_writes')) return COMMAND_TEXTS.shadowSend
   if (!d.sendText) return COMMAND_TEXTS.noDraft
+  const hold = await sendHold(d.db, parent.conversationId, 'boris')
+  if (hold) return holdText(hold)
   const [card] = parent.taskId
     ? await d.db.select().from(task).where(eq(task.id, parent.taskId))
     : []

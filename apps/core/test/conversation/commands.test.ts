@@ -17,6 +17,7 @@ import type { SendOptions } from '../../src/conversation/sendTexts'
 import { ensureConversation, getConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
 import {
+  account,
   chatMessage,
   conversation,
   convTurn,
@@ -330,6 +331,7 @@ describe('Boris’s commands', () => {
 
   it('FR-CONV-11: after the switch «Отправить» is not the shadow answer', async () => {
     await setSetting(db, 'conv.v1_writes', false, 'system')
+    await setSetting(db, 'outbound.messages', true, 'system')
     const sent: string[] = []
     const answer = await onConvPress(
       {
@@ -739,6 +741,130 @@ describe('Boris’s commands', () => {
       const r = await reply('да')
       expect(asText(r)).toMatch(/уже/)
       expect(asRows(r)).toHaveLength(0)
+    })
+  })
+  describe('a press on a card is safe (review: the card is not spent for nothing)', () => {
+    type Sent = { text: string; author: 'sara' | 'boris'; o?: SendOptions }
+    let sent: Sent[]
+    const live = () => ({
+      db,
+      notifier,
+      sendText: async (_c: string, text: string, author: 'sara' | 'boris', o?: SendOptions) => {
+        sent.push({ text, author, o })
+        return 'Отправила клиенту.'
+      },
+    })
+    const stateOf = async (id: string) => (await db.select().from(task).where(eq(task.id, id)))[0]
+    const asRows = (r: unknown) =>
+      (r as { rows?: { text: string; callbackData: string }[][] } | null)?.rows?.flat() ?? []
+
+    beforeEach(async () => {
+      sent = []
+      await setSetting(db, 'conv.v1_writes', false, 'system')
+      await setSetting(db, 'outbound.messages', true, 'system')
+      await db
+        .insert(account)
+        .values({ id: 'hance-marketing', title: 'Hance', egressIp: '127.0.0.1' })
+        .onConflictDoNothing()
+    })
+
+    it('FR-OPS-1: a press during the «Пишет клиентам» pause says why and keeps the card for later', async () => {
+      await setSetting(db, 'outbound.messages', false, 'system')
+      expect(await onConvPress(live(), { taskId: cardTask, action: 'send' })).toBe(
+        'Сейчас не отправляю: пауза «Пишет клиентам». Карточка остаётся, нажми позже.',
+      )
+      expect(sent).toEqual([])
+      expect((await stateOf(cardTask))?.state).toBe('open')
+      await setSetting(db, 'outbound.messages', true, 'system')
+      expect(await onConvPress(live(), { taskId: cardTask, action: 'send' })).toBe(
+        'Отправила клиенту.',
+      )
+      expect(sent).toHaveLength(1)
+    })
+
+    it('FR-OPS-1: an account on pause, logged out or banned keeps the card open too', async () => {
+      await db.update(account).set({ paused: true }).where(eq(account.id, 'hance-marketing'))
+      expect(await onConvPress(live(), { taskId: cardTask, action: 'send' })).toMatch(
+        /аккаунт на паузе/,
+      )
+      await db
+        .update(account)
+        .set({ paused: false, loginState: 'dead' })
+        .where(eq(account.id, 'hance-marketing'))
+      expect(await onConvPress(live(), { taskId: cardTask, action: 'send' })).toMatch(
+        /не вошёл в Профи\.ру/,
+      )
+      expect(sent).toEqual([])
+      expect((await stateOf(cardTask))?.state).toBe('open')
+    })
+
+    it('FR-CONV-5: back in shadow the press does not spend the card either', async () => {
+      await setSetting(db, 'conv.v1_writes', true, 'system')
+      expect(await onConvPress(live(), { taskId: cardTask, action: 'send' })).toMatch(/Режим тени/)
+      expect((await stateOf(cardTask))?.state).toBe('open')
+    })
+
+    it('FR-OPS-1: his own text passes the «Пишет клиентам» pause, but not an account on pause, and the confirmation stays', async () => {
+      await onConvPress(live(), { taskId: cardTask, action: 'edit' })
+      const r = await onConvReply(live(), {
+        replyToMessageId: cardMessage,
+        text: 'Анна, давайте в пятницу',
+        at: new Date(),
+      })
+      const sayTask = asRows(r)[0]?.callbackData.split(':')[1] ?? ''
+      await db.update(account).set({ paused: true }).where(eq(account.id, 'hance-marketing'))
+      expect(await onConvPress(live(), { taskId: sayTask, action: 'send' })).toMatch(
+        /аккаунт на паузе/,
+      )
+      expect(sent).toEqual([])
+      expect((await stateOf(sayTask))?.state).toBe('open')
+      expect((await stateOf(cardTask))?.state).toBe('open')
+      await db.update(account).set({ paused: false }).where(eq(account.id, 'hance-marketing'))
+      await setSetting(db, 'outbound.messages', false, 'system')
+      expect(await onConvPress(live(), { taskId: sayTask, action: 'send' })).toBe(
+        'Отправила клиенту.',
+      )
+      expect(sent).toHaveLength(1)
+    })
+
+    it('FR-CONV-9: a draft is refused when another card of the same turn already sent it', async () => {
+      // Two cards for one turn (a card that went out twice); the first one was pressed and its message is out.
+      const twin = newEventId()
+      await db.insert(task).values({
+        id: twin,
+        kind: 'conv_draft',
+        entityKind: 'conv_turn',
+        entityId: 't-1',
+        telegramMessageId: 777,
+      })
+      for (const [state, expected] of [
+        ['confirmed', /Ответ уже ушёл/],
+        ['queued', /Ответ уже ушёл/],
+        ['uncertain', /Не уверена, что прошлая отправка дошла/],
+      ] as const) {
+        await db.delete(outbox)
+        await db.insert(outbox).values({
+          id: newEventId(),
+          kind: 'message',
+          idempotencyKey: `msg:send:${cardTask}`,
+          payload: { chatId: CHAT, accountId: 'hance-marketing', text: 'Начнём', author: 'sara' },
+          state,
+        })
+        expect(await onConvPress(live(), { taskId: twin, action: 'send' })).toMatch(expected)
+      }
+      expect(sent).toEqual([])
+      expect((await stateOf(twin))?.state).toBe('open')
+      // A send that failed does not stop the other card.
+      await db.update(outbox).set({ state: 'failed' })
+      expect(await onConvPress(live(), { taskId: twin, action: 'send' })).toBe('Отправила клиенту.')
+    })
+
+    it('FR-CONV-11: «напиши» through the pult answers the card behind it: the draft cannot go too', async () => {
+      expect(await say(live(), convId, 'Анна, давайте в пятницу')).toBe('Отправила клиенту.')
+      expect((await stateOf(cardTask))?.state).toBe('resolved')
+      expect((await stateOf(cardTask))?.resolution).toBe('say')
+      expect(await onConvPress(live(), { taskId: cardTask, action: 'send' })).toMatch(/уже/)
+      expect(sent).toHaveLength(1)
     })
   })
 })

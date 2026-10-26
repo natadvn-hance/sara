@@ -4,7 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { deliverMessage, queueMessage, sendTurnReply } from '../../src/conversation/outbox'
 import { ensureConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
-import { convTurn, outbox, task } from '../../src/db/schema'
+import { conversation, convTurn, outbox, task } from '../../src/db/schema'
 import { ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
@@ -141,13 +141,19 @@ describe('sending to a client', () => {
   })
 
   describe('with the autopilot off', () => {
-    const q = (author: 'sara' | 'boris', key: string) =>
+    // The text of the card's turn (t-1): what Boris's press sends.
+    const q = (
+      author: 'sara' | 'boris',
+      key: string,
+      text = 'Начнём с короткого созвона.',
+      chatId = CHAT,
+    ) =>
       db.transaction((tx) =>
         queueMessage(tx, {
           key,
           accountId: 'hance-marketing',
-          chatId: CHAT,
-          text: 'Анна, добрый день',
+          chatId,
+          text,
           author,
           expectLast: 'm-2',
         }),
@@ -188,6 +194,73 @@ describe('sending to a client', () => {
       expect(await q('sara', `send:${skipped}`)).toBeNull()
       expect(await q('sara', 'say:tg:5')).toBeNull()
       expect(await db.select().from(outbox)).toHaveLength(0)
+    })
+
+    it('FR-CONV-5: a press key is bound to its card: its text, its conversation and its kind', async () => {
+      const card = await pressed()
+      // Another text than the card's: the press said yes to a text Boris never saw.
+      expect(await q('sara', `send:${card}`, 'Совсем другой текст')).toBeNull()
+      // Another chat than the card's conversation.
+      expect(await q('sara', `send:${card}`, undefined, 'other-chat')).toBeNull()
+      // A task of another kind, answered with «send» by some other press.
+      const other = newEventId()
+      await db.insert(task).values({
+        id: other,
+        kind: 'lead_review',
+        entityKind: 'lead',
+        entityId: 'x',
+        state: 'resolved',
+        resolution: 'send',
+      })
+      expect(await q('sara', `send:${other}`)).toBeNull()
+      // A card whose turn is in another conversation, with the same text.
+      const [conv] = await db.select().from(conversation)
+      const [second] = await db
+        .insert(conversation)
+        .values({ id: newEventId(), accountId: 'hance-marketing', chatId: 'other-chat' })
+        .returning()
+      await db.insert(convTurn).values({
+        id: 't-other',
+        conversationId: second?.id ?? '',
+        anchorMessageId: 'm-9',
+        text: 'Начнём с короткого созвона.',
+      })
+      const foreign = newEventId()
+      await db.insert(task).values({
+        id: foreign,
+        kind: 'conv_draft',
+        entityKind: 'conv_turn',
+        entityId: 't-other',
+        state: 'resolved',
+        resolution: 'send',
+      })
+      expect(await q('sara', `send:${foreign}`)).toBeNull()
+      expect(conv?.chatId).toBe(CHAT)
+      expect(await db.select().from(outbox)).toHaveLength(0)
+      // The right text, chat and card: it goes.
+      expect(await q('sara', `send:${card}`)).not.toBeNull()
+    })
+
+    it('FR-CONV-12: the card of a reminder is bound the same way, to the text of its row', async () => {
+      const [conv] = await db.select().from(conversation)
+      await db.insert(convTurn).values({
+        id: 'conv-remind:x:m-1:1',
+        conversationId: conv?.id ?? '',
+        kind: 'reminder',
+        anchorMessageId: 'm-1',
+        text: 'Анна, здравствуйте! Как у вас дела?',
+      })
+      const card = newEventId()
+      await db.insert(task).values({
+        id: card,
+        kind: 'conv_draft',
+        entityKind: 'conv_turn',
+        entityId: 'conv-remind:x:m-1:1',
+        state: 'resolved',
+        resolution: 'send',
+      })
+      expect(await q('sara', `send:${card}`, 'Начнём с короткого созвона.')).toBeNull()
+      expect(await q('sara', `send:${card}`, 'Анна, здравствуйте! Как у вас дела?')).not.toBeNull()
     })
 
     it('FR-CONV-5: Boris’s press on «Отправить» still sends, once', async () => {
