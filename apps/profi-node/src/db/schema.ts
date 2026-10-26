@@ -80,6 +80,21 @@ export const bidAttempt = node.table('bid_attempt', {
   result: jsonb('result'),
 })
 
+/**
+ * A press of the send button of a chat message, written before the press: a call with the same key after it (also
+ * after a restart) may only look whether the message is in the chat, never type again (NFR-REL-4). result is the
+ * confirmed answer, repeated to every later call. It holds no text: the permit already ties the key to the text.
+ */
+export const messageAttempt = node.table('message_attempt', {
+  idempotencyKey: text('idempotency_key').primaryKey(),
+  accountId: text('account_id').notNull(),
+  chatId: text('chat_id').notNull(),
+  /** The last message the core saw before this one (null: the chat had none): where a later look starts. */
+  expectLastMessageId: text('expect_last_message_id'),
+  pressedAt: ts('pressed_at').notNull(),
+  result: jsonb('result'),
+})
+
 /** A stop the node set for itself and keeps until a person clears it; never purged. */
 export const nodeFlag = node.table(
   'node_flag',

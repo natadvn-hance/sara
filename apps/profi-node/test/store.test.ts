@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { bidAttempt, outboxNode, rawEvent } from '../src/db/schema'
+import { bidAttempt, messageAttempt, outboxNode, rawEvent } from '../src/db/schema'
 import { purgeOld } from '../src/store/purge'
 import { upsertOrder } from '../src/store/raw'
 import { openNodeTestDb, resetNodeDb } from './helpers/db'
@@ -84,5 +84,18 @@ describe('node store', () => {
     await db.insert(bidAttempt).values([press('old', 31), press('fresh', 29)])
     await purgeOld(db, now)
     expect((await db.select().from(bidAttempt)).map((r) => r.idempotencyKey)).toEqual(['fresh'])
+  })
+
+  it('data-dictionary: presses of a chat message are kept 30 days', async () => {
+    const press = (key: string, days: number) => ({
+      idempotencyKey: key,
+      accountId: 'a',
+      chatId: '95147898',
+      expectLastMessageId: null,
+      pressedAt: ago(days),
+    })
+    await db.insert(messageAttempt).values([press('old', 31), press('fresh', 29)])
+    await purgeOld(db, now)
+    expect((await db.select().from(messageAttempt)).map((r) => r.idempotencyKey)).toEqual(['fresh'])
   })
 })
