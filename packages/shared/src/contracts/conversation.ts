@@ -184,6 +184,8 @@ export const CHECK_SEVERITY = {
   'voice.many_questions': 'S3',
   'voice.emoji_tone': 'S3',
   'voice.signature_repeat': 'S3',
+  // A number range written with a hyphen or a dash («15-20»): the model is asked to write «от 15 до 20».
+  'voice.range': 'S3',
 } as const satisfies Record<string, 'S1' | 'S2' | 'S3'>
 export type CheckId = keyof typeof CHECK_SEVERITY
 export const CHECK_IDS = Object.keys(CHECK_SEVERITY) as CheckId[]

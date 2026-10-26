@@ -518,6 +518,46 @@ function emojiIssue(i: VoiceInput): VoiceIssue | null {
   return reasons.length > 0 ? { id: 'voice.emoji_tone', detail: reasons.join('; ') } : null
 }
 
+const CODES = new RegExp(`[-${DASH}]`, 'g')
+const NUMBER = String.raw`(?:\d{1,3}(?:[  ]\d{3})+|\d+)(?:[.,]\d+)?`
+const MONTHS = 'январ|феврал|март|апрел|ма[яй]|июн|июл|август|сентябр|октябр|ноябр|декабр'
+/** A range of two numbers with a hyphen or a dash between them, spaces allowed: «15-20», «10%-15%», «50 000 - 60 000». */
+const NUMBER_RANGE = new RegExp(
+  `(?<![\\p{L}\\d.,-])${NUMBER}%?[ \\u00a0]?[-${DASH}][ \\u00a0]?${NUMBER}`,
+  'gu',
+)
+/** What looks like a range and is not one: phones, times and dates. Each is blanked out before ranges are read. */
+const NOT_RANGES: [RegExp, ((m: string) => boolean)?][] = [
+  // A phone with a plus: +7 (918) 123-45-67, +375 29 123-45-67.
+  [new RegExp(String.raw`\+\d[\d\s()${DASH}-]{8,}\d`, 'gu'), (m) => digitsIn(m) >= 10],
+  // A phone of 11 digits that starts with 8: 8 (918) 123-45-67, 8-800-555-35-35.
+  [new RegExp(String.raw`(?<![\d.,-])8[\d\s()${DASH}-]{9,}\d`, 'gu'), (m) => digitsIn(m) === 11],
+  // Three numbers or more with hyphens: 123-45-67, 2026-10-27.
+  [new RegExp(String.raw`(?<![\d.,-])\d+(?:[-${DASH}]\d+){2,}(?![\d-])`, 'gu')],
+  [/\d{1,2}:\d{2}(?::\d{2})?/g],
+  // 25.10, 25.10.2026: a day and a month of two digits, so «1,5» and «2.5» stay numbers.
+  [/(?<![\d.,])(?:0?[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])(?:\.(?:\d{4}|\d{2}))?(?![\d]|[.,]\d)/g],
+  // «25-27 октября».
+  [new RegExp(String.raw`\d{1,2}[  ]?[-${DASH}][  ]?\d{1,2}[  ]+(?:${MONTHS})\p{L}*`, 'giu')],
+]
+const digitsIn = (s: string) => s.replace(/\D/g, '').length
+
+function rangeIssue(text: string): VoiceIssue | null {
+  let rest = text
+  for (const [re, only] of NOT_RANGES)
+    rest = rest.replace(re, (m) => (only && !only(m) ? m : ' '.repeat(m.length)))
+  const found = [...new Set([...rest.matchAll(NUMBER_RANGE)].map((m) => m[0].replace(CODES, '-')))]
+  if (found.length === 0) return null
+  const quoted = found
+    .slice(0, 3)
+    .map((r) => `«${r}»`)
+    .join(', ')
+  return {
+    id: 'voice.range',
+    detail: `диапазон ${quoted} записан цифрами через дефис или тире, а нужно словами: «от 15 до 20», «2 или 3 недели»`,
+  }
+}
+
 /** Words of a sentence as a key; the client's name does not count, so a repeat is found with or without it. */
 const sentenceKey = (s: string, own: string) =>
   (fold(s).match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w !== own).join(' ')
@@ -554,10 +594,11 @@ function nameIssue(i: VoiceInput): VoiceIssue | null {
 
 /**
  * What in a reply breaks the voice of Boris's decisions of 26.10: a promise of an action that only Boris does
- * (rule 12), more than one question in a first message (14), a smile in a tense talk or with bad news, other emoji
- * than 🤝 🙏 😊 👍, more than two «)» (8), a phrase of ours said again (12), a woman's form in Boris's name (7), and a
- * reply by the essence that does not start with the client's name (6). At most one issue of each kind, in that
- * order of weight; nothing for an empty text.
+ * (rule 12), more than one question in a first message (14), a smile with bad news or to a client who is irritated,
+ * rude, in a hurry, official («Вы» with a capital) or upset (8), other emoji than 🤝 🙏 😊 👍 and more than two «)»
+ * (8), a number range written with a hyphen or a dash (3), a phrase of ours said again (12), a woman's form in
+ * Boris's name (7), and a reply by the essence that does not start with the client's name (6). At most one issue
+ * of each kind, in that order of weight; nothing for an empty text.
  */
 export function voiceIssues(i: VoiceInput): VoiceIssue[] {
   if (!i.text.trim()) return []
@@ -568,6 +609,7 @@ export function voiceIssues(i: VoiceInput): VoiceIssue[] {
     nameIssue(i),
     i.firstMessage ? questionsIssue(i.text) : null,
     emojiIssue(i),
+    rangeIssue(i.text),
     repeatIssue(i, own),
   ].filter((x): x is VoiceIssue => x !== null)
 }

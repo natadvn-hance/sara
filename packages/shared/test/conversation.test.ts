@@ -155,6 +155,7 @@ describe('M4 contracts', () => {
       'voice.many_questions',
       'voice.emoji_tone',
       'voice.signature_repeat',
+      'voice.range',
     ])
       expect(CHECK_SEVERITY[id as 'voice.no_name'], id).toBe('S3')
     expect(CHECK_IDS.filter((id) => id.startsWith('voice.')).sort()).toEqual([
@@ -163,6 +164,7 @@ describe('M4 contracts', () => {
       'voice.many_questions',
       'voice.no_name',
       'voice.promise_action',
+      'voice.range',
       'voice.signature_repeat',
     ])
   })

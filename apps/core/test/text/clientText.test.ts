@@ -661,6 +661,69 @@ describe('voiceIssues: voice.emoji_tone (rule 8)', () => {
   })
 })
 
+describe('voiceIssues: voice.range (FR-SPEECH-3, rule 3)', () => {
+  it('FR-SPEECH-3: a number range written with a hyphen or a dash is an issue', () => {
+    for (const text of [
+      'Анна, сделаем за 15-20 дней',
+      `Анна, срок 2${MEDIUM}3 недели`,
+      `Анна, срок 2${LONG}3 недели`,
+      'Анна, скидка 10-15%',
+      'Анна, скидка 10%-15%',
+      'Анна, от 50-70 тысяч',
+      'Анна, 50 000-60 000 рублей',
+      `Анна, 50 000 ${MEDIUM} 60 000 рублей`,
+      'Анна, бюджет 30 - 60 тысяч',
+      'Анна, примерно 1,5-2 месяца',
+      'Анна, в 2025-2026 году',
+      'Анна, с 10-12 часов',
+    ])
+      expect(voiceIds({ text }), text).toContain('voice.range')
+  })
+
+  it('FR-SPEECH-3: the detail quotes the range and says how to write it', () => {
+    const issue = voice({ text: 'Анна, сделаем за 15-20 дней' }).find((i) => i.id === 'voice.range')
+    expect(issue?.detail).toContain('15-20')
+    expect(issue?.detail).toContain('от 15 до 20')
+    expect(issue?.detail).toContain('2 или 3')
+    const dashed = voice({ text: `Анна, срок 2${MEDIUM}3 недели` }).find(
+      (i) => i.id === 'voice.range',
+    )
+    expect(dashed?.detail).toContain('2-3')
+    expect(dashed?.detail).not.toMatch(ANY_DASH)
+  })
+
+  it('FR-SPEECH-3: phone numbers, times and dates are not a range', () => {
+    for (const text of [
+      'Анна, звоните +7 (918) 123-45-67',
+      'Анна, звоните 8-800-555-35-35',
+      'Анна, номер 123-45-67',
+      'Анна, номер 8 (918) 123-45-67',
+      'Анна, номер +375 29 123-45-67',
+      'Анна, работаем с 9:00-18:00',
+      `Анна, работаем с 9:00 ${MEDIUM} 18:00`,
+      'Анна, до 25.10-27.10',
+      'Анна, дата 2026-10-27',
+      'Анна, с 25-27 октября',
+      'Анна, встреча 27.10.2026',
+    ])
+      expect(voiceIds({ text }), text).not.toContain('voice.range')
+  })
+
+  it('FR-SPEECH-3: a hyphen in a word with a number, and a range already in words, are not an issue', () => {
+    for (const text of [
+      'Анна, Wi-Fi и топ-10',
+      'Анна, 5-летний опыт и 2-й этап',
+      'Анна, B2B-сегмент и COVID-19',
+      'Анна, 1С-Битрикс',
+      'Анна, 10-е число',
+      'Анна, от 15 до 20 дней',
+      'Анна, 2 или 3 недели',
+      'Анна, скидка от 10 до 15 процентов',
+    ])
+      expect(voiceIds({ text }), text).not.toContain('voice.range')
+  })
+})
+
 describe("isOfficialClient and isUpsetClient: the client's turn (FR-SPEECH-3, rule 8)", () => {
   it('FR-SPEECH-3: «Вы» with a capital in the middle of a sentence is an official client', () => {
     for (const text of [
