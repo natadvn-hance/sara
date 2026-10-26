@@ -22,6 +22,7 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
       orderId: '10000001',
       open: true,
       disabled: false,
+      bare: false,
       feeRub: 71,
       hasBid: false,
       // The recorded sample keeps the length of the words only; the live text is «Откликнуться».
@@ -56,6 +57,59 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
       open: false,
       disabled: false,
     })
+  })
+
+  /** The answer of a closed order read live (order 95385373): only what the page shows, no form, tariff or price. */
+  const closedOnSite = (s: Screen) => {
+    for (const k of ['form', 'bidForms', 'tariffsBlock', 'price', 'disabledBidBlock']) delete s[k]
+  }
+
+  it('FR-LEAD-5: an answer with no form, no bid forms, no tariff and no price is bare, and a bare order is closed', () => {
+    const r = withScreen('order-page.json', closedOnSite)
+    expect(orderScreenFromAnswer(r.url, r.body, '10000001')).toMatchObject({
+      bare: true,
+      open: false,
+      disabled: false,
+    })
+    const empty = withScreen('order-page.json', (s) => {
+      closedOnSite(s)
+      s.bidForms = []
+      s.form = null
+      s.price = null
+    })
+    expect(orderScreenFromAnswer(empty.url, empty.body, '10000001')).toMatchObject({ bare: true })
+  })
+
+  it('FR-LEAD-5: a bid already made keeps a bare answer from being called closed', () => {
+    const r = withScreen('order-page.json', (s) => {
+      closedOnSite(s)
+      s.hasBid = true
+    })
+    expect(orderScreenFromAnswer(r.url, r.body, '10000001')).toMatchObject({
+      bare: false,
+      hasBid: true,
+    })
+  })
+
+  it('FR-LEAD-5: an answer with a form but no tariff is not bare, and a full answer is not bare', () => {
+    const noTariff = withScreen('order-page.json', (s) => {
+      delete s.tariffsBlock
+    })
+    expect(orderScreenFromAnswer(noTariff.url, noTariff.body, '10000001')).toMatchObject({
+      bare: false,
+      open: true,
+    })
+    const full = sample('order-page.json')
+    expect(orderScreenFromAnswer(full.url, full.body, '10000001')?.bare).toBe(false)
+    // A changed layout that left only the tariff, only the price or only the bid slide is not a closed order.
+    for (const keep of ['tariffsBlock', 'price', 'bidForms']) {
+      const r = withScreen('order-page.json', (s) => {
+        const kept = s[keep]
+        closedOnSite(s)
+        s[keep] = kept
+      })
+      expect(orderScreenFromAnswer(r.url, r.body, '10000001')?.bare).toBe(false)
+    }
   })
 
   it('FR-LEAD-8: a bid already on the order, and a payment way in the form, are seen', () => {

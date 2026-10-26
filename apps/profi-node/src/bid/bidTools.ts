@@ -305,9 +305,12 @@ export function createBidTools(o: {
           (x) => x,
           () => null,
         )
-        // Closed only on the site's own word: a disabled bid block in the order answer, or, when the page gave no
-        // answer, a notice on the page. A missing form can be a changed layout or a bid already made.
-        const closed = opened.screen ? opened.screen.disabled : await closedNotice(page)
+        // Closed only on the site's own word: a disabled bid block in the order answer, the bare answer of an order
+        // the client closed (no form, tariff or price, and no bid of ours), or, when the page gave no answer, a
+        // notice on the page. A missing form alone can be a changed layout or a bid already made.
+        const closed = opened.screen
+          ? opened.screen.disabled || opened.screen.bare
+          : await closedNotice(page)
         const read = opened.screen !== null || closed
         // The page text is read for what the board did not show (a card without the text, or without any client
         // name), and for an order the eyes never stored; the client answer already carries a name.

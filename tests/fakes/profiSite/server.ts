@@ -42,6 +42,8 @@ export type SiteOrder = {
   hasBid: boolean
   /** The form will not take a bid without «Стоимость услуги». */
   priceRequired: boolean
+  /** The order page answers as for an order the client closed, read live: no form, tariff or price, no closed mark. */
+  bare?: boolean
   /** The client as getKlientInfo shows them; null: the site has no answer for this order. */
   klient: SiteKlient | null
 }
@@ -125,6 +127,20 @@ const COMMENT_PLACEHOLDER =
 
 /** The order page answer in the shape of the live one (tests/fixtures/profi/response/order-page.json). */
 function orderScreen(o: SiteOrder, s: BidSettings) {
+  // An order the client closed (order 95385373, read live): only what the page shows, nothing to bid with.
+  if (o.bare)
+    return {
+      id: o.id,
+      ...(s.hasBidField && { hasBid: o.hasBid }),
+      badges: [],
+      params: [],
+      gallery: null,
+      markers: [],
+      subject: o.subject,
+      documents: [],
+      duplicates: [],
+      analyticsData: {},
+    }
   const fee = String(o.price)
   const submit = { text: 'Откликнуться', style: 'PRIMARY' }
   return {
