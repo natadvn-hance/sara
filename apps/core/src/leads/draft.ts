@@ -103,10 +103,34 @@ export function greetingRoom(greeting: string): number {
  */
 const EMOJI_SIGN = String.raw`(?:(?![\u00a9\u00ae\u2122])\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200d\ufe0f\u20e3])`
 const EMOJI = new RegExp(EMOJI_SIGN, 'gu')
+const EMOJI_RUN = `${EMOJI_SIGN}+`
 /** An emoji that stands before a sign of punctuation takes the space before it along: «важное 🤝.» is «важное.». */
-const EMOJI_BEFORE_MARK = new RegExp(String.raw`[ \t]*${EMOJI_SIGN}+(?=[.,;:!?)])`, 'gu')
+const EMOJI_BEFORE_MARK = new RegExp(String.raw`[ \t]*${EMOJI_RUN}(?=[.,;:!?)])`, 'gu')
+/** Brackets that held only an emoji: «Спасибо (🤝).» is «Спасибо.», «слово(🤝)слово» is two words. */
+const EMOJI_BRACKETS_BEFORE_MARK = new RegExp(
+  String.raw`[ \t]*\(\s*${EMOJI_RUN}\s*\)(?=[.,;:!?)])`,
+  'gu',
+)
+const EMOJI_BRACKETS = new RegExp(String.raw`[ \t]*\(\s*${EMOJI_RUN}\s*\)`, 'gu')
+/** «Принял. 🤝. Дальше»: the period before the emoji and the one after it are one. */
+const EMOJI_BETWEEN_PERIODS = new RegExp(String.raw`\.[ \t]*${EMOJI_RUN}[ \t]*\.`, 'gu')
+/** An emoji glued between two letters or digits stands for a space. */
+const EMOJI_BETWEEN_WORDS = new RegExp(
+  String.raw`(?<=[\p{L}\p{N}])${EMOJI_RUN}(?=[\p{L}\p{N}])`,
+  'gu',
+)
 export function removeEmoji(text: string): string {
-  return text.replace(EMOJI_BEFORE_MARK, '').replace(EMOJI, '')
+  return text
+    .replace(EMOJI_BRACKETS_BEFORE_MARK, '')
+    .replace(EMOJI_BRACKETS, (m, at: number, whole: string) =>
+      /[\p{L}\p{N}]/u.test(whole[at - 1] ?? '') && /[\p{L}\p{N}]/u.test(whole[at + m.length] ?? '')
+        ? ' '
+        : '',
+    )
+    .replace(EMOJI_BETWEEN_PERIODS, '.')
+    .replace(EMOJI_BEFORE_MARK, '')
+    .replace(EMOJI_BETWEEN_WORDS, ' ')
+    .replace(EMOJI, '')
 }
 
 export function greets(text: string): boolean {

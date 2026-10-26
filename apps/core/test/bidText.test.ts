@@ -62,6 +62,34 @@ describe('removeEmoji (FR-LEAD-6, rule 8)', () => {
     expect(removeEmoji('Договорились🤝')).toBe('Договорились')
   })
 
+  it('FR-LEAD-6: an emoji between two letters or digits leaves one space, not a glued word', () => {
+    expect(removeEmoji('Ждём🤝вас')).toBe('Ждём вас')
+    expect(removeEmoji('Сайт👍быстро, 5🙏6 штук')).toBe('Сайт быстро, 5 6 штук')
+    expect(removeEmoji('Спасибо 🤝🙏 вам')).toBe('Спасибо  вам')
+  })
+
+  it('FR-LEAD-6: a period before and a period after an emoji are one period, not «..»', () => {
+    expect(removeEmoji('Принял. 🤝. Дальше')).toBe('Принял. Дальше')
+    expect(removeEmoji('Принял.🤝.')).toBe('Принял.')
+    expect(removeEmoji('Ждите... 🤝.')).toBe('Ждите...')
+    expect(removeEmoji('Хм.. 🤝 ладно')).toBe('Хм..  ладно')
+  })
+
+  it('FR-LEAD-6: brackets that held only an emoji go with it, with the space before them', () => {
+    expect(removeEmoji('Спасибо (🤝) всем')).toBe('Спасибо всем')
+    expect(removeEmoji('Спасибо (🤝).')).toBe('Спасибо.')
+    expect(removeEmoji('Спасибо ( 🤝 ), друзья')).toBe('Спасибо, друзья')
+    expect(removeEmoji('слово(🤝)слово')).toBe('слово слово')
+    expect(removeEmoji('Цена (от 30 тысяч) 🤝')).toBe('Цена (от 30 тысяч) ')
+  })
+
+  it('FR-LEAD-6: in a bid none of that shows: no «..», no «()», no glued words', () => {
+    const text = 'Ирина, добрый день!\n\nСпасибо (🤝). Ждём🤝вас. 🙏.\n\nКогда запуск?'
+    expect(bidTextAt(text, 'Ирина', M_1200)).toBe(
+      'Ирина, добрый день!\n\nСпасибо. Ждём вас\n\nКогда запуск?',
+    )
+  })
+
   it('FR-LEAD-6: letters, digits, signs and the marks of a brand are not emoji', () => {
     const text = 'Сайт за 30 000 ₽, 2-3 недели, 10% скидка, Hance™ и © 2026, → дальше, №5, 1) раз'
     expect(removeEmoji(text)).toBe(text)
