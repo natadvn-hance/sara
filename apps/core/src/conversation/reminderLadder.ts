@@ -8,7 +8,7 @@ import { moscowHoursEnd } from './time'
 const HOUR_MS = 3600_000
 const DAY_MS = 24 * HOUR_MS
 
-export type ReminderStep = 1 | 2 | 'dormant' | 3 | 4
+export type ReminderStep = 1 | 2 | 'dormant' | 3
 export type ReminderTone = 'check_in' | 'friendly'
 
 export type NextReminder = {
@@ -25,15 +25,15 @@ const MIN_GAP_MS = DAY_MS
 /** Moscow hours without reminders to clients (the setting's default). */
 const DEFAULT_QUIET = { from: 23, to: 9 }
 
-/** After Boris says «Напоминать дальше»: the third reminder in 10 days, the fourth 30 days after it. */
-const AFTER_PRESS_MS = { third: 10 * DAY_MS, fourth: 30 * DAY_MS }
+/** After Boris says «Напоминать дальше»: the one last reminder in 10 days. */
+const AFTER_PRESS_MS = 10 * DAY_MS
 
 /**
  * The next step of the ladder (design 5.11), counted from our side's last message: a day (two for a client who went
- * to think it over), three days, and on the
- * seventh day the client is dormant and Boris gets one task. Only when Boris says «Напоминать дальше» the ladder goes
- * on: 10 days after his press, then 30 days after that, the last one friendly (old Sara's ladder since 12.09). A
- * ladder given no press time counts the press on the dormant day. `sent` is how many reminders of the ladder are done. A time inside the quiet hours moves to the morning, a time
+ * to think it over), three days, and on the seventh day the client is dormant and Boris gets one task. Only when
+ * Boris says «Напоминать дальше» the ladder goes on, with one last, friendly reminder 10 days after his press: the
+ * third ping is the last (Boris's own document). A ladder given no press time counts the press on the dormant day.
+ * `sent` is how many reminders of the ladder are done. A time inside the quiet hours moves to the morning, a time
  * already past is now, and two reminders keep a day between them. Null: nothing more to say.
  */
 export function nextReminder(i: {
@@ -50,8 +50,8 @@ export function nextReminder(i: {
   minGapMs?: number
   /** When Boris pressed «Напоминать дальше»; left out, the dormant day. */
   continuedAt?: string | null
-  /** The waits after the press (10 and 30 days); tests shorten them. */
-  afterPressMs?: { third: number; fourth: number }
+  /** The wait after the press (10 days); tests shorten it. */
+  afterPressMs?: number
   /** The first reminder's wait: a day, but two for a client who went to think it over. */
   firstAfterMs?: number
 }): NextReminder | null {
@@ -65,14 +65,8 @@ export function nextReminder(i: {
     0: { step: 1, at: from + (i.firstAfterMs ?? DAY_MS), tone: 'check_in' },
     1: { step: 2, at: from + 3 * DAY_MS, tone: 'check_in' },
     2: i.continued
-      ? { step: 3, at: press + wait.third, tone: 'check_in' }
+      ? { step: 3, at: press + wait, tone: 'friendly' }
       : { step: 'dormant', at: from + 7 * DAY_MS, tone: 'check_in' },
-    // The 30 days count from the third reminder as it went, or from its planned time.
-    3: {
-      step: 4,
-      at: (Number.isNaN(sentAt) ? press + wait.third : sentAt) + wait.fourth,
-      tone: 'friendly',
-    },
   }
   const p = i.continued || i.sent <= 2 ? plan[i.sent] : undefined
   if (!p) return null

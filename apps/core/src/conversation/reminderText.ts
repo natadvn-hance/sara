@@ -12,8 +12,8 @@ import { getConversation } from './store'
 import type { CheckIssue, MindHit, MindSearch } from './types'
 
 /** The reminders of the ladder that carry a text (the dormant day has none); `of` in the input counts them. */
-export type TextStep = 1 | 2 | 3 | 4
-const LADDER_STEPS = 4
+export type TextStep = 1 | 2 | 3
+const LADDER_STEPS = 3
 
 export type WrittenReminder = {
   /** The text that passed the checks; null when the model gave none or none that passed. */
