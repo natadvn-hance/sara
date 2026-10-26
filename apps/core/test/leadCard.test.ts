@@ -183,6 +183,22 @@ describe('the card built from a lead', () => {
     expect(row?.draftText).toBe('Ирина, доброе утро!\n\nПонимаю задачу')
   })
 
+  it('FR-LEAD-6: an old draft of 500 that loses the name in the evening says so on the card, and only then', async () => {
+    const body = 'а'.repeat(500 - 'Ирина, добрый день!'.length - 2)
+    const taskId = await openLead('91012', { draftText: `Ирина, добрый день!\n\n${body}` })
+    moment = new Date('2026-10-26T15:00:00Z')
+    await pipeline.resendCard(taskId)
+    expect(cards[0]?.draft).toMatchObject({
+      text: `Добрый вечер!\n\n${body}`,
+      note: TEXTS.greetingNameDropped,
+    })
+    expect(leadCardText(cards[0] as LeadCard)).toContain(`<i>${TEXTS.greetingNameDropped}</i>`)
+    moment = new Date('2026-10-26T09:00:00Z')
+    await pipeline.resendCard(taskId)
+    expect(cards[1]?.draft?.text).toBe(`Ирина, добрый день!\n\n${body}`)
+    expect(cards[1]?.draft?.note ?? null).toBeNull()
+  })
+
   it('NFR-UX-1: the card shows the bid as it will go out: no dash, no final period, no emoji', async () => {
     const dash = String.fromCharCode(0x2014)
     const taskId = await openLead('91011', {

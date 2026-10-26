@@ -531,6 +531,32 @@ describe('the greeting and the voice of the bid at the moment it is sent (FR-LEA
     )
   })
 
+  it('FR-LEAD-6: an old draft of 500 sent in the evening loses the name; the journal says so, without the name', async () => {
+    const id = await cardFor()
+    const body = 'а'.repeat(500 - 'Ирина, добрый день!'.length - 2)
+    await db
+      .update(lead)
+      .set({ draftText: `Ирина, добрый день!\n\n${body}` })
+      .where(eq(lead.id, id))
+    moment = new Date('2026-10-26T15:00:00Z')
+    press()
+    await until(sentOk)
+    expect(fake.bids[0]?.text).toBe(`Добрый вечер!\n\n${body}`)
+    const noted = await db
+      .select({ payload: event.payload })
+      .from(event)
+      .where(eq(event.type, 'outbox.attempted'))
+    expect(noted.map((e) => e.payload)).toEqual([{ attempt: 1, greeting: 'name_dropped' }])
+  })
+
+  it('FR-LEAD-6: a normal bid leaves no note about its greeting', async () => {
+    await cardFor()
+    moment = new Date('2026-10-26T15:00:00Z')
+    press()
+    await until(sentOk)
+    expect(await count('outbox.attempted')).toBe(0)
+  })
+
   it('FR-LEAD-6: the text sent holds the 500 characters of the form with the longest greeting of the day', async () => {
     const id = await cardFor()
     const body = 'а'.repeat(500 - 'Ирина, добрый вечер!'.length - 2)

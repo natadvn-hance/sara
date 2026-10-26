@@ -35,6 +35,7 @@ import {
   BID_TEXT_MAX,
   bidLengthMax,
   bidTextAt,
+  bidTextDetail,
   bodyOf,
   type Draft,
   type DraftMiss,
@@ -684,11 +685,28 @@ async function cardOfFound(
     reminder,
     // The card shows the bid as it would go out now: the greeting of this hour, the voice rules applied. Nothing says
     // that the greeting may change; it is built again when the bid is sent.
-    draft: l.draftText
-      ? { text: bidTextAt(l.draftText, l.clientName, greetingMoment()), priceRub: l.draftPriceRub }
-      : null,
+    draft: l.draftText ? draftOnCard(l.draftText, l.clientName, l.draftPriceRub) : null,
     analysis: cardAnalysis(l.draftAnalysis),
   }
+}
+
+/**
+ * The draft as a card shows it: the bid as it would go out now, with a note when it had to give up the name or the
+ * hour in its greeting to fit the 500 characters (an old draft that fills the whole form).
+ */
+function draftOnCard(
+  stored: string,
+  clientName: string,
+  priceRub: number | null,
+): { text: string; priceRub: number | null; note: string | null } {
+  const { text, fallback } = bidTextDetail(stored, clientName, greetingMoment())
+  const note =
+    fallback === 'name_dropped'
+      ? TEXTS.greetingNameDropped
+      : fallback === 'greeting_kept'
+        ? TEXTS.greetingKept
+        : null
+  return { text, priceRub, note }
 }
 
 /** The lead card for an open task. */
@@ -924,7 +942,9 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   // (the evening greeting is the longest), so what fits now fits whenever the bid is sent.
   if (next !== null) {
     const longest = bidLengthMax(next, l.clientName)
-    if (longest > BID_TEXT_MAX) return TEXTS.draftTooLong(longest)
+    // The count is with the evening greeting; when the greeting Boris sees now is shorter, the answer says so.
+    const shown = bidTextAt(next, l.clientName, greetingMoment()).length
+    if (longest > BID_TEXT_MAX) return TEXTS.draftTooLong(longest, longest !== shown)
   }
   const saved = await d().db.transaction(async (tx) => {
     if (!(await markAnswered(tx, a.question, a))) return false

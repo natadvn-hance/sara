@@ -25,6 +25,7 @@ const ANALYST = analystAnswer(BODY)
 const CLEAN = 'Понимаю, клинике важно быстро начать запись\n\nКогда хотите открыть запись онлайн?'
 /** 12:00 in Moscow: the greeting follows the hour (rule 5), so the tests fix it. */
 const NOON = new Date('2026-10-26T09:00:00Z')
+let moment = NOON
 /** The sample order 90000001: client Ирина, budget «до 150 000 ₽». */
 const DRAFT = `Ирина, добрый день!\n\n${CLEAN}`
 /** Sara's note after a new text; the sample order 90000001 is «Сайт для стоматологической клиники». */
@@ -109,7 +110,7 @@ beforeAll(async () => {
       retryDelaysMs: [50, 50, 50, 50, 50],
       learningTickMs: 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
-      now: () => NOON,
+      now: () => moment,
     },
   )
   fake.setCoreEventsUrl(`${app.url}/internal/profi/events`)
@@ -126,6 +127,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
+  moment = NOON
   await rm(claudeLog, { force: true })
   byRole = { sorter: FIT, scorer: scorerAnswer(70), analyst: ANALYST }
   await resetDb(db)
@@ -460,14 +462,29 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await until(() => cards().length === 1)
     const ask = await pressEdit(cards()[0])
     tg.pushText(111, `Понимаю. ${'а'.repeat(590)}`, ask)
+    // The greeting changes with the hour: the count is the one of the longest, the evening one, and says so at noon.
     await until(() =>
-      said('С приветствием выходит 621 знак, а Профи.ру принимает до 500. Пришли текст короче.'),
+      said(
+        'С вечерним приветствием выходит 621 знак, а Профи.ру принимает до 500. Пришли текст короче.',
+      ),
     )
     expect((await leadOf(id))?.draftText).toBe(DRAFT)
     expect(cards()).toHaveLength(1)
     tg.pushText(111, NEW)
     await until(() => said(SAVED))
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
+  })
+
+  it('FR-LEAD-6: in the evening the same too long edit is counted with the greeting Boris sees', async () => {
+    moment = new Date('2026-10-26T15:00:00Z')
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const ask = await pressEdit(cards()[0])
+    tg.pushText(111, `Понимаю. ${'а'.repeat(590)}`, ask)
+    await until(() =>
+      said('С приветствием выходит 621 знак, а Профи.ру принимает до 500. Пришли текст короче.'),
+    )
   })
 
   it('FR-LEAD-7: after «Пропустить» a late edit changes nothing', async () => {

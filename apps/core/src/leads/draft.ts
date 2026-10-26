@@ -167,14 +167,28 @@ function bareGreeting(sentence: string): { name: string | null } | false {
  * moment and the outbox sends it for its own.
  */
 export function bidTextAt(stored: string, clientName: string, now: Date): string {
+  return bidTextDetail(stored, clientName, now).text
+}
+
+/** What had to give way so that the bid fits the 500 characters: the client's name, or the part of the day. */
+export type BidTextFallback = 'name_dropped' | 'greeting_kept'
+
+/** `bidTextAt` with the note of what it had to give up; `fallback` is null for every draft made by this rule. */
+export function bidTextDetail(
+  stored: string,
+  clientName: string,
+  now: Date,
+): { text: string; fallback: BidTextFallback | null } {
   const p = split(stored, clientName)
-  if (p.whole !== null) return p.whole
+  if (p.whole !== null) return { text: p.whole, fallback: null }
   const fresh = greeted(p.rest, p.name, now)
-  if (fresh.length <= BID_TEXT_MAX) return fresh
+  if (fresh.length <= BID_TEXT_MAX) return { text: fresh, fallback: null }
   // Only a draft of before this rule can be here (500 characters with «добрый день», 501 with «добрый вечер»): the name
   // goes before the part of the day does, and the draft as it was before anything else.
   const nameless = greeted(p.rest, null, now)
-  return nameless.length <= BID_TEXT_MAX ? nameless : p.kept
+  return nameless.length <= BID_TEXT_MAX
+    ? { text: nameless, fallback: 'name_dropped' }
+    : { text: p.kept, fallback: 'greeting_kept' }
 }
 
 /** A stored draft taken apart: the whole text when its own greeting stays, else the name of its greeting and the rest. */

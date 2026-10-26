@@ -10,7 +10,7 @@ import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
-import { bidTextAt } from './draft'
+import { bidTextDetail } from './draft'
 
 export type OutboxDeps = {
   db: Db
@@ -341,12 +341,25 @@ async function attempt(
   // The pause is read again right before the node is called: Boris may have set it while the bid waited.
   if (!(await getSetting(d().db, 'outbound.bids')))
     return mayBeOnSite || ranBefore ? { kind: 'uncertain' } : { kind: 'paused' }
+  // Greeted and tidied at this very moment, not at the press: the hour may have changed since the card (rule 5).
+  const sent = bidTextDetail(p.text, p.clientName ?? '', d().now?.() ?? new Date())
+  // Only an old draft that fills the whole form loses something of its greeting; the journal notes it, never with the name.
+  if (sent.fallback) {
+    await appendEvent(
+      d().db,
+      ev(
+        'outbox.attempted',
+        p,
+        { kind: 'outbox', id: row.id },
+        { attempt: n + 1, greeting: sent.fallback },
+      ),
+    ).catch(() => {})
+  }
   try {
     const r = await d().profi.submitBid({
       account_id: p.accountId,
       order_id: p.leadId,
-      // Greeted and tidied at this very moment, not at the press: the hour may have changed since the card (rule 5).
-      text: bidTextAt(p.text, p.clientName ?? '', d().now?.() ?? new Date()),
+      text: sent.text,
       price_rub: p.servicePriceRub ?? null,
       // The fee on the card Boris pressed: the node pays no more than that.
       max_fee_rub: p.priceRub,

@@ -3,6 +3,7 @@ import {
   BID_TEXT_MAX,
   bidLengthMax,
   bidTextAt,
+  bidTextDetail,
   draftOf,
   editOf,
   greetingOf,
@@ -209,6 +210,31 @@ describe('the 500 characters of the bid form hold with the greeting at any hour 
     const nameless = `Добрый день!\n\n${'б'.repeat(BID_TEXT_MAX - 'Добрый день!'.length - 2)}`
     expect(nameless.length).toBe(BID_TEXT_MAX)
     expect(bidTextAt(nameless, '', M_1800)).toBe(nameless)
+  })
+})
+
+describe('bidTextDetail: what had to give way to the 500 characters (FR-LEAD-6)', () => {
+  it('FR-LEAD-6: a normal draft has nothing to say', () => {
+    expect(bidTextDetail('Ирина, добрый день!\n\nТекст', 'Ирина', M_1800)).toEqual({
+      text: 'Ирина, добрый вечер!\n\nТекст',
+      fallback: null,
+    })
+  })
+
+  it('FR-LEAD-6: the name goes first, and it is said', () => {
+    const body = 'а'.repeat(BID_TEXT_MAX - 'Ирина, добрый день!'.length - 2)
+    expect(bidTextDetail(`Ирина, добрый день!\n\n${body}`, 'Ирина', M_1800)).toEqual({
+      text: `Добрый вечер!\n\n${body}`,
+      fallback: 'name_dropped',
+    })
+  })
+
+  it('FR-LEAD-6: with no name to drop the greeting stays as it was, and it is said', () => {
+    const body = 'б'.repeat(BID_TEXT_MAX - 'Добрый день!'.length - 2)
+    expect(bidTextDetail(`Добрый день!\n\n${body}`, '', M_1800)).toEqual({
+      text: `Добрый день!\n\n${body}`,
+      fallback: 'greeting_kept',
+    })
   })
 })
 
