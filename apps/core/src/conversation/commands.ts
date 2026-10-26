@@ -1,10 +1,11 @@
-import { type Actor, newEventId, type TaskAction } from '@sara/shared'
+import { type Actor, formatCallback, newEventId, type TaskAction } from '@sara/shared'
 import { and, desc, eq, isNull, like } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, convTurn, outbox, question, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { redact } from '../gateway/redact'
 import { appendEvent } from '../journal/journal'
+import type { BorisReply } from '../learning/inbox'
 import type { QuestionRow } from '../learning/questions'
 import { proposeMind } from '../mind/proposals'
 import type { Notifier } from '../notify/notifier'
@@ -13,6 +14,7 @@ import { clientNames } from './dossier'
 import { SEND_TEXTS, type SendOptions } from './outbox'
 import { editReminder, onReminderPress, type ReminderPressDeps } from './reminderCard'
 import { getConversation, updateConversation } from './store'
+import { CONV_TEXTS } from './texts'
 
 export type CommandDeps = {
   db: Db
@@ -49,6 +51,11 @@ export const COMMAND_TEXTS = {
   answeredYourself:
     'Ты уже ответил сам: в чате есть твоё сообщение после слов клиента. Черновик не отправляю.',
   stale: 'Черновик устарел: клиент успел дописать. Текст не ушёл, посмотри новые сообщения.',
+  /** A typed «да» never sends: only the button does (the review of the drafts mode). */
+  pressSend: 'Нажми «Отправить», и уйдёт',
+  pressGood: 'Нажми «Хорошо», и отмечу, что черновик годный',
+  sayAsked: 'Я уже спросила про этот текст: нажми «Отправить» или «Изменить» под моим вопросом.',
+  sayConfirm: (words: string) => `Отправлю клиенту так: «${words}»`,
 }
 
 type CardTask = typeof task.$inferSelect
@@ -299,6 +306,7 @@ export async function onConvPress(
 ): Promise<string> {
   const [dormant] = await d.db.select().from(task).where(eq(task.id, p.taskId))
   if (dormant?.kind === 'conv_dormant') return onDormantPress(d, dormant, p.action)
+  if (dormant?.kind === 'conv_say') return onSayPress(d, dormant, p.action)
   const t = await cardTaskOf(d.db, p.taskId)
   const [turn] = t ? await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId)) : []
   if (!t || !turn) return COMMAND_TEXTS.done
@@ -375,27 +383,157 @@ async function startEdit(d: CommandDeps, turnId: string): Promise<void> {
   await d.db.update(question).set({ telegramMessageId: m.messageId }).where(eq(question.id, id))
 }
 
-/** Boris's version after «Изменить»: kept beside the draft (in shadow), sent as his text after the switch. */
+/**
+ * Boris's version after «Изменить»: kept beside the draft (in shadow); after the switch it is shown back to him with
+ * «Отправить» and «Изменить», and only that press sends it, with exactly these words.
+ */
 export async function onConvEdit(
   d: CommandDeps,
   a: { question: QuestionRow; text: string; voice: boolean; at: Date; messageId?: number },
-): Promise<string> {
+): Promise<BorisReply> {
   await d.db
     .update(question)
     .set({ answeredAt: a.at.toISOString(), answer: a.text })
     .where(and(eq(question.id, a.question.id), isNull(question.answeredAt)))
   const [turn] = await d.db.select().from(convTurn).where(eq(convTurn.id, a.question.entityId))
   if (!turn) return COMMAND_TEXTS.done
-  await d.db.update(convTurn).set({ borisText: a.text }).where(eq(convTurn.id, turn.id))
-  // A reminder has no client words to be an example of: only a reply's draft becomes a proposal.
-  if (turn.kind !== 'reminder') await proposeBorisWords(d.db, turn.id, turn.conversationId, a.text)
-  await journal(d.db, 'conv.draft_edited', turn.conversationId, 'boris', {
-    turn_id: turn.id,
-    voice: a.voice,
+  if ((await getSetting(d.db, 'conv.v1_writes')) || !d.sendText) {
+    await d.db.update(convTurn).set({ borisText: a.text }).where(eq(convTurn.id, turn.id))
+    // A reminder has no client words to be an example of: only a reply's draft becomes a proposal.
+    if (turn.kind !== 'reminder')
+      await proposeBorisWords(d.db, turn.id, turn.conversationId, a.text)
+    await journal(d.db, 'conv.draft_edited', turn.conversationId, 'boris', {
+      turn_id: turn.id,
+      voice: a.voice,
+    })
+    return COMMAND_TEXTS.editKept
+  }
+  return proposeSay(d, turn, a.text, { via: 'edit', voice: a.voice, messageId: a.messageId })
+}
+
+/**
+ * Boris's own words for the client after the switch (his «напиши: …» or his version after «Изменить»): nothing goes
+ * yet. Sara shows the exact words back with «Отправить» and «Изменить»; only the press on «Отправить» sends them
+ * (design 5.10). The words are kept in a row of their own, so a later version never changes what this press sends.
+ */
+async function proposeSay(
+  d: CommandDeps,
+  parent: typeof convTurn.$inferSelect,
+  text: string,
+  o: { via: 'say' | 'edit'; voice?: boolean; messageId?: number },
+): Promise<BorisReply> {
+  const [card] = parent.taskId
+    ? await d.db.select().from(task).where(eq(task.id, parent.taskId))
+    : []
+  if (!card || card.state !== 'open') return COMMAND_TEXTS.done
+  const rowId =
+    o.messageId !== undefined
+      ? `conv-say:${parent.id}:tg:${o.messageId}`
+      : `conv-say:${parent.id}:${newEventId()}`
+  const taskId = newEventId()
+  const made = await d.db.transaction(async (tx) => {
+    const rows = await tx
+      .insert(convTurn)
+      .values({
+        id: rowId,
+        conversationId: parent.conversationId,
+        kind: 'say',
+        anchorMessageId: parent.anchorMessageId,
+        messageIds: parent.messageIds,
+        state: 'decided',
+        text,
+        decision: 'say',
+        understanding: { parent: parent.id, via: o.via, voice: o.voice ?? false, key: sayKey(o) },
+        taskId,
+      })
+      .onConflictDoNothing()
+      .returning({ id: convTurn.id })
+    if (rows.length === 0) return false
+    await tx.insert(task).values({
+      id: taskId,
+      kind: 'conv_say',
+      entityKind: 'conv_turn',
+      entityId: rowId,
+      priority: 'P1',
+    })
+    return true
   })
-  if ((await getSetting(d.db, 'conv.v1_writes')) || !d.sendText) return COMMAND_TEXTS.editKept
-  if (turn.kind === 'reminder') return editReminder(d, turn, a.text, telegramKey(a.messageId))
-  return d.sendText(turn.conversationId, a.text, 'boris', { key: telegramKey(a.messageId) })
+  if (!made) return COMMAND_TEXTS.sayAsked
+  const b = (label: string, action: TaskAction) => ({
+    text: label,
+    callbackData: formatCallback(taskId, action),
+  })
+  return {
+    text: COMMAND_TEXTS.sayConfirm(text),
+    rows: [[b(CONV_TEXTS.buttons.send, 'send'), b(CONV_TEXTS.buttons.edit, 'edit')]],
+  }
+}
+
+/** What makes a repeat of the same Telegram message, or the press on its confirmation, the same message. */
+const sayKey = (o: { messageId?: number }) =>
+  o.messageId === undefined ? null : `say:tg:${o.messageId}`
+
+/** A press on «Отправить» or «Изменить» under Sara's «Отправлю клиенту так: …». */
+async function onSayPress(d: CommandDeps, st: CardTask, action: TaskAction): Promise<string> {
+  if (st.state !== 'open') return COMMAND_TEXTS.done
+  const [say] = await d.db.select().from(convTurn).where(eq(convTurn.id, st.entityId))
+  const meta = (say?.understanding ?? {}) as {
+    parent?: string
+    via?: 'say' | 'edit'
+    key?: string | null
+  }
+  const [parent] = meta.parent
+    ? await d.db.select().from(convTurn).where(eq(convTurn.id, meta.parent))
+    : []
+  if (!say?.text || !parent) return COMMAND_TEXTS.done
+  if (action === 'edit') {
+    if (!(await closeCard(d.db, st.id, 'edit'))) return COMMAND_TEXTS.done
+    await startEdit(d, parent.id)
+    return COMMAND_TEXTS.askEdit
+  }
+  if (action !== 'send') return COMMAND_TEXTS.notUnderstood
+  if (await getSetting(d.db, 'conv.v1_writes')) return COMMAND_TEXTS.shadowSend
+  if (!d.sendText) return COMMAND_TEXTS.noDraft
+  const [card] = parent.taskId
+    ? await d.db.select().from(task).where(eq(task.id, parent.taskId))
+    : []
+  if (!card || card.state !== 'open') return COMMAND_TEXTS.alreadySent
+  const via = meta.via ?? 'say'
+  const key = meta.key ?? `say:${st.id}`
+  const words = say.text
+  if (parent.kind === 'reminder') {
+    // The reread of the chat may say «not now» (a pause): then nothing is taken and the question stays.
+    await d.db.update(convTurn).set({ borisText: words }).where(eq(convTurn.id, parent.id))
+    const answer = await editReminder(d, parent, words, key)
+    const [after] = await d.db.select().from(task).where(eq(task.id, card.id))
+    if (after && after.state !== 'open') {
+      await closeCard(d.db, st.id, 'send')
+      await journal(d.db, 'conv.draft_edited', parent.conversationId, 'boris', {
+        turn_id: parent.id,
+      })
+    }
+    return answer
+  }
+  const refusal = await sendRefusal(d.db, parent)
+  if (refusal) return refusal
+  // His words answer the card: the draft behind it cannot go too.
+  if (!(await closeCard(d.db, card.id, via === 'edit' ? 'edit' : 'say')))
+    return COMMAND_TEXTS.alreadySent
+  await closeCard(d.db, st.id, 'send')
+  await d.db.update(convTurn).set({ borisText: words }).where(eq(convTurn.id, parent.id))
+  await proposeBorisWords(d.db, parent.id, parent.conversationId, words)
+  await journal(
+    d.db,
+    via === 'edit' ? 'conv.draft_edited' : 'conv.said',
+    parent.conversationId,
+    'boris',
+    { turn_id: parent.id },
+  )
+  const covered = ((parent.messageIds as string[] | null) ?? []).at(-1)
+  return d.sendText(parent.conversationId, words, 'boris', {
+    expectLast: covered ?? undefined,
+    key,
+  })
 }
 
 /** A message of Boris's in Telegram is one message to the client however often the update is delivered. */
@@ -407,7 +545,16 @@ export type CardCommand =
   | { cmd: 'return'; note: string | null }
   | { cmd: 'say'; text: string }
   | { cmd: 'close' }
-  | { cmd: 'good' }
+  /** «да», «ок», «отправляй»: no command, a nudge to press the button. */
+  | { cmd: 'confirm' }
+
+const CONFIRM_WORD =
+  '(?:да|ага|ок|окей|окай|хорошо|годится|норм|отлично|давай|отправляй|отправь|отправить|как есть)'
+/** The whole message is a confirmation (a voice recognition adds commas and dots): «Да, отправляй.» */
+const CONFIRM = new RegExp(
+  `^(?:ну\\s+)?${CONFIRM_WORD}(?:[\\s,.!)👍]+(?:${CONFIRM_WORD}|так|пожалуйста))*[\\s.,!)👍]*$`,
+  'iu',
+)
 
 /** Boris's words in reply to a card, read as a command; anything else is not guessed (FR-NOTIF-1). */
 export function parseCardReply(text: string): CardCommand | null {
@@ -419,11 +566,15 @@ export function parseCardReply(text: string): CardCommand | null {
     /^(?:напиши|отправь|ответь)(?:\s+(?:ей|ему|клиенту|клиентке))?\s*[:,-]?\s*(.+)$/is.exec(t)
   if (write?.[1]?.trim()) return { cmd: 'say', text: write[1].trim() }
   if (/^(закрой|закрыть|закрываем)(?!\p{L})/iu.test(t)) return { cmd: 'close' }
-  if (/^(да|ок|окей|хорошо|годится|норм)(?!\p{L})/iu.test(t)) return { cmd: 'good' }
+  if (CONFIRM.test(t)) return { cmd: 'confirm' }
   return null
 }
 
-/** A reply to a conversation card: null when it is not a reply to one (the message is someone else's business). */
+/**
+ * A reply to a conversation card: null when it is not a reply to one (the message is someone else's business). A typed
+ * reply never sends a draft: «да» points at the card's own «Отправить», and Boris's own words are shown back to him
+ * and go only on that press (the review of the drafts mode).
+ */
 export async function onConvReply(
   d: CommandDeps,
   m: {
@@ -433,7 +584,7 @@ export async function onConvReply(
     messageId?: number
     at: Date
   },
-): Promise<string | null> {
+): Promise<BorisReply | null> {
   if (m.replyToMessageId === null) return null
   const [t] = await d.db
     .select()
@@ -441,6 +592,7 @@ export async function onConvReply(
     .where(and(eq(task.telegramMessageId, m.replyToMessageId), eq(task.kind, 'conv_draft')))
   const [turn] = t ? await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId)) : []
   if (!t || !turn) return null
+  const live = !(await getSetting(d.db, 'conv.v1_writes'))
   const c = parseCardReply(m.text)
   if (!c) {
     // «Изменить» waits for his version: his words on the card are it, even without a command word.
@@ -472,16 +624,30 @@ export async function onConvReply(
       await giveBack(d.db, turn.conversationId, c.note)
       return COMMAND_TEXTS.returned
     case 'say':
-      return say(d, turn.conversationId, c.text, telegramKey(m.messageId))
+      if (!live) return say(d, turn.conversationId, c.text, telegramKey(m.messageId))
+      return proposeSay(d, turn, c.text, {
+        via: 'say',
+        voice: m.voice,
+        messageId: m.messageId,
+      })
     case 'close':
       await close(d.db, turn.conversationId)
       return COMMAND_TEXTS.closed
-    case 'good':
-      // After the switch «да» on a card is «Отправить» (design 5.10): a reply that only marked the draft good would
-      // close the card with nothing sent. In shadow it is the mark for the comparison.
-      return onConvPress(d, {
-        taskId: t.id,
-        action: (await getSetting(d.db, 'conv.v1_writes')) ? 'good' : 'send',
-      })
+    case 'confirm': {
+      // A typed «да» sends nothing. The button of the same card does, through the usual press.
+      if (t.state !== 'open') return COMMAND_TEXTS.done
+      const action: TaskAction = live ? (turn.text ? 'send' : 'edit') : 'good'
+      return {
+        text: live ? COMMAND_TEXTS.pressSend : COMMAND_TEXTS.pressGood,
+        rows: [
+          [
+            {
+              text: live ? CONV_TEXTS.buttons.send : CONV_TEXTS.buttons.good,
+              callbackData: formatCallback(t.id, action),
+            },
+          ],
+        ],
+      }
+    }
   }
 }

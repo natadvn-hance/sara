@@ -293,7 +293,7 @@ describe('Boris answers the card of a reminder', () => {
     expect(sends).toHaveLength(1)
   })
 
-  it('FR-CONV-11: «да» in reply to the card is «Отправить» after the switch', async () => {
+  it('FR-CONV-11: «да» in reply to the card sends nothing, it points at the card’s «Отправить»', async () => {
     const { taskId } = await carded()
     const [t] = await db.select().from(task).where(eq(task.id, taskId))
     const answer = await onConvReply(commandDeps(), {
@@ -301,11 +301,17 @@ describe('Boris answers the card of a reminder', () => {
       text: 'да',
       at: new Date(),
     })
-    expect(answer).toBe('Отправила напоминание клиенту.')
+    expect(answer).toEqual({
+      text: 'Нажми «Отправить», и уйдёт',
+      rows: [[{ text: 'Отправить', callbackData: `t:${taskId}:send` }]],
+    })
+    expect(sends).toHaveLength(0)
+    // The press of that button is the one that sends.
+    expect(await press(taskId, 'send')).toBe('Отправила напоминание клиенту.')
     expect(sends.map((s) => s.text)).toEqual([TEXT])
   })
 
-  it('FR-CONV-11: «Изменить» takes his text, which goes as his own, once, and closes the card', async () => {
+  it('FR-CONV-11: «Изменить» takes his text, shows it back, and it goes as his own only on «Отправить», once', async () => {
     const { rowId, taskId } = await carded()
     expect(await press(taskId, 'edit')).toMatch(/Жду твой вариант/)
     const [q] = await db.select().from(question)
@@ -318,15 +324,21 @@ describe('Boris answers the card of a reminder', () => {
       messageId: 4711,
       at: new Date(),
     }
-    expect(await onConvReply(commandDeps(), reply)).toBe('Отправила напоминание клиенту.')
-    // The same Telegram message delivered twice is one message.
-    expect(await onConvReply(commandDeps(), reply)).not.toMatch(/Отправила/)
+    const asked = await onConvReply(commandDeps(), reply)
+    expect(asked).toMatchObject({ text: `Отправлю клиенту так: «${mine}»` })
+    expect(sends).toHaveLength(0)
+    // The same Telegram message delivered twice is one question.
+    expect(typeof (await onConvReply(commandDeps(), reply))).toBe('string')
+    const confirm = (asked as { rows: { callbackData: string }[][] }).rows[0]?.[0]?.callbackData
+    const sayTask = confirm?.split(':')[1] ?? ''
+    expect(await press(sayTask, 'send')).toBe('Отправила напоминание клиенту.')
     expect(sends).toEqual([{ key: 'msg:say:tg:4711', text: mine, expectLast: 'm-1' }])
     expect(await row(rowId)).toMatchObject({ outcome: 'sent', borisText: mine })
     const [closed] = await db.select().from(task).where(eq(task.id, taskId))
     expect(closed).toMatchObject({ state: 'resolved', resolution: 'edit' })
-    // The text is Boris's: «Отправить» on the same card does not send Sara's.
+    // The text is Boris's: «Отправить» on the same card, or on his confirmation again, sends nothing more.
     expect(await press(taskId, 'send')).toMatch(/уже/)
+    expect(await press(sayTask, 'send')).toMatch(/уже/)
     expect(sends).toHaveLength(1)
     expect(await countEvents(db, 'conv.reminder_sent')).toBe(1)
   })
@@ -335,13 +347,36 @@ describe('Boris answers the card of a reminder', () => {
     const { taskId } = await carded()
     await press(taskId, 'edit')
     const [t] = await db.select().from(task).where(eq(task.id, taskId))
-    await onConvReply(commandDeps(), {
+    const asked = await onConvReply(commandDeps(), {
       replyToMessageId: t?.telegramMessageId ?? null,
       text: 'Анна, добрый день! Как успехи с сайтом?',
       messageId: 4712,
       at: new Date(),
     })
+    const confirm = (asked as { rows: { callbackData: string }[][] }).rows[0]?.[0]?.callbackData
+    await press(confirm?.split(':')[1] ?? '', 'send')
     expect(await db.select().from(mindProposal)).toHaveLength(0)
+  })
+
+  it('FR-OPS-1: a pause when he confirms his text holds it, and the confirmation stays for a second press', async () => {
+    const { taskId } = await carded()
+    await press(taskId, 'edit')
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    const asked = await onConvReply(commandDeps(), {
+      replyToMessageId: t?.telegramMessageId ?? null,
+      text: 'Анна, добрый день! Как успехи с сайтом?',
+      messageId: 4713,
+      at: new Date(),
+    })
+    const sayTask =
+      (asked as { rows: { callbackData: string }[][] }).rows[0]?.[0]?.callbackData.split(':')[1] ??
+      ''
+    await setSetting(db, 'outbound.messages', false, 'system')
+    expect(await press(sayTask, 'send')).toMatch(/Сейчас не могу отправить напоминание/)
+    expect(sends).toHaveLength(0)
+    await setSetting(db, 'outbound.messages', true, 'system')
+    expect(await press(sayTask, 'send')).toBe('Отправила напоминание клиенту.')
+    expect(sends).toHaveLength(1)
   })
 
   it('FR-CONV-12: a press that cannot reread the chat sends nothing', async () => {
