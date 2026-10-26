@@ -14,6 +14,7 @@ ssh_retry() {
   return 255
 }
 $SSH 'cd /opt/sara && git fetch -q origin && git checkout -q --detach origin/main && git log --oneline -1
+  if [ -d /opt/sara-mind/.git ]; then git -C /opt/sara-mind pull -q --ff-only && git -C /opt/sara-mind log --oneline -1; else echo "Разума на сервере нет: RB-17"; fi
   nohup sh -c "docker compose -f infra/compose.prod.yml --env-file .env up -d --build --remove-orphans && echo DEPLOY-OK || echo DEPLOY-FAILED" > /tmp/deploy.log 2>&1 &'
 echo "Сборка идёт на сервере; ход: ssh $HOST tail -f /tmp/deploy.log"
 until $SSH 'tail -1 /tmp/deploy.log' 2>/dev/null | grep -qE 'DEPLOY-(OK|FAILED)'; do sleep 20; done
