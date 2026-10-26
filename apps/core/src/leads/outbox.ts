@@ -342,7 +342,15 @@ async function attempt(
   if (!(await getSetting(d().db, 'outbound.bids')))
     return mayBeOnSite || ranBefore ? { kind: 'uncertain' } : { kind: 'paused' }
   // Greeted and tidied at this very moment, not at the press: the hour may have changed since the card (rule 5).
-  const sent = bidTextDetail(p.text, p.clientName ?? '', d().now?.() ?? new Date())
+  // The text is built before the node is called, outside the try below: an error of ours here pressed nothing, so the
+  // order goes back to Boris at once and is never reported as «unsure» (that would make him look for a bid that is not there).
+  let sent: ReturnType<typeof bidTextDetail>
+  try {
+    sent = bidTextDetail(p.text, p.clientName ?? '', d().now?.() ?? new Date())
+  } catch (e) {
+    console.error('bid text failed', e instanceof Error ? e.message.slice(0, 200) : e)
+    return { kind: 'refused', errorClass: 'INTERNAL' }
+  }
   // Only an old draft that fills the whole form loses something of its greeting; the journal notes it, never with the name.
   if (sent.fallback) {
     await appendEvent(

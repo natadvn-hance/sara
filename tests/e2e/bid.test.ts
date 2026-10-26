@@ -25,6 +25,8 @@ const CLEAN = 'Понимаю задачу\n\nКогда запуск?'
 // The greeting follows the hour in Moscow (rule 5): 12:00 unless a test moves the clock.
 const NOON = new Date('2026-10-26T09:00:00Z')
 let moment = NOON
+/** The clock breaks while it is true: a local error in the core, before the node is called. */
+let clockBroken = false
 const TITLE = 'Сайт для стоматологической клиники'
 const { db, close } = openTestDb()
 
@@ -114,7 +116,10 @@ beforeAll(async () => {
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
-      now: () => moment,
+      now: () => {
+        if (clockBroken) throw new Error('the clock is broken')
+        return moment
+      },
     },
   )
   fake.setCoreEventsUrl(`${app.url}/internal/profi/events`)
@@ -132,6 +137,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   moment = NOON
+  clockBroken = false
   analystPrice = 30000
   await resetDb(db)
   tg.sent.length = 0
@@ -548,6 +554,24 @@ describe('the greeting and the voice of the bid at the moment it is sent (FR-LEA
       .where(eq(event.type, 'outbox.attempted'))
     expect(noted.map((e) => e.payload)).toEqual([{ attempt: 1, greeting: 'name_dropped' }])
   })
+
+  it('NFR-REL-4: a local error while the text is built is «nothing pressed»: the order goes back to Boris, never «unsure»', async () => {
+    const id = await cardFor()
+    clockBroken = true
+    press()
+    await until(() => said(TEXTS.bidRefused(TITLE, 'INTERNAL')))
+    clockBroken = false
+    await settle()
+    expect(fake.bids).toHaveLength(0)
+    expect(said(TEXTS.bidUncertain)).toBe(false)
+    expect(await db.select().from(outbox)).toHaveLength(0)
+    expect((await taskOf(id))?.state).toBe('open')
+    expect(await payloads('bid.failed', id)).toEqual([{ reason: 'INTERNAL', given_back: true }])
+    // The card in his hands works again (the resend of a card may have met the broken clock too): the bid goes.
+    press()
+    await until(sentOk)
+    expect(fake.bids).toHaveLength(1)
+  }, 30000)
 
   it('FR-LEAD-6: a normal bid leaves no note about its greeting', async () => {
     await cardFor()
