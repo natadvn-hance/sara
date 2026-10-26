@@ -176,7 +176,7 @@ describe('the card built from a lead', () => {
     expect(cards[0]?.draft?.text).toBe('Ирина, добрый вечер!\n\nПонимаю задачу')
     expect(leadCardText(cards[0] as LeadCard)).toContain('Ирина, добрый вечер!')
     moment = new Date('2026-10-26T08:59:00Z')
-    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
     expect(cards[1]?.draft?.text).toBe('Ирина, доброе утро!\n\nПонимаю задачу')
     // The card never rewrites the stored draft: the greeting is built again when the bid is sent.
     const [row] = await db.select().from(lead).where(eq(lead.id, '91010'))
