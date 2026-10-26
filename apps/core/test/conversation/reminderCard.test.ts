@@ -1,0 +1,378 @@
+import { newEventId } from '@sara/shared'
+import { eq } from 'drizzle-orm'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { onConvPress, onConvReply } from '../../src/conversation/commands'
+import { sendTextNow } from '../../src/conversation/outbox'
+import {
+  checkGround,
+  isLadderMessage,
+  ladderTexts,
+  type Planned,
+  type RemindDeps,
+  sendStep,
+} from '../../src/conversation/reminderSteps'
+import { convTurn, mindProposal, outbox, question, task } from '../../src/db/schema'
+import { type ProfiClient, ProfiError } from '../../src/profi/client'
+import { setSetting } from '../../src/settings/store'
+import { chatMsg, fakeMind, stubProfi } from '../helpers/conversation'
+import { openTestDb, resetDb } from '../helpers/db'
+import { countEvents } from '../helpers/events'
+import { seedChat } from '../helpers/reminders'
+
+const { db, close } = openTestDb()
+afterAll(close)
+
+const CHAT = '95147898'
+const TEXT = 'Анна, здравствуйте! Как у вас дела с сайтом для клиники?'
+const HOUR = 3600_000
+const PLAN: Planned = { at: new Date().toISOString(), step: 1, tone: 'check_in' }
+
+type Card = { text: string; rows: { text: string; callbackData: string }[][] }
+const profi = stubProfi([])
+let cards: Card[]
+let sends: { key: string; text: string; expectLast: string | null }[]
+let telegramDown: number
+let deps: RemindDeps
+
+beforeEach(async () => {
+  await resetDb(db)
+  cards = []
+  sends = []
+  telegramDown = 0
+  profi.chat.splice(0, profi.chat.length)
+  profi.sendMessage = async (i) => {
+    sends.push({
+      key: i.idempotency_key,
+      text: i.text,
+      expectLast: i.expect_last_message_id,
+    })
+    const id = `s-${sends.length}`
+    profi.chat.push(chatMsg(id, 'specialist', i.text, new Date().toISOString(), CHAT))
+    return { found_on_page: true, platform_message_id: id }
+  }
+  deps = {
+    db,
+    profi: profi as ProfiClient,
+    gateway: null as unknown as RemindDeps['gateway'],
+    mind: fakeMind(),
+    notifier: {
+      sendButtons: async (text, rows) => {
+        if (telegramDown-- > 0) throw new Error('telegram is down')
+        cards.push({ text, rows })
+        return { messageId: 500 + cards.length }
+      },
+    },
+  }
+  await setSetting(db, 'pipeline.conversations', true, 'system')
+  // After the switch, the drafts mode: the autopilot stays at its default, off.
+  await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'outbound.messages', true, 'system')
+})
+
+/** Our message a day ago that the client did not answer, and the trace row of the first reminder step. */
+async function scene(step: 1 | 2 | 3 = 1) {
+  const at = new Date(Date.now() - 25 * HOUR).toISOString()
+  const conv = await seedChat(db, CHAT, [
+    { id: 'm-1', side: 'specialist', text: 'Добрый день', at },
+  ])
+  profi.chat.push(chatMsg('m-1', 'specialist', 'Добрый день', at, CHAT))
+  return { conv, rowId: await addRow(conv.id, step) }
+}
+
+async function addRow(conversationId: string, step: 1 | 2 | 3) {
+  const rowId = `conv-remind:${conversationId}:m-1:${step}`
+  await db.insert(convTurn).values({
+    id: rowId,
+    conversationId,
+    kind: 'reminder',
+    anchorMessageId: 'm-1',
+    state: 'waiting',
+    text: TEXT,
+    understanding: { step, tone: 'check_in' },
+  })
+  return rowId
+}
+
+const row = async (id: string) => (await db.select().from(convTurn).where(eq(convTurn.id, id)))[0]
+const taskOf = async (rowId: string) =>
+  (await db.select().from(task).where(eq(task.entityId, rowId)))[0]
+const outboxMessages = async () =>
+  (await db.select().from(outbox)).filter((o) => o.kind === 'message')
+const actions = (c: Card | undefined) => c?.rows.flat().map((b) => b.callbackData.split(':')[2])
+
+const commandDeps = () => ({
+  db,
+  notifier: { sendText: async () => ({ messageId: 900 }) },
+  sendText: (c: string, text: string, author: 'sara' | 'boris', o?: never) =>
+    sendTextNow({ db, profi }, c, text, author, o),
+  remindGround: (c: string, a: string) => checkGround(deps, c, a, { dormant: false }),
+})
+const press = (taskId: string, action: 'send' | 'edit' | 'skip') =>
+  onConvPress(commandDeps(), { taskId, action })
+
+/** The card of the step is sent: the state after the reminder process woke up in drafts mode. */
+async function carded(step: 1 | 2 | 3 = 1) {
+  const s = await scene(step)
+  const r = await sendStep(deps, s.rowId, s.conv.id, 'm-1', { ...PLAN, step }, TEXT)
+  expect(r.outcome).toBe('carded')
+  const t = await taskOf(s.rowId)
+  return { ...s, taskId: t?.id ?? '' }
+}
+
+describe('the card of a reminder', () => {
+  it('FR-CONV-12: with the autopilot off the step sends Boris a card and queues nothing', async () => {
+    const { conv, rowId } = await scene()
+    const r = await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)
+    expect(r).toEqual({ outcome: 'carded', end: false })
+    expect(cards).toHaveLength(1)
+    const text = cards[0]?.text ?? ''
+    expect(text).toContain('Напомнить клиенту?')
+    expect(text).toContain('Анна')
+    expect(text).toContain('Сайт для клиники')
+    expect(text).toContain('Первое напоминание')
+    expect(text).toContain(TEXT)
+    expect(text).not.toMatch(/[–—]/)
+    expect(actions(cards[0])).toEqual(['send', 'edit', 'skip'])
+    expect(cards[0]?.rows.flat().map((b) => b.text)).toEqual(['Отправить', 'Изменить', 'Не надо'])
+    expect(await outboxMessages()).toHaveLength(0)
+    expect(sends).toHaveLength(0)
+    const t = await taskOf(rowId)
+    expect(t).toMatchObject({ kind: 'conv_draft', entityKind: 'conv_turn', state: 'open' })
+    expect(await row(rowId)).toMatchObject({
+      state: 'finished',
+      outcome: 'carded',
+      decision: 'draft',
+      taskId: t?.id,
+      cardMessageId: 501,
+      text: TEXT,
+    })
+    expect(await countEvents(db, 'conv.reminder_drafted')).toBe(1)
+    expect(await countEvents(db, 'conv.reminder_sent')).toBe(0)
+  })
+
+  it('FR-CONV-12: a repeat of the step after a crash sends no second card', async () => {
+    const { conv, rowId } = await scene()
+    await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)
+    expect((await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)).outcome).toBe('carded')
+    expect(cards).toHaveLength(1)
+    expect(await db.select().from(task)).toHaveLength(1)
+    expect(await countEvents(db, 'conv.reminder_drafted')).toBe(1)
+  })
+
+  it('FR-CONV-12: a card that Telegram would not take leaves the row open to be tried again', async () => {
+    const { conv, rowId } = await scene()
+    telegramDown = 1
+    const r = await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)
+    expect(r).toEqual({ outcome: 'failed', end: false, retry: true })
+    expect((await row(rowId))?.state).toBe('waiting')
+    expect(await db.select().from(task)).toHaveLength(0)
+    expect((await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)).outcome).toBe('carded')
+    expect(cards).toHaveLength(1)
+  })
+
+  it('FR-CONV-5: in shadow no card comes, only the trace', async () => {
+    const { conv, rowId } = await scene()
+    await setSetting(db, 'conv.v1_writes', true, 'system')
+    expect((await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)).outcome).toBe('drafted')
+    expect(cards).toHaveLength(0)
+    expect(await db.select().from(task)).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: the autopilot on sends the reminder by itself, as before, and no card comes', async () => {
+    const { conv, rowId } = await scene()
+    await setSetting(db, 'conv.autopilot', true, 'system')
+    expect((await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)).outcome).toBe('sent')
+    expect(cards).toHaveLength(0)
+    expect(sends).toHaveLength(1)
+  })
+
+  it('FR-CONV-12: the next reminder card closes the one Boris has not answered', async () => {
+    const { conv, rowId, taskId } = await carded(1)
+    const second = await addRow(conv.id, 2)
+    expect((await sendStep(deps, second, conv.id, 'm-1', { ...PLAN, step: 2 }, TEXT)).outcome).toBe(
+      'carded',
+    )
+    expect(cards).toHaveLength(2)
+    expect(cards[1]?.text).toContain('Второе напоминание')
+    const [old] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(old).toMatchObject({ state: 'resolved', resolution: 'expired' })
+    expect((await row(rowId))?.outcome).toBe('expired')
+    expect(await press(taskId, 'send')).toMatch(/уже/)
+    expect(sends).toHaveLength(0)
+  })
+})
+
+describe('Boris answers the card of a reminder', () => {
+  it('FR-CONV-12: «Отправить» sends the text once, with the key of the card and the last message of the chat', async () => {
+    const { rowId, taskId } = await carded()
+    expect(await press(taskId, 'send')).toBe('Отправила напоминание клиенту.')
+    expect(sends).toEqual([{ key: `msg:send:${taskId}`, text: TEXT, expectLast: 'm-1' }])
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t).toMatchObject({ state: 'resolved', resolution: 'send' })
+    expect(await row(rowId)).toMatchObject({ outcome: 'sent', decision: 'send' })
+    expect(await countEvents(db, 'conv.reminder_sent')).toBe(1)
+    const queued = await outboxMessages()
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.state).toBe('confirmed')
+    // The same press delivered again sends nothing.
+    expect(await press(taskId, 'send')).toMatch(/уже/)
+    expect(sends).toHaveLength(1)
+  })
+
+  it('FR-CONV-12: two cards of one step never send the reminder twice', async () => {
+    const { rowId, taskId } = await carded()
+    // A card that went out twice (a crash between Telegram and the database) has two tasks for one step.
+    const twin = newEventId()
+    await db.insert(task).values({
+      id: twin,
+      kind: 'conv_draft',
+      entityKind: 'conv_turn',
+      entityId: rowId,
+      telegramMessageId: 999,
+    })
+    expect(await press(taskId, 'send')).toBe('Отправила напоминание клиенту.')
+    expect(await press(twin, 'send')).toMatch(/уже/)
+    expect(sends).toHaveLength(1)
+    expect(await outboxMessages()).toHaveLength(1)
+  })
+
+  it('FR-CONV-12: «Не надо» sends nothing and closes the step, the row says so', async () => {
+    const { rowId, taskId } = await carded()
+    expect(await press(taskId, 'skip')).toMatch(/не отправляю/)
+    expect(sends).toHaveLength(0)
+    expect(await outboxMessages()).toHaveLength(0)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t).toMatchObject({ state: 'resolved', resolution: 'skip' })
+    expect(await row(rowId)).toMatchObject({ outcome: 'declined', decision: 'nothing' })
+    // The answer of one press is final: «Отправить» after «Не надо» does nothing.
+    expect(await press(taskId, 'send')).toMatch(/уже/)
+    expect(sends).toHaveLength(0)
+  })
+
+  it('FR-CONV-6: a client who wrote since the card gets no reminder, the card is closed', async () => {
+    const { rowId, taskId } = await carded()
+    profi.chat.push(chatMsg('m-2', 'client', 'Да, давайте', new Date().toISOString(), CHAT))
+    expect(await press(taskId, 'send')).toMatch(/клиент ответил/)
+    expect(sends).toHaveLength(0)
+    expect(await outboxMessages()).toHaveLength(0)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t).toMatchObject({ state: 'resolved', resolution: 'stale' })
+    expect(await row(rowId)).toMatchObject({ outcome: 'stopped' })
+  })
+
+  it('FR-CONV-6: our side that wrote since the card (Boris himself) keeps the reminder from going', async () => {
+    const { taskId } = await carded()
+    profi.chat.push(
+      chatMsg('m-2', 'specialist', 'Анна, я на связи', new Date().toISOString(), CHAT),
+    )
+    expect(await press(taskId, 'send')).toMatch(/наша сторона уже написала/)
+    expect(sends).toHaveLength(0)
+  })
+
+  it('FR-CONV-9: a chat that moved on after the reread is refused by the service and Boris is told', async () => {
+    const { rowId, taskId } = await carded()
+    profi.sendMessage = async () => {
+      throw new ProfiError('CHAT_CHANGED', 'moved on')
+    }
+    expect(await press(taskId, 'send')).toMatch(/Клиент успел написать/)
+    expect(await row(rowId)).toMatchObject({ outcome: 'stopped' })
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.resolution).toBe('stale')
+  })
+
+  it('FR-OPS-1: a pause that came after the card holds the press, the card stays open for later', async () => {
+    const { rowId, taskId } = await carded()
+    await setSetting(db, 'outbound.messages', false, 'system')
+    expect(await press(taskId, 'send')).toMatch(/Сейчас не могу отправить напоминание/)
+    expect(sends).toHaveLength(0)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.state).toBe('open')
+    expect((await row(rowId))?.outcome).toBe('carded')
+    await setSetting(db, 'outbound.messages', true, 'system')
+    expect(await press(taskId, 'send')).toBe('Отправила напоминание клиенту.')
+    expect(sends).toHaveLength(1)
+  })
+
+  it('FR-CONV-11: «да» in reply to the card is «Отправить» after the switch', async () => {
+    const { taskId } = await carded()
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    const answer = await onConvReply(commandDeps(), {
+      replyToMessageId: t?.telegramMessageId ?? null,
+      text: 'да',
+      at: new Date(),
+    })
+    expect(answer).toBe('Отправила напоминание клиенту.')
+    expect(sends.map((s) => s.text)).toEqual([TEXT])
+  })
+
+  it('FR-CONV-11: «Изменить» takes his text, which goes as his own, once, and closes the card', async () => {
+    const { rowId, taskId } = await carded()
+    expect(await press(taskId, 'edit')).toMatch(/Жду твой вариант/)
+    const [q] = await db.select().from(question)
+    expect(q).toMatchObject({ kind: 'conv_edit', entityId: rowId })
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    const mine = 'Анна, добрый день! Как успехи с сайтом?'
+    const reply = {
+      replyToMessageId: t?.telegramMessageId ?? null,
+      text: mine,
+      messageId: 4711,
+      at: new Date(),
+    }
+    expect(await onConvReply(commandDeps(), reply)).toBe('Отправила напоминание клиенту.')
+    // The same Telegram message delivered twice is one message.
+    expect(await onConvReply(commandDeps(), reply)).not.toMatch(/Отправила/)
+    expect(sends).toEqual([{ key: 'msg:say:tg:4711', text: mine, expectLast: 'm-1' }])
+    expect(await row(rowId)).toMatchObject({ outcome: 'sent', borisText: mine })
+    const [closed] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(closed).toMatchObject({ state: 'resolved', resolution: 'edit' })
+    // The text is Boris's: «Отправить» on the same card does not send Sara's.
+    expect(await press(taskId, 'send')).toMatch(/уже/)
+    expect(sends).toHaveLength(1)
+    expect(await countEvents(db, 'conv.reminder_sent')).toBe(1)
+  })
+
+  it('FR-CONV-11: «Изменить» leaves no speech example: a reminder has no client words to answer', async () => {
+    const { taskId } = await carded()
+    await press(taskId, 'edit')
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    await onConvReply(commandDeps(), {
+      replyToMessageId: t?.telegramMessageId ?? null,
+      text: 'Анна, добрый день! Как успехи с сайтом?',
+      messageId: 4712,
+      at: new Date(),
+    })
+    expect(await db.select().from(mindProposal)).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: a press that cannot reread the chat sends nothing', async () => {
+    const { taskId } = await carded()
+    const answer = await onConvPress(
+      { db, notifier: { sendText: async () => ({ messageId: 900 }) }, sendText: async () => 'x' },
+      { taskId, action: 'send' },
+    )
+    expect(answer).toMatch(/не могу проверить чат/)
+    expect(sends).toHaveLength(0)
+  })
+})
+
+describe('the ladder knows the reminders that went by Boris’s press', () => {
+  it('FR-CONV-12: the text of a pressed reminder and of his own version are the ladder’s, not a new beginning', async () => {
+    const { conv, taskId } = await carded()
+    expect((await ladderTexts(db, conv.id)).size).toBe(0)
+    await press(taskId, 'send')
+    const texts = await ladderTexts(db, conv.id)
+    expect(texts.size).toBe(1)
+    const m = {
+      author: 'sara' as const,
+      authorBasis: 'outbox' as const,
+      text: TEXT,
+    }
+    expect(isLadderMessage(m, texts)).toBe(true)
+    expect(isLadderMessage({ ...m, text: 'Другое' }, texts)).toBe(false)
+    // Boris's words after «Изменить» are the ladder's too; a message of his from the page is not.
+    expect(isLadderMessage({ ...m, author: 'boris', authorBasis: 'say' }, texts)).toBe(true)
+    expect(isLadderMessage({ ...m, author: 'boris', authorBasis: 'after_cutover' }, texts)).toBe(
+      false,
+    )
+  })
+})

@@ -1,5 +1,5 @@
 import { type ChatMessage, formatCallback, newEventId, normalizeText } from '@sara/shared'
-import { and, asc, desc, eq, gte, like, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, isNotNull, like, ne, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
@@ -11,6 +11,7 @@ import { getSetting } from '../settings/store'
 import { clientTurnBefore, isRefusal, isThinking } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
+import { sendReminderCard } from './reminderCard'
 import {
   nextReminder,
   type ReminderStep,
@@ -48,6 +49,9 @@ export type RemindDeps = {
   dormantTries?: number
   /** The wait after «Напоминать дальше» (default 10 days); tests shorten it. */
   afterPressMs?: number
+  /** How often a card that Telegram would not take is tried again (default 10 minutes), and how many tries (6). */
+  cardRetryEveryMs?: number
+  cardTries?: number
 }
 
 /** The step the ladder is at: when it is due, which reminder and in what tone. */
@@ -59,9 +63,12 @@ export type Ground =
   | { go: false; end: boolean; why: string }
 
 export type Sent = {
-  outcome: 'sent' | 'drafted' | 'skipped' | 'stopped' | 'failed' | 'uncertain'
+  /** `carded`: drafts mode, Boris has the card «Напомнить клиенту?» and nothing is queued. */
+  outcome: 'sent' | 'drafted' | 'carded' | 'skipped' | 'stopped' | 'failed' | 'uncertain'
   /** True when the ladder is over. */
   end: boolean
+  /** The card did not reach Boris (Telegram is down): the row stays open and the step is tried again. */
+  retry?: boolean
 }
 
 /** A turn that has not finished for longer than this is not running, it is stuck. */
@@ -190,9 +197,13 @@ export async function planNext(
   return r ? { at: r.at.toISOString(), step: r.step, tone: r.tone } : null
 }
 
-/** The texts of the reminders this conversation's ladder sent: they stand in the chat as our side's messages. */
+/**
+ * The texts of the reminders this conversation's ladder sent: they stand in the chat as our side's messages. Those that
+ * went by themselves (the key of their process), those Boris sent with «Отправить» on the card of a reminder (the key
+ * of the card's task) and his own version of a reminder (what he wrote after «Изменить»).
+ */
 export async function ladderTexts(db: Db, conversationId: string): Promise<Set<string>> {
-  const rows = await db
+  const own = await db
     .select({ payload: outbox.payload })
     .from(outbox)
     .where(
@@ -201,12 +212,39 @@ export async function ladderTexts(db: Db, conversationId: string): Promise<Set<s
         like(outbox.idempotencyKey, `msg:conv-remind:${conversationId}:%`),
       ),
     )
-  return new Set(rows.map((r) => normalizeText((r.payload as { text?: string }).text ?? '')))
+  const pressed = await db
+    .select({ payload: outbox.payload })
+    .from(outbox)
+    .innerJoin(task, eq(outbox.idempotencyKey, sql`'msg:send:' || ${task.id}::text`))
+    .where(and(eq(outbox.kind, 'message'), like(task.entityId, `conv-remind:${conversationId}:%`)))
+  const edited = await db
+    .select({ text: convTurn.borisText })
+    .from(convTurn)
+    .where(
+      and(
+        eq(convTurn.conversationId, conversationId),
+        eq(convTurn.kind, 'reminder'),
+        isNotNull(convTurn.borisText),
+      ),
+    )
+  return new Set(
+    [
+      ...[...own, ...pressed].map((r) => (r.payload as { text?: string }).text ?? ''),
+      ...edited.map((r) => r.text ?? ''),
+    ].map(normalizeText),
+  )
 }
 
-/** One of the ladder's own reminders, which the sync stored as Sara's from the outbox. */
-export const isLadderMessage = (m: Pick<StoredMessage, 'author' | 'text'>, texts: Set<string>) =>
-  m.author === 'sara' && texts.has(normalizeText(m.text))
+/**
+ * One of the ladder's own reminders, which the sync stored as Sara's from the outbox (or as Boris's own words when he
+ * changed the text of a reminder card).
+ */
+export const isLadderMessage = (
+  m: Pick<StoredMessage, 'author' | 'authorBasis' | 'text'>,
+  texts: Set<string>,
+) =>
+  (m.author === 'sara' || (m.author === 'boris' && m.authorBasis === 'say')) &&
+  texts.has(normalizeText(m.text))
 
 /** The account is paused, logged out or banned: nothing is written to its clients. */
 async function accountHolds(db: Db, accountId: string): Promise<boolean> {
@@ -506,6 +544,35 @@ async function deliver(
   return { outcome: uncertain ? 'uncertain' : 'failed', end: false }
 }
 
+/** The reminder step is done when Boris has its card: the row says so together with its event. */
+async function endCard(
+  d: RemindDeps,
+  rowId: string,
+  conv: ConversationRow,
+  p: Planned,
+  text: string,
+): Promise<void> {
+  if (await endedWith(d, rowId, 'carded')) return
+  await d.db.transaction(async (tx) => {
+    await finishRow(tx, rowId, {
+      text,
+      outcome: 'carded',
+      decision: 'draft',
+      decisionReason: 'карточка Борису: отправлю по его нажатию',
+    })
+    await journal(tx, 'conv.reminder_drafted', conv, rowId, { step: p.step, card: true })
+  })
+}
+
+/** The card could not be sent to Boris in all the tries: the row says why, the ladder goes on with its next step. */
+export async function giveUpCard(d: RemindDeps, rowId: string): Promise<void> {
+  await finishRow(d.db, rowId, {
+    outcome: 'failed',
+    decision: 'draft',
+    decisionReason: 'не смогла прислать карточку Борису',
+  })
+}
+
 /**
  * The end of a reminder step: the last check, then the shadow's record or the send through the message outbox. In
  * shadow nothing is queued, the draft is only the trace (design 5.11). The key is the process and the step, so a
@@ -544,9 +611,18 @@ export async function sendStep(
     await finishRow(d.db, rowId, {
       outcome: 'skipped',
       decision: 'nothing',
-      decisionReason: 'сейчас не отправляю: пауза, пауза аккаунта или режим тени',
+      decisionReason: 'сейчас не отправляю: пауза, пауза аккаунта, режим тени или режим черновиков',
     })
     return { outcome: 'skipped', end: false }
+  }
+  // Drafts mode: an earlier run of this step already sent Boris the card; it is not sent twice.
+  const [made] = await d.db
+    .select({ taskId: convTurn.taskId, state: convTurn.state })
+    .from(convTurn)
+    .where(eq(convTurn.id, rowId))
+  if (made?.taskId) {
+    if (made.state !== 'finished') await endCard(d, rowId, conv, p, text)
+    return { outcome: 'carded', end: false }
   }
   const g = await checkGround(d, conversationId, anchor, { dormant: false })
   if (!g.go) {
@@ -568,6 +644,17 @@ export async function sendStep(
         await journal(tx, 'conv.reminder_drafted', conv, rowId, { step: p.step })
       })
     return { outcome: 'drafted', end: false }
+  }
+  // Drafts mode (FR-CONV-5): Sara sends nothing by herself, Boris gets the card and his press sends the text.
+  if (!(await getSetting(d.db, 'conv.autopilot'))) {
+    try {
+      await sendReminderCard(d, rowId, conv, p.step as 1 | 2 | 3, text)
+    } catch (e) {
+      console.error('reminder: the card did not go', e instanceof Error ? e.message : e)
+      return { outcome: 'failed', end: false, retry: true }
+    }
+    await endCard(d, rowId, conv, p, text)
+    return { outcome: 'carded', end: false }
   }
   const id = await d.db.transaction((tx) =>
     queueMessage(tx, {

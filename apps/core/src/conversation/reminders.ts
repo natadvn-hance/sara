@@ -1,13 +1,16 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { and, eq, like, notLike } from 'drizzle-orm'
+import { and, eq, inArray, like, notLike } from 'drizzle-orm'
 import { convTurn, deal, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { getSetting } from '../settings/store'
 import { clientTurnBefore, isRefusal } from './clientCues'
 import {
+  checkGround,
   dormantStep,
   expireDormantTask,
   fallbackStep,
+  type Ground,
+  giveUpCard,
   giveUpDormant,
   groundStep,
   isLadderMessage,
@@ -65,6 +68,9 @@ const DORMANT_TRIES = 24
 const DORMANT_RETRY_MS = 3600_000
 const DORMANT_STEP_RETRY_MS = 10 * 60_000
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
+/** The card of a reminder that Telegram would not take is tried again every 10 minutes, 6 times, then given up. */
+const CARD_TRIES = 6
+const CARD_RETRY_MS = 10 * 60_000
 
 /**
  * The text of a reminder: the model's; when the model itself gave nothing (a limit, a failure) it is asked again every
@@ -195,12 +201,33 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
     })
     const rest = hold.until ? Date.parse(hold.until) - (await DBOS.now()) : 0
     if (rest > 0) await DBOS.sleep(rest)
-    const result = await DBOS.runStep(
+    let result = await DBOS.runStep(
       () => sendStep(d(), rowId, conversationId, anchor, next, text),
       { name: `send-${k}`, ...DB_STEP },
     )
+    // Drafts mode: Telegram not taking the card is a passing trouble, the step is tried again for an hour.
+    for (let a = 1; result.retry; a++) {
+      if (a >= (d().cardTries ?? CARD_TRIES)) {
+        await DBOS.runStep(() => giveUpCard(d(), rowId), {
+          name: `card-giveup-${k}`,
+          ...DB_STEP,
+        })
+        result = { outcome: 'failed', end: false }
+        break
+      }
+      await DBOS.sleep(d().cardRetryEveryMs ?? CARD_RETRY_MS)
+      result = await DBOS.runStep(() => sendStep(d(), rowId, conversationId, anchor, next, text), {
+        name: `send-${k}-r${a}`,
+        ...DB_STEP,
+      })
+    }
     if (result.end) return
-    if (result.outcome === 'sent' || result.outcome === 'drafted' || result.outcome === 'uncertain')
+    if (
+      result.outcome === 'sent' ||
+      result.outcome === 'drafted' ||
+      result.outcome === 'carded' ||
+      result.outcome === 'uncertain'
+    )
       lastSentAt = new Date(await DBOS.now()).toISOString()
     sent++
   }
@@ -233,6 +260,14 @@ export async function startReminder(
   })(conversationId, lastOursMessageId)
 }
 
+/**
+ * The chat read again before the text of a reminder card goes to the client, hours after the card came (a press of
+ * Boris, FR-CONV-12): the same last word as at the wake-up of the step.
+ */
+export async function reminderGround(conversationId: string, anchor: string): Promise<Ground> {
+  return checkGround(d(), conversationId, anchor, { dormant: false })
+}
+
 const OPEN = ['PENDING', 'ENQUEUED', 'DELAYED'] as const
 
 /** The ids of the reminder processes of a conversation that are not over. */
@@ -255,21 +290,28 @@ export async function cancelReminders(
 }
 
 /**
- * The task for Boris about a quiet client is moot once the client or our side wrote: it is closed. The task of the
- * process `keep` (the one that goes on) stays.
+ * The task for Boris about a quiet client, and the card of a reminder that still waits for his press, are moot once
+ * the client or our side wrote: they are closed. The tasks of the process `keep` (the one that goes on) stay.
  */
 async function resolveDormantTasks(conversationId: string, keep?: string) {
-  await d()
+  const closed = await d()
     .db.update(task)
     .set({ state: 'resolved', resolution: 'answered', resolvedAt: new Date().toISOString() })
     .where(
       and(
-        eq(task.kind, 'conv_dormant'),
+        inArray(task.kind, ['conv_dormant', 'conv_draft']),
         like(task.entityId, `conv-remind:${conversationId}:%`),
         keep ? notLike(task.entityId, `${keep}:%`) : undefined,
         eq(task.state, 'open'),
       ),
     )
+    .returning({ rowId: task.entityId, kind: task.kind })
+  for (const c of closed)
+    if (c.kind === 'conv_draft')
+      await d()
+        .db.update(convTurn)
+        .set({ outcome: 'answered', decisionReason: 'разговор пошёл дальше: напоминание не нужно' })
+        .where(and(eq(convTurn.id, c.rowId), eq(convTurn.outcome, 'carded')))
 }
 
 /** A client who was dormant and wrote again is in the conversation again. */

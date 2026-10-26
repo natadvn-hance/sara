@@ -67,6 +67,12 @@ const wouldRu = (v: CardView) => {
   return reason || 'прислала бы тебе черновик'
 }
 
+const REMINDER_STEP_RU = {
+  1: 'Первое напоминание',
+  2: 'Второе напоминание',
+  3: 'Третье напоминание, последнее',
+} as const
+
 export const CONV_TEXTS = {
   authorUnclear: (chatId: string) =>
     `⚠️ В чате заказа ${chatId} не понимаю, кто написал последние сообщения: клиент или наша сторона. Пока ничего не отвечаю, посмотри сам.`,
@@ -132,7 +138,33 @@ export const CONV_TEXTS = {
       ].join('\n'),
     ),
 
+  /**
+   * The card of a reminder in drafts mode: nothing goes to the client until Boris presses «Отправить» (FR-CONV-12).
+   * `step` is the step of the ladder: the first, second or third (the last) reminder.
+   */
+  reminderCard: (v: {
+    name: string | null
+    orderTitle: string | null
+    step: 1 | 2 | 3
+    text: string
+  }) =>
+    hyphenated(
+      [
+        '⏰ Напомнить клиенту?',
+        [v.name ?? 'Клиент', v.orderTitle ? `заказ «${v.orderTitle}»` : null]
+          .filter(Boolean)
+          .join(', '),
+        `${REMINDER_STEP_RU[v.step]}: клиент не ответил на наше последнее сообщение.`,
+        '',
+        'Текст напоминания:',
+        v.text.trim(),
+        '',
+        'Без твоего нажатия клиенту ничего не уйдёт.',
+      ].join('\n'),
+    ),
+
   buttons: {
+    skip: 'Не надо',
     good: 'Хорошо',
     edit: 'Изменить',
     send: 'Отправить',
@@ -141,4 +173,15 @@ export const CONV_TEXTS = {
     giveBack: 'Вернуть Саре',
     remind: 'Напоминать дальше',
   },
+}
+
+/** What Boris is told when he answers the card of a reminder (FR-CONV-12). */
+export const REMIND_TEXTS = {
+  declined: 'Хорошо, это напоминание клиенту не отправляю.',
+  gone: (why: string) => `Напоминание уже не нужно: ${why}. Клиенту ничего не отправила.`,
+  notNow: (why: string) =>
+    `Сейчас не могу отправить напоминание: ${why}. Нажми «Отправить» позже, карточка остаётся.`,
+  stale: 'Клиент успел написать: напоминание не ушло. Посмотри чат.',
+  sent: 'Отправила напоминание клиенту.',
+  alreadyDone: 'Это напоминание уже обработано. Второй раз не отправляю.',
 }

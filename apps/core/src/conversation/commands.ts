@@ -11,6 +11,7 @@ import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { clientNames } from './dossier'
 import { SEND_TEXTS, type SendOptions } from './outbox'
+import { editReminder, onReminderPress, type ReminderPressDeps } from './reminderCard'
 import { getConversation, updateConversation } from './store'
 
 export type CommandDeps = {
@@ -25,6 +26,8 @@ export type CommandDeps = {
   ): Promise<string>
   /** Boris's answer on the task of a client quiet for 7 days reaches the reminder process (FR-CONV-12). */
   decideDormant?(reminderTurnId: string, decision: 'remind' | 'close'): Promise<boolean>
+  /** The chat read again before the text of a reminder card goes: whether the reminder is still wanted (FR-CONV-12). */
+  remindGround?: ReminderPressDeps['remindGround']
 }
 
 export const COMMAND_TEXTS = {
@@ -320,6 +323,7 @@ export async function onConvPress(
   const [turn] = t ? await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId)) : []
   if (!t || !turn) return COMMAND_TEXTS.done
   const conversationId = turn.conversationId
+  if (turn.kind === 'reminder') return onReminderCardPress(d, t, turn, p.action)
   if (p.action === 'return') {
     await giveBack(d.db, conversationId, null)
     return COMMAND_TEXTS.returned
@@ -365,6 +369,21 @@ export async function onConvPress(
   }
 }
 
+/** A press on the card of a reminder (drafts mode): «Отправить», «Изменить» or «Не надо». */
+async function onReminderCardPress(
+  d: CommandDeps,
+  t: CardTask,
+  turn: typeof convTurn.$inferSelect,
+  action: TaskAction,
+): Promise<string> {
+  if (t.state !== 'open' || turn.outcome !== 'carded') return COMMAND_TEXTS.done
+  if (action === 'edit') {
+    await startEdit(d, turn.id)
+    return COMMAND_TEXTS.askEdit
+  }
+  return onReminderPress(d, t, turn, action)
+}
+
 /** «Изменить»: a question whose answer is Boris's version of the reply. */
 async function startEdit(d: CommandDeps, turnId: string): Promise<void> {
   const id = newEventId()
@@ -388,12 +407,14 @@ export async function onConvEdit(
   const [turn] = await d.db.select().from(convTurn).where(eq(convTurn.id, a.question.entityId))
   if (!turn) return COMMAND_TEXTS.done
   await d.db.update(convTurn).set({ borisText: a.text }).where(eq(convTurn.id, turn.id))
-  await proposeBorisWords(d.db, turn.id, turn.conversationId, a.text)
+  // A reminder has no client words to be an example of: only a reply's draft becomes a proposal.
+  if (turn.kind !== 'reminder') await proposeBorisWords(d.db, turn.id, turn.conversationId, a.text)
   await journal(d.db, 'conv.draft_edited', turn.conversationId, 'boris', {
     turn_id: turn.id,
     voice: a.voice,
   })
   if ((await getSetting(d.db, 'conv.v1_writes')) || !d.sendText) return COMMAND_TEXTS.editKept
+  if (turn.kind === 'reminder') return editReminder(d, turn, a.text, telegramKey(a.messageId))
   return d.sendText(turn.conversationId, a.text, 'boris', { key: telegramKey(a.messageId) })
 }
 
@@ -476,6 +497,11 @@ export async function onConvReply(
       await close(d.db, turn.conversationId)
       return COMMAND_TEXTS.closed
     case 'good':
-      return onConvPress(d, { taskId: t.id, action: 'good' })
+      // After the switch «да» on a card is «Отправить» (design 5.10): a reply that only marked the draft good would
+      // close the card with nothing sent. In shadow it is the mark for the comparison.
+      return onConvPress(d, {
+        taskId: t.id,
+        action: (await getSetting(d.db, 'conv.v1_writes')) ? 'good' : 'send',
+      })
   }
 }

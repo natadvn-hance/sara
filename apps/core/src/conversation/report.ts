@@ -64,7 +64,7 @@ async function reminderLines(db: Db, rows: Row[]): Promise<string[]> {
     return n > 0 ? [`${k === 'dormant' ? 'застой' : `шаг ${k}`} ${n}`] : []
   })
   const lines = [
-    `Напоминания: ${rows.length}: черновиков в тени ${by('drafted')}, отправлено ${by('sent')}, пропущено ${by('skipped')}, остановлено ${by('stopped')}, застоев ${by('dormant')}.`,
+    `Напоминания: ${rows.length}: черновиков в тени ${by('drafted')}, карточек Борису, ждут ответа ${by('carded')}, отправлено ${by('sent')}, Борис сказал «не надо» ${by('declined')}, устарело ${by('expired') + by('answered')}, пропущено ${by('skipped')}, остановлено ${by('stopped')}, застоев ${by('dormant')}.`,
     `По шагам: ${steps.join(', ')}.`,
   ]
   const drafts = rows

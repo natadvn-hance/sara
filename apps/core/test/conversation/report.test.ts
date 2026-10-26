@@ -147,6 +147,34 @@ describe('reminders in the conversation report', () => {
     expect(text).not.toMatch(/[\u2014\u2013]/)
   })
 
+  it('FR-CONV-12: in drafts mode the report counts the cards, the presses and what Boris declined', async () => {
+    const conv = await ensureConversation(db, {
+      accountId: 'hance-marketing',
+      chatId: 'c-10',
+      orderId: null,
+    })
+    const base = {
+      conversationId: conv.id,
+      kind: 'reminder',
+      anchorMessageId: 'm-0',
+      state: 'finished',
+    }
+    await db.insert(convTurn).values([
+      { ...base, id: 'conv-remind:g:m-0:1', outcome: 'carded', understanding: { step: 1 } },
+      { ...base, id: 'conv-remind:h:m-0:1', outcome: 'sent', understanding: { step: 1 } },
+      { ...base, id: 'conv-remind:i:m-0:1', outcome: 'declined', understanding: { step: 1 } },
+      { ...base, id: 'conv-remind:j:m-0:1', outcome: 'expired', understanding: { step: 1 } },
+      { ...base, id: 'conv-remind:k:m-0:1', outcome: 'answered', understanding: { step: 1 } },
+    ])
+    const text = await convReport(db, 7)
+    expect(text).toContain('Напоминания: 5')
+    expect(text).toContain('карточек Борису, ждут ответа 1')
+    expect(text).toContain('отправлено 1')
+    expect(text).toContain('Борис сказал «не надо» 1')
+    expect(text).toContain('устарело 2')
+    expect(text).not.toMatch(/[\u2014\u2013]/)
+  })
+
   it('FR-CONV-12: a report without reminders says so in one line', async () => {
     const conv = await ensureConversation(db, {
       accountId: 'hance-marketing',

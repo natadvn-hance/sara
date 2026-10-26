@@ -3,16 +3,20 @@ import { type ChatMessage, newEventId } from '@sara/shared'
 import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onConvPress } from '../../src/conversation/commands'
+import { sendTextNow } from '../../src/conversation/outbox'
 import { checkGround } from '../../src/conversation/reminderSteps'
 import {
   decideDormant,
+  openReminders,
   REMIND_MAX_RECOVERY_ATTEMPTS,
   type RemindDeps,
   reminderFallback,
   remindWorkflowId,
   setRemindDeps,
   startReminder,
+  syncReminders,
 } from '../../src/conversation/reminders'
+import { syncChat } from '../../src/conversation/sync'
 import { moscowHour, moscowHoursEnd } from '../../src/conversation/time'
 import {
   account,
@@ -565,6 +569,119 @@ describe('a reminder after the switch', () => {
     await startReminder(conv?.id ?? '', 'm-1')
     await until(done(1))
     expect((await rows())[0]?.outcome).toBe('skipped')
+    expect(sends).toHaveLength(0)
+  })
+})
+
+describe('a reminder in drafts mode', () => {
+  /** After the switch, the autopilot at its default (off): Boris's press is the only way a reminder goes. */
+  const draftsMode = async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await setSetting(db, 'outbound.messages', true, 'system')
+  }
+  const press = (taskId: string, action: 'send' | 'skip') =>
+    onConvPress(
+      {
+        db,
+        notifier: { sendText: async () => ({ messageId: 1 }) },
+        sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
+        remindGround: (c, a) => checkGround(deps, c, a, { dormant: false }),
+      },
+      { taskId, action },
+    )
+  const cardTask = async () => (await db.select().from(task))[0]
+
+  it('FR-CONV-12: the reminder comes to Boris as a card «Напомнить клиенту?» and nothing is queued', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=carded'])
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]?.text).toContain('Напомнить клиенту?')
+    expect(buttons[0]?.text).toContain(GOOD_TEXT)
+    expect(buttons[0]?.rows.flat().map((b) => b.text)).toEqual(['Отправить', 'Изменить', 'Не надо'])
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    expect(await cardTask()).toMatchObject({ kind: 'conv_draft', state: 'open' })
+    expect(await countEvents(db, 'conv.reminder_sent')).toBe(0)
+    // The process goes on to its next step; it does not wait for Boris's press.
+    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: «Отправить» sends the reminder once, and the ladder takes it for its own, not for a new beginning', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const t = await cardTask()
+    expect(await press(t?.id ?? '', 'send')).toBe('Отправила напоминание клиенту.')
+    expect(await press(t?.id ?? '', 'send')).toMatch(/уже/)
+    expect(sends).toEqual([
+      { key: `msg:send:${t?.id}`, text: GOOD_TEXT, expectLast: 'm-1', chatId: CHAT },
+    ])
+    expect((await rows())[0]?.outcome).toBe('sent')
+    expect(await countEvents(db, 'conv.reminder_sent')).toBe(1)
+    // The chat read after it: the reminder is our side's last message, and the process of m-1 stays the only one.
+    const wf = remindWorkflowId(conv.id, 'm-1')
+    const r = await syncChat({ db, profi }, conv, new Date(), { v1Writes: false })
+    await syncReminders(conv, r.messages)
+    expect(await openReminders(conv.id)).toEqual([wf])
+  })
+
+  it('FR-CONV-12: «Не надо» sends nothing, closes the step, and the ladder goes on to the next one', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const t = await cardTask()
+    expect(await press(t?.id ?? '', 'skip')).toMatch(/не отправляю/)
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    expect((await rows())[0]?.outcome).toBe('declined')
+    expect((await cardTask())?.resolution).toBe('skip')
+    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: Telegram not taking the card for a moment only delays it, one card comes', async () => {
+    await draftsMode()
+    deps.cardRetryEveryMs = 200
+    notifyFails = 2
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=carded'])
+    expect(buttons).toHaveLength(1)
+    expect(await db.select().from(task)).toHaveLength(1)
+  })
+
+  it('FR-CONV-12: a card that does not go in all the tries is a failed step in the trace, the process lives on', async () => {
+    await draftsMode()
+    deps.cardRetryEveryMs = 100
+    deps.cardTries = 3
+    notifyFails = 100
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const [r] = await rows()
+    expect(r).toMatchObject({ outcome: 'failed' })
+    expect(r?.decisionReason).toMatch(/карточку/)
+    expect(buttons).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: the client answering closes the card that waits for Boris', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    profi.chat.push(chatMsg('m-2', 'client', 'Да, давайте', ago(1000), CHAT))
+    const r = await syncChat({ db, profi }, conv, new Date(), { v1Writes: false })
+    await syncReminders(conv, r.messages)
+    expect(await cardTask()).toMatchObject({ state: 'resolved', resolution: 'answered' })
+    expect((await rows())[0]?.outcome).toBe('answered')
+    expect(await press((await cardTask())?.id ?? '', 'send')).toMatch(/уже/)
     expect(sends).toHaveLength(0)
   })
 })
