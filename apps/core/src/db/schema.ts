@@ -558,6 +558,7 @@ export const calibrationItem = core.table(
     markedAt: ts('marked_at'),
   },
   (t) => [primaryKey({ columns: [t.runId, t.leadId] })],
+)
 
 /** A meeting with a client: offered by the call procedure, marked by Boris, or a call now (M6, design 5.8). */
 export const meeting = core.table(
