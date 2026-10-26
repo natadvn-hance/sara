@@ -224,3 +224,45 @@ export function leadingGreeting(text: string): string | null {
   const first = /^[^\n!.]*[!.]?/.exec(text.trimStart())?.[0].trim() ?? ''
   return first && isGreetingForm(first) ? first : null
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Rule 6: a substantive reply starts with the client's name, a short one goes without it
+
+/**
+ * Whether a text opens with the client's name (the first word of what Profi.ru gave, any letter case, ё as е), as a
+ * whole word: «Анна, понял вас» does, «Аннализа, ...», «Анна-Мария, ...» (for the name Анна) and «Понял вас, Анна»
+ * do not. The tag the model is given for the name, «[имя 1]», counts as the name. No name, no start with it.
+ */
+export function startsWithName(text: string, name: string | null): boolean {
+  const first = name ? firstName(name) : null
+  if (!first) return false
+  const head = fold(text.trimStart())
+  if (/^\[имя \d+\]/u.test(head)) return true
+  const own = fold(first)
+  return head.startsWith(own) && !/^[\p{L}\p{N}-]/u.test(head.slice(own.length))
+}
+
+/** A short reply: at most this many words (SHORT_REPLY_WORDS), characters, sentences, and no question. */
+export const SHORT_REPLY_WORDS = 5
+export const SHORT_REPLY_CHARS = 40
+export const SHORT_REPLY_SENTENCES = 2
+
+const EMOJI_RUN = new RegExp(`${EMOJI_PART}+`, 'gu')
+
+/**
+ * Whether a reply is a nod and not an answer, so it needs no name at its start («Принял», «Договорились 🤝», «Отлично,
+ * жду»). Short means all of: no question mark, at most 5 words, at most 40 characters (emoji not counted), at most 2
+ * sentences (a line break ends a sentence too). One more word, one more sentence or a question makes it substantive.
+ * Empty text is short: there is nothing to put a name before.
+ */
+export function isShortReply(text: string): boolean {
+  const bare = text.replace(EMOJI_RUN, ' ')
+  if (bare.includes('?')) return false
+  const words = bare.match(/[\p{L}\p{N}]+(?:[-'][\p{L}\p{N}]+)*/gu) ?? []
+  const sentences = bare.split(/[.!…\n]+/).filter((s) => /[\p{L}\p{N}]/u.test(s))
+  return (
+    words.length <= SHORT_REPLY_WORDS &&
+    sentences.length <= SHORT_REPLY_SENTENCES &&
+    bare.replace(/\s+/g, ' ').trim().length <= SHORT_REPLY_CHARS
+  )
+}

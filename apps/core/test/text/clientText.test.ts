@@ -3,14 +3,16 @@ import {
   fixClientText,
   greetingFor,
   isGreetingForm,
+  isShortReply,
   leadingGreeting,
   moscowPartOfDay,
+  startsWithName,
 } from '../../src/text/clientText'
 
 // Long and medium dashes are written by code, never typed (CI forbids the long one in files).
 const LONG = String.fromCharCode(0x2014)
 const MEDIUM = String.fromCharCode(0x2013)
-const NBSP = ' '
+const NBSP = String.fromCharCode(0xa0)
 
 describe('fixClientText: the final period of a paragraph (FR-SPEECH-3, rule 4)', () => {
   it('FR-SPEECH-3: the period at the end of each paragraph goes, the rest of the text stays', () => {
@@ -323,5 +325,85 @@ describe('isGreetingForm and leadingGreeting (FR-SPEECH-3, rule 5)', () => {
     expect(leadingGreeting('Здравствуйте! Посмотрел задачу')).toBeNull()
     expect(leadingGreeting('Добрый день, посмотрел задачу')).toBeNull()
     expect(leadingGreeting('')).toBeNull()
+  })
+})
+
+describe('startsWithName (FR-SPEECH-3, rule 6)', () => {
+  it("FR-SPEECH-3: a text that opens with the client's name, then a comma, a mark or a space, does start with it", () => {
+    expect(startsWithName('Анна, понял вас', 'Анна')).toBe(true)
+    expect(startsWithName('Анна! Смотрю задачу', 'Анна')).toBe(true)
+    expect(startsWithName('Анна, добрый день!', 'Анна')).toBe(true)
+    expect(startsWithName('  Анна, понял', 'Анна')).toBe(true)
+    expect(startsWithName('Анна', 'Анна')).toBe(true)
+  })
+
+  it('FR-SPEECH-3: letter case and ё do not matter, a full name from Profi.ru gives its first word', () => {
+    expect(startsWithName('анна, понял', 'Анна')).toBe(true)
+    expect(startsWithName('Артем, понял', 'Артём')).toBe(true)
+    expect(startsWithName('Анна, понял', 'Анна Петровна')).toBe(true)
+    expect(startsWithName('Анна-Мария, понял', 'Анна-Мария')).toBe(true)
+  })
+
+  it('FR-SPEECH-3: the tag the model is given for the name counts as the name', () => {
+    expect(startsWithName('[имя 1], понял', 'Анна')).toBe(true)
+  })
+
+  it('FR-SPEECH-3: the name later in the text, another name, a longer name or no name is not a start with the name', () => {
+    expect(startsWithName('Понял вас, Анна', 'Анна')).toBe(false)
+    expect(startsWithName('Добрый день, Анна!', 'Анна')).toBe(false)
+    expect(startsWithName('Ирина, понял', 'Анна')).toBe(false)
+    expect(startsWithName('Аннализа, понял', 'Анна')).toBe(false)
+    expect(startsWithName('Анна-Мария, понял', 'Анна')).toBe(false)
+    expect(startsWithName('Анна, понял', null)).toBe(false)
+    expect(startsWithName('Анна, понял', '')).toBe(false)
+    expect(startsWithName('Клиент, понял', 'Клиент')).toBe(false)
+    expect(startsWithName('', 'Анна')).toBe(false)
+  })
+})
+
+describe('isShortReply (FR-SPEECH-3, rule 6)', () => {
+  // A short reply is one the client reads as a nod, not as an answer: at most 5 words, at most 40 characters
+  // (emoji not counted), at most 2 sentences, and no question.
+  const w = (n: number) => 'а'.repeat(n)
+
+  it("FR-SPEECH-3: the replies of Boris's examples are short", () => {
+    for (const text of [
+      'Принял',
+      'Договорились 🤝',
+      'Отлично, жду',
+      'Спасибо!',
+      'Хорошо 👍',
+      'Да, удобно',
+      'Понял, спасибо',
+      'Принял. Жду',
+      'Ок',
+      '🤝',
+    ])
+      expect(isShortReply(text), text).toBe(true)
+  })
+
+  it('FR-SPEECH-3: a reply with a question, many words, many sentences or a lot of letters is substantive', () => {
+    for (const text of [
+      'Какой у вас бюджет?',
+      'Принял?',
+      'Понял вас, сайт нужен к запуску, давайте обсудим детали',
+      'Договорились, жду вас завтра в 11',
+      'Да. Хорошо. Жду',
+      'Принял.\n\nЖду.\n\nСпасибо',
+    ])
+      expect(isShortReply(text), text).toBe(false)
+  })
+
+  it('FR-SPEECH-3: the thresholds are 5 words and 40 characters', () => {
+    expect(isShortReply('Хорошо, давайте так и сделаем')).toBe(true)
+    expect(isShortReply('Хорошо, давайте так и сделаем сегодня')).toBe(false)
+    expect(isShortReply([w(7), w(7), w(7), w(7), w(8)].join(' '))).toBe(true)
+    expect(isShortReply([w(7), w(7), w(7), w(7), w(9)].join(' '))).toBe(false)
+    expect(isShortReply('Принял. Жду')).toBe(true)
+    expect(isShortReply('Принял. Жду. Спасибо')).toBe(false)
+  })
+
+  it('FR-SPEECH-3: emoji are not counted as words or as characters', () => {
+    expect(isShortReply(`${w(7)} ${w(7)} ${w(7)} ${w(7)} ${w(8)} 🤝🙏😊👍👍🏽`)).toBe(true)
   })
 })
