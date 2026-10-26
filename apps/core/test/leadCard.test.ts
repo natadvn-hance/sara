@@ -1,5 +1,5 @@
 import { newEventId } from '@sara/shared'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { event, lead, leadScore, task } from '../src/db/schema'
 import { seedDirection } from '../src/direction/store'
@@ -187,6 +187,43 @@ describe('the card built from a lead', () => {
     })
     await pipeline.onReminder(taskId)
     expect(cards[0]?.analysis).toMatchObject({ hiddenNeed: ANSWER.hidden_need, reading: null })
+  })
+})
+
+describe('the messages of a card are all written down (FR-LEAD-7)', () => {
+  const sentOf = async (taskId: string) =>
+    (
+      await db
+        .select({ payload: event.payload })
+        .from(event)
+        .where(and(eq(event.type, 'card.sent'), eq(event.entityId, taskId)))
+        .orderBy(event.recordedAt, event.id)
+    ).map((e) => e.payload as { via: string; message_id: number })
+
+  it('FR-LEAD-7: a reminder card is written down with its message number and kept on the task', async () => {
+    const taskId = await openLead('91101')
+    await pipeline.onReminder(taskId)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.telegramMessageId).toBe(11)
+    expect(await sentOf(taskId)).toMatchObject([{ via: 'reminder', message_id: 11 }])
+    // The reminder is still journalled as before.
+    expect(await events()).toContain('task.reminded')
+  })
+
+  it('FR-LEAD-7: a card sent again is written down with its message number', async () => {
+    const taskId = await openLead('91102')
+    await pipeline.resendCard(taskId)
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.telegramMessageId).toBe(11)
+    expect(await sentOf(taskId)).toMatchObject([{ via: 'resend', message_id: 11 }])
+  })
+
+  it('FR-LEAD-7: the card of a task that is not open is not sent and not written down', async () => {
+    const taskId = await openLead('91103', {}, 'resolved')
+    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
+    expect(cards).toHaveLength(0)
+    expect(await sentOf(taskId)).toEqual([])
   })
 })
 

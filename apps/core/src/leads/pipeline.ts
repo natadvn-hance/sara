@@ -656,20 +656,24 @@ async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard |
 }
 
 /**
- * A card went out: the task keeps the new message (the one Boris sees last) and the journal the moment, which
- * the speed report reads for the order's own card (via 'order').
+ * A card went out: the task keeps the new message (the one Boris sees last) and the journal the moment and the
+ * message number. The speed report reads only the order's own card (via 'order'); the daily cap counts tasks.
  */
 function cardSent(
   taskId: string,
   correlationId: string,
   messageId: number,
-  via: 'order' | 'summary' | 'edit',
+  via: 'order' | 'summary' | 'edit' | 'reminder' | 'resend',
 ): Promise<void> {
   return d().db.transaction(async (tx) => {
     await tx.update(task).set({ telegramMessageId: messageId }).where(eq(task.id, taskId))
+    // The message number is kept so every message of the card can be found again (a closed order, FR-LEAD-5).
     await appendEvent(
       tx,
-      ev('card.sent', { kind: 'task', id: taskId }, correlationId, 'sara', { via }),
+      ev('card.sent', { kind: 'task', id: taskId }, correlationId, 'sara', {
+        via,
+        message_id: messageId,
+      }),
     )
   })
 }
@@ -1058,9 +1062,12 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     async onReminder(taskId) {
       const card = await cardOfTask(taskId, true)
       if (!card) return
-      await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
+      const m = await d().notifier.sendLeadCard(card, {
+        silent: await quietNow(d().db, new Date()),
+      })
       const found = await leadOfTask(taskId)
       if (found) {
+        await cardSent(taskId, found.lead.correlationId, m.messageId, 'reminder')
         await appendEvent(
           d().db,
           ev('task.reminded', { kind: 'task', id: taskId }, found.lead.correlationId, 'sara'),
@@ -1070,8 +1077,12 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
 
     async resendCard(taskId) {
       const card = await cardOfTask(taskId, false)
-      if (card)
-        await d().notifier.sendLeadCard(card, { silent: await quietNow(d().db, new Date()) })
+      if (!card) return
+      const m = await d().notifier.sendLeadCard(card, {
+        silent: await quietNow(d().db, new Date()),
+      })
+      const found = await leadOfTask(taskId)
+      if (found) await cardSent(taskId, found.lead.correlationId, m.messageId, 'resend')
     },
 
     onDraftText,
