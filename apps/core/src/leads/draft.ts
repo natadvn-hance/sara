@@ -7,6 +7,7 @@ import {
   type ReplyProfile,
 } from '../direction/reply'
 import type { Gateway } from '../gateway/gateway'
+import { fixClientText, greetingFor } from '../text/clientText'
 import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
@@ -57,7 +58,6 @@ const analysisOf = (o: AnalystOutput): Analysis => ({
 const OPENING_GREETING =
   /^[^.!?\n]{0,40}?(?<!\p{L})(?:добр(?:ый|ое|ого)\s+(?:день|дня|утро|утра|вечер|вечера|времени)|здравствуй(?:те)?|приветствую|привет)(?!\p{L})/iu
 const FIRST_SENTENCE = /^[^.!?\n]*[.!?]*\s*/u
-const DASHES = /[\u2013\u2014]/g
 /** The model's own framing or JSON around the text (old Sara, 17.09 and 30.09): never typed into the form. */
 const NOT_PLAIN = /^\s*[{[]|<\/?parameter\b/i
 /**
@@ -66,10 +66,47 @@ const NOT_PLAIN = /^\s*[{[]|<\/?parameter\b/i
  */
 const BRACKETED = /\[[^\]\n]{1,40}\]/u
 
-/** «Ирина, добрый день!» when the client's name is known, else «Добрый день!» (Boris, 20.10: a missing hello is rude). */
-export function greetingOf(clientName: string): string {
-  const name = firstName(clientName)
-  return name ? `${name}, добрый день!` : 'Добрый день!'
+/**
+ * The greeting of a moment in Moscow (Boris, 26.10, rule 5): «Ирина, доброе утро!» until 12:00, «Ирина, добрый день!»
+ * until 18:00, «Ирина, добрый вечер!» after; «Доброе утро!» and so on when the name is not known (a missing hello is
+ * rude, Boris 20.10). Without a moment it is the greeting of now. A bid is greeted at the moment it is SENT
+ * (`bidTextAt`); this is the greeting a draft and the card are built with, and it changes with the hour.
+ */
+export function greetingOf(clientName: string, now: Date = new Date()): string {
+  return greetingFor(now, clientName)
+}
+
+/** One moment in each part of the Moscow day (UTC+3 all year): 09:00, 13:00 and 20:00. */
+const PARTS_OF_DAY = ['2026-01-15T06:00:00Z', '2026-01-15T10:00:00Z', '2026-01-15T17:00:00Z'].map(
+  (iso) => new Date(iso),
+)
+
+/** The longest greeting of the day for this client, «Ирина, добрый вечер!»: the room a bid keeps for its greeting. */
+export function longestGreeting(clientName: string): string {
+  return PARTS_OF_DAY.map((t) => greetingOf(clientName, t)).reduce((a, b) =>
+    b.length > a.length ? b : a,
+  )
+}
+
+/**
+ * The length a greeting may grow to in the course of the day: «добрый вечер» is a letter longer than «добрый день» and
+ * «доброе утро». For a greeting already written, as in a sample of the direction.
+ */
+export function greetingRoom(greeting: string): number {
+  return /вечер/iu.test(greeting) ? greeting.length : greeting.length + 1
+}
+
+/**
+ * Rule 8: no emoji in a bid for now. One sign of an emoji, or the glue of a sequence (joiner, variation selector, keycap,
+ * skin tone, a flag's letters). The marks of a brand (© ® ™) are no emoji. Built from a string: in a literal the
+ * escapes would be rewritten into the invisible characters themselves.
+ */
+const EMOJI_SIGN = String.raw`(?:(?![\u00a9\u00ae\u2122])\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200d\ufe0f\u20e3])`
+const EMOJI = new RegExp(EMOJI_SIGN, 'gu')
+/** An emoji that stands before a sign of punctuation takes the space before it along: «важное 🤝.» is «важное.». */
+const EMOJI_BEFORE_MARK = new RegExp(String.raw`[ \t]*${EMOJI_SIGN}+(?=[.,;:!?)])`, 'gu')
+export function removeEmoji(text: string): string {
+  return text.replace(EMOJI_BEFORE_MARK, '').replace(EMOJI, '')
 }
 
 export function greets(text: string): boolean {
@@ -82,20 +119,97 @@ export function bodyOf(text: string): string {
   return greets(t) ? t.replace(FIRST_SENTENCE, '').trim() : t
 }
 
-const plain = (s: string) => s.replace(DASHES, '-').trim()
+/** What the voice rules make of a text (3, 4, 8, 15): no emoji, no dashes, no hyphen in a common word, no final period, one empty line. */
+const plain = (s: string) => fixClientText(removeEmoji(s))
 
 /** The model's body behind the code's greeting; a greeting the model wrote anyway goes, it never knows the name. */
-export function draftOf(body: string, clientName: string): string {
-  return `${greetingOf(clientName)}\n\n${bodyOf(plain(body))}`
+export function draftOf(body: string, clientName: string, now: Date = new Date()): string {
+  return `${greetingOf(clientName, now)}\n\n${bodyOf(plain(body))}`
 }
 
 /** Boris's own text: his greeting stays; without one ours goes first (a bare «Ирина,» at the start joins it). */
-export function editOf(text: string, clientName: string): string {
+export function editOf(text: string, clientName: string, now: Date = new Date()): string {
   const t = plain(text)
   if (greets(t)) return t
   const name = firstName(clientName)
   const rest = name ? t.replace(new RegExp(`^${name},\\s*`, 'iu'), '') : t
-  return `${greetingOf(clientName)}\n\n${rest.charAt(0).toUpperCase()}${rest.slice(1)}`
+  return `${greetingOf(clientName, now)}\n\n${rest.charAt(0).toUpperCase()}${rest.slice(1)}`
+}
+
+const NAME = String.raw`(\p{Lu}[\p{L}-]*)`
+const GREETING_WORD = String.raw`(?:[Дд]обр(?:ый\s+день|ое\s+утро|ый\s+вечер|ого\s+(?:дня|утра|вечера|времени))|[Зз]дравствуй(?:те)?|[Пп]риветствую|[Пп]ривет)`
+/** A first sentence that is a greeting and nothing else, with a name before or after it, or none. */
+const BARE_GREETING = new RegExp(
+  String.raw`^(?:${NAME}[,\s]\s*)?${GREETING_WORD}(?:[,\s]\s*${NAME})?$`,
+  'u',
+)
+
+/** The name of a first sentence that is a bare greeting (null when it has none), or false when it is something else. */
+function bareGreeting(sentence: string): { name: string | null } | false {
+  const m = BARE_GREETING.exec(
+    sentence
+      .trim()
+      .replace(/[!.]+$/u, '')
+      .trim(),
+  )
+  return m ? { name: m[1] ?? m[2] ?? null } : false
+}
+
+/**
+ * The text of a bid as it goes out at `now` (rules 3, 4, 5, 8, 15): the greeting of that moment in Moscow, then the body
+ * through the voice rules. The stored draft keeps the greeting it was made with; when its first sentence is a greeting
+ * and no more, in any form («Ирина, добрый день!», «Здравствуйте, Ирина!»), that sentence is swapped for the fresh one
+ * with the same name (a name Boris wrote stays), and with no name there is none. A first sentence that greets and says
+ * more is Boris's own and stays; a text with no greeting gets one with `clientName`. The card shows this text for its
+ * moment and the outbox sends it for its own.
+ */
+export function bidTextAt(stored: string, clientName: string, now: Date): string {
+  const p = split(stored, clientName)
+  if (p.whole !== null) return p.whole
+  const fresh = greeted(p.rest, p.name, now)
+  if (fresh.length <= BID_TEXT_MAX) return fresh
+  // Only a draft of before this rule can be here (500 characters with «добрый день», 501 with «добрый вечер»): the name
+  // goes before the part of the day does, and the draft as it was before anything else.
+  const nameless = greeted(p.rest, null, now)
+  return nameless.length <= BID_TEXT_MAX ? nameless : p.kept
+}
+
+/** A stored draft taken apart: the whole text when its own greeting stays, else the name of its greeting and the rest. */
+function split(
+  stored: string,
+  clientName: string,
+):
+  | { whole: string; kept: string }
+  | { whole: null; name: string | null; rest: string; kept: string } {
+  const text = stored.replace(/\r\n?/g, '\n').trim()
+  const first = FIRST_SENTENCE.exec(text)?.[0] ?? ''
+  const bare = bareGreeting(first)
+  const kept = plain(text)
+  if (!bare && greets(text)) return { whole: kept, kept }
+  return {
+    whole: null,
+    name: bare ? bare.name : clientName,
+    rest: plain(bare ? text.slice(first.length) : text),
+    kept,
+  }
+}
+
+const greeted = (rest: string, name: string | null, now: Date): string => {
+  const hello = greetingOf(name ?? '', now)
+  return rest ? `${hello}\n\n${rest}` : hello
+}
+
+/**
+ * The most characters a stored draft is when it goes out: its text with its own name at the worst hour of the day (the
+ * evening greeting is the longest). The 500 characters of the form are held against this number, so a draft that fits
+ * in the morning fits in the evening and nothing has to be cut at the moment of sending.
+ */
+export function bidLengthMax(stored: string, clientName: string): number {
+  const p = split(stored, clientName)
+  if (p.whole !== null) return p.whole.length
+  const rest = p.rest
+  const name = p.name
+  return Math.max(...PARTS_OF_DAY.map((t) => greeted(rest, name, t).length))
 }
 
 /** The «Стоимость услуги»: never 0 and never above the client's budget (then the field stays empty). */
@@ -183,19 +297,22 @@ const chars = (n: number) => `${n} ${plural(n, ['знак', 'знака', 'зн�
 /**
  * The Analyst's draft with the code's greeting, at most 500 characters. A text too long or not plain is asked
  * for once more, saying why; a second miss, or no answer, gives no draft (the card then asks for «Изменить»).
+ * The greeting is the one of `now` (the moment the draft is made), but the room is kept for the longest one of the day:
+ * a bid is greeted again when it is sent, and the evening «добрый вечер» is a letter longer than the morning.
  */
 export async function writeDraft(
   gw: Gateway,
   o: DraftSource,
-  opts: { correlationId?: string; causationId?: string; profile?: ReplyProfile } = {},
+  opts: { correlationId?: string; causationId?: string; profile?: ReplyProfile; now?: Date } = {},
 ): Promise<Draft | DraftMiss> {
   // The direction's own format and cases (FR-LEAD-6); with none the numbers and the input are what they always were.
   const profile: ReplyProfile = opts.profile ?? { reply_format: null, cases: [] }
   const ceiling = bidCeiling(profile)
-  const greeting = greetingOf(o.client_name)
+  const now = opts.now ?? new Date()
+  const longest = longestGreeting(o.client_name)
   // The model is told a shorter limit by the room the cases may take, but never under what a bid needs; a text
   // that fits the ceiling stays whole and the cases that do not fit are the ones left out.
-  const bodyCeiling = ceiling - greeting.length - 2
+  const bodyCeiling = ceiling - longest.length - 2
   const maxBody = Math.max(Math.min(MIN_BODY, bodyCeiling), bodyCeiling - caseReserve(profile))
   const base = analystInput(o, maxBody, analystProfileText(profile))
   let input = base
@@ -203,26 +320,33 @@ export async function writeDraft(
   let analysis: Analysis | null = null
   const redact = { names: namesToHide(o.client_name, o.client_info?.name) }
   for (let attempts = 1; attempts <= 2; attempts++) {
-    const { profile: _profile, ...callOpts } = opts
+    const { profile: _profile, now: _now, ...callOpts } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
-    const text = draftOf(r.output.text, o.client_name)
+    const text = draftOf(r.output.text, o.client_name, now)
+    const longestLength = bidLengthMax(text, o.client_name)
     if (!body || NOT_PLAIN.test(body)) {
       reason = 'not_plain'
       input = `${base}\n\nПрошлый вариант был не простой текст. Напиши только сам текст отклика, без JSON и разметки.`
     } else if (BRACKETED.test(body)) {
       reason = 'has_tag'
       input = `${base}\n\nВ прошлом варианте остались метки в квадратных скобках. Напиши текст без них, словами.`
-    } else if (text.length > ceiling) {
+    } else if (longestLength > ceiling) {
       reason = 'too_long'
-      input = `${base}\n\nПрошлый вариант вышел ${chars(text.length)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
+      input = `${base}\n\nПрошлый вариант вышел ${chars(longestLength)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
     } else {
-      // The program puts the links in: the model only named the ids, and only the library's count.
-      const placed = placeCases(text, profile, r.output.case_ids ?? [])
+      // The program puts the links in: the model only named the ids, and only the library's count. They are fitted
+      // behind the longest greeting of the day, so the bid fits whenever it is sent.
+      const hello = greetingOf(o.client_name, now)
+      const placed = placeCases(
+        `${longest}${text.slice(hello.length)}`,
+        profile,
+        r.output.case_ids ?? [],
+      )
       return {
-        text: placed.text,
+        text: `${hello}${placed.text.slice(longest.length)}`,
         priceRub: priceWithin(r.output.price_rub, o.budget_text),
         attempts,
         analysis,
