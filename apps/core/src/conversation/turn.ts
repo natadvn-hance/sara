@@ -270,6 +270,8 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
             topic: out.topic,
             tone: out.tone,
             why: out.why,
+            // What Sara would have done herself: the card of a turn that calls Boris tells it also in shadow.
+            would: plan.decision.would,
             // The case the reply tells (one it was offered that no check refused), with why and its title for the card.
             case: caseTrace(out.case, plan.case),
           }

@@ -81,6 +81,35 @@ export function formatCase(c: CaseHit): string {
   ].join('\n')
 }
 
+/** The «Заказ» section of an input: what the order page says (the client wrote it, so it is framed). */
+const orderPart = (d: Dossier) =>
+  [
+    '## Заказ',
+    d.order
+      ? [
+          `Название: ${d.order.title}`,
+          `Категория: ${d.order.category || 'не указана'}`,
+          `Город: ${d.order.city || 'не указан'}`,
+          `Бюджет: ${d.order.budgetText ?? 'не указан'}`,
+          'Текст заказа:',
+          framed(d.order.text),
+        ].join('\n')
+      : 'Заказ не известен.',
+  ].join('\n')
+
+/** The «Клиент» section: his name (the gateway hides it) and what the platform shows about him. */
+const clientPart = (d: Dossier) => {
+  const info = d.clientInfo
+  return [
+    '## Клиент',
+    `Имя: ${d.clientName ?? 'не известно'}`,
+    ...(info?.on_profi_since ? [info.on_profi_since] : []),
+    ...(info?.reviews
+      ? [`Отзывы специалистов: ${info.reviews.positive} хороших, ${info.reviews.negative} плохих`]
+      : []),
+  ].join('\n')
+}
+
 /** What «Кейсы» says when the turn has no case to offer. */
 const NO_CASES = 'Подходящих кейсов нет, не выдумывай'
 /** What it says on the rewrite after a failed case check: no case at all in the second answer. */
@@ -99,33 +128,7 @@ export function formatInterlocutorInput(
   withoutCase = false,
 ): string {
   const turn = new Set(d.turnMessageIds)
-  const parts: string[] = [FRAME_NOTE]
-  parts.push(
-    [
-      '## Заказ',
-      d.order
-        ? [
-            `Название: ${d.order.title}`,
-            `Категория: ${d.order.category || 'не указана'}`,
-            `Город: ${d.order.city || 'не указан'}`,
-            `Бюджет: ${d.order.budgetText ?? 'не указан'}`,
-            'Текст заказа:',
-            framed(d.order.text),
-          ].join('\n')
-        : 'Заказ не известен.',
-    ].join('\n'),
-  )
-  const info = d.clientInfo
-  parts.push(
-    [
-      '## Клиент',
-      `Имя: ${d.clientName ?? 'не известно'}`,
-      ...(info?.on_profi_since ? [info.on_profi_since] : []),
-      ...(info?.reviews
-        ? [`Отзывы специалистов: ${info.reviews.positive} хороших, ${info.reviews.negative} плохих`]
-        : []),
-    ].join('\n'),
-  )
+  const parts: string[] = [FRAME_NOTE, orderPart(d), clientPart(d)]
   parts.push(
     [
       '## Отклик',
@@ -199,4 +202,42 @@ export function formatCheckerDossier(d: Dossier): string {
     ].join('\n'),
     ['Реплика клиента, на которую отвечает черновик:', framed(said.join('\n\n'))].join('\n'),
   ].join('\n\n')
+}
+
+/** What a reminder is: which one of how many, the tone, and whether the client read our message. */
+export type ReminderFacts = { ordinal: number; of: number; friendly: boolean; read: boolean }
+
+/**
+ * The reminder role's input, by the headings it reads (roles/reminder/role.md): the order, the client, the whole
+ * chat, the message of ours he did not answer, what this reminder is, and the records of the mind. «Прочитал» is
+ * «да» only when the platform told so; otherwise it is not known, and the role writes the softer short text.
+ * «Переделать» appears only on the rewrite after failed checks.
+ */
+export function formatReminderInput(
+  d: Dossier,
+  records: MindHit[],
+  r: ReminderFacts,
+  retry: CheckIssue[],
+): string {
+  const lastOurs = d.messages.findLast((m) => m.side === 'specialist')
+  const parts: string[] = [FRAME_NOTE, orderPart(d), clientPart(d)]
+  parts.push(
+    ['## Переписка', ...(d.messages.length ? d.messages.map(chatLine) : ['Пока ничего.'])].join(
+      '\n',
+    ),
+  )
+  parts.push(['## Наше последнее сообщение', lastOurs ? lastOurs.text : 'Не известно.'].join('\n'))
+  parts.push(
+    [
+      '## Напоминание',
+      `По счёту: ${r.ordinal} из ${r.of}`,
+      `Клиент прочитал наше сообщение: ${r.read ? 'да' : 'неизвестно'}`,
+      `Тон: ${r.friendly ? 'дружеский' : 'обычный'}`,
+    ].join('\n'),
+  )
+  parts.push(
+    ['## Записи разума', ...(records.length ? records.map(record) : ['Записей нет.'])].join('\n\n'),
+  )
+  if (retry.length) parts.push(['## Переделать', ...retry.map((x) => `- ${x.detail}`)].join('\n'))
+  return `${parts.join('\n\n')}\n`
 }

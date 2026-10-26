@@ -54,7 +54,10 @@ export const SETTINGS = {
       .nullable(),
     default: { from: 23, to: 9 } as { from: number; to: number } | null,
   },
-  /** M4: client messages start turns of the conversation; off until the deploy turns it on, as pipeline.leads. */
+  /**
+   * M4: client messages start turns of the conversation; off until the deploy turns it on, as pipeline.leads. Off, no
+   * reminder starts either, and the waiting ones skip their steps (they go on when it is turned on again).
+   */
   'pipeline.conversations': { schema: z.boolean(), default: false },
   /**
    * Shadow (ADR-024): old Sara still writes to clients from this account. While on, the new Sara sends nothing,
@@ -89,7 +92,10 @@ export const SETTINGS = {
     ),
     default: AUTONOMY_DEFAULT,
   },
-  /** FR-CONV-12: reminders to clients who went quiet. */
+  /**
+   * FR-CONV-12: reminders to clients who went quiet. Off: nothing new starts, and a reminder that falls due meanwhile
+   * is skipped, not sent later; the processes that wait go on when it is turned on again.
+   */
   'conv.reminders': { schema: z.boolean(), default: true },
   /** FR-MIND-2: local vectors beside the full-text search, when they proved cheap. */
   'mind.vectors': { schema: z.boolean(), default: false },

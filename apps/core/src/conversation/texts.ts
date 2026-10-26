@@ -1,4 +1,4 @@
-import type { ChatAuthor, Tone } from '@sara/shared'
+import { type ChatAuthor, plural, type Tone } from '@sara/shared'
 
 /** Texts of the conversation module for Boris (NFR-UX-1: plain Russian, no long dash). */
 
@@ -44,6 +44,10 @@ export type CardView = {
   examples: number
   /** The case of Hance the reply tells and why it was chosen (Boris reads it under «Почему так»). */
   caseUsed: { title: string; why: string | null } | null
+  /** The turn calls Boris (or would, in shadow): its text is a draft for him, not Sara's reply. */
+  callsBoris: boolean
+  /** What the code checks found in the text, for Boris to read beside a draft meant for him. */
+  issues: string[]
 }
 
 /** «Кейс: <название>, потому что <причина>.» */
@@ -71,8 +75,15 @@ export const CONV_TEXTS = {
   card(v: CardView): string {
     const head = v.decision === 'call_boris' ? `🔔 ${who(v)}: ${wouldRu(v)}` : `💬 ${who(v)}`
     const lines = [head, `Клиент: ${quote(v.clientWords)}`, '']
-    if (v.text) lines.push(v.shadow ? 'Ответила бы так:' : 'Черновик ответа:', v.text.trim(), '')
-    else
+    if (v.text) {
+      lines.push(
+        v.callsBoris ? 'Черновик для тебя:' : v.shadow ? 'Ответила бы так:' : 'Черновик ответа:',
+        v.text.trim(),
+        '',
+      )
+      if (v.callsBoris && v.issues.length)
+        lines.push(`В черновике не так: ${v.issues.join('; ')}.`, '')
+    } else
       lines.push(
         v.decision === 'call_boris' ? 'Сама не отвечаю, это к тебе.' : 'Ответа не написала.',
         '',
@@ -109,6 +120,18 @@ export const CONV_TEXTS = {
       } пишет: ${quote(words)}`,
     ),
 
+  /** The task for Boris when a client has been quiet for 7 days (FR-CONV-12, M4 design 5.11). */
+  dormant: (name: string | null, orderTitle: string | null, reminders: number) =>
+    hyphenated(
+      [
+        `😴 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: молчит 7 дней.`,
+        reminders > 0
+          ? `Напоминала ему ${reminders} ${plural(reminders, ['раз', 'раза', 'раз'])}, ответа нет.`
+          : 'Ответа нет.',
+        'Закрыть разговор или напомнить ему ещё раз через 10 суток? Это будет последнее напоминание.',
+      ].join('\n'),
+    ),
+
   buttons: {
     good: 'Хорошо',
     edit: 'Изменить',
@@ -116,5 +139,6 @@ export const CONV_TEXTS = {
     take: 'Беру сам',
     close: 'Закрыть',
     giveBack: 'Вернуть Саре',
+    remind: 'Напоминать дальше',
   },
 }

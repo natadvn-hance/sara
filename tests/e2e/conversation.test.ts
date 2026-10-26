@@ -6,6 +6,7 @@ import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
+import { openReminders } from '../../apps/core/src/conversation/reminders'
 import { moscowHour } from '../../apps/core/src/conversation/time'
 import { conversation, convTurn, event, outbox } from '../../apps/core/src/db/schema'
 import { setSetting } from '../../apps/core/src/settings/store'
@@ -198,6 +199,21 @@ describe('a conversation end to end', () => {
     expect(fake.messages).toHaveLength(0)
     expect(await theConversation()).toMatchObject({ owner: 'boris', ownerReason: 'wrote' })
     expect(await count('conv.boris_wrote')).toBe(1)
+  }, 40000)
+
+  it('FR-CONV-12: a bid nobody answered gets a reminder process, and the client writing cancels it', async () => {
+    const chat = await oldChat()
+    await until(async () => (await theConversation()) !== undefined)
+    const conv = await theConversation()
+    await until(async () => (await openReminders(conv?.id ?? '')).length === 1)
+    // In shadow the process only waits for its time: no card, no message, no outbox row.
+    expect(tg.sent.filter((m) => m.reply_markup)).toHaveLength(0)
+    expect(fake.messages).toHaveLength(0)
+    await fake.addChatMessage({ chatId: chat, author: 'client', text: 'Добрый день, посмотрю' })
+    await until(async () => (await openReminders(conv?.id ?? '')).length === 0)
+    await until(() => finished(1))
+    expect(fake.messages).toHaveLength(0)
+    expect(await db.select().from(outbox)).toHaveLength(0)
   }, 40000)
 
   it('FR-CONV-11: «Беру сам» by the button and «вернуть» in a reply to the card', async () => {

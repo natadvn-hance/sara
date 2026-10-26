@@ -146,6 +146,76 @@ describe('the draft card', () => {
     expect(sent[2]?.text).not.toContain('Кейс:')
   })
 
+  describe('a call for Boris with a draft', () => {
+    const DRAFT = 'Понимаю, вопрос о стоимости. Борис ответит вам лично, когда посмотрит задачу.'
+    const call = (id: string, o: Partial<typeof convTurn.$inferInsert> = {}) =>
+      turn(id, {
+        decision: 'call_boris',
+        move: 'call_boris',
+        text: DRAFT,
+        decisionReason: 'тема Бориса: price',
+        understanding: { topic: 'price', tone: 'neutral', would: 'call_boris' },
+        ...o,
+      })
+    const actions = (i: number) => sent[i]?.rows.flat().map((b) => b.callbackData.split(':')[2])
+
+    it('FR-CONV-3: the 🔔 card shows the draft for Boris, and after the switch he can send or edit it', async () => {
+      await setSetting(db, 'conv.v1_writes', false, 'system')
+      await call('t-call')
+      await sendTurnCard({ db, notifier }, 't-call')
+      const text = sent[0]?.text ?? ''
+      expect(text.startsWith('🔔')).toBe(true)
+      expect(text).toContain('Черновик для тебя:')
+      expect(text).toContain(DRAFT)
+      expect(text).not.toContain('Сама не отвечаю')
+      expect(text).not.toContain('Ответила бы так')
+      // The buttons Boris uses for drafts: send, edit, and the usual take and close.
+      expect(actions(0)).toEqual(['send', 'edit', 'take', 'close'])
+      expect(text).not.toMatch(/[\u2013\u2014]/)
+    })
+
+    it('FR-CONV-4: the card tells what the checks found in the draft', async () => {
+      await setSetting(db, 'conv.v1_writes', false, 'system')
+      await call('t-bad', {
+        text: 'Я бот, цена 90 000.',
+        checks: {
+          issues: [
+            { id: 'robotic.ai', detail: 'слова про ИИ о себе: «бот»' },
+            { id: 'facts.numbers', detail: 'число 90 000 не из разума' },
+          ],
+        },
+      })
+      await sendTurnCard({ db, notifier }, 't-bad')
+      expect(sent[0]?.text).toContain(
+        'В черновике не так: слова про ИИ о себе: «бот»; число 90 000 не из разума.',
+      )
+      // A clean draft has no such line.
+      await call('t-ok', { checks: { issues: [] } })
+      await sendTurnCard({ db, notifier }, 't-ok')
+      expect(sent[1]?.text).not.toContain('В черновике не так')
+    })
+
+    it('FR-CONV-3: a call without a draft keeps its old card, with the edit button only', async () => {
+      await setSetting(db, 'conv.v1_writes', false, 'system')
+      await call('t-none', { text: null })
+      await sendTurnCard({ db, notifier }, 't-none')
+      expect(sent[0]?.text).toContain('Сама не отвечаю, это к тебе.')
+      expect(sent[0]?.text).not.toContain('Черновик для тебя')
+      expect(actions(0)).toEqual(['edit', 'take', 'close'])
+    })
+
+    it('FR-CONV-5: in shadow the draft is shown to Boris too, and nothing can be sent', async () => {
+      await call('t-shadow', {
+        decision: 'draft',
+        decisionReason: 'режим тени; сама бы: тема Бориса: price',
+      })
+      await sendTurnCard({ db, notifier }, 't-shadow')
+      expect(sent[0]?.text).toContain('Черновик для тебя:')
+      expect(sent[0]?.text).toContain(DRAFT)
+      expect(actions(0)).not.toContain('send')
+    })
+  })
+
   it('FR-NOTIF-3: the 11th card of the day is not sent, a call for Boris still is', async () => {
     for (let i = 0; i < 11; i++) {
       await turn(`t-${i}`)
@@ -161,6 +231,14 @@ describe('the draft card', () => {
     expect(await sendTurnCard({ db, notifier }, 't-call')).not.toBeNull()
     expect(sent).toHaveLength(11)
     expect(sent[10]?.text).toMatch(/просит созвон/)
+  })
+
+  it('FR-NOTIF-3: the dormant tasks of reminders do not use the cards of the day', async () => {
+    for (let i = 0; i < 10; i++)
+      await turn(`r-${i}`, { kind: 'reminder', cardMessageId: 800 + i, outcome: 'dormant' })
+    await turn('t-1')
+    expect(await sendTurnCard({ db, notifier }, 't-1')).not.toBeNull()
+    expect(sent).toHaveLength(1)
   })
 
   it('NFR-UX-1: conversation texts have no long dash', async () => {

@@ -129,6 +129,8 @@ export async function compareTurn(
     .where(
       and(
         eq(convTurn.conversationId, conversationId),
+        // A reminder's draft is not the answer to a client turn.
+        eq(convTurn.kind, 'reply'),
         isNull(convTurn.actualMessageId),
         inArray(convTurn.outcome, ['drafted', 'called_boris']),
         gte(convTurn.createdAt, since),
