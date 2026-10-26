@@ -56,7 +56,6 @@ setRemindDeps({
   }),
   mind: fakeMind(),
   notifier: { sendButtons: async () => ({ messageId: 1 }) },
-  minGapMs: 0,
   fallbackAfterMs: 5000,
   retryEveryMs: 500,
 })

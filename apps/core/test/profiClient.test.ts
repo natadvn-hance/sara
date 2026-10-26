@@ -157,7 +157,11 @@ describe('profi client and event intake', () => {
     const first = await patient.sendMessage(m)
     expect(first).toMatchObject({ found_on_page: true })
     // An answer later than the tab's wait is a lost one (UNCERTAIN), at the tab's time and not at the SDK's 60 s.
-    const impatient = createProfiClient({ url: fake.url, permitSecret: 'permit', tabTimeoutMs: 400 })
+    const impatient = createProfiClient({
+      url: fake.url,
+      permitSecret: 'permit',
+      tabTimeoutMs: 400,
+    })
     fake.delaySend(2500)
     const started = Date.now()
     const err = await impatient

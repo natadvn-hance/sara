@@ -24,8 +24,6 @@ export type CommandDeps = {
     author: 'sara' | 'boris',
     o?: SendOptions,
   ): Promise<string>
-  /** Boris's answer on the task of a client quiet for 7 days reaches the reminder process (FR-CONV-12). */
-  decideDormant?(reminderTurnId: string, decision: 'remind' | 'close'): Promise<boolean>
   /** The chat read again before the text of a reminder card goes: whether the reminder is still wanted (FR-CONV-12). */
   remindGround?: ReminderPressDeps['remindGround']
 }
@@ -51,10 +49,6 @@ export const COMMAND_TEXTS = {
   answeredYourself:
     'Ты уже ответил сам: в чате есть твоё сообщение после слов клиента. Черновик не отправляю.',
   stale: 'Черновик устарел: клиент успел дописать. Текст не ушёл, посмотри новые сообщения.',
-  remindOn:
-    'Хорошо, напомню ему ещё один раз через 10 суток, это будет последнее напоминание. Если он ответит раньше, остановлюсь.',
-  remindEnded:
-    'Напоминания этому клиенту уже закончились: он ответил, или я перестала ждать твой ответ. Новых не будет, а написать ему можно самому.',
 }
 
 type CardTask = typeof task.$inferSelect
@@ -288,28 +282,14 @@ async function cardTaskOf(db: Db, taskId: string): Promise<CardTask | null> {
   return t && t.kind === 'conv_draft' ? t : null
 }
 
-/** A press on the task of a client quiet for 7 days: close the conversation, or remind him further (FR-CONV-12). */
+/** A press on the task of a client silent after three reminders: «Закрыть» closes the conversation (FR-CONV-12). */
 async function onDormantPress(d: CommandDeps, t: CardTask, action: TaskAction): Promise<string> {
-  const ended = ['expired', 'answered', 'ended'].includes(t.resolution ?? '')
-  if (t.state !== 'open')
-    return action === 'remind' && ended ? COMMAND_TEXTS.remindEnded : COMMAND_TEXTS.done
+  if (t.state !== 'open') return COMMAND_TEXTS.done
+  if (action !== 'close') return COMMAND_TEXTS.notUnderstood
   const [row] = await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId))
   if (!row) return COMMAND_TEXTS.done
-  if (action === 'close') {
-    await close(d.db, row.conversationId)
-    await d.decideDormant?.(row.id, 'close')
-    return COMMAND_TEXTS.closed
-  }
-  if (action === 'remind') {
-    if (!(await closeCard(d.db, t.id, 'remind'))) return COMMAND_TEXTS.done
-    // The promise is made only if the process still waits for it.
-    if ((await d.decideDormant?.(row.id, 'remind')) === false) {
-      await d.db.update(task).set({ resolution: 'ended' }).where(eq(task.id, t.id))
-      return COMMAND_TEXTS.remindEnded
-    }
-    return COMMAND_TEXTS.remindOn
-  }
-  return COMMAND_TEXTS.notUnderstood
+  await close(d.db, row.conversationId)
+  return COMMAND_TEXTS.closed
 }
 
 /** A press on a conversation card (C5 actions: good, edit, send, take, return, close). */

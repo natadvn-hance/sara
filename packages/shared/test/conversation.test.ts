@@ -19,6 +19,7 @@ import {
   ReminderOutput,
   SETTINGS,
   SendMessageInput,
+  TASK_ACTIONS,
 } from '../src/index'
 
 const answer = {
@@ -299,9 +300,13 @@ describe('M4 contracts', () => {
     expect(parseCallback(formatCallback(id, 'close'))).toEqual({ taskId: id, action: 'close' })
   })
 
-  it('FR-CONV-12: «Напоминать дальше» on the dormant task fits the callback', () => {
+  it('FR-CONV-12: the card of a reminder (send, edit, skip) fits the callback, «Напоминать дальше» is gone', () => {
     const id = '0192f3c4-5b6a-7c8d-9e0f-112233445566'
-    expect(parseCallback(formatCallback(id, 'remind'))).toEqual({ taskId: id, action: 'remind' })
+    for (const action of ['send', 'edit', 'skip'] as const)
+      expect(parseCallback(formatCallback(id, action))).toEqual({ taskId: id, action })
+    // The old button of a task from before: nothing in the core answers it any more.
+    expect(TASK_ACTIONS).not.toContain('remind')
+    expect(parseCallback(`t:${id}:remind`)).toBeNull()
   })
 
   it('FR-OPS-4: the M4 journal events are known', () => {

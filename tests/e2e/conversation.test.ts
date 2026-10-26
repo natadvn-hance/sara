@@ -217,7 +217,9 @@ describe('a conversation end to end', () => {
     expect(t?.decision).toBe('draft')
     expect(cards()[0]?.text).toContain('Черновик ответа:')
     expect(cards()[0]?.text).not.toContain('Режим тени')
-    const actions = cards()[0]?.reply_markup?.inline_keyboard.flat().map((b) => b.callback_data)
+    const actions = cards()[0]
+      ?.reply_markup?.inline_keyboard.flat()
+      .map((b) => b.callback_data)
     expect(actions?.map((a) => a.split(':')[2])).toEqual(['send', 'edit', 'take', 'close'])
     tg.pushPress(BORIS, button('send'))
     await until(() => fake.messages.length === 1)

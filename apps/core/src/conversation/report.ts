@@ -48,7 +48,7 @@ const shown = (s: string, max = 300) => {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t
 }
 
-const STEP_ORDER = ['1', '2', 'dormant', '3']
+const STEP_ORDER = ['1', '2', '3', 'dormant']
 const stepOf = (r: Row) =>
   String((r.understanding as { step?: number | string } | null)?.step ?? '')
 
@@ -61,10 +61,10 @@ async function reminderLines(db: Db, rows: Row[]): Promise<string[]> {
   const by = (outcome: string) => rows.filter((r) => r.outcome === outcome).length
   const steps = STEP_ORDER.flatMap((k) => {
     const n = rows.filter((r) => stepOf(r) === k).length
-    return n > 0 ? [`${k === 'dormant' ? 'застой' : `шаг ${k}`} ${n}`] : []
+    return n > 0 ? [`${k === 'dormant' ? 'молчание после трёх' : `шаг ${k}`} ${n}`] : []
   })
   const lines = [
-    `Напоминания: ${rows.length}: черновиков в тени ${by('drafted')}, карточек Борису, ждут ответа ${by('carded')}, отправлено ${by('sent')}, Борис сказал «не надо» ${by('declined')}, устарело ${by('expired') + by('answered')}, пропущено ${by('skipped')}, остановлено ${by('stopped')}, застоев ${by('dormant')}.`,
+    `Напоминания: ${rows.length}: черновиков в тени ${by('drafted')}, карточек Борису, ждут ответа ${by('carded')}, отправлено ${by('sent')}, Борис сказал «не надо» ${by('declined')}, устарело ${by('expired') + by('answered')}, пропущено ${by('skipped')}, остановлено ${by('stopped')}, молчат после трёх напоминаний ${by('dormant')}.`,
     `По шагам: ${steps.join(', ')}.`,
   ]
   const drafts = rows

@@ -5,10 +5,9 @@ import { moscowHoursEnd } from './time'
  * ladder and the ready texts (pure); the durable process `convRemind` is in reminders.ts.
  */
 
-const HOUR_MS = 3600_000
-const DAY_MS = 24 * HOUR_MS
+const DAY_MS = 24 * 3600_000
 
-export type ReminderStep = 1 | 2 | 'dormant' | 3
+export type ReminderStep = 1 | 2 | 3 | 'dormant'
 export type ReminderTone = 'check_in' | 'friendly'
 
 export type NextReminder = {
@@ -19,61 +18,64 @@ export type NextReminder = {
   read: boolean
 }
 
-/** A reminder never goes within this long after the one before it (tests shorten it). */
-const MIN_GAP_MS = DAY_MS
-
 /** Moscow hours without reminders to clients (the setting's default). */
 const DEFAULT_QUIET = { from: 23, to: 9 }
 
-/** After Boris says «Напоминать дальше»: the one last reminder in 10 days. */
-const AFTER_PRESS_MS = 10 * DAY_MS
+/** The waits of the ladder (rule 11 of «Голос Hance для Сары», Boris, 26.10.2026), in days. */
+const FIRST_DAYS = 1
+const SECOND_DAYS = 2
+const THIRD_DAYS = 3
+const SILENT_DAYS = 3
+
+/** The waits of the ladder, each counted from the step before it; tests shorten them. */
+export type Waits = { second?: number; third?: number; silent?: number }
 
 /**
- * The next step of the ladder (design 5.11), counted from our side's last message: a day (two for a client who went
- * to think it over), three days, and on the seventh day the client is dormant and Boris gets one task. Only when
- * Boris says «Напоминать дальше» the ladder goes on, with one last, friendly reminder 10 days after his press: the
- * third ping is the last (Boris's own document). A ladder given no press time counts the press on the dormant day.
- * `sent` is how many reminders of the ladder are done. A time inside the quiet hours moves to the morning, a time
- * already past is now, and two reminders keep a day between them. Null: nothing more to say.
+ * The next step of the ladder (design 5.11, Boris's rule 11): the first reminder a day after our side's last message
+ * (two for a client who went to think it over), the second two days after the first, the third three days after the
+ * second, and the third is the last. If the client is still silent three days after the third, that is a step of its
+ * own, `dormant`: one task for Boris, no message to the client. `sent` is how many steps are done. A step counts from
+ * `prevAt`, when the step before it went (or, if it was only skipped, when it was due); left out, the times of the
+ * ladder itself are taken. A reminder inside the quiet hours moves to the morning, a time already past is now. Null:
+ * nothing more to do.
  */
 export function nextReminder(i: {
   lastOursAt: string
   sent: number
   read: boolean
-  continued: boolean
   now: Date
-  /** When the reminder before this one went. */
-  lastSentAt?: string | null
+  /** When the step before this one went or was due. */
+  prevAt?: string | null
   /** Moscow hours without reminders to clients (`conv.reminder_quiet`). */
   quiet?: { from: number; to: number }
-  /** The least time between two reminders. */
-  minGapMs?: number
-  /** When Boris pressed «Напоминать дальше»; left out, the dormant day. */
-  continuedAt?: string | null
-  /** The wait after the press (10 days); tests shorten it. */
-  afterPressMs?: number
   /** The first reminder's wait: a day, but two for a client who went to think it over. */
   firstAfterMs?: number
+  /** The waits after the first step (2, 3 and 3 days); tests shorten them. */
+  waitsMs?: Waits
 }): NextReminder | null {
   const from = new Date(i.lastOursAt).getTime()
   if (Number.isNaN(from)) return null
-  const pressed = i.continuedAt ? new Date(i.continuedAt).getTime() : Number.NaN
-  const press = Number.isNaN(pressed) ? from + 7 * DAY_MS : pressed
-  const wait = i.afterPressMs ?? AFTER_PRESS_MS
-  const sentAt = i.lastSentAt ? new Date(i.lastSentAt).getTime() : Number.NaN
-  const plan: Record<number, { step: ReminderStep; at: number; tone: ReminderTone }> = {
-    0: { step: 1, at: from + (i.firstAfterMs ?? DAY_MS), tone: 'check_in' },
-    1: { step: 2, at: from + 3 * DAY_MS, tone: 'check_in' },
-    2: i.continued
-      ? { step: 3, at: press + wait, tone: 'friendly' }
-      : { step: 'dormant', at: from + 7 * DAY_MS, tone: 'check_in' },
-  }
-  const p = i.continued || i.sent <= 2 ? plan[i.sent] : undefined
-  if (!p) return null
-  let due = p.at
-  if (p.step !== 'dormant' && !Number.isNaN(sentAt))
-    due = Math.max(due, sentAt + (i.minGapMs ?? MIN_GAP_MS))
-  let at = new Date(Math.max(due, i.now.getTime()))
+  const waits = [
+    i.firstAfterMs ?? FIRST_DAYS * DAY_MS,
+    i.waitsMs?.second ?? SECOND_DAYS * DAY_MS,
+    i.waitsMs?.third ?? THIRD_DAYS * DAY_MS,
+    i.waitsMs?.silent ?? SILENT_DAYS * DAY_MS,
+  ]
+  const steps: { step: ReminderStep; tone: ReminderTone }[] = [
+    { step: 1, tone: 'check_in' },
+    { step: 2, tone: 'check_in' },
+    { step: 3, tone: 'friendly' },
+    { step: 'dormant', tone: 'check_in' },
+  ]
+  const p = steps[i.sent]
+  const wait = waits[i.sent]
+  if (!p || wait === undefined) return null
+  // The time of the step before: when it went, or the ladder's own time for it.
+  let before = from
+  for (let k = 0; k < i.sent; k++) before += waits[k] ?? 0
+  const prev = i.prevAt ? new Date(i.prevAt).getTime() : Number.NaN
+  const base = i.sent === 0 ? from : Number.isNaN(prev) ? before : prev
+  let at = new Date(Math.max(base + wait, i.now.getTime()))
   // The dormant day is a task for Boris, whose notices have their own quiet; only a message to the client waits.
   if (p.step !== 'dormant') at = moscowHoursEnd(at, i.quiet ?? DEFAULT_QUIET) ?? at
   return { at, step: p.step, tone: p.tone, read: i.read }

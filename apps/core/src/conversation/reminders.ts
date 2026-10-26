@@ -7,7 +7,6 @@ import { clientTurnBefore, isRefusal } from './clientCues'
 import {
   checkGround,
   dormantStep,
-  expireDormantTask,
   fallbackStep,
   type Ground,
   giveUpCard,
@@ -56,14 +55,12 @@ export function setRemindDeps(x: RemindDeps): void {
 export const remindWorkflowId = (conversationId: string, anchor: string) =>
   `conv-remind:${conversationId}:${anchor}`
 
-/** Steps of the ladder: a day, three days, dormant, ten days, thirty days; the loop stops long before this. */
-const MAX_PLANS = 8
+/** Steps of the ladder: three reminders and the silence task; the loop stops at the task. */
+const MAX_PLANS = 5
 /** A model that gave no text is asked again every so often until the reminder is that late (design 5.11). */
 const FALLBACK_AFTER_MS = 3 * 3600_000
 const RETRY_EVERY_MS = 10 * 60_000
-/** Boris has this long to answer the task of a dormant client; with no answer the ladder ends. */
-const DORMANT_WAIT_S = 30 * 24 * 3600
-/** The dormant day is tried every hour for a day while something stands in its way, soon again after a failure. */
+/** The silence task is tried every hour for a day while something stands in its way, soon again after a failure. */
 const DORMANT_TRIES = 24
 const DORMANT_RETRY_MS = 3600_000
 const DORMANT_STEP_RETRY_MS = 10 * 60_000
@@ -149,38 +146,24 @@ async function askBoris(
 
 async function runRemind(conversationId: string, anchor: string): Promise<void> {
   const wf = remindWorkflowId(conversationId, anchor)
+  // How many steps are done, and when the one before went (or was due, if it was only skipped): the next wait
+  // counts from there (rule 11: 1 day, then 2 days after the first, 3 days after the second, 3 days after the third).
   let sent = 0
-  let continued = false
-  let lastSentAt: string | null = null
-  let continuedAt: string | null = null
+  let prevAt: string | null = null
   for (let k = 0; k < MAX_PLANS; k++) {
-    const next = await DBOS.runStep(
-      () => planNext(d(), conversationId, anchor, { sent, continued, lastSentAt, continuedAt }),
-      { name: `plan-${k}`, ...DB_STEP },
-    )
+    const next = await DBOS.runStep(() => planNext(d(), conversationId, anchor, { sent, prevAt }), {
+      name: `plan-${k}`,
+      ...DB_STEP,
+    })
     if (!next) return
     const wait = Date.parse(next.at) - (await DBOS.now())
     if (wait > 0) await DBOS.sleep(wait)
     const rowId = `${wf}:${next.step}`
     if (next.step === 'dormant') {
-      // Shadow has nobody to ask: the ladder ends at the dormant day.
-      if ((await askBoris(k, conversationId, anchor, rowId, next)) !== 'asked') return
-      const answer = await DBOS.recv<string>('decision', {
-        timeoutSeconds: d().dormantWaitS ?? DORMANT_WAIT_S,
-      })
-      if (answer !== 'remind') {
-        // No answer in the whole time: the task is closed, not left open with buttons that promise what will not come.
-        if (answer === null)
-          await DBOS.runStep(() => expireDormantTask(d(), rowId), {
-            name: `dormant-expire-${k}`,
-            ...DB_STEP,
-          })
-        return
-      }
-      continued = true
-      // «Через 10 суток» is true from the moment he pressed, not from the dormant day.
-      continuedAt = new Date(await DBOS.now()).toISOString()
-      continue
+      // The third reminder is the last: three silent days later Boris gets one task (in shadow only the trace) and the
+      // ladder is over. Nothing waits for his answer, «Закрыть» works on the task whenever he presses it.
+      await askBoris(k, conversationId, anchor, rowId, next)
+      return
     }
     const g = await DBOS.runStep(() => groundStep(d(), rowId, conversationId, anchor, next), {
       name: `ground-${k}`,
@@ -191,6 +174,7 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
       // unreadable chat, a pause of sending) is not repeated later, the next step comes at its own time.
       if (g.end) return
       sent++
+      prevAt = next.at
       continue
     }
     const text = await obtainText(k, conversationId, rowId, next, g.read)
@@ -222,13 +206,13 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
       })
     }
     if (result.end) return
-    if (
+    prevAt =
       result.outcome === 'sent' ||
       result.outcome === 'drafted' ||
       result.outcome === 'carded' ||
       result.outcome === 'uncertain'
-    )
-      lastSentAt = new Date(await DBOS.now()).toISOString()
+        ? new Date(await DBOS.now()).toISOString()
+        : next.at
     sent++
   }
 }
@@ -387,11 +371,6 @@ export async function syncReminders(
   await startReminder(conv.id, anchor.platformMessageId)
 }
 
-/** DBOS tells a send to a process that never existed by this code (`DBOSNonExistentWorkflowError`, not exported). */
-const NON_EXISTENT_WORKFLOW = 16
-const isMissingWorkflow = (e: unknown) =>
-  (e as { dbosErrorCode?: number } | null)?.dbosErrorCode === NON_EXISTENT_WORKFLOW
-
 /** The only trace of a ladder that was not run: one row, whatever the shadow or the switch (a repeat adds none). */
 async function traceRefusal(conversationId: string, anchor: string, wf: string): Promise<void> {
   const now = new Date().toISOString()
@@ -411,22 +390,4 @@ async function traceRefusal(conversationId: string, anchor: string, wf: string):
       finishedAt: now,
     })
     .onConflictDoNothing()
-}
-
-/** Boris's answer on the dormant task reaches the process that waits for it (a process that is gone is fine). */
-export async function decideDormant(
-  reminderTurnId: string,
-  decision: 'remind' | 'close',
-): Promise<boolean> {
-  const wf = reminderTurnId.slice(0, reminderTurnId.lastIndexOf(':'))
-  // Only a process that still waits can be told; the caller says so plainly to Boris when it does not.
-  if ((await DBOS.getWorkflowStatus(wf))?.status !== 'PENDING') return false
-  try {
-    await DBOS.send(wf, decision, 'decision', `dormant:${reminderTurnId}:${decision}`)
-    return true
-  } catch (e) {
-    // DBOS names this error by its class only in the code: the error object's `name` is plain «Error».
-    if (!isMissingWorkflow(e)) throw e
-    return false
-  }
 }

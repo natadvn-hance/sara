@@ -17,6 +17,7 @@ import {
   type ReminderStep,
   type ReminderTone,
   reminderFallback,
+  type Waits,
 } from './reminderLadder'
 import { type TextStep, writeReminder } from './reminderText'
 import { getConversation } from './store'
@@ -37,18 +38,14 @@ export type RemindDeps = {
   fallbackAfterMs?: number
   /** How often a model that gave no text is asked again (default 10 minutes). */
   retryEveryMs?: number
-  /** How long the task for Boris waits for his answer (default 30 days). */
-  dormantWaitS?: number
-  /** The least time between two reminders (default a day); tests shorten it. */
-  minGapMs?: number
-  /** How often the dormant day is tried again while something stands in its way (default an hour). */
+  /** The waits after the first reminder (2, 3 and 3 days, each from the step before); tests shorten them. */
+  waitsMs?: Waits
+  /** How often the silence task is tried again while something stands in its way (default an hour). */
   dormantRetryEveryMs?: number
   /** How often it is tried again after a failure, a Telegram outage say (default 10 minutes). */
   dormantStepRetryMs?: number
-  /** How many tries the dormant day gets before it is given up (default 24, a day). */
+  /** How many tries the silence task gets before it is given up (default 24, a day). */
   dormantTries?: number
-  /** The wait after «Напоминать дальше» (default 10 days); tests shorten it. */
-  afterPressMs?: number
   /** How often a card that Telegram would not take is tried again (default 10 minutes), and how many tries (6). */
   cardRetryEveryMs?: number
   cardTries?: number
@@ -158,11 +155,10 @@ export async function planNext(
   conversationId: string,
   anchor: string,
   st: {
+    /** How many steps of the ladder are done. */
     sent: number
-    continued: boolean
-    lastSentAt: string | null
-    /** When Boris pressed «Напоминать дальше»: the 10 and the 30 days count from there. */
-    continuedAt: string | null
+    /** When the step before went, or was due if it was only skipped: the next wait counts from there. */
+    prevAt: string | null
   },
 ): Promise<Planned | null> {
   const conv = await getConversation(d.db, conversationId)
@@ -185,13 +181,10 @@ export async function planNext(
     lastOursAt: m.sentAt,
     sent: st.sent,
     read: m.read,
-    continued: st.continued,
     now: new Date(),
-    lastSentAt: st.lastSentAt,
+    prevAt: st.prevAt,
     quiet: await getSetting(d.db, 'conv.reminder_quiet'),
-    minGapMs: d.minGapMs,
-    continuedAt: st.continuedAt,
-    afterPressMs: d.afterPressMs,
+    waitsMs: d.waitsMs,
     ...(thinking && { firstAfterMs: THINKING_FIRST_MS }),
   })
   return r ? { at: r.at.toISOString(), step: r.step, tone: r.tone } : null
@@ -382,15 +375,7 @@ export async function groundStep(
   return g
 }
 
-/** Boris did not answer the task of a quiet client in the whole time: it is closed, no button of it promises anything. */
-export async function expireDormantTask(d: RemindDeps, rowId: string): Promise<void> {
-  await d.db
-    .update(task)
-    .set({ state: 'resolved', resolution: 'expired', resolvedAt: new Date().toISOString() })
-    .where(and(eq(task.kind, 'conv_dormant'), eq(task.entityId, rowId), eq(task.state, 'open')))
-}
-
-/** The dormant day could not be told to Boris in the whole time it was tried: the row says why. */
+/** The silence task could not be told to Boris in the whole time it was tried: the row says why. */
 export async function giveUpDormant(d: RemindDeps, rowId: string, why: string): Promise<void> {
   await finishRow(d.db, rowId, {
     outcome: 'skipped',
@@ -677,7 +662,7 @@ export async function sendStep(
   return deliver(d, rowId, conv, id, p)
 }
 
-/** The deal of a dormant client becomes dormant too; a stage that cannot (a booked meeting) stays as it is. */
+/** The deal of a client silent after three reminders becomes dormant; a stage that cannot (a booked meeting) stays. */
 async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> {
   if (!conv.dealId) return
   try {
@@ -685,7 +670,7 @@ async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> 
       dealId: conv.dealId,
       to: 'dormant',
       actor: 'sara',
-      reason: 'клиент молчит 7 дней',
+      reason: SILENT_REASON,
       correlationId: conv.id,
     })
   } catch (e) {
@@ -694,9 +679,12 @@ async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> 
   }
 }
 
+const SILENT_REASON = 'клиент молчит после трёх напоминаний'
+
 /**
- * The seventh day: the client is dormant. In shadow only the trace says so. After the switch the deal, if there is
- * one, becomes dormant and Boris gets one task with «Закрыть» and «Напоминать дальше» (design 5.11).
+ * Three days after the third reminder the client is still silent. In shadow only the trace says so. After the switch
+ * the deal, if there is one, becomes dormant and Boris gets one task «Клиент молчит после трёх напоминаний» with
+ * «Закрыть» only: nothing more is written to the client (design 5.11, Boris's rule 11).
  */
 export async function dormantStep(
   d: RemindDeps,
@@ -713,7 +701,7 @@ export async function dormantStep(
       await finishRow(tx, rowId, {
         outcome: 'dormant',
         decision: shadow ? 'trace' : 'task',
-        decisionReason: shadow ? 'в тени задача Борису только в трассе' : 'клиент молчит 7 дней',
+        decisionReason: shadow ? 'в тени задача Борису только в трассе' : SILENT_REASON,
       })
       await journal(tx, 'conv.dormant', conv, rowId, { shadow })
     })
@@ -732,24 +720,10 @@ export async function dormantStep(
     return { asked: true }
   }
   const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
-  const [sent] = await d.db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(convTurn)
-    .where(
-      and(
-        eq(convTurn.conversationId, conv.id),
-        eq(convTurn.kind, 'reminder'),
-        eq(convTurn.outcome, 'sent'),
-      ),
-    )
   const taskId = newEventId()
-  const button = (text: string, action: 'close' | 'remind') => ({
-    text,
-    callbackData: formatCallback(taskId, action),
-  })
   const m = await d.notifier.sendButtons(
-    CONV_TEXTS.dormant(l?.clientName || null, l?.title ?? null, sent?.n ?? 0),
-    [[button(CONV_TEXTS.buttons.close, 'close'), button(CONV_TEXTS.buttons.remind, 'remind')]],
+    CONV_TEXTS.dormant(l?.clientName || null, l?.title ?? null),
+    [[{ text: CONV_TEXTS.buttons.close, callbackData: formatCallback(taskId, 'close') }]],
   )
   await d.db.transaction(async (tx) => {
     await tx.insert(task).values({

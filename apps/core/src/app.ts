@@ -16,12 +16,7 @@ import { startConvDaySummary } from './conversation/daySummary'
 import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
 import { sendTextNow, sendTurnReply } from './conversation/outbox'
 import { startReconcile } from './conversation/reconcile'
-import {
-  decideDormant,
-  reminderGround,
-  setRemindDeps,
-  syncReminders,
-} from './conversation/reminders'
+import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
 import { registerConversationRoutes } from './conversation/routes'
 import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
@@ -99,7 +94,6 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     db,
     notifier: bot.notifier,
     sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
-    decideDormant,
     remindGround: reminderGround,
   })
   // A press on a conversation card goes to the conversation, every other press to the lead pipeline.

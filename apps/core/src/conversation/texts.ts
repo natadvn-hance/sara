@@ -1,4 +1,4 @@
-import { type ChatAuthor, plural, type Tone } from '@sara/shared'
+import type { ChatAuthor, Tone } from '@sara/shared'
 
 /** Texts of the conversation module for Boris (NFR-UX-1: plain Russian, no long dash). */
 
@@ -128,15 +128,13 @@ export const CONV_TEXTS = {
       } пишет: ${quote(words)}`,
     ),
 
-  /** The task for Boris when a client has been quiet for 7 days (FR-CONV-12, M4 design 5.11). */
-  dormant: (name: string | null, orderTitle: string | null, reminders: number) =>
+  /** The task for Boris when a client is silent three days after the third reminder (FR-CONV-12, M4 design 5.11). */
+  dormant: (name: string | null, orderTitle: string | null) =>
     hyphenated(
       [
-        `😴 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: молчит 7 дней.`,
-        reminders > 0
-          ? `Напоминала ему ${reminders} ${plural(reminders, ['раз', 'раза', 'раз'])}, ответа нет.`
-          : 'Ответа нет.',
-        'Закрыть разговор или напомнить ему ещё раз через 10 суток? Это будет последнее напоминание.',
+        `😴 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: клиент молчит после трёх напоминаний.`,
+        'Ответа нет уже три дня после третьего. Больше напоминать не буду.',
+        'Закрыть разговор?',
       ].join('\n'),
     ),
 
@@ -173,7 +171,6 @@ export const CONV_TEXTS = {
     take: 'Беру сам',
     close: 'Закрыть',
     giveBack: 'Вернуть Саре',
-    remind: 'Напоминать дальше',
   },
 }
 

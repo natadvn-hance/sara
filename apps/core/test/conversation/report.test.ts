@@ -71,7 +71,7 @@ describe('the conversation report', () => {
   })
 })
 
-/** Reminders of one anchor, as the process leaves them: two drafts in shadow, a dormant day, and others after the switch. */
+/** Reminders of one anchor, as the process leaves them: two drafts in shadow, the silence step, and others after the switch. */
 async function reminders(convId: string) {
   const base = {
     conversationId: convId,
@@ -138,8 +138,8 @@ describe('reminders in the conversation report', () => {
     expect(text).toContain('отправлено 1')
     expect(text).toContain('пропущено 1')
     expect(text).toContain('остановлено 1')
-    expect(text).toContain('застоев 1')
-    expect(text).toContain('шаг 1 4, шаг 2 1, застой 1')
+    expect(text).toContain('молчат после трёх напоминаний 1')
+    expect(text).toContain('шаг 1 4, шаг 2 1, молчание после трёх 1')
     expect(text).toContain('Ответила бы: «Анна, здравствуйте! Как у вас дела с сайтом?»')
     expect(text).toContain('Ушло потом (Сара v1 или ты')
     expect(text).toContain('«Анна, здравствуйте! Как успехи с сайтом?»')
