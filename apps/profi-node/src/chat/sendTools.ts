@@ -371,57 +371,93 @@ export function createSendTools(o: {
     throw stillUnknown()
   }
 
+  /**
+   * Work in the account tab in turn with the feed check and the chat walk. A call that waited longer than queueMs is
+   * UNCERTAIN, and its work never starts later; so it is when the core hung up while the call waited (`skipped`).
+   */
+  function queued<T>(
+    r: SendRuntime,
+    aborted: () => boolean,
+    work: (t: Tab) => Promise<T>,
+    skipped: () => ProfiToolError,
+  ): Promise<T> {
+    let started = false
+    let gaveUp = false
+    const job = r.inTab(async (t) => {
+      if (gaveUp || aborted()) throw skipped()
+      started = true
+      return work(t)
+    })
+    // The call may stop listening before the job ends; its failure is then nobody's.
+    job.catch(() => {})
+    let timer: NodeJS.Timeout | undefined
+    const tooLong = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        if (started) return
+        gaveUp = true
+        reject(
+          uncertain('Вкладка аккаунта занята, сообщение не набрано: смотреть чат перед повтором'),
+        )
+      }, queueMs)
+    })
+    return Promise.race([job, tooLong]).finally(() => clearTimeout(timer))
+  }
+
   return {
     async sendMessage(i, signal) {
-      if (!o.enabled) throw fail('INTERNAL', 'отправка сообщений выключена на службе')
       const m = { accountId: i.account_id, chatId: i.chat_id, text: i.text, key: i.idempotency_key }
       if (!verifyMessagePermit(o.permitSecret, m, i.permit))
         throw fail('INTERNAL', 'Разрешение ядра не подходит к сообщению')
       const r = runtime(i.account_id)
+      const aborted = () => signal?.aborted === true
+
+      // A key seen before is answered from the database, never by a refusal: what it pressed may be in the chat, and
+      // a plain failure here would send a person to type the same message again (as for submit_bid).
+      const known = await findMessageAttempt(o.db, i.idempotency_key)
+      if (known) {
+        if (known.accountId !== i.account_id || known.chatId !== i.chat_id)
+          throw fail('INTERNAL', 'Ключ повтора уже занят сообщением в другом чате или аккаунте')
+        if (known.result) return known.result as SendMessageOutput
+        // Pressed, no answer: only a look at the chat, and none at all while the switch is off or the session is down.
+        const s = r.watch.state()
+        if (!o.enabled || s === 'dead' || s === 'banned') throw stillUnknown()
+        return queued(
+          r,
+          aborted,
+          async (t) => {
+            // A twin of this call may have found the message while this one waited for the tab.
+            const twin = await findMessageAttempt(o.db, i.idempotency_key)
+            if (twin?.result) return twin.result as SendMessageOutput
+            return look(r, t, i, twin?.expectLastMessageId ?? known.expectLastMessageId)
+          },
+          stillUnknown,
+        ).catch(() => {
+          throw stillUnknown()
+        })
+      }
+
+      if (!o.enabled) throw fail('INTERNAL', 'отправка сообщений выключена на службе')
       if (leaksProtocol(i.text))
         throw fail('INTERNAL', 'Текст похож на служебный (JSON или тег) и клиенту не уходит')
-      const aborted = () => signal?.aborted === true
-      // A repeat answers first, before anything else is looked at: the chat already has the message it sent.
-      const known = await findMessageAttempt(o.db, i.idempotency_key)
-      if (known?.result) return known.result as SendMessageOutput
       requireAlive(r.watch)
-
-      // The tab is in one hand: the feed check and the chat walk may hold it. A call that waited too long never types.
-      let started = false
-      let gaveUp = false
-      const job = r.inTab(async (t) => {
-        if (gaveUp || aborted())
-          throw fail('RATE_LIMITED', 'Ядро перестало ждать, сообщение не набрано')
-        started = true
-        // A twin of this call may have pressed while this one waited for the tab.
-        const twin = await findMessageAttempt(o.db, i.idempotency_key)
-        if (twin?.result) return twin.result as SendMessageOutput
-        if (twin) return look(r, t, i, twin.expectLastMessageId)
-        requireAlive(r.watch)
-        if (!t.can())
-          throw fail(
-            'RATE_LIMITED',
-            'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), сообщение не набрано',
-          )
-        return send(r, t, i, aborted)
-      })
-      // The call may stop listening before the job ends; its failure is then nobody's.
-      job.catch(() => {})
-      let timer: NodeJS.Timeout | undefined
-      const tooLong = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          if (started) return
-          gaveUp = true
-          reject(
-            uncertain('Вкладка аккаунта занята, сообщение не набрано: смотреть чат перед повтором'),
-          )
-        }, queueMs)
-      })
-      try {
-        return await Promise.race([job, tooLong])
-      } finally {
-        clearTimeout(timer)
-      }
+      return queued(
+        r,
+        aborted,
+        async (t) => {
+          // A twin of this call may have pressed while this one waited for the tab.
+          const twin = await findMessageAttempt(o.db, i.idempotency_key)
+          if (twin?.result) return twin.result as SendMessageOutput
+          if (twin) return look(r, t, i, twin.expectLastMessageId)
+          requireAlive(r.watch)
+          if (!t.can())
+            throw fail(
+              'RATE_LIMITED',
+              'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), сообщение не набрано',
+            )
+          return send(r, t, i, aborted)
+        },
+        () => fail('RATE_LIMITED', 'Ядро перестало ждать, сообщение не набрано'),
+      )
     },
   }
 }

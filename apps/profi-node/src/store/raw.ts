@@ -80,7 +80,12 @@ export async function saveBidResult(db: NodeDbOrTx, key: string, result: unknown
   await db.update(bidAttempt).set({ result }).where(eq(bidAttempt.idempotencyKey, key))
 }
 
-export type MessageAttempt = { expectLastMessageId: string | null; result: unknown }
+export type MessageAttempt = {
+  accountId: string
+  chatId: string
+  expectLastMessageId: string | null
+  result: unknown
+}
 
 export async function findMessageAttempt(
   db: NodeDbOrTx,
@@ -88,6 +93,8 @@ export async function findMessageAttempt(
 ): Promise<MessageAttempt | null> {
   const [r] = await db
     .select({
+      accountId: messageAttempt.accountId,
+      chatId: messageAttempt.chatId,
       expectLastMessageId: messageAttempt.expectLastMessageId,
       result: messageAttempt.result,
     })

@@ -468,3 +468,70 @@ describe('profi.send_message on the chat page (M4)', () => {
     for (const secret of [REPLY, OURS, CLIENTS]) expect(all).not.toContain(secret)
   }, 60000)
 })
+
+describe('a key that was pressed is never refused as a plain failure', () => {
+  /** The press written down, as after a node that died between the button and the answer. */
+  const pressed = async (input: SendMessageInput) =>
+    saveMessagePress(db, {
+      key: input.idempotency_key,
+      accountId: input.account_id,
+      chatId: input.chat_id,
+      expectLastMessageId: input.expect_last_message_id,
+    })
+
+  it('NFR-REL-4: a pressed key on a dead or banned session is UNCERTAIN, never SESSION_DEAD, and nothing is opened', async () => {
+    const input = msg(REPLY)
+    await pressed(input)
+    // The message did go out before the session died.
+    c1().messages.push({ id: '103', side: 'specialist', text: REPLY })
+    for (const s of ['dead', 'banned'] as const) {
+      state = s
+      expect(await failure(tools().sendMessage(input))).toBe('UNCERTAIN')
+    }
+    expect(site.opened).toEqual([])
+    expect(site.presses).toEqual([])
+  }, 60000)
+
+  it('NFR-REL-4: a pressed key with the node switch off is UNCERTAIN, never INTERNAL, and nothing is opened', async () => {
+    const input = msg(REPLY)
+    await pressed(input)
+    expect(await failure(tools({ enabled: false }).sendMessage(input))).toBe('UNCERTAIN')
+    expect(site.opened).toEqual([])
+    expect(site.presses).toEqual([])
+  }, 60000)
+
+  it('NFR-REL-4: a stored result is still returned with the node switch off or the session dead (only a database read)', async () => {
+    const input = msg(REPLY)
+    const first = await tools().sendMessage(input)
+    const opened = site.opened.length
+    state = 'dead'
+    expect(await tools({ enabled: false }).sendMessage(input)).toEqual(first)
+    expect(site.opened).toHaveLength(opened)
+  }, 60000)
+
+  it('NFR-REL-4: a pressed key whose look cannot run (the tab busy past the wait) is UNCERTAIN', async () => {
+    const input = msg(REPLY)
+    await pressed(input)
+    const held = await holdTab()
+    expect(await failure(tools({ queueMs: 300 }).sendMessage(input))).toBe('UNCERTAIN')
+    held.release()
+    await held.done
+    expect(site.opened).toEqual([])
+  }, 60000)
+
+  it('NFR-REL-4: a key stored for another account or chat never gets the stored answer', async () => {
+    const input = msg(REPLY)
+    await saveMessagePress(db, {
+      key: input.idempotency_key,
+      accountId: ACCOUNT,
+      chatId: 'another-chat',
+      expectLastMessageId: '102',
+    })
+    await db
+      .update(messageAttempt)
+      .set({ result: { found_on_page: true, platform_message_id: '9' } })
+    expect(await failure(tools().sendMessage(input))).toBe('INTERNAL')
+    expect(site.opened).toEqual([])
+    expect(site.presses).toEqual([])
+  }, 60000)
+})
