@@ -43,7 +43,7 @@ export const COMMAND_TEXTS = {
     'Режим тени: я пока не пишу клиентам. Сохранила твой текст как твой ответ, отправь его сам в Профи.ру.',
   shadowSend: 'Режим тени: я пока не пишу клиентам. Отправь сам в Профи.ру, если текст подходит.',
   notUnderstood:
-    'Не поняла. Ответь на карточку словами: «беру сам», «верни», «напиши: …» или «закрой».',
+    'Не поняла. Ответь на карточку словами: «беру сам», «верни», «закрой» или «напиши: …». Чтобы ушёл мой черновик, нажми «Отправить».',
   noDraft: 'В этой карточке нет текста для клиента.',
   alreadySent: 'Ответ уже ушёл клиенту или стоит в очереди. Второй раз не отправляю.',
   sendUncertain:
@@ -54,6 +54,7 @@ export const COMMAND_TEXTS = {
   /** A typed «да» never sends: only the button does (the review of the drafts mode). */
   pressSend: 'Нажми «Отправить», и уйдёт',
   pressGood: 'Нажми «Хорошо», и отмечу, что черновик годный',
+  askText: 'Что отправить клиенту? Пришли текст после двоеточия: «напиши: …».',
   sayAsked: 'Я уже спросила про этот текст: нажми «Отправить» или «Изменить» под моим вопросом.',
   sayConfirm: (words: string) => `Отправлю клиенту так: «${words}»`,
 }
@@ -543,7 +544,8 @@ const telegramKey = (messageId: number | undefined) =>
 export type CardCommand =
   | { cmd: 'take' }
   | { cmd: 'return'; note: string | null }
-  | { cmd: 'say'; text: string }
+  /** His own words after the colon; null when the command leaves no text, and Sara asks for it. */
+  | { cmd: 'say'; text: string | null }
   | { cmd: 'close' }
   /** «да», «ок», «отправляй»: no command, a nudge to press the button. */
   | { cmd: 'confirm' }
@@ -555,18 +557,35 @@ const CONFIRM = new RegExp(
   `^(?:ну\\s+)?${CONFIRM_WORD}(?:[\\s,.!)👍]+(?:${CONFIRM_WORD}|так|пожалуйста))*[\\s.,!)👍]*$`,
   'iu',
 )
+const END = '[\\s.!)]*$'
+const TAKE = new RegExp(
+  `^(?:я\\s+сам(?:а)?|(?:беру|возьму)(?:\\s+(?:её|ее|его|клиента|клиентку))?(?:\\s+сам(?:а)?)?)${END}`,
+  'iu',
+)
+const CLOSE = new RegExp(
+  `^(?:закрой|закрыть|закрываем)(?:\\s+(?:разговор|диалог|его|её|ее|клиента))?${END}`,
+  'iu',
+)
+const WHO = '(?:\\s+(?:ей|ему|клиенту|клиентке))?'
+const SAY_COLON = new RegExp(`^(?:напиши|отправь|ответь)${WHO}\\s*:\\s*(.*)$`, 'isu')
+const SAY_BARE = new RegExp(`^(?:напиши|отправь|отправляй|ответь)${WHO}${END}`, 'iu')
 
-/** Boris's words in reply to a card, read as a command; anything else is not guessed (FR-NOTIF-1). */
+/**
+ * Boris's words in reply to a card, read as a command; anything else is not guessed (FR-NOTIF-1). A command is the
+ * whole message: «Закрыть не надо, подожди» closes nothing, and only a colon makes the words after a command word his
+ * text («напиши: …»), so «Напиши ему, что я перезвоню» is never cut into «что я перезвоню».
+ */
 export function parseCardReply(text: string): CardCommand | null {
   const t = text.trim()
-  if (/^(беру сам|я сам|возьму|беру)(?!\p{L})/iu.test(t)) return { cmd: 'take' }
+  if (TAKE.test(t)) return { cmd: 'take' }
   const back = /^(?:верни|вернуть)(?!\p{L})(?:\s+саре)?\s*[:,.-]?\s*(.*)$/isu.exec(t)
   if (back) return { cmd: 'return', note: back[1]?.trim() || null }
-  const write =
-    /^(?:напиши|отправь|ответь)(?:\s+(?:ей|ему|клиенту|клиентке))?\s*[:,-]?\s*(.+)$/is.exec(t)
-  if (write?.[1]?.trim()) return { cmd: 'say', text: write[1].trim() }
-  if (/^(закрой|закрыть|закрываем)(?!\p{L})/iu.test(t)) return { cmd: 'close' }
+  // «отправь», «отправляй» alone are a confirmation; with «ему» and no text they ask for the text.
   if (CONFIRM.test(t)) return { cmd: 'confirm' }
+  const say = SAY_COLON.exec(t)
+  if (say) return { cmd: 'say', text: say[1]?.trim() || null }
+  if (SAY_BARE.test(t)) return { cmd: 'say', text: null }
+  if (CLOSE.test(t)) return { cmd: 'close' }
   return null
 }
 
@@ -624,6 +643,7 @@ export async function onConvReply(
       await giveBack(d.db, turn.conversationId, c.note)
       return COMMAND_TEXTS.returned
     case 'say':
+      if (c.text === null) return COMMAND_TEXTS.askText
       if (!live) return say(d, turn.conversationId, c.text, telegramKey(m.messageId))
       return proposeSay(d, turn, c.text, {
         via: 'say',

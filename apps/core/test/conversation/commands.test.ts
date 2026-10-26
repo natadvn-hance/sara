@@ -272,25 +272,59 @@ describe('Boris’s commands', () => {
     ).toMatch(/Не поняла/)
   })
 
-  it('FR-CONV-11: replies to a card are read as commands', () => {
+  it('FR-CONV-11: replies to a card are read as commands, whole messages only', () => {
     expect(parseCardReply('Беру сам')).toEqual({ cmd: 'take' })
     expect(parseCardReply('я сам')).toEqual({ cmd: 'take' })
+    expect(parseCardReply('Беру.')).toEqual({ cmd: 'take' })
+    expect(parseCardReply('Возьму её сам!')).toEqual({ cmd: 'take' })
     expect(parseCardReply('верни')).toEqual({ cmd: 'return', note: null })
     expect(parseCardReply('Вернуть Саре: веди мягко')).toEqual({
       cmd: 'return',
       note: 'веди мягко',
     })
+    expect(parseCardReply('закрой')).toEqual({ cmd: 'close' })
+    expect(parseCardReply('Закрыть разговор.')).toEqual({ cmd: 'close' })
+    expect(parseCardReply('Закрываем!')).toEqual({ cmd: 'close' })
+    expect(parseCardReply('что это')).toBeNull()
+  })
+
+  it('FR-CONV-11: his own text needs the colon, what follows it is exactly his words', () => {
     expect(parseCardReply('напиши: Анна, добрый день!')).toEqual({
       cmd: 'say',
       text: 'Анна, добрый день!',
     })
-    expect(parseCardReply('отправь ей Давайте завтра')).toEqual({
+    expect(parseCardReply('Отправь ему: Давайте завтра\nв 11')).toEqual({
       cmd: 'say',
-      text: 'Давайте завтра',
+      text: 'Давайте завтра\nв 11',
     })
-    expect(parseCardReply('закрой')).toEqual({ cmd: 'close' })
-    expect(parseCardReply('да')).toEqual({ cmd: 'confirm' })
-    expect(parseCardReply('что это')).toBeNull()
+    expect(parseCardReply('ответь клиенту : Хорошо')).toEqual({ cmd: 'say', text: 'Хорошо' })
+    // The command word with no text: Sara asks for it, nothing is cut out of a longer sentence.
+    expect(parseCardReply('Отправь ему')).toEqual({ cmd: 'say', text: null })
+    expect(parseCardReply('Напиши ей.')).toEqual({ cmd: 'say', text: null })
+    expect(parseCardReply('напиши:')).toEqual({ cmd: 'say', text: null })
+    expect(parseCardReply('напиши: ')).toEqual({ cmd: 'say', text: null })
+    // No colon, a sentence: not a command, never «что я перезвоню завтра» or «Давайте завтра» as the text.
+    expect(parseCardReply('Напиши ему, что я перезвоню завтра')).toBeNull()
+    expect(parseCardReply('отправь ей Давайте завтра')).toBeNull()
+    expect(parseCardReply('Отправь как есть')).toEqual({ cmd: 'confirm' })
+  })
+
+  it.each([
+    'Закрыть не надо, подожди',
+    'Закрой окно',
+    'не закрывай',
+    'Я сам не буду',
+    'Беру сам, позвоню ей вечером',
+    'Не беру',
+    'Закрыть? Нет',
+  ])('FR-CONV-11: «%s» is no command, nothing acts', async (words) => {
+    expect(parseCardReply(words)).toBeNull()
+    expect(
+      await onConvReply(deps(), { replyToMessageId: cardMessage, text: words, at: new Date() }),
+    ).toMatch(/Не поняла/)
+    expect((await getConversation(db, convId))?.closedAt).toBeNull()
+    expect((await getConversation(db, convId))?.owner).toBe('sara')
+    expect((await db.select().from(task).where(eq(task.id, cardTask)))[0]?.state).toBe('open')
   })
 
   it('FR-CONV-11: after the switch «Отправить» is not the shadow answer', async () => {
@@ -660,6 +694,34 @@ describe('Boris’s commands', () => {
       const second = await onConvReply(live(), m)
       expect(asRows(second)).toHaveLength(0)
       expect(await db.select().from(task)).toHaveLength(2)
+    })
+
+    it('FR-CONV-11: «Отправь ему» with no text asks for the text and sends nothing', async () => {
+      for (const words of ['Отправь ему', 'Напиши ей', 'напиши:']) {
+        const r = await reply(words)
+        expect(asText(r)).toMatch(/Что отправить клиенту/)
+        expect(asRows(r)).toHaveLength(0)
+      }
+      expect(sent).toEqual([])
+      expect(await db.select().from(task)).toHaveLength(1)
+    })
+
+    it('FR-CONV-11: a sentence that only starts like a command is not cut: no colon, no text', async () => {
+      const said = 'Напиши ему, что я перезвоню завтра'
+      expect(asText(await reply(said))).toMatch(/Не поняла/)
+      // While «Изменить» waits it is his version, shown whole for his confirmation.
+      await onConvPress(live(), { taskId: cardTask, action: 'edit' })
+      const r = await reply(said)
+      expect(asText(r)).toBe(`Отправлю клиенту так: «${said}»`)
+      expect(sent).toEqual([])
+    })
+
+    it('FR-CONV-11: «Закрыть не надо, подожди» with «Изменить» open is his version, nothing is closed', async () => {
+      await onConvPress(live(), { taskId: cardTask, action: 'edit' })
+      const r = await reply('Закрыть не надо, подожди')
+      expect(asText(r)).toBe('Отправлю клиенту так: «Закрыть не надо, подожди»')
+      expect((await getConversation(db, convId))?.closedAt).toBeNull()
+      expect(sent).toEqual([])
     })
 
     it('FR-CONV-11: in shadow nothing changes: «напиши: …» is kept, «да» points at «Хорошо»', async () => {
