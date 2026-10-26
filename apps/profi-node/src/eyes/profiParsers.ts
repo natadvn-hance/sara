@@ -317,7 +317,9 @@ export const profiParsers: Parsers = {
   },
 
   async fromChatDom(page, chatId, o) {
-    await page.waitForSelector(MESSAGE, { timeout: o?.waitMs ?? 15000 }).catch(() => {})
+    // 0 is no wait at all (a Playwright timeout of 0 would wait for ever).
+    const wait = o?.waitMs ?? 15000
+    if (wait > 0) await page.waitForSelector(MESSAGE, { timeout: wait }).catch(() => {})
     const raw = await page
       .locator(MESSAGE)
       .evaluateAll((els) =>

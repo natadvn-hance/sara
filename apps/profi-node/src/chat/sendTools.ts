@@ -309,6 +309,17 @@ export function createSendTools(o: {
       const late = stop()
       if (late) throw late
 
+      // The chat was read before the clicking, the pauses and the typing: it may have moved since. One more look,
+      // right before the press (a client who wrote while the words were typed, Boris answering by hand).
+      const fresh = await o.parsers.fromChatDom(page, i.chat_id, { waitMs: 0 })
+      await r.eyes.onChatRead(i.chat_id, fresh).catch(() => {})
+      const lastNow = messagesOf(fresh).at(-1)?.id ?? null
+      if (lastNow !== i.expect_last_message_id || (await field.inputValue()) !== want)
+        throw fail(
+          'CHAT_CHANGED',
+          `Пока набирался текст, чат ${i.chat_id} изменился (последнее сообщение ${lastNow ?? 'пусто'}): ничего не отправлено`,
+        )
+
       // The press is written down before it happens: a retry, also after a restart, only looks.
       const written = await saveMessagePress(o.db, {
         key: i.idempotency_key,

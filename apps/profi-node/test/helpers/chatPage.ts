@@ -32,6 +32,8 @@ export type FakeChat = {
   enterSends?: boolean
   /** The id the next bubble gets. */
   nextId?: string
+  /** A client bubble that arrives in the open page the moment something is typed into the field. */
+  arriveOnInput?: { id: string; text: string }
 }
 
 export function bubble(m: FakeMessage): string {
@@ -63,6 +65,7 @@ ${
 ${composer}
 <script>
 const SIDE = ${JSON.stringify(SIDE_CLASS)}
+const ARRIVE = ${JSON.stringify(c.arriveOnInput ?? null)}
 const field = document.querySelector('textarea')
 const main = document.getElementById('main')
 let next = ${JSON.stringify(c.nextId ?? 'new-1')}
@@ -87,7 +90,17 @@ async function submit() {
   add(text)
 }
 if (field) {
+  let arrived = false
   field.addEventListener('input', () => {
+    if (ARRIVE && !arrived) {
+      arrived = true
+      const el = document.createElement('div')
+      el.className = 'cw_msg ' + SIDE.client
+      el.setAttribute('data-message-content-id', ARRIVE.id)
+      el.innerHTML = '<div class="cw_xeDn2R"><div class="cw_BFgZYK"></div></div><span class="cw_time">12:02</span>'
+      el.querySelector('.cw_BFgZYK').textContent = ARRIVE.text
+      document.getElementById('list').appendChild(el)
+    }
     ${c.mangle ? "field.value = field.value.replace(/[0-9]/g, '')" : ''}
     morph()
   })

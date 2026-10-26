@@ -280,6 +280,17 @@ describe('profi.send_message on the chat page (M4)', () => {
     expect(stored.map((m) => m.platformMessageId)).toContain('103')
   }, 60000)
 
+  it('FR-CONV-6: a client message that arrives while the text is typed is CHAT_CHANGED, nothing is pressed, the draft is cleared', async () => {
+    c1().arriveOnInput = { id: '103', text: 'И ещё вопрос про сроки' }
+    expect(await failure(tools().sendMessage(msg(REPLY)))).toBe('CHAT_CHANGED')
+    expect(site.presses).toEqual([])
+    expect(fieldAtEnd).toBe('')
+    // The press was never written, and the eyes know the news at once.
+    expect(await attempts()).toHaveLength(0)
+    const stored = await db.select().from(rawMessage)
+    expect(stored.map((m) => m.platformMessageId)).toContain('103')
+  }, 60000)
+
   it('FR-CONV-6: Boris answered by hand in the meantime: CHAT_CHANGED as well', async () => {
     site.chats.get('c1')?.messages.push({ id: '103', side: 'specialist', text: 'Сам отвечу' })
     expect(await failure(tools().sendMessage(msg(REPLY)))).toBe('CHAT_CHANGED')
