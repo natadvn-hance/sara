@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   fixClientText,
   greetingFor,
+  HYPHEN_NAMES,
   isGreetingForm,
   leadingGreeting,
   moscowPartOfDay,
@@ -10,6 +11,7 @@ import {
 // Long and medium dashes are written by code, never typed (CI forbids the long one in files).
 const LONG = String.fromCharCode(0x2014)
 const MEDIUM = String.fromCharCode(0x2013)
+const ANY_DASH = new RegExp(`[${MEDIUM}${LONG}]`)
 const NBSP = ' '
 
 describe('fixClientText: the final period of a paragraph (FR-SPEECH-3, rule 4)', () => {
@@ -130,21 +132,48 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
     )
   })
 
-  it('NFR-UX-1: a hyphen in a Latin brand keeps', () => {
+  it('NFR-UX-1: a hyphen in a Latin-only brand word keeps', () => {
     expect(fixClientText('Подключим Wi-Fi и A-Store')).toBe('Подключим Wi-Fi и A-Store')
     expect(fixClientText('Нужен e-mail и T-Bank')).toBe('Нужен e-mail и T-Bank')
-    expect(fixClientText('Делаем Telegram-бот и SEO-продвижение')).toBe(
-      'Делаем Telegram-бот и SEO-продвижение',
-    )
+    expect(fixClientText('Смотрите B2B-SaaS и Web3-Wallet')).toBe('Смотрите B2B-SaaS и Web3-Wallet')
   })
 
-  it('NFR-UX-1: a name with a colon, a digit or a number keeps', () => {
-    expect(fixClientText('Мы партнёры 1С:Франчайзи')).toBe('Мы партнёры 1С:Франчайзи')
-    expect(fixClientText('Работаем с 1С-Битрикс и B2B-сегментом')).toBe(
-      'Работаем с 1С-Битрикс и B2B-сегментом',
+  it('NFR-UX-1: a word of Latin and Cyrillic loses its hyphen like any common word (Boris writes «B2B компании»)', () => {
+    expect(fixClientText('Делаем Telegram-бот и SEO-продвижение')).toBe(
+      'Делаем Telegram бот и SEO продвижение',
     )
+    expect(fixClientText('Работаем с B2B-сегментом и CRM-системой')).toBe(
+      'Работаем с B2B сегментом и CRM системой',
+    )
+    expect(fixClientText('Нужен Instagram-аккаунт, SMM-стратегия и iPhone-чехол')).toBe(
+      'Нужен Instagram аккаунт, SMM стратегия и iPhone чехол',
+    )
+    expect(fixClientText('Бот-Telegram и Яндекс-Direct')).toBe('Бот Telegram и Яндекс Direct')
+  })
+
+  it('NFR-UX-1: a name of the list keeps its hyphen, in any case form', () => {
+    expect(fixClientText('Мы партнёры 1С:Франчайзи и работаем с 1С-Битрикс')).toBe(
+      'Мы партнёры 1С:Франчайзи и работаем с 1С-Битрикс',
+    )
+    expect(fixClientText('Офис в санкт-петербурге, клиент из ростова-на-дону')).toBe(
+      'Офис в санкт-петербурге, клиент из ростова-на-дону',
+    )
+    expect(fixClientText('Из Нью-Йорка и в Нью-Йорке')).toBe('Из Нью-Йорка и в Нью-Йорке')
+  })
+
+  it('NFR-UX-1: the list of names is one exported constant of whole names', () => {
+    for (const name of ['Санкт-Петербург', 'Ростов-на-Дону', 'Нью-Йорк', 'Wi-Fi', '1С:Франчайзи'])
+      expect(HYPHEN_NAMES, name).toContain(name)
+    for (const name of HYPHEN_NAMES)
+      expect(fixClientText(`У нас ${name} есть`), name).toContain(name)
+  })
+
+  it('NFR-UX-1: numbers keep their hyphens: ranges are not rewritten, dates and a number with an ending stay', () => {
     expect(fixClientText('Через 2-3 недели, скидка 10-15%, 5-летний опыт, 2-й этап')).toBe(
       'Через 2-3 недели, скидка 10-15%, 5-летний опыт, 2-й этап',
+    )
+    expect(fixClientText('Встреча 26-10-2026, с 9:00-18:00, на 100-200 человек')).toBe(
+      'Встреча 26-10-2026, с 9:00-18:00, на 100-200 человек',
     )
   })
 
@@ -177,7 +206,7 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
 
   it('NFR-UX-1: the fixed text holds no long or medium dash at all', () => {
     const out = fixClientText(`А ${LONG} б ${MEDIUM} в, г${LONG}д, 1${MEDIUM}2, ${LONG}е`)
-    expect(out).not.toMatch(/[–—]/)
+    expect(out).not.toMatch(ANY_DASH)
   })
 })
 

@@ -112,15 +112,58 @@ const NAME_LINKS = new Set([
 ])
 
 /**
- * Whether the hyphens of a word stay (rule 3). They stay in names and brands: a word with a Latin letter («Wi-Fi»,
- * «A-Store», «SEO-продвижение»), with a digit («2-3», «10-15%», phone numbers, «B2B-сегмент», «1С-Битрикс»), or one
- * whose parts are all capitalized («Санкт-Петербург», «Анна-Мария») or capitalized with a link word in lower case
- * («Ростов-на-Дону»). In «что-то», «все-таки», «по-русски», «Что-то» (a capital at the start of a sentence) the
- * hyphen goes. When in doubt a hyphen stays: a hurt name costs more than a hyphen kept.
+ * The names and brands whose hyphen is theirs (rule 3), written whole and in the nominative; a case form («Нью-Йорка»)
+ * and a lower-case spelling match as well. Add a name here when Boris says its hyphen must stay and nothing below
+ * (a Latin-only word, a number, parts that are all capitalized) already keeps it. A name with no hyphen («1С:Франчайзи»)
+ * is here so the list is the one place to look.
+ */
+export const HYPHEN_NAMES: readonly string[] = [
+  'Санкт-Петербург',
+  'Ростов-на-Дону',
+  'Нью-Йорк',
+  'Комсомольск-на-Амуре',
+  'Орехово-Зуево',
+  'Йошкар-Ола',
+  'Улан-Удэ',
+  'Ханты-Мансийск',
+  'Wi-Fi',
+  '1С-Битрикс',
+  '1С:Франчайзи',
+]
+
+/** The longest ending a case form of a listed name may have in one of its parts («Ростова-на-Дону», «Нью-Йорком»). */
+const CASE_ENDING_MAX = 3
+const keepsListedName = (word: string): boolean => {
+  const parts = word.toLowerCase().split('-')
+  return HYPHEN_NAMES.some((name) => {
+    const own = name.toLowerCase().split('-')
+    return (
+      own.length === parts.length &&
+      own.every((o, i) => {
+        const p = parts[i] ?? ''
+        return p.startsWith(o) && p.length - o.length <= CASE_ENDING_MAX
+      })
+    )
+  })
+}
+
+/**
+ * Whether the hyphens of a word stay (rule 3). Boris writes «B2B компании», «Telegram бот», «SEO продвижение»: a hyphen
+ * stays only in
+ * - a number: a phone number, a date, a range («2-3», «10-15%») and a number with its ending («5-летний», «2-й»);
+ * - a word that is Latin all through («Wi-Fi», «e-mail», «A-Store», «B2B-SaaS»);
+ * - a name of `HYPHEN_NAMES`, and a Cyrillic proper name whose parts are all capitalized («Анна-Мария») or capitalized
+ *   with a link word in lower case («Ростов-на-Дону»).
+ * In «что-то», «все-таки», «по-русски», «Что-то» (a capital at the start of a sentence), «SEO-продвижение» and
+ * «B2B-сегмент» the hyphen goes. When in doubt about a name, its hyphen stays: a hurt name costs more.
  */
 function keepsHyphens(word: string): boolean {
-  if (/[\d]|[A-Za-z]/.test(word)) return true
   const parts = word.split('-')
+  if (parts.some((p) => /^\d+%?$/.test(p))) return true
+  if (parts.every((p) => /^[A-Za-z0-9]+$/.test(p) && /[A-Za-z]/.test(p))) return true
+  if (keepsListedName(word)) return true
+  // Latin and Cyrillic in one word is never a proper name of ours: «Telegram-бот», «SEO-продвижение», «Бот-Telegram».
+  if (/[A-Za-z]/.test(word)) return false
   const capital = (p: string) => /^\p{Lu}/u.test(p)
   if (parts.every(capital)) return true
   const [head, ...rest] = parts
