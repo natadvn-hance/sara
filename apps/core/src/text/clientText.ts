@@ -285,6 +285,12 @@ export type VoiceInput = {
   /** Our earlier messages of this conversation, for the repeat of a phrase. */
   ourPrevious: string[]
   name: string | null
+  /** The client's last turn: read for an official «Вы» and for words of an upset client (rule 8). */
+  clientTurn?: string
+  /** The client writes officially («Вы» with a capital); the caller may say so when it knows better than the turn. */
+  clientOfficial?: boolean
+  /** The client is upset or anxious (disappointment, worry: no Tone for these); the caller may set it. */
+  clientUpset?: boolean
 }
 
 const B = String.raw`(?<!\p{L})`
@@ -418,13 +424,44 @@ function questionsIssue(text: string): VoiceIssue | null {
 }
 
 const ALLOWED_EMOJI = new Set(['🤝', '🙏', '😊', '👍'])
-/** Tones in which a smile is out of place (the Tone list has no «formal»): the client is tense or in a hurry. */
+/**
+ * Tones in which a smile is out of place: irritation, rudeness and a hurry («коротко и по делу, без шуток»). A doubting
+ * or a bargaining client may be answered with 😊 or 🙏 (Boris's examples), so those tones are not here. An official
+ * client and an upset one are not tones, they are read from the client's turn (`isOfficialClient`, `isUpsetClient`).
+ */
 const SERIOUS_TONES: Partial<Record<Tone, string>> = {
   irritation: 'раздражение',
   rudeness: 'грубость',
   hurry: 'спешка',
-  doubt: 'сомнение',
-  bargaining: 'торг',
+}
+
+/** «Вы», «Вас», «Вам», «Вами», «Ваш...» with a capital. */
+const CAPITAL_YOU = /(?<!\p{L})В(?:ы|ас|ам|ами|аш\p{L}*)(?!\p{L})/gu
+/** What may stand between a sentence start and the word: spaces and opening quotes or brackets. */
+const BEFORE_WORD = /[ \t «"'([„]+$/u
+const SENTENCE_END = new RegExp(`[.!?\\u2026\\n${DASH}]$`, 'u')
+
+/**
+ * Whether the client writes officially: «Вы» (or «Вас», «Вам», «Ваш...») with a capital in the middle of a
+ * sentence, «сколько у Вас стоит». A capital at the start of a sentence is only the start of a sentence.
+ */
+export function isOfficialClient(clientTurn: string): boolean {
+  for (const m of clientTurn.matchAll(CAPITAL_YOU)) {
+    const before = clientTurn.slice(0, m.index).replace(BEFORE_WORD, '')
+    if (before !== '' && !SENTENCE_END.test(before)) return true
+  }
+  return false
+}
+
+/** «Расстроен», «разочарован», «волнуюсь», «переживаю», «тревожно» and their forms of a person speaking of himself. */
+const UPSET = new RegExp(
+  `${B}(?:расстро(?:ен|ена|ены|ился|илась|ились)|разочаров(?:ан|ана|аны|ался|алась|ались)|волну(?:юсь|емся)|переживаю|переживаем|тревожно|тревожусь|тревожимся)${E}`,
+  'u',
+)
+
+/** Whether the client's turn says he is upset or anxious: no smile then (rule 8). */
+export function isUpsetClient(clientTurn: string): boolean {
+  return UPSET.test(fold(clientTurn))
 }
 // The glue of an emoji sequence: the variation selector 16, the zero width joiner, the skin tones. Built from
 // character codes: written as a plain class, a joiner in a class is a lint error and a trap for the reader.
@@ -467,6 +504,10 @@ function emojiIssue(i: VoiceInput): VoiceIssue | null {
   if (emoji.length > 0 || smiles > 0) {
     if (i.badNews) reasons.push('смайл или эмодзи при плохой новости')
     if (serious) reasons.push(`смайл или эмодзи при тоне клиента «${serious}»`)
+    if (i.clientOfficial || (i.clientTurn && isOfficialClient(i.clientTurn)))
+      reasons.push('смайл или эмодзи официальному клиенту: он пишет «Вы» с большой буквы')
+    if (i.clientUpset || (i.clientTurn && isUpsetClient(i.clientTurn)))
+      reasons.push('смайл или эмодзи расстроенному или встревоженному клиенту')
   }
   if (reasons.length === 0) {
     if (smiles > 2) reasons.push(`скобок-смайлов ${smiles}, а можно не больше двух`)

@@ -5,7 +5,9 @@ import {
   greetingFor,
   isBotQuestion,
   isGreetingForm,
+  isOfficialClient,
   isShortReply,
+  isUpsetClient,
   leadingGreeting,
   moscowPartOfDay,
   startsWithName,
@@ -564,17 +566,86 @@ describe('voiceIssues: voice.emoji_tone (rule 8)', () => {
       expect(voiceIds({ text: `Анна, отлично ${e}` }), e).toContain('voice.emoji_tone')
   })
 
-  it('FR-SPEECH-3: no emoji and no bracket in a tense talk', () => {
-    for (const tone of ['irritation', 'rudeness', 'hurry', 'doubt', 'bargaining'] as Tone[]) {
+  it('FR-SPEECH-3: no emoji and no bracket with irritation, rudeness or a hurry', () => {
+    for (const tone of ['irritation', 'rudeness', 'hurry'] as Tone[]) {
       expect(voiceIds({ text: 'Анна, понимаю 🙏', tone }), tone).toContain('voice.emoji_tone')
       expect(voiceIds({ text: 'Анна, понимаю)', tone }), tone).toContain('voice.emoji_tone')
       expect(voiceIds({ text: 'Анна, понимаю', tone }), tone).not.toContain('voice.emoji_tone')
     }
   })
 
+  it("FR-SPEECH-3: a doubting or a bargaining client may be answered with the four emoji (Boris's examples)", () => {
+    expect(
+      voiceIds({ text: 'Анна, полчаса, без обязательств 😊', tone: 'doubt' }),
+      'doubt',
+    ).not.toContain('voice.emoji_tone')
+    expect(
+      voiceIds({ text: 'Анна, спасибо за честный ответ 🙏', tone: 'bargaining' }),
+      'bargaining',
+    ).not.toContain('voice.emoji_tone')
+    expect(voiceIds({ text: 'Анна, понимаю)', tone: 'doubt' }), 'doubt').not.toContain(
+      'voice.emoji_tone',
+    )
+    // The other limits stay: a strange emoji is an issue in any tone.
+    expect(voiceIds({ text: 'Анна, понимаю 🔥', tone: 'doubt' })).toContain('voice.emoji_tone')
+    expect(voiceIds({ text: 'Анна, понимаю)))', tone: 'bargaining' })).toContain('voice.emoji_tone')
+  })
+
   it('FR-SPEECH-3: a friendly or ordinary tone and an unknown tone allow the four emoji', () => {
     for (const tone of ['neutral', 'joke', 'compliment', null] as (Tone | null)[])
       expect(voiceIds({ text: 'Анна, договорились 🤝', tone }), String(tone)).toEqual([])
+  })
+
+  it('FR-SPEECH-3: no emoji and no bracket for an official client who writes «Вы» with a capital', () => {
+    const official = 'Подскажите, пожалуйста, сколько у Вас стоит сайт?'
+    expect(voiceIds({ text: 'Анна, договорились 🤝', clientTurn: official })).toContain(
+      'voice.emoji_tone',
+    )
+    expect(voiceIds({ text: 'Анна, договорились)', clientTurn: official })).toContain(
+      'voice.emoji_tone',
+    )
+    expect(voiceIds({ text: 'Анна, договорились', clientTurn: official })).toEqual([])
+    // «вы» in lower case, or «Вы» that opens a sentence, is no sign of it.
+    expect(
+      voiceIds({
+        text: 'Анна, договорились 🤝',
+        clientTurn: 'Подскажите, сколько у вас стоит сайт? Вы делаете магазины?',
+      }),
+    ).toEqual([])
+    // The caller may say it outright.
+    expect(voiceIds({ text: 'Анна, договорились 🤝', clientOfficial: true })).toContain(
+      'voice.emoji_tone',
+    )
+  })
+
+  it('FR-SPEECH-3: no emoji and no bracket for an upset or anxious client', () => {
+    for (const clientTurn of [
+      'Я расстроена, что так вышло',
+      'Честно, разочарован результатом',
+      'Волнуюсь за сроки',
+      'Переживаю, что не успеем к открытию',
+      'Мне тревожно от этой тишины',
+    ]) {
+      expect(voiceIds({ text: 'Анна, понимаю 🙏', clientTurn }), clientTurn).toContain(
+        'voice.emoji_tone',
+      )
+      expect(voiceIds({ text: 'Анна, понимаю)', clientTurn }), clientTurn).toContain(
+        'voice.emoji_tone',
+      )
+      expect(voiceIds({ text: 'Анна, понимаю', clientTurn }), clientTurn).toEqual([])
+    }
+    // The caller may set the flag when the detector cannot know.
+    expect(voiceIds({ text: 'Анна, понимаю 🙏', clientUpset: true })).toContain('voice.emoji_tone')
+    expect(voiceIds({ text: 'Анна, понимаю 🙏', clientTurn: 'Сколько стоит сайт?' })).toEqual([])
+  })
+
+  it('FR-SPEECH-3: the detail says why the smile is out of place', () => {
+    const detail = (over: Partial<VoiceInput>) =>
+      voice({ text: 'Анна, понимаю 🙏', ...over }).find((i) => i.id === 'voice.emoji_tone')?.detail
+    expect(detail({ clientOfficial: true })).toMatch(/Вы/)
+    expect(detail({ clientUpset: true })).toMatch(/расстроен|встревожен/)
+    expect(detail({ tone: 'hurry' })).toMatch(/спешка/)
+    expect(detail({ badNews: true })).toMatch(/плохой новости/)
   })
 
   it('FR-SPEECH-3: no emoji and no bracket with bad news, in any tone', () => {
@@ -587,6 +658,64 @@ describe('voiceIssues: voice.emoji_tone (rule 8)', () => {
     expect(
       voiceIds({ text: 'Анна, к сожалению, не успеем', badNews: true, tone: 'joke' }),
     ).not.toContain('voice.emoji_tone')
+  })
+})
+
+describe("isOfficialClient and isUpsetClient: the client's turn (FR-SPEECH-3, rule 8)", () => {
+  it('FR-SPEECH-3: «Вы» with a capital in the middle of a sentence is an official client', () => {
+    for (const text of [
+      'Подскажите, пожалуйста, сколько у Вас стоит сайт?',
+      'Скажите, Вы бот?',
+      'Сколько стоит, если Вы делаете под ключ?',
+      'Пришлите, пожалуйста, Ваш номер',
+      'Спасибо за Вашу помощь',
+      'Добрый день! Мы хотим заказать у Вас сайт',
+      'Вопрос: Вы работаете по договору?',
+      'Мы свяжемся с Вами завтра',
+    ])
+      expect(isOfficialClient(text), text).toBe(true)
+  })
+
+  it('FR-SPEECH-3: «вы» in lower case, «Вы» that opens a sentence, or no «вы» is not', () => {
+    for (const text of [
+      'Подскажите, сколько у вас стоит сайт?',
+      'Вы делаете сайты?',
+      'Добрый день. Вы делаете сайты?',
+      'Здравствуйте!\nВы делаете сайты?',
+      '«Вы делаете сайты?»',
+      'Вас устроит четверг?',
+      'Сколько стоит сайт?',
+      'Отдельно Вычислить цену',
+      '',
+    ])
+      expect(isOfficialClient(text), text).toBe(false)
+  })
+
+  it('FR-SPEECH-3: «расстроен», «разочарован», «волнуюсь», «переживаю», «тревожно» tell an upset client', () => {
+    for (const text of [
+      'Я расстроен',
+      'Мы очень расстроены, что так вышло',
+      'Разочарована результатом',
+      'Разочарованы',
+      'Волнуюсь за сроки',
+      'Мы волнуемся',
+      'Переживаю, что не успеем',
+      'Тревожно как-то',
+      'мне тревожно',
+    ])
+      expect(isUpsetClient(text), text).toBe(true)
+  })
+
+  it('FR-SPEECH-3: other words, a request not to worry and an empty turn are not', () => {
+    for (const text of [
+      'Не волнуйтесь, мы справимся',
+      'Не хочу вас расстраивать',
+      'Переживать не стоит',
+      'Сколько стоит сайт?',
+      'Спасибо, всё понятно',
+      '',
+    ])
+      expect(isUpsetClient(text), text).toBe(false)
   })
 })
 
