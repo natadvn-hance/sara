@@ -147,7 +147,7 @@ describe('M4 contracts', () => {
     for (const id of ['case.ad', 'case.link']) expect(CHECK_SEVERITY[id as 'case.ad']).toBe('S3')
   })
 
-  it('FR-SPEECH-3: the voice checks of Boris\'s decisions of 26.10 have their severities', () => {
+  it("FR-SPEECH-3: the voice checks of Boris's decisions of 26.10 have their severities", () => {
     expect(CHECK_SEVERITY['voice.promise_action']).toBe('S1')
     expect(CHECK_SEVERITY['voice.feminine']).toBe('S2')
     for (const id of [
