@@ -611,7 +611,7 @@ describe('a reminder in drafts mode', () => {
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
     await until(done(4))
-    expect(await outcomes()).toEqual(['1=expired', '2=expired', '3=carded', 'dormant=dormant'])
+    expect(await outcomes()).toEqual(['1=expired', '2=expired', '3=expired', 'dormant=dormant'])
     expect(buttons.map((b) => b.rows.flat().map((x) => x.text))).toEqual([
       ['Отправить', 'Изменить', 'Не надо'],
       ['Отправить', 'Изменить', 'Не надо'],
@@ -619,12 +619,13 @@ describe('a reminder in drafts mode', () => {
       ['Закрыть'],
     ])
     expect(buttons[2]?.text).toContain('Третье напоминание, последнее')
-    expect(buttons[3]?.text).toMatch(/молчит после трёх напоминаний/)
+    // Boris pressed nothing, so no reminder went: the task says it plainly.
+    expect(buttons[3]?.text).toContain('напоминания ему не уходили')
     expect(sends).toHaveLength(0)
     expect(await messageOutbox()).toHaveLength(0)
-    // Only the last card still waits for Boris.
+    // Nothing waits for Boris but the silence task: no «third» reminder after «Больше напоминать не буду».
     const open = (await db.select().from(task)).filter((t) => t.state === 'open')
-    expect(open.map((t) => t.kind).sort()).toEqual(['conv_dormant', 'conv_draft'])
+    expect(open.map((t) => t.kind)).toEqual(['conv_dormant'])
   })
 
   it('FR-CONV-12: the client answering closes the card that waits for Boris', async () => {
@@ -674,7 +675,10 @@ describe('the silence task', () => {
     bookedFails = 4
     await startReminder(conv.id, 'm-1')
     await until(async () => (await taskCount()) === 1)
-    await until(async () => (await stage()) === 'dormant')
+    // The three reminders were held back too, so nothing went to him: his silence says nothing about the deal.
+    expect(await outcomes()).toEqual(['1=skipped', '2=skipped', '3=skipped', 'dormant=dormant'])
+    expect(buttons[0]?.text).toContain('напоминания ему не уходили')
+    expect(await stage()).toBe('bid_sent')
   })
 
   it('FR-CONV-12: an unreadable chat does not stop the task, it goes to Boris and not to the client', async () => {
@@ -704,7 +708,9 @@ describe('the silence task', () => {
     expect(await stage()).toBe('bid_sent')
     await db.update(convTurn).set({ state: 'finished' }).where(eq(convTurn.id, turnId))
     await until(async () => (await taskCount()) === 1)
-    await until(async () => (await stage()) === 'dormant')
+    // The reminders were held back by the turn too: no reminder went, so the deal stays where it was.
+    expect(buttons[0]?.text).toContain('напоминания ему не уходили')
+    expect(await stage()).toBe('bid_sent')
   })
 
   it('FR-CONV-12: after a day of tries without success the silence step is skipped and the deal stays', async () => {

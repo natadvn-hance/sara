@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { onConvPress, onConvReply } from '../../src/conversation/commands'
 import {
   checkGround,
+  dormantStep,
   isLadderMessage,
   ladderTexts,
   type Planned,
@@ -12,7 +13,7 @@ import {
 } from '../../src/conversation/reminderSteps'
 import { sendTextNow } from '../../src/conversation/sendJob'
 import type { SendOptions } from '../../src/conversation/sendTexts'
-import { convTurn, mindProposal, outbox, question, task } from '../../src/db/schema'
+import { convTurn, deal, mindProposal, outbox, question, task } from '../../src/db/schema'
 import { type ProfiClient, ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, fakeMind, stubProfi } from '../helpers/conversation'
@@ -422,6 +423,125 @@ describe('the ladder knows the reminders that went by Boris’s press', () => {
     expect(isLadderMessage({ ...m, author: 'boris', authorBasis: 'say' }, texts)).toBe(true)
     expect(isLadderMessage({ ...m, author: 'boris', authorBasis: 'after_cutover' }, texts)).toBe(
       false,
+    )
+  })
+})
+
+describe('the silence task', () => {
+  /** The ladder as it stood on the ninth day: one row a step, with the outcomes given, and a deal in the bid stage. */
+  async function ladder(
+    outcomes: Record<1 | 2 | 3, string>,
+    o: { clientName?: string | null } = {},
+  ) {
+    const at = new Date(Date.now() - 9 * 24 * HOUR).toISOString()
+    const conv = await seedChat(
+      db,
+      CHAT,
+      [{ id: 'm-1', side: 'specialist', text: 'Добрый день', at }],
+      { deal: true, ...(o.clientName === null && { clientName: null }) },
+    )
+    for (const step of [1, 2, 3] as const) {
+      const id = `conv-remind:${conv.id}:m-1:${step}`
+      await db.insert(convTurn).values({
+        id,
+        conversationId: conv.id,
+        kind: 'reminder',
+        anchorMessageId: 'm-1',
+        state: 'finished',
+        outcome: outcomes[step],
+        text: TEXT,
+        understanding: { step, tone: 'check_in' },
+      })
+      // The cards of steps that wait for Boris are open tasks.
+      if (outcomes[step] === 'carded') {
+        const taskId = newEventId()
+        await db.insert(task).values({
+          id: taskId,
+          kind: 'conv_draft',
+          entityKind: 'conv_turn',
+          entityId: id,
+          telegramMessageId: 700 + step,
+        })
+        await db.update(convTurn).set({ taskId }).where(eq(convTurn.id, id))
+      }
+    }
+    // The row of the silence step, as the process makes it when it wakes.
+    const rowId = `conv-remind:${conv.id}:m-1:dormant`
+    await db.insert(convTurn).values({
+      id: rowId,
+      conversationId: conv.id,
+      kind: 'reminder',
+      anchorMessageId: 'm-1',
+      state: 'waiting',
+      understanding: { step: 'dormant', tone: 'check_in' },
+    })
+    return { conv, rowId }
+  }
+  const stage = async () => (await db.select().from(deal))[0]?.stage
+
+  it('FR-CONV-12: the task counts the reminders that really went, not three by default', async () => {
+    const { conv, rowId } = await ladder({ 1: 'sent', 2: 'sent', 3: 'declined' })
+    await dormantStep(deps, rowId, conv.id, false)
+    expect(cards.at(-1)?.text).toContain('клиент молчит после двух напоминаний')
+    expect(cards.at(-1)?.text).not.toContain('трёх')
+    expect(actions(cards.at(-1))).toEqual(['close'])
+    expect(await stage()).toBe('dormant')
+  })
+
+  it('FR-CONV-12: three sent reminders read «после трёх напоминаний», one reads «после одного»', async () => {
+    const a = await ladder({ 1: 'sent', 2: 'sent', 3: 'sent' })
+    await dormantStep(deps, a.rowId, a.conv.id, false)
+    expect(cards.at(-1)?.text).toContain('клиент молчит после трёх напоминаний')
+    await resetDb(db)
+    const b = await ladder({ 1: 'sent', 2: 'declined', 3: 'expired' })
+    await dormantStep(deps, b.rowId, b.conv.id, false)
+    expect(cards.at(-1)?.text).toContain('клиент молчит после одного напоминания')
+  })
+
+  it('FR-CONV-12: when no reminder went (cards ignored, «Не надо», pauses) the task says so and the deal stays', async () => {
+    const { conv, rowId } = await ladder({ 1: 'declined', 2: 'skipped', 3: 'expired' })
+    await dormantStep(deps, rowId, conv.id, false)
+    const text = cards.at(-1)?.text ?? ''
+    expect(text).toContain('напоминания ему не уходили')
+    expect(text).not.toMatch(/после (одного|двух|трёх)/)
+    expect(actions(cards.at(-1))).toEqual(['close'])
+    expect(await stage()).toBe('bid_sent')
+    // The task is raised all the same: Boris may close the conversation.
+    expect((await db.select().from(task)).filter((t) => t.kind === 'conv_dormant')).toHaveLength(1)
+    expect(await row(rowId)).toMatchObject({ outcome: 'dormant' })
+  })
+
+  it('FR-CONV-12: the task closes the cards that still wait: there is no «third» reminder after «Больше напоминать не буду»', async () => {
+    const { conv, rowId } = await ladder({ 1: 'sent', 2: 'sent', 3: 'carded' })
+    const waiting = (await db.select().from(task)).find((t) => t.kind === 'conv_draft')
+    await dormantStep(deps, rowId, conv.id, false)
+    const [t] = await db
+      .select()
+      .from(task)
+      .where(eq(task.id, waiting?.id ?? ''))
+    expect(t).toMatchObject({ state: 'resolved', resolution: 'expired' })
+    expect(await row(`conv-remind:${conv.id}:m-1:3`)).toMatchObject({ outcome: 'expired' })
+    // A press on it later sends nothing.
+    await press(waiting?.id ?? '', 'send')
+    expect(sends).toHaveLength(0)
+    // A repeat of the step (a crash) neither adds a task nor a card.
+    await dormantStep(deps, rowId, conv.id, false)
+    expect((await db.select().from(task)).filter((x) => x.kind === 'conv_dormant')).toHaveLength(1)
+    expect(cards).toHaveLength(1)
+  })
+
+  it('FR-CONV-12: a client without a name in the order reads well: «Клиент молчит», not «Клиент: клиент молчит»', async () => {
+    const { conv, rowId } = await ladder({ 1: 'sent', 2: 'sent', 3: 'sent' }, { clientName: null })
+    await dormantStep(deps, rowId, conv.id, false)
+    const first = (cards.at(-1)?.text ?? '').split('\n')[0]
+    expect(first).toBe('😴 Клиент молчит после трёх напоминаний.')
+  })
+
+  it('FR-CONV-12: with a name and an order the first line names them', async () => {
+    const { conv, rowId } = await ladder({ 1: 'sent', 2: 'sent', 3: 'sent' })
+    await dormantStep(deps, rowId, conv.id, false)
+    expect((cards.at(-1)?.text ?? '').split('\n')[0]).toBe(
+      '😴 Анна, заказ «Сайт для клиники»: клиент молчит после трёх напоминаний.',
     )
   })
 })

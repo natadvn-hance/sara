@@ -67,6 +67,12 @@ const wouldRu = (v: CardView) => {
   return reason || 'прислала бы тебе черновик'
 }
 
+const REMINDERS_AFTER: Record<number, string> = {
+  1: 'одного напоминания',
+  2: 'двух напоминаний',
+  3: 'трёх напоминаний',
+}
+
 const REMINDER_STEP_RU = {
   1: 'Первое напоминание',
   2: 'Второе напоминание',
@@ -134,15 +140,29 @@ export const CONV_TEXTS = {
       `${/^Отправила/.test(text) ? '✅' : '⚠️'} ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: ${text}`,
     ),
 
-  /** The task for Boris when a client is silent three days after the third reminder (FR-CONV-12, M4 design 5.11). */
-  dormant: (name: string | null, orderTitle: string | null) =>
-    hyphenated(
+  /**
+   * The task for Boris when a client is silent three days after the last reminder (FR-CONV-12, M4 design 5.11);
+   * `sent` is how many reminders really went, which can be fewer than three (cards ignored, «Не надо», pauses).
+   */
+  dormant: (name: string | null, orderTitle: string | null, sent: number) => {
+    const order = orderTitle ? `заказ «${orderTitle}»` : null
+    const who = name
+      ? [name, order].filter(Boolean).join(', ')
+      : ['Клиент', order].filter(Boolean).join(', ')
+    const first =
+      sent > 0
+        ? `${name ? `${who}: клиент` : who} молчит после ${REMINDERS_AFTER[sent] ?? `${sent} напоминаний`}.`
+        : `${name ? `${who}: клиент` : who} молчит, а напоминания ему не уходили.`
+    return hyphenated(
       [
-        `😴 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: клиент молчит после трёх напоминаний.`,
-        'Ответа нет уже три дня после третьего. Больше напоминать не буду.',
+        `😴 ${first}`,
+        sent > 0
+          ? 'Ответа нет уже три дня после последнего. Больше напоминать не буду.'
+          : 'Больше напоминать не буду.',
         'Закрыть разговор?',
       ].join('\n'),
-    ),
+    )
+  },
 
   /**
    * The card of a reminder in drafts mode: nothing goes to the client until Boris presses «Отправить» (FR-CONV-12).

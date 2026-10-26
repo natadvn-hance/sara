@@ -36,7 +36,12 @@ export type ReminderPressDeps = {
 }
 
 /** The reminder rows of a conversation whose card still waits for Boris are no longer meant when a newer one comes. */
-async function expireOldCards(db: Db, conversationId: string, keepRowId: string): Promise<void> {
+export async function expireOldCards(
+  db: Db,
+  conversationId: string,
+  keepRowId: string,
+  why = 'пришло следующее напоминание',
+): Promise<void> {
   const open = await db
     .select({ id: task.id, rowId: task.entityId })
     .from(task)
@@ -52,7 +57,7 @@ async function expireOldCards(db: Db, conversationId: string, keepRowId: string)
     await closeCard(db, o.id, 'expired')
     await db
       .update(convTurn)
-      .set({ outcome: 'expired', decisionReason: 'пришло следующее напоминание' })
+      .set({ outcome: 'expired', decisionReason: why })
       .where(and(eq(convTurn.id, o.rowId), eq(convTurn.outcome, 'carded')))
   }
 }

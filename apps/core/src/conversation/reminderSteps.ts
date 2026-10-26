@@ -11,7 +11,7 @@ import { getSetting } from '../settings/store'
 import { clientTurnBefore, isRefusal, isThinking } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
-import { sendReminderCard } from './reminderCard'
+import { expireOldCards, sendReminderCard } from './reminderCard'
 import {
   nextReminder,
   type ReminderStep,
@@ -662,15 +662,16 @@ export async function sendStep(
   return deliver(d, rowId, conv, id, p)
 }
 
-/** The deal of a client silent after three reminders becomes dormant; a stage that cannot (a booked meeting) stays. */
-async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> {
-  if (!conv.dealId) return
+/** The deal of a client silent after the reminders becomes dormant; a stage that cannot (a booked meeting) stays. */
+async function dormantDeal(d: RemindDeps, conv: ConversationRow, sent: number): Promise<void> {
+  // Nothing went to him: his silence says nothing about the deal.
+  if (!conv.dealId || sent === 0) return
   try {
     await transition(d.db, {
       dealId: conv.dealId,
       to: 'dormant',
       actor: 'sara',
-      reason: SILENT_REASON,
+      reason: silentReason(sent),
       correlationId: conv.id,
     })
   } catch (e) {
@@ -679,7 +680,8 @@ async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> 
   }
 }
 
-const SILENT_REASON = 'клиент молчит после трёх напоминаний'
+const silentReason = (sent: number) =>
+  sent > 0 ? `клиент молчит после напоминаний: ${sent}` : 'клиент молчит, напоминания не уходили'
 
 /**
  * Three days after the third reminder the client is still silent. In shadow only the trace says so. After the switch
@@ -694,6 +696,19 @@ export async function dormantStep(
 ): Promise<{ asked: boolean }> {
   const conv = await getConversation(d.db, conversationId)
   if (!conv) return { asked: false }
+  // How many reminders of this ladder really went (the cards may have been ignored, declined or held by a pause).
+  const [went] = await d.db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(convTurn)
+    .where(
+      and(
+        eq(convTurn.conversationId, conv.id),
+        eq(convTurn.kind, 'reminder'),
+        eq(convTurn.outcome, 'sent'),
+        like(convTurn.id, `${rowId.slice(0, rowId.lastIndexOf(':'))}:%`),
+      ),
+    )
+  const sent = went?.n ?? 0
   // The step ends when its work is done, so a row that is finished has its task too.
   const settle = async () => {
     if (await endedWith(d, rowId, 'dormant')) return
@@ -701,7 +716,7 @@ export async function dormantStep(
       await finishRow(tx, rowId, {
         outcome: 'dormant',
         decision: shadow ? 'trace' : 'task',
-        decisionReason: shadow ? 'в тени задача Борису только в трассе' : SILENT_REASON,
+        decisionReason: shadow ? 'в тени задача Борису только в трассе' : silentReason(sent),
       })
       await journal(tx, 'conv.dormant', conv, rowId, { shadow })
     })
@@ -715,14 +730,15 @@ export async function dormantStep(
     .from(task)
     .where(and(eq(task.kind, 'conv_dormant'), eq(task.entityId, rowId)))
   if (have) {
-    await dormantDeal(d, conv)
+    await dormantDeal(d, conv, sent)
+    await expireOldCards(d.db, conv.id, rowId, 'больше напоминаний не будет')
     await settle()
     return { asked: true }
   }
   const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
   const taskId = newEventId()
   const m = await d.notifier.sendButtons(
-    CONV_TEXTS.dormant(l?.clientName || null, l?.title ?? null),
+    CONV_TEXTS.dormant(l?.clientName || null, l?.title ?? null, sent),
     [[{ text: CONV_TEXTS.buttons.close, callbackData: formatCallback(taskId, 'close') }]],
   )
   await d.db.transaction(async (tx) => {
@@ -752,7 +768,9 @@ export async function dormantStep(
     })
   })
   // The deal moves only with the task: a task that could not be sent leaves it where it is (a retry follows).
-  await dormantDeal(d, conv)
+  await dormantDeal(d, conv, sent)
+  // After «Больше напоминать не буду» no reminder card may go: the ones that still wait are closed.
+  await expireOldCards(d.db, conv.id, rowId, 'больше напоминаний не будет')
   await settle()
   return { asked: true }
 }
