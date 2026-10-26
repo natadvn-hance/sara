@@ -237,11 +237,40 @@ function removeDashes(text: string): string {
   return gone.replace(WORD_WITH_HYPHEN, withKeptHyphens)
 }
 
-/** The line without the period that closes it. «Хм..» and «Хм...» keep theirs, an emoji at the end stays. */
+/** Short words whose period is theirs («30 000 руб.», «2020 г.»): written without the dot, before the period. */
+const ABBREVIATIONS = new Set([
+  'руб',
+  'тыс',
+  'млн',
+  'г',
+  'гг',
+  'др',
+  'пр',
+  'ул',
+  'д',
+  'кв',
+  'см',
+  'рис',
+  'т.е',
+  'т.д',
+  'т.п',
+])
+/** A token of dotted letters, «т.д.», «т.п.», «e.g.»: its last period is its own. */
+const DOTTED = /(?:\p{L}{1,3}\.){2,}$/u
+/** Whether the text ends with an abbreviation, whose period closes the word and not the sentence. */
+function endsInAbbreviation(head: string): boolean {
+  const last = head.split(/\s/).pop() ?? ''
+  return DOTTED.test(last) || ABBREVIATIONS.has(last.slice(0, -1).toLowerCase())
+}
+
+/**
+ * The line without the period that closes it. «Хм..» and «Хм...» keep theirs, an emoji at the end stays, and so does
+ * the period of an abbreviation at the end («и т.д.», «30 000 руб.»).
+ */
 function dropFinalPeriod(line: string): string {
   const tail = EMOJI_TAIL.exec(line)?.[0] ?? ''
   const head = line.slice(0, line.length - tail.length)
-  if (!/(?<![.…])\.$/.test(head)) return line
+  if (!/(?<![.…])\.$/.test(head) || endsInAbbreviation(head)) return line
   const cut = head.slice(0, -1)
   return tail && !/^\s/.test(tail) ? `${cut} ${tail}` : `${cut}${tail}`
 }

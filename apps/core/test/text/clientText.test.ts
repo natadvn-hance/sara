@@ -33,9 +33,27 @@ describe('fixClientText: the final period of a paragraph (FR-SPEECH-3, rule 4)',
     expect(fixClientText('Смотрите на hance.ru.')).toBe('Смотрите на hance.ru')
   })
 
-  it('FR-SPEECH-3: an abbreviation keeps its inner dots, only the final period of the paragraph goes', () => {
-    expect(fixClientText('Нужны сайт, бот и т.д.')).toBe('Нужны сайт, бот и т.д')
+  it('FR-SPEECH-3: an abbreviation keeps its inner dots and its own final period, a sentence period after it goes', () => {
+    expect(fixClientText('Нужны сайт, бот и т.д.')).toBe('Нужны сайт, бот и т.д.')
+    expect(fixClientText('Нужны сайт, бот и т. д.')).toBe('Нужны сайт, бот и т. д.')
     expect(fixClientText('Работаем с ООО и т.д. Пишите.')).toBe('Работаем с ООО и т.д. Пишите')
+    expect(fixClientText('Нужны сайт, бот и т.п.\n\nЕщё')).toBe('Нужны сайт, бот и т.п.\n\nЕщё')
+    expect(fixClientText('Например, см. выше, т.е. сейчас')).toBe('Например, см. выше, т.е. сейчас')
+  })
+
+  it('FR-SPEECH-3: a short abbreviation at the end of a paragraph keeps its period', () => {
+    expect(fixClientText('Сайт обойдётся в 30 000 руб.')).toBe('Сайт обойдётся в 30 000 руб.')
+    expect(fixClientText('Бюджет до 5 млн.')).toBe('Бюджет до 5 млн.')
+    expect(fixClientText('Это 40 тыс.')).toBe('Это 40 тыс.')
+    expect(fixClientText('Офис: г. Краснодар, ул.')).toBe('Офис: г. Краснодар, ул.')
+    expect(fixClientText('С 2020 г.\n\nЕщё')).toBe('С 2020 г.\n\nЕщё')
+    expect(fixClientText('Площадь 40 кв.')).toBe('Площадь 40 кв.')
+  })
+
+  it('FR-SPEECH-3: a word that only looks like an abbreviation loses its period as any word does', () => {
+    expect(fixClientText('Это наш рисунок.')).toBe('Это наш рисунок')
+    expect(fixClientText('Мы работаем с гражданами.')).toBe('Мы работаем с гражданами')
+    expect(fixClientText('Сделаем быстро.')).toBe('Сделаем быстро')
   })
 
   it('FR-SPEECH-3: a single line break is a line break, and a period at the end of a line goes as well', () => {
