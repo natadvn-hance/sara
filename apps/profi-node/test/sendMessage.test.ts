@@ -5,7 +5,7 @@ import type { SendMessageInput } from '@sara/shared'
 import { signMessagePermit } from '@sara/shared/permit'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { createSendTools } from '../src/chat/sendTools'
+import { createSendTools, typingChunks } from '../src/chat/sendTools'
 import { messageAttempt, rawEvent, rawMessage } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { type Insurance, startInsurance } from '../src/eyes/insurance'
@@ -455,6 +455,90 @@ describe('profi.send_message on the chat page (M4)', () => {
     expect(await db.select().from(rawMessage)).toHaveLength(0)
   }, 60000)
 
+  it('FR-CONV-2: no message on the page although the core saw some is LAYOUT_CHANGED, not CHAT_CHANGED', async () => {
+    c1().messages = []
+    expect(await failure(tools({ boxMs: 500 }).sendMessage(msg(REPLY)))).toBe('LAYOUT_CHANGED')
+    expect(site.presses).toEqual([])
+  }, 60000)
+
+  it('FR-CONV-2: a bubble of an unknown side anywhere in the chat is LAYOUT_CHANGED', async () => {
+    c1().messages.push({ id: '103', side: 'unknown', text: 'Что-то новое' })
+    expect(await failure(tools().sendMessage(msg(REPLY, { expect_last_message_id: '103' })))).toBe(
+      'LAYOUT_CHANGED',
+    )
+    expect(site.presses).toEqual([])
+  }, 60000)
+
+  it('FR-CONV-2: bubbles that show no words at all (the text element moved) are LAYOUT_CHANGED', async () => {
+    const c8 = /\/backoffice\/r\.php\?id=c8$/
+    await ab.page.route(c8, (route) =>
+      route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: '<!doctype html><title>Чат</title><div data-message-content-id="7" class="cw_iCsdtF"><div>слова</div></div><div><div><div><textarea placeholder="Сообщение"></textarea><button>ok</button></div></div></div>',
+      }),
+    )
+    try {
+      expect(
+        await failure(
+          tools().sendMessage(msg(REPLY, { chat_id: 'c8', expect_last_message_id: '7' })),
+        ),
+      ).toBe('LAYOUT_CHANGED')
+    } finally {
+      await ab.page.unroute(c8)
+    }
+  }, 60000)
+
+  it('FR-CONV-6: a chat the core thinks empty is given time to draw its bubbles before it counts as empty', async () => {
+    // The field is there at once, the messages a little later (the page was still being drawn).
+    site.chats.set('c1', {
+      messages: [],
+      laterBubble: { id: '201', text: 'Здравствуйте!', afterMs: 3200 },
+    })
+    expect(
+      await failure(
+        tools({ emptyMs: 6000 }).sendMessage(msg(REPLY, { expect_last_message_id: null })),
+      ),
+    ).toBe('CHAT_CHANGED')
+    expect(site.presses).toEqual([])
+  }, 60000)
+
+  it('FR-CONV-9: a button that does not change with the text (no microphone to send switch) is not pressed', async () => {
+    c1().staticButton = true
+    expect(await failure(tools().sendMessage(msg(REPLY)))).toBe('LAYOUT_CHANGED')
+    expect(site.presses).toEqual([])
+    expect(fieldAtEnd).toBe('')
+    expect(await attempts()).toHaveLength(0)
+  }, 60000)
+
+  it('NFR-REL-4: when the answer cannot be saved after the bubble was found, the message is still reported as sent', async () => {
+    const broken = new Proxy(db, {
+      get(target, prop) {
+        if (prop === 'update')
+          return () => {
+            throw new Error('database went away')
+          }
+        const v = Reflect.get(target, prop)
+        return typeof v === 'function' ? v.bind(target) : v
+      },
+    })
+    const input = msg(REPLY)
+    const out = await tools({ db: broken }).sendMessage(input)
+    expect(out).toEqual({ found_on_page: true, platform_message_id: 'new-1' })
+    expect(site.presses).toHaveLength(1)
+    const [row] = await attempts()
+    expect(row?.result).toBeNull()
+    // The repeat looks at the chat, finds the same message, and types nothing.
+    expect(await tools().sendMessage(input)).toEqual(out)
+    expect(site.presses).toHaveLength(1)
+  }, 60000)
+
+  it('FR-CONV-9: a text with emoji goes in whole, whichever place the cut between two keys would fall on', async () => {
+    const text = '123456789😀abcdefgh😀😀 ok'
+    const out = await tools().sendMessage(msg(text))
+    expect(out.platform_message_id).toBe('new-1')
+    expect(site.presses).toEqual([{ chat: 'c1', how: 'works', text }])
+  }, 60000)
+
   it('FR-CONV-9: a chat that shows neither bubbles nor a field is NOT_FOUND', async () => {
     expect(
       await failure(tools({ boxMs: 600 }).sendMessage(msg(REPLY, { chat_id: 'nobody' }))),
@@ -588,6 +672,15 @@ describe('profi.send_message on the chat page (M4)', () => {
     const all = JSON.stringify(maps[0])
     for (const secret of [REPLY, OURS, CLIENTS]) expect(all).not.toContain(secret)
   }, 60000)
+})
+
+describe('typing in pieces', () => {
+  it('FR-CONV-9: a line is cut into pieces by whole characters, an emoji is never split', () => {
+    expect(typingChunks('123456789😀abc')).toEqual(['123456789😀', 'abc'])
+    expect(typingChunks('😀😀😀😀😀😀😀😀😀😀😀', 10)).toEqual(['😀'.repeat(10), '😀'])
+    expect(typingChunks('')).toEqual([])
+    expect(typingChunks('Ирина, добрый день!').join('')).toBe('Ирина, добрый день!')
+  })
 })
 
 describe('a key that was pressed is never refused as a plain failure', () => {

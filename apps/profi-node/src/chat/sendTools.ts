@@ -57,6 +57,14 @@ function leaksProtocol(text: string): boolean {
   }
 }
 
+/** A line in pieces of `size` characters for typing, cut by whole characters: an emoji is never split in two keys. */
+export function typingChunks(line: string, size = 10): string[] {
+  const letters = Array.from(line)
+  const out: string[] = []
+  for (let at = 0; at < letters.length; at += size) out.push(letters.slice(at, at + size).join(''))
+  return out
+}
+
 /**
  * profi.send_message on the site itself (FR-CONV-9, NFR-REL-4, M4). The chat is opened the way old Sara opened it
  * (r.php?id=<chat>), read twice until it holds still, and compared with what the core saw (CHAT_CHANGED). Then the
@@ -83,6 +91,8 @@ export function createSendTools(o: {
   pressBudgetMs?: number
   /** How long a freshly opened chat may take to show its first bubble or its field. */
   boxMs?: number
+  /** How long a chat the core thinks empty is given to draw its bubbles before it counts as empty. */
+  emptyMs?: number
   /** The pause between the two readings that must agree, and between two looks after the press. */
   stableMs?: number
   /** After the new bubble is first seen: how long it must still be there, under the same number, to count. */
@@ -95,6 +105,7 @@ export function createSendTools(o: {
   // 4 minutes of the core's wait, less the look after the press and half a minute.
   const pressBudgetMs = o.pressBudgetMs ?? 240_000 - confirmMs - 30_000
   const boxMs = o.boxMs ?? 15_000
+  const emptyMs = o.emptyMs ?? 5000
   const stableMs = o.stableMs ?? 1000
   const settleMs = o.settleMs ?? 1500
   const pollMs = o.pollMs ?? 500
@@ -172,8 +183,9 @@ export function createSendTools(o: {
     chatId: string,
     empty: boolean,
   ): Promise<Read> {
-    // A chat the core thinks is empty has no bubble to wait for.
-    const waitMs = empty ? 1500 : undefined
+    // A chat the core thinks empty may still be drawing: the field comes before the bubbles. It is waited for longer,
+    // as its emptiness decides whether anything is typed.
+    const waitMs = empty ? emptyMs : boxMs
     for (let attempt = 0; attempt < 3; attempt++) {
       const first = messagesOf(await o.parsers.fromChatDom(page, chatId, { waitMs }))
       await sleep(stableMs)
@@ -216,12 +228,11 @@ export function createSendTools(o: {
     for (const [n, line] of lines.entries()) {
       // A line break goes in as inserted text: an Enter key might send the half-written message.
       if (n > 0) await page.keyboard.insertText('\n')
-      const letters = Array.from(line)
-      for (let at = 0; at < letters.length; at += 10) {
+      for (const piece of typingChunks(line)) {
         // Between two pieces: the core may have hung up, the press deadline may have passed, the tab may be gone.
         const halt = stop()
         if (halt) throw halt
-        await field.pressSequentially(letters.slice(at, at + 10).join(''), {
+        await field.pressSequentially(piece, {
           delay: Math.min(Math.round(between(typing.charMs)), cap),
         })
       }
@@ -266,7 +277,9 @@ export function createSendTools(o: {
 
   async function keepResult(i: SendMessageInput, id: string): Promise<SendMessageOutput> {
     const out = { found_on_page: true, platform_message_id: id }
-    await saveMessageResult(o.db, i.idempotency_key, out)
+    // The message is in the chat: a database that fails now must not turn it into a failure. The press stays written
+    // without an answer, and a repeat of the key finds the same bubble.
+    await saveMessageResult(o.db, i.idempotency_key, out).catch(() => {})
     return out
   }
 
@@ -279,16 +292,27 @@ export function createSendTools(o: {
   ): Promise<SendMessageOutput> {
     const page = await openChat(r, t, i.chat_id)
     const read = await readStable(r, page, i.chat_id, i.expect_last_message_id === null)
-    const last = read.messages.at(-1)?.id ?? null
+    // What the reading cannot be trusted for is the page's change, not the chat's: no bubble where the core saw some,
+    // a side the node does not know, or bubbles without any words (the place of the text has moved).
+    const bubbles = read.messages
+    if (bubbles.length === 0 && i.expect_last_message_id !== null)
+      throw fail(
+        'LAYOUT_CHANGED',
+        `В чате ${i.chat_id} не нашлось ни одного сообщения, а ядро видело ${i.expect_last_message_id}: страница читается не так, сообщение не набрано`,
+      )
+    if (bubbles.some((m) => m.author === 'unknown'))
+      throw fail(
+        'LAYOUT_CHANGED',
+        'В чате есть сообщение неизвестной стороны, сообщение не набрано',
+      )
+    if (bubbles.length > 0 && bubbles.every((m) => m.text.trim() === ''))
+      throw fail('LAYOUT_CHANGED', 'Сообщения чата прочитались без слов, сообщение не набрано')
+    const last = bubbles.at(-1)?.id ?? null
     if (last !== i.expect_last_message_id)
       throw fail(
         'CHAT_CHANGED',
         `В чате ${i.chat_id} последнее сообщение ${last ?? 'пусто'}, а ядро видело ${i.expect_last_message_id ?? 'пусто'}: ничего не набрано`,
       )
-    // Our own bubble could not be told from the client's: the message could not be found afterwards either.
-    if (read.messages.length > 0 && read.messages.every((m) => m.author === 'unknown'))
-      throw fail('LAYOUT_CHANGED', 'Не узнаю, где в чате чьи сообщения, сообщение не набрано')
-
     const field = page.locator(CHAT_INPUT).filter({ visible: true })
     const fields = await field.count()
     if (fields !== 1)
@@ -329,6 +353,20 @@ export function createSendTools(o: {
       await field.click({ timeout: 5000 })
       await sleep(between(typing.lookMs))
       if ((await field.inputValue()) !== '') await clearDraft(field)
+      // The button before the words: a microphone while the field is empty (old Sara). It must change with the text.
+      const button = field.locator(CHAT_SEND_PATH)
+      const buttonNow = async () => {
+        const n = await button.count()
+        if (n !== 1)
+          throw fail(
+            'LAYOUT_CHANGED',
+            n === 0
+              ? 'Кнопки отправки у поля ввода нет, сообщение не отправлено'
+              : 'Кнопок отправки несколько, сообщение не отправлено',
+          )
+        return button.evaluate((el) => el.outerHTML)
+      }
+      const emptyButton = await buttonNow()
       await typeIn(page, field, i.text, stop)
       let got = await field.inputValue()
       // The field did not take it as typed: old Sara's way, the whole text at once.
@@ -340,16 +378,12 @@ export function createSendTools(o: {
         throw fail('INTERNAL', 'Поле ввода не приняло текст целиком, сообщение не отправлено')
       await keepTypedMap(r, page)
 
-      // Old Sara's button: the last of the field's third ancestor div. A microphone while the field is empty,
-      // so it is looked for only now, with the text in the field; a trial press first, nothing happens by it.
-      const button = field.locator(CHAT_SEND_PATH)
-      const buttons = await button.count()
-      if (buttons !== 1)
+      // Old Sara's button, with the text in the field now: its look (words, icon, classes) must differ from the
+      // empty field's, or it may still be the microphone. A trial press first, nothing happens by it.
+      if ((await buttonNow()) === emptyButton)
         throw fail(
           'LAYOUT_CHANGED',
-          buttons === 0
-            ? 'Кнопки отправки у поля ввода нет, сообщение не отправлено'
-            : 'Кнопок отправки несколько, сообщение не отправлено',
+          'Кнопка у поля не изменилась после набора текста (возможно, это микрофон), сообщение не отправлено',
         )
       try {
         await button.click({ trial: true, timeout: 5000 })

@@ -5,12 +5,13 @@ import type { Page } from 'playwright'
 // field textarea[placeholder="Сообщение"], and a send button that is the last button of the field's third ancestor
 // div (a microphone while the field is empty, a send icon when it has text). Guessed where old Sara did not say.
 
-export type FakeSide = 'specialist' | 'client' | 'system'
+export type FakeSide = 'specialist' | 'client' | 'system' | 'unknown'
 export type FakeMessage = { id: string; side: FakeSide; text: string }
 export const SIDE_CLASS: Record<FakeSide, string> = {
   specialist: 'cw_iCsdtF',
   client: 'cw_cO7-r-',
   system: 'cw_GK6qZJ',
+  unknown: 'cw_ZZZ999',
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -41,6 +42,10 @@ export type FakeChat = {
   enterSends?: boolean
   /** The id the next bubble gets. */
   nextId?: string
+  /** The button does not change with the text in the field (a button that is no microphone-and-send one). */
+  staticButton?: boolean
+  /** A client bubble that is drawn into the open page this many milliseconds after it has loaded. */
+  laterBubble?: { id: string; text: string; afterMs: number }
   /** A client bubble that arrives in the open page the moment something is typed into the field. */
   arriveOnInput?: { id: string; text: string }
 }
@@ -78,7 +83,7 @@ const ARRIVE = ${JSON.stringify(c.arriveOnInput ?? null)}
 const field = document.querySelector('textarea')
 const main = document.getElementById('main')
 let next = ${JSON.stringify(c.nextId ?? 'new-1')}
-const morph = () => { if (main && field) main.dataset.mode = field.value ? 'send' : 'mic' }
+const morph = () => { if (main && field && !${JSON.stringify(c.staticButton ?? false)}) main.dataset.mode = field.value ? 'send' : 'mic' }
 const add = (text, id, pending) => {
   const el = document.createElement('div')
   el.className = 'cw_msg ' + SIDE.specialist + (pending ? ' cw_pending' : '')
@@ -124,6 +129,15 @@ if (field) {
   })
   ${enter}
 }
+const LATER = ${JSON.stringify(c.laterBubble ?? null)}
+if (LATER) setTimeout(() => {
+  const el = document.createElement('div')
+  el.className = 'cw_msg ' + SIDE.client
+  el.setAttribute('data-message-content-id', LATER.id)
+  el.innerHTML = '<div class="cw_xeDn2R"><div class="cw_BFgZYK"></div></div>'
+  el.querySelector('.cw_BFgZYK').textContent = LATER.text
+  document.getElementById('list').appendChild(el)
+}, LATER.afterMs)
 if (main) main.addEventListener('click', () => { if (main.dataset.mode === 'send') submit() })
 </script></body></html>`
 }
