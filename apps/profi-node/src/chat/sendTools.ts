@@ -112,7 +112,23 @@ export function createSendTools(o: {
         text: s.message.text,
       }))
 
-  /** Opens the chat like old Sara: its own address, then a bubble or the field, whichever comes first. */
+  /** The tab stands on this chat's own address (the site may land it on another chat, or on a list). */
+  const onChat = (page: Page, chatId: string): boolean => {
+    try {
+      const want = new URL(o.parsers.paths.chat(chatId), 'http://x.invalid')
+      const got = new URL(page.url())
+      if (got.pathname !== want.pathname) return false
+      for (const [k, v] of want.searchParams) if (got.searchParams.get(k) !== v) return false
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Opens the chat like old Sara: its own address, then a bubble or the field, whichever comes first. The page must
+   * be that chat's: nothing of another chat is read, typed into or given to the eyes.
+   */
   async function openChat(r: SendRuntime, t: Tab, chatId: string): Promise<Page> {
     if (!(await t.go(o.parsers.paths.chat(chatId))))
       throw fail('RATE_LIMITED', 'Страница чата не открылась, сообщение не набрано')
@@ -121,13 +137,15 @@ export function createSendTools(o: {
       () => true,
       () => false,
     )
-    if (loaded) return page
+    if (loaded && onChat(page, chatId)) return page
     const state = await detectSessionState(page, o.parsers.banMarkers)
     if (state === 'dead') throw fail('SESSION_DEAD', 'Профи.ру разлогинил аккаунт')
     if (state === 'banned') throw fail('BANNED', 'Профи.ру заблокировал профиль')
     throw fail(
       'NOT_FOUND',
-      `Чат ${chatId} не открылся: на странице нет ни сообщений, ни поля ввода`,
+      loaded
+        ? `Адрес чата ${chatId} привёл на другую страницу, сообщение не набрано`
+        : `Чат ${chatId} не открылся: на странице нет ни сообщений, ни поля ввода`,
     )
   }
 

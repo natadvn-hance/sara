@@ -380,6 +380,38 @@ describe('profi.send_message on the chat page (M4)', () => {
     await ab.page.unroute(c9)
   }, 60000)
 
+  it('FR-CONV-9: a chat address that lands on another chat is NOT_FOUND, and nothing of that page reaches the eyes', async () => {
+    const c7 = /\/backoffice\/r\.php\?id=c7$/
+    await ab.page.route(c7, (route) =>
+      // The site sends the tab to another chat once the page has loaded.
+      route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><title>...</title><script>location.replace('/backoffice/r.php?id=c1')</script>`,
+      }),
+    )
+    try {
+      expect(
+        await failure(
+          tools().sendMessage(msg(REPLY, { chat_id: 'c7', expect_last_message_id: '102' })),
+        ),
+      ).toBe('NOT_FOUND')
+      // A pressed key looks at the same page and gives the same: UNCERTAIN, and again nothing is read.
+      const pressed = msg(REPLY, { chat_id: 'c7' })
+      await saveMessagePress(db, {
+        key: pressed.idempotency_key,
+        accountId: ACCOUNT,
+        chatId: 'c7',
+        expectLastMessageId: '102',
+      })
+      c1().messages.push({ id: '103', side: 'specialist', text: REPLY })
+      expect(await failure(tools().sendMessage(pressed))).toBe('UNCERTAIN')
+    } finally {
+      await ab.page.unroute(c7)
+    }
+    expect(site.presses).toEqual([])
+    expect(await db.select().from(rawMessage)).toHaveLength(0)
+  }, 60000)
+
   it('FR-CONV-9: a chat that shows neither bubbles nor a field is NOT_FOUND', async () => {
     expect(
       await failure(tools({ boxMs: 600 }).sendMessage(msg(REPLY, { chat_id: 'nobody' }))),
