@@ -315,6 +315,21 @@ function dropFinalPeriod(line: string): string {
  * period like a paragraph does. Applying it twice gives the same text.
  */
 export function fixClientText(text: string): string {
+  // A pass can leave something for the next one (a dash taken away leaves a period at the end, «Текст. .» leaves
+  // «Текст.»): it goes on until the text no longer changes, so the result is a text that fixing leaves as it is.
+  let out = fixOnce(text)
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const next = fixOnce(out)
+    if (next === out) break
+    out = next
+  }
+  return out
+}
+
+/** The most passes after the first one that fixing takes; in practice one more is the most it needs. */
+const MAX_PASSES = 8
+
+function fixOnce(text: string): string {
   const saved: string[] = []
   const hidden = text
     .replace(/\r\n?/g, '\n')

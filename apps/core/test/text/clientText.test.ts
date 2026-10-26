@@ -278,6 +278,96 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
     expect(fixClientText(fixClientText(text))).toBe(fixClientText(text))
   })
 
+  it('FR-SPEECH-3: a period left over after the first one goes in the same pass: «Текст. .» is «Текст»', () => {
+    expect(fixClientText('Текст. .')).toBe('Текст')
+    expect(fixClientText('Текст. . .')).toBe('Текст')
+    expect(fixClientText('Текст .')).toBe('Текст')
+    expect(fixClientText('Текст. 🤝 .')).toBe('Текст 🤝')
+    expect(fixClientText(`Текст ${LONG}.`)).toBe('Текст')
+    expect(fixClientText('Нужны сайт и т.д. .')).toBe('Нужны сайт и т.д.')
+  })
+
+  it('FR-SPEECH-3: a text that was fixed is not changed by fixing it again, whatever it was made of', () => {
+    const samples = [
+      'Текст. .',
+      `А ${LONG} . ${LONG} б`,
+      'Хм.. .',
+      'Хм... .',
+      'Цена: 5000 руб. .',
+      `Что-то - 5 ${LONG} 3 этапа. . .`,
+      'Wi-Fi-роутер. Е-mail-рассылка.',
+      `1${MEDIUM} .${MEDIUM}2`,
+      '(.) .',
+      'Спасибо ( . ) .',
+      '- . -\n.\n- .',
+      'Раз.\n.\n\n.\nДва.',
+      ` .${LONG} . ${NBSP}`,
+      'Звоните 8-800-555-35-35. .',
+      'Скидка 10%. 🤝. .',
+    ]
+    for (const text of samples) {
+      const once = fixClientText(text)
+      expect(fixClientText(once), JSON.stringify(text)).toBe(once)
+    }
+  })
+
+  it('FR-SPEECH-3: idempotent on four thousand texts built at random from the pieces the rules work on', () => {
+    const pieces = [
+      'Текст',
+      'слово',
+      'Wi-Fi',
+      'что-то',
+      'SEO-продвижение',
+      '2-3',
+      '5000',
+      '3',
+      'руб.',
+      'т.д.',
+      'г.',
+      'Москва',
+      '.',
+      '..',
+      '...',
+      '…',
+      '!',
+      '?',
+      ',',
+      ':',
+      '(',
+      ')',
+      '«',
+      '»',
+      '-',
+      LONG,
+      MEDIUM,
+      '🤝',
+      '🙏',
+      '\n',
+      '\n\n',
+      ' ',
+      '  ',
+      NBSP,
+      'https://hance.ru/a-b.',
+      'иван@mail.ru',
+      'пн-пт',
+      '9:00',
+      '%',
+      '1С:Франчайзи',
+    ]
+    let seed = 20261026
+    const next = (n: number) => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296
+      return Math.floor((seed / 4294967296) * n)
+    }
+    for (let i = 0; i < 4000; i++) {
+      const text = Array.from({ length: 1 + next(14) }, () => pieces[next(pieces.length)]).join(
+        next(3) === 0 ? ' ' : '',
+      )
+      const once = fixClientText(text)
+      expect(fixClientText(once), JSON.stringify(text)).toBe(once)
+    }
+  })
+
   it('NFR-UX-1: the fixed text holds no long or medium dash at all', () => {
     const out = fixClientText(`А ${LONG} б ${MEDIUM} в, г${LONG}д, 1${MEDIUM}2, ${LONG}е`)
     expect(out).not.toMatch(ANY_DASH)
