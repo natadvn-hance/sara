@@ -576,7 +576,10 @@ async function deliver(
   return { outcome: uncertain ? 'uncertain' : 'failed', end: false }
 }
 
-/** The reminder step is done when Boris has its card: the row says so together with its event. */
+/**
+ * The reminder step is done when Boris has its card: the row says so together with its event. A press that came before
+ * this (the card is Boris's from the moment it is sent) has moved the row on: it is finished, not put back.
+ */
 async function endCard(
   d: RemindDeps,
   rowId: string,
@@ -584,11 +587,15 @@ async function endCard(
   p: Planned,
   text: string,
 ): Promise<void> {
-  if (await endedWith(d, rowId, 'carded')) return
+  const [now] = await d.db
+    .select({ state: convTurn.state, outcome: convTurn.outcome })
+    .from(convTurn)
+    .where(eq(convTurn.id, rowId))
+  if (now?.state === 'finished') return
   await d.db.transaction(async (tx) => {
     await finishRow(tx, rowId, {
       text,
-      outcome: 'carded',
+      ...((now?.outcome ?? 'carded') === 'carded' && { outcome: 'carded' }),
       decision: 'draft',
       decisionReason: 'карточка Борису: отправлю по его нажатию',
     })

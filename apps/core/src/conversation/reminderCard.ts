@@ -111,7 +111,8 @@ export async function sendReminderCard(
     })
     await tx
       .update(convTurn)
-      .set({ taskId, cardMessageId: m.messageId })
+      // The card is Boris's from this moment: a press that comes before the step writes its end is a press on a card.
+      .set({ taskId, cardMessageId: m.messageId, outcome: 'carded' })
       .where(eq(convTurn.id, rowId))
     await appendEvent(tx, {
       type: 'task.created',

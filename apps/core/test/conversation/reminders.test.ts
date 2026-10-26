@@ -700,6 +700,7 @@ describe('the silence task', () => {
     bookedFails = 4
     await startReminder(conv.id, 'm-1')
     await until(async () => (await taskCount()) === 1)
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
     // The three reminders were held back too, so nothing went to him: his silence says nothing about the deal.
     expect(await outcomes()).toEqual(['1=skipped', '2=skipped', '3=skipped', 'dormant=dormant'])
     expect(buttons[0]?.text).toContain('напоминания ему не уходили')
@@ -728,7 +729,9 @@ describe('the silence task', () => {
       state: 'waiting',
     })
     await startReminder(conv.id, 'm-1')
-    await sleep(900)
+    // The three reminders are held back by the running turn; only then the silence step tries again.
+    await until(done(3))
+    await sleep(600)
     expect(await taskCount()).toBe(0)
     expect(await stage()).toBe('bid_sent')
     await db.update(convTurn).set({ state: 'finished' }).where(eq(convTurn.id, turnId))

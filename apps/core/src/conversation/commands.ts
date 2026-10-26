@@ -15,7 +15,7 @@ import { editReminder, onReminderPress } from './reminderCard'
 import { holdText, sendHold } from './sendHold'
 import { type SendOptions, STALE_DRAFT } from './sendTexts'
 import { getConversation, updateConversation } from './store'
-import { CONV_TEXTS } from './texts'
+import { CONV_TEXTS, REMIND_TEXTS } from './texts'
 
 export type CommandDeps = {
   db: Db
@@ -88,7 +88,10 @@ async function journal(
   })
 }
 
-/** Closes the conversation's open cards: one decision answers them all. */
+/**
+ * Closes the conversation's open cards: one decision answers them all. The reminder rows whose card waited end with
+ * it, so the numbers of the report are right.
+ */
 async function resolveCards(db: Db, conversationId: string, resolution: string) {
   const turns = await db
     .select({ taskId: convTurn.taskId })
@@ -100,6 +103,20 @@ async function resolveCards(db: Db, conversationId: string, resolution: string) 
         .update(task)
         .set({ state: 'resolved', resolution, resolvedAt: new Date().toISOString() })
         .where(and(eq(task.id, t.taskId), eq(task.state, 'open')))
+  await db
+    .update(convTurn)
+    .set({
+      outcome: 'stopped',
+      decision: 'nothing',
+      decisionReason: resolution === 'take' ? 'клиента взял Борис' : 'разговор закрыт',
+    })
+    .where(
+      and(
+        eq(convTurn.conversationId, conversationId),
+        eq(convTurn.kind, 'reminder'),
+        eq(convTurn.outcome, 'carded'),
+      ),
+    )
 }
 
 /** «Беру сам» (FR-CONV-11): Boris leads the client; drafts and reminders stop. */
@@ -383,7 +400,11 @@ async function onReminderCardPress(
   turn: typeof convTurn.$inferSelect,
   action: TaskAction,
 ): Promise<string> {
-  if (t.state !== 'open' || turn.outcome !== 'carded') return COMMAND_TEXTS.done
+  if (t.state !== 'open')
+    return ['expired', 'answered', 'stale'].includes(t.resolution ?? '')
+      ? REMIND_TEXTS.notNeeded
+      : COMMAND_TEXTS.done
+  if (turn.outcome !== 'carded') return COMMAND_TEXTS.done
   if (action === 'edit') {
     await startEdit(d, turn.id)
     return COMMAND_TEXTS.askEdit

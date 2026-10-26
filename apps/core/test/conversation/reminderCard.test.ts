@@ -1,7 +1,13 @@
 import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { onConvPress, onConvReply } from '../../src/conversation/commands'
+import {
+  close as closeConversation,
+  onConvPress,
+  onConvReply,
+  take,
+} from '../../src/conversation/commands'
+import { sendReminderCard } from '../../src/conversation/reminderCard'
 import {
   checkGround,
   dormantStep,
@@ -647,5 +653,60 @@ describe('the time of a reminder that goes by a press', () => {
     )
     expect(seen[0]?.notBefore).toBeUndefined()
     expect(answer).toBe('Отправляю…')
+  })
+})
+
+describe('small things of the reminder cards', () => {
+  it('FR-CONV-12: a card that is no longer needed says so plainly, not «Это уже сделано»', async () => {
+    const { conv, taskId } = await carded(1)
+    // The next reminder expired it.
+    const second = await addRow(conv.id, 2)
+    await sendStep(deps, second, conv.id, 'm-1', { ...PLAN, step: 2 }, TEXT)
+    expect(await press(taskId, 'send')).toBe('Это напоминание уже не нужно.')
+    expect(await press(taskId, 'skip')).toBe('Это напоминание уже не нужно.')
+    expect(sends).toHaveLength(0)
+    // A card Boris answered himself is «уже сделано», as before.
+    const answered = await taskOf(second)
+    await press(answered?.id ?? '', 'skip')
+    expect(await press(answered?.id ?? '', 'send')).toBe('Это уже сделано.')
+  })
+
+  it('FR-CONV-12: the same for a card the client made moot by writing', async () => {
+    const { taskId } = await carded(1)
+    profi.chat.push(chatMsg('m-2', 'client', 'Да, давайте', new Date().toISOString(), CHAT))
+    await press(taskId, 'send')
+    expect(await press(taskId, 'send')).toBe('Это напоминание уже не нужно.')
+  })
+
+  it('FR-CONV-12: a press right after the card arrives is not answered «уже сделано»', async () => {
+    const { conv, rowId } = await scene()
+    // The card is in Boris's chat and its row is not finished yet: the step has not yet written its end.
+    const { taskId } = await sendReminderCard(deps, rowId, conv, 1, TEXT)
+    expect((await row(rowId))?.outcome).toBe('carded')
+    expect(await press(taskId, 'send')).toBe('Отправила напоминание клиенту.')
+    expect(sends).toHaveLength(1)
+    // The step then ends: it must not put the row back to «carded» over the press.
+    expect((await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)).outcome).toBe('carded')
+    expect(await row(rowId)).toMatchObject({ outcome: 'sent', state: 'finished' })
+    expect(cards).toHaveLength(1)
+    expect(await countEvents(db, 'conv.reminder_drafted')).toBe(1)
+  })
+
+  it('FR-CONV-11: «Беру сам» ends the reminder cards that wait, so the report counts are right', async () => {
+    const { conv, rowId } = await carded(1)
+    await take(db, conv.id)
+    expect(await row(rowId)).toMatchObject({ outcome: 'stopped', decision: 'nothing' })
+    expect((await row(rowId))?.decisionReason).toMatch(/взял Борис/)
+    const t = await taskOf(rowId)
+    expect(t).toMatchObject({ state: 'resolved', resolution: 'take' })
+  })
+
+  it('FR-CONV-11: «Закрыть» ends them too, and a press afterwards sends nothing', async () => {
+    const { conv, rowId, taskId } = await carded(1)
+    await closeConversation(db, conv.id)
+    expect(await row(rowId)).toMatchObject({ outcome: 'stopped' })
+    expect((await row(rowId))?.decisionReason).toMatch(/закрыт/)
+    expect(await press(taskId, 'send')).toMatch(/уже/)
+    expect(sends).toHaveLength(0)
   })
 })
