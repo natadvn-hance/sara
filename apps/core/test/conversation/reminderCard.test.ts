@@ -131,7 +131,7 @@ describe('the card of a reminder', () => {
     expect(text).toContain('Сайт для клиники')
     expect(text).toContain('Первое напоминание')
     expect(text).toContain(TEXT)
-    expect(text).not.toMatch(/[–—]/)
+    expect(text).not.toMatch(/[\u2013\u2014]/)
     expect(actions(cards[0])).toEqual(['send', 'edit', 'skip'])
     expect(cards[0]?.rows.flat().map((b) => b.text)).toEqual(['Отправить', 'Изменить', 'Не надо'])
     expect(await outboxMessages()).toHaveLength(0)
