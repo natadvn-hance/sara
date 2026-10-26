@@ -54,6 +54,7 @@ beforeEach(async () => {
   await writeFile(sendLog, '')
   await setSetting(db, 'pipeline.conversations', true, 'system')
   await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'conv.autopilot', true, 'system')
   await setSetting(db, 'outbound.messages', true, 'system')
   const h = moscowHour(new Date())
   await setSetting(db, 'conv.reminder_quiet', { from: (h + 2) % 24, to: (h + 3) % 24 }, 'system')

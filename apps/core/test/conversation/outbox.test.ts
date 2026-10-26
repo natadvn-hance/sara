@@ -1,10 +1,10 @@
-import type { SendMessageInput } from '@sara/shared'
+import { newEventId, type SendMessageInput } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { deliverMessage, queueMessage, sendTurnReply } from '../../src/conversation/outbox'
 import { ensureConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
-import { convTurn, outbox } from '../../src/db/schema'
+import { convTurn, outbox, task } from '../../src/db/schema'
 import { ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
@@ -58,6 +58,7 @@ beforeEach(async () => {
     decision: 'send',
   })
   await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'conv.autopilot', true, 'system')
   await setSetting(db, 'outbound.messages', true, 'system')
   // The reset, the sync and the settings are a dozen queries on a database other test processes may hold locks on:
   // a loaded machine took over 10 s once (not seen alone, 0.4-1.9 s), so the hook gets an honest 30 s.
@@ -137,6 +138,87 @@ describe('sending to a client', () => {
       )
     expect(await q('sara', 'k-1')).toBeNull()
     expect(await q('boris', 'k-2')).not.toBeNull()
+  })
+
+  describe('with the autopilot off', () => {
+    const q = (author: 'sara' | 'boris', key: string) =>
+      db.transaction((tx) =>
+        queueMessage(tx, {
+          key,
+          accountId: 'hance-marketing',
+          chatId: CHAT,
+          text: 'Анна, добрый день',
+          author,
+          expectLast: 'm-2',
+        }),
+      )
+    /** The card Boris pressed «Отправить» on: its task is resolved with «send» before the text is queued. */
+    const pressed = async (resolution: string | null = 'send') => {
+      const id = newEventId()
+      await db.insert(task).values({
+        id,
+        kind: 'conv_draft',
+        entityKind: 'conv_turn',
+        entityId: 't-1',
+        state: resolution ? 'resolved' : 'open',
+        resolution,
+      })
+      return id
+    }
+
+    beforeEach(async () => {
+      await setSetting(db, 'conv.autopilot', false, 'system')
+    })
+
+    it('FR-CONV-5: a message of Sara’s own without Boris’s press is refused, nothing is queued or sent', async () => {
+      expect(await q('sara', 'conv-remind:c-1:m-1:1')).toBeNull()
+      expect(await sendTurnReply({ db, profi }, 't-1', 1)).toBe('failed')
+      expect(await db.select().from(outbox)).toHaveLength(0)
+      expect(sendCalls).toHaveLength(0)
+      expect(await countEvents(db, 'outbox.queued')).toBe(0)
+    })
+
+    it('FR-CONV-5: a key that only looks like a press is refused: no task of Boris’s press stands behind it', async () => {
+      expect(await q('sara', 'send:forged')).toBeNull()
+      expect(await q('sara', `send:${newEventId()}`)).toBeNull()
+      // A card that is still open, or one he answered otherwise, is no press on «Отправить» either.
+      const open = await pressed(null)
+      const skipped = await pressed('skip')
+      expect(await q('sara', `send:${open}`)).toBeNull()
+      expect(await q('sara', `send:${skipped}`)).toBeNull()
+      expect(await q('sara', 'say:tg:5')).toBeNull()
+      expect(await db.select().from(outbox)).toHaveLength(0)
+    })
+
+    it('FR-CONV-5: Boris’s press on «Отправить» still sends, once', async () => {
+      const card = await pressed()
+      const id = await q('sara', `send:${card}`)
+      expect(id).not.toBeNull()
+      expect(await q('sara', `send:${card}`)).toBe(id)
+      expect(await deliverMessage({ db, profi }, id ?? '')).toBe('confirmed')
+      expect(sendCalls.map((c) => c.idempotency_key)).toEqual([`msg:send:${card}`])
+      expect(await db.select().from(outbox)).toHaveLength(1)
+    })
+
+    it('FR-CONV-5: Boris’s own text is his press and passes, with any key', async () => {
+      expect(await q('boris', 'say:tg:77')).not.toBeNull()
+      expect(await q('boris', 'say:abc')).not.toBeNull()
+    })
+
+    it('FR-CONV-5: the shadow and the «Пишет клиентам» pause still hold a press', async () => {
+      const card = await pressed()
+      await setSetting(db, 'outbound.messages', false, 'system')
+      expect(await q('sara', `send:${card}`)).toBeNull()
+      await setSetting(db, 'outbound.messages', true, 'system')
+      await setSetting(db, 'conv.v1_writes', true, 'system')
+      expect(await q('sara', `send:${card}`)).toBeNull()
+      expect(await q('boris', 'say:tg:78')).toBeNull()
+    })
+
+    it('FR-CONV-5: with the autopilot on Sara’s own message goes with any key', async () => {
+      await setSetting(db, 'conv.autopilot', true, 'system')
+      expect(await q('sara', 'conv-remind:c-1:m-1:1')).not.toBeNull()
+    })
   })
 
   it('NFR-REL-4: a failed delivery is not retried blindly', async () => {

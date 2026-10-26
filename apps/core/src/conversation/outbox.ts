@@ -1,7 +1,7 @@
 import { newEventId, normalizeText } from '@sara/shared'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { chatMessage, convTurn, outbox } from '../db/schema'
+import { chatMessage, convTurn, outbox, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
@@ -39,10 +39,28 @@ async function event(
   })
 }
 
+/** The key of a text Boris sent with «Отправить» on a card: `send:<task id of the card>` (commands.ts). */
+const PRESS_KEY = /^send:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+
+/**
+ * Whether the key stands for Boris's press on «Отправить»: its card's task is there and he answered it with «send».
+ * A key that only looks like one is no press, so the line of drafts mode cannot be crossed by naming a key.
+ */
+async function borisPressed(tx: DbOrTx, key: string): Promise<boolean> {
+  const id = PRESS_KEY.exec(key)?.[1]
+  if (!id) return false
+  const [t] = await tx
+    .select({ id: task.id })
+    .from(task)
+    .where(and(eq(task.id, id), eq(task.state, 'resolved'), eq(task.resolution, 'send')))
+  return t !== undefined
+}
+
 /**
  * A message to a client enters the outbox once per key (FR-CONV-9). Nothing is queued in shadow, not even Boris's
  * own text (ADR-024); Sara's own text also waits out the «Пишет клиентам» pause, Boris's text passes it (as v1).
- * Null when it may not go now.
+ * In drafts mode (`conv.autopilot` off) the one line nothing crosses: a message of author sara goes only with Boris's
+ * press on «Отправить»; his own text is his press already (FR-CONV-5, FR-CONV-11). Null when it may not go now.
  */
 export async function queueMessage(
   tx: DbOrTx,
@@ -50,6 +68,12 @@ export async function queueMessage(
 ): Promise<string | null> {
   if (await getSetting(tx, 'conv.v1_writes')) return null
   if (i.author === 'sara' && !(await getSetting(tx, 'outbound.messages'))) return null
+  if (
+    i.author === 'sara' &&
+    !(await getSetting(tx, 'conv.autopilot')) &&
+    !(await borisPressed(tx, i.key))
+  )
+    return null
   const { key, ...p } = i
   const id = newEventId()
   const rows = await tx

@@ -148,8 +148,10 @@ const quiet = (agoMs: number, o: { read?: boolean } = {}): SeedMessage[] => [
   },
 ]
 
+/** After the switch with the autopilot on: Sara sends her reminders by herself (the drafts mode is its own block). */
 const live = async () => {
   await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'conv.autopilot', true, 'system')
   await setSetting(db, 'outbound.messages', true, 'system')
 }
 
