@@ -118,6 +118,34 @@ describe('the draft card', () => {
     expect(row?.taskId).toBe(t?.id)
   })
 
+  it('FR-CONV-3: the turn trace and the card keep the case and why it was chosen', async () => {
+    await turn('t-case', {
+      understanding: {
+        topic: 'cases',
+        tone: 'neutral',
+        case: {
+          moment: 'asked',
+          case_id: 'k-case-01',
+          why: 'Клиент спросил, делали ли похожее',
+          title: 'Лиса-Клиник: онлайн-запись, Краснодар',
+        },
+      },
+    })
+    await sendTurnCard({ db, notifier }, 't-case')
+    expect(sent[0]?.text).toContain(
+      'Кейс: Лиса-Клиник: онлайн-запись, Краснодар, потому что клиент спросил, делали ли похожее.',
+    )
+    // The case sits before the mind ids, and a turn with no case has no such line.
+    await turn('t-none')
+    await sendTurnCard({ db, notifier }, 't-none')
+    expect(sent[1]?.text).not.toContain('Кейс:')
+    await turn('t-null', {
+      understanding: { topic: 'process', case: { moment: null, case_id: null, why: null } },
+    })
+    await sendTurnCard({ db, notifier }, 't-null')
+    expect(sent[2]?.text).not.toContain('Кейс:')
+  })
+
   it('FR-NOTIF-3: the 11th card of the day is not sent, a call for Boris still is', async () => {
     for (let i = 0; i < 11; i++) {
       await turn(`t-${i}`)

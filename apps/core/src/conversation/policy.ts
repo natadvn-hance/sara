@@ -26,7 +26,11 @@ function wouldDo(i: DecideInput): { would: Would; reason: string } {
   const out = i.plan.output
   if (i.dossier.owner === 'boris' && i.dossier.ownerReason === 'take')
     return { would: 'forward', reason: 'клиента ведёт Борис' }
-  if (i.callRequest) return { would: 'call_boris', reason: 'клиент просит созвон или дал телефон' }
+  if (i.callRequest)
+    return {
+      would: 'call_boris',
+      reason: 'клиент просит созвон, согласился на него или дал телефон',
+    }
   if (!out) return { would: 'draft', reason: 'Собеседник не ответил' }
   if (out.move === 'none') return { would: 'nothing', reason: out.why || 'отвечать не нужно' }
   if (out.move === 'call_boris') return { would: 'call_boris', reason: out.why }

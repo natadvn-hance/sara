@@ -1,9 +1,10 @@
 import { type ClientInfo, CONV_STAGES, type ConvStage } from '@sara/shared'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, ne } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { chatMessage, deal, lead } from '../db/schema'
+import { chatMessage, convTurn, deal, lead } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
 import { isNewMoscowDay } from './check/codeChecks'
+import { NOT_NAMES } from './check/phrases'
 import { getConversation } from './store'
 import { inMoscowHours } from './time'
 import type { ConversationRow, Dossier, DossierMessage } from './types'
@@ -39,31 +40,6 @@ export function untilOurs<T extends DossierMessage>(messages: T[], anchor: strin
   return cut < 0 ? messages : messages.slice(0, cut)
 }
 
-/** Words that open a message before a comma and are not a name. */
-const NOT_NAMES = new Set([
-  'здравствуйте',
-  'здравствуй',
-  'привет',
-  'приветствую',
-  'добрый',
-  'доброе',
-  'доброго',
-  'добрая',
-  'спасибо',
-  'благодарю',
-  'хорошо',
-  'отлично',
-  'конечно',
-  'да',
-  'нет',
-  'итак',
-  'извините',
-  'простите',
-  'понимаю',
-  'понял',
-  'поняла',
-])
-
 /**
  * The names of the client to hide from the model (ADR-016): the lead's or the order page's (the dossier has the one
  * it found), and the name old Sara greeted the client with. She opened every chat «<Имя>, добрый день!» or
@@ -88,7 +64,8 @@ export async function clientNames(
     .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
     .limit(1)
   const greeted = /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
-  const names = [known, greeted && !NOT_NAMES.has(greeted.toLowerCase()) ? greeted : null]
+  const folded = greeted?.toLowerCase().replace(/ё/g, 'е') ?? ''
+  const names = [known, greeted && !NOT_NAMES.has(folded) ? greeted : null]
   return [...new Map(names.flatMap((n) => (n ? [[n.toLowerCase(), n] as const] : []))).values()]
 }
 
@@ -111,7 +88,13 @@ export async function buildDossier(
   db: Db,
   conversationId: string,
   now: Date,
-  o: { night: { from: number; to: number }; profi?: ProfiClient; anchor?: string },
+  o: {
+    night: { from: number; to: number }
+    profi?: ProfiClient
+    anchor?: string
+    /** The turn this dossier is for: its own trace is not an earlier turn's. */
+    turnId?: string
+  },
 ): Promise<Dossier> {
   const conv = await getConversation(db, conversationId)
   if (!conv) throw new Error(`conversation ${conversationId} not found`)
@@ -178,5 +161,39 @@ export async function buildDossier(
     night: inMoscowHours(now, o.night),
     lastOursAt: lastOurs?.sentAt ?? null,
     remindersSent: 0,
+    toldCases: await toldCases(db, conversationId, o.turnId),
   }
+}
+
+/**
+ * The cases the client heard from our side in the earlier turns of this chat, each once: those in the traces
+ * (`understanding.case`) of turns whose reply really went to the client (outcome «sent»). A shadow draft, a call to
+ * Boris, a failed turn or one a message of ours cancelled told the client nothing. A case that a message of our side
+ * names by its brand is told too, but that is read from the chat where the cases are (casesFor, caseIssues). The turn
+ * being planned is left out: planning it again after CHAT_CHANGED must not call its own first try a repeat.
+ */
+async function toldCases(
+  db: Db,
+  conversationId: string,
+  exceptTurn?: string,
+): Promise<{ id: string; title: string }[]> {
+  const rows = await db
+    .select({ understanding: convTurn.understanding })
+    .from(convTurn)
+    .where(
+      and(
+        eq(convTurn.conversationId, conversationId),
+        eq(convTurn.outcome, 'sent'),
+        exceptTurn ? ne(convTurn.id, exceptTurn) : undefined,
+      ),
+    )
+    .orderBy(asc(convTurn.createdAt), asc(convTurn.id))
+  const told = new Map<string, string>()
+  for (const r of rows) {
+    const c = (
+      r.understanding as { case?: { case_id?: string | null; title?: string } | null } | null
+    )?.case
+    if (c?.case_id && !told.has(c.case_id)) told.set(c.case_id, c.title ?? '')
+  }
+  return [...told].map(([id, title]) => ({ id, title }))
 }

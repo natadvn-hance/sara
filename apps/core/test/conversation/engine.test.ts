@@ -1,18 +1,18 @@
-import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { newEventId, SETTINGS } from '@sara/shared'
+import { type CaseMoment, newEventId, SETTINGS } from '@sara/shared'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { buildDossier, clientNames } from '../../src/conversation/dossier'
 import { planTurn, recall } from '../../src/conversation/engine'
 import { formatInterlocutorInput } from '../../src/conversation/prompt'
 import { ensureConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
-import type { Dossier, MindHit, MindSearch, PolicySettings } from '../../src/conversation/types'
-import { lead } from '../../src/db/schema'
+import type { Dossier, PolicySettings } from '../../src/conversation/types'
+import { convTurn, lead } from '../../src/db/schema'
 import { createGateway } from '../../src/gateway/gateway'
 import { createSecretStore } from '../../src/secrets/store'
-import { chatMsg, interlocutorAnswer, stubProfi } from '../helpers/conversation'
+import { caseOf, chatMsg, fakeMind, interlocutorAnswer, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
@@ -26,18 +26,6 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'engine-'))
   log = join(dir, 'calls.log')
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
-  // The real role texts come with part D; the engine needs only that the roles load.
-  for (const [name, model] of [
-    ['interlocutor', 'sonnet'],
-    ['checker', 'haiku'],
-  ] as const) {
-    await mkdir(join(dir, 'roles', name), { recursive: true })
-    await writeFile(
-      join(dir, 'roles', name, 'meta.json'),
-      JSON.stringify({ name, version: 1, model, priority: 'P0', timeoutMs: 30000 }),
-    ).catch(() => {})
-    await writeFile(join(dir, 'roles', name, 'role.md'), 'Роль для теста.').catch(() => {})
-  }
 })
 
 async function gateway(byRole: Record<string, unknown>, mode = 'ok') {
@@ -52,47 +40,20 @@ async function gateway(byRole: Record<string, unknown>, mode = 'ok') {
     extraEnv: {
       FAKE_CLAUDE_MODE: mode,
       FAKE_CLAUDE_ARGS_LOG: log,
+      FAKE_CLAUDE_COUNTER_FILE: join(dir, 'counter.json'),
       FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
     },
   })
 }
 
-const hit = (id: string, type: MindHit['type'], o: Partial<MindHit> = {}): MindHit => ({
-  id,
-  type,
-  scope: 'shared',
-  title: id,
-  body: `Текст ${id}`,
-  topic: null,
-  tones: [],
-  stages: [],
-  exampleClient: null,
-  exampleBoris: null,
-  rank: 1,
-  ...o,
-})
-
-function fakeMind(): MindSearch {
-  return {
-    version: async () => 'mind-v1',
-    search: async (q) => {
-      if (q.types.includes('understanding')) return [hit('u-process', 'understanding')]
-      if (q.types.includes('knowledge'))
-        return [hit('k-process-start', 'knowledge', { body: 'Начинаем с созвона на 30 минут' })]
-      if (q.types.includes('example'))
-        return [
-          hit('e-1', 'example', {
-            exampleClient: 'Как начнём?',
-            exampleBoris: 'Начнём с короткого созвона',
-          }),
-          hit('e-2', 'example', { exampleClient: 'Как начнём?', exampleBoris: null }),
-        ]
-      return []
-    },
-    byIds: async (ids) => ids.map((id) => hit(id, id.startsWith('s-') ? 'speech' : 'judgment')),
-    byStage: async () => hit('j-stage-talking', 'judgment', { stages: ['talking'] }),
-    bannedPhrases: async () => ['Рад помочь'],
-  }
+const CLEAN_CHECK = { unsupported: [], contradicts_boris: null, robotic: [], promises: [] }
+/** The calls of one role the fake CLI logged, in order. */
+async function callsOf(role: string): Promise<{ args: string[]; stdin: string }[]> {
+  return (await readFile(log, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+    .filter((c) => c.args.some((a) => a.includes(`roles/${role}/`)))
 }
 
 const settings: PolicySettings = {
@@ -274,18 +235,83 @@ describe('turn engine', () => {
 
   it('FR-CONV-4: a reply failing checks twice becomes a draft with the reasons', async () => {
     const d = await dossierOf()
-    const gw = await gateway({ interlocutor: interlocutorAnswer() })
+    // A robotic phrase of the portrait: the fake model says it again on the rewrite, so both tries fail the code checks.
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Рад помочь! Начинаем с созвона на 30 минут. Удобно?',
+      }),
+      checker: { unsupported: [], contradicts_boris: null, robotic: [], promises: [] },
+    })
     const plan = await planTurn(
       { gateway: gw, mind: fakeMind() },
       { dossier: d, names: ['Анна'], settings, now: new Date() },
     )
-    // Until part D, the code checks stub fails every reply: one rewrite, then a draft.
     expect(plan.attempts).toBe(2)
-    expect(plan.issues.length).toBeGreaterThan(0)
+    expect(plan.issues.map((x) => x.id)).toContain('robotic.phrase')
     expect(plan.decision.action).toBe('draft')
+    expect(plan.decision.reason).toContain('Рад помочь')
     const calls = (await readFile(log, 'utf8')).trim().split('\n')
-    expect(calls).toHaveLength(2)
-    expect(calls[1]).toContain('Переделать')
+    const asked = calls.filter((c) => c.includes('roles/interlocutor/'))
+    expect(asked).toHaveLength(2)
+    expect(asked[0]).not.toContain('Переделать')
+    expect(asked[1]).toContain('Переделать')
+    expect(asked[1]).toContain('Рад помочь')
+  })
+
+  it('FR-CONV-4: the Checker reads the order, the last messages with their authors and the framed client turn', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({ text: 'Начинаем с созвона на 30 минут. Удобно?' }),
+      checker: { unsupported: [], contradicts_boris: null, robotic: [], promises: [] },
+    })
+    await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    const entries = (await readFile(log, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+    const checker = entries.find((e) => e.args.some((a) => a.includes('roles/checker/')))
+    expect(checker?.stdin).toContain('Сайт для клиники')
+    // Old Sara's bid is «наша сторона» in shadow: the author is not proven, and the Checker is told so.
+    expect(checker?.stdin).toContain('[наша сторона ')
+    expect(checker?.stdin).toMatch(/<<< данные клиента\n\[имя 1] тут\. Как начнём\?/)
+    expect(checker?.stdin).toContain('неизвестно')
+  })
+
+  it('FR-CONV-4: a text the model writes with call_boris is dropped, never shown unchecked', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        move: 'call_boris',
+        text: 'Я бот, цена 90 000.',
+        fact_ids: [],
+      }),
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.output?.text).toBeNull()
+    expect(plan.issues).toEqual([])
+    expect(plan.attempts).toBe(1)
+    expect(plan.decision.would).toBe('call_boris')
+  })
+
+  it('FR-CONV-4: a reply that passes the checks is not rewritten', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({ text: 'Начинаем с созвона на 30 минут. Удобно?' }),
+      checker: { unsupported: [], contradicts_boris: null, robotic: [], promises: [] },
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.attempts).toBe(1)
+    expect(plan.issues).toEqual([])
+    expect(plan.checkerRan).toBe(true)
   })
 
   it('ADR-016: the client’s name reaches the model as a tag', async () => {
@@ -308,6 +334,38 @@ describe('turn engine', () => {
     expect(plan.output).toBeNull()
     expect(plan.failure).toBe('cli_failed')
     expect(plan.decision.action).toBe('draft')
+  })
+
+  it('FR-CONV-5: a «хорошо» to our call proposal calls Boris even when the model says none', async () => {
+    const d = await dossierOf()
+    const chat = (ours: string, said: string): Dossier => ({
+      ...d,
+      messages: [
+        { ...d.messages[0], text: ours } as Dossier['messages'][number],
+        { ...d.messages[1], text: said, platformMessageId: 'm-9' } as Dossier['messages'][number],
+      ],
+      turnMessageIds: ['m-9'],
+    })
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        move: 'none',
+        text: null,
+        fact_ids: [],
+        topic: 'smalltalk',
+      }),
+    })
+    const run = (dossier: Dossier) =>
+      planTurn(
+        { gateway: gw, mind: fakeMind() },
+        { dossier, names: ['Анна'], settings, now: new Date() },
+      )
+    expect(
+      (await run(chat('Удобно созвониться и обсудить детали?', 'Хорошо'))).decision.would,
+    ).toBe('call_boris')
+    // The same word after a message that proposed no call is nothing to answer.
+    expect((await run(chat('Лендинг делаем за 2-3 недели.', 'Хорошо'))).decision.would).toBe(
+      'nothing',
+    )
   })
 
   it('FR-CONV-5: a call request calls Boris without waiting for the model to agree', async () => {
@@ -336,5 +394,379 @@ describe('turn engine', () => {
       },
     )
     expect(plan.decision.action).toBe('call_boris')
+  })
+})
+
+describe('cases in a turn', () => {
+  /** The chat of dossierOf with one client message of its own, on the same day. */
+  let base: Dossier | null = null
+  beforeEach(() => {
+    base = null
+  })
+  async function chatOf(said: string, o: Partial<Dossier> = {}): Promise<Dossier> {
+    // The lead and the chat are stored once per test; every dossier is a copy of them.
+    base ??= await dossierOf()
+    const d = base
+    const [ours, client] = d.messages as [Dossier['messages'][number], Dossier['messages'][number]]
+    return {
+      ...d,
+      newDay: false,
+      messages: [ours, { ...client, text: said, platformMessageId: 'm-9' }],
+      turnMessageIds: ['m-9'],
+      ...o,
+    }
+  }
+  const plan = async (
+    dossier: Dossier,
+    interlocutor: unknown,
+    mind = fakeMind(),
+    checker: unknown = CLEAN_CHECK,
+  ) =>
+    planTurn(
+      { gateway: await gateway({ interlocutor, checker }), mind },
+      { dossier, names: ['Анна'], settings, now: new Date() },
+    )
+  const ASK = 'Вы делали что-то похожее для клиник?'
+  const choose = (case_id: string | null, moment: CaseMoment | null = 'asked') => ({
+    moment: case_id ? moment : null,
+    case_id,
+    why: case_id ? 'Клиент спросил про примеры' : null,
+  })
+
+  it('FR-CONV-3: recall takes up to three cases by the client and the order, without those told', async () => {
+    const seen: { text: string; exclude?: string[]; limit: number }[] = []
+    const mind = fakeMind()
+    const watched = {
+      ...mind,
+      cases: async (q: { text: string; scope: string; limit: number; exclude?: string[] }) => {
+        seen.push(q)
+        return (mind.cases ? mind.cases(q) : []) ?? []
+      },
+    }
+    const d = await chatOf(ASK, {
+      toldCases: [{ id: 'k-case-04', title: 'Школа танцев: стратегия маркетинга, Казань' }],
+    })
+    const r = await recall(watched, d)
+    expect(r.cases.map((c) => c.id)).toEqual(['k-case-01', 'k-case-02', 'k-case-03'])
+    expect(seen[0]?.exclude).toEqual(['k-case-04'])
+    expect(seen[0]?.text).toContain(ASK)
+    expect(seen[0]?.text).toContain('Сайт для клиники')
+    expect(seen[0]?.text).toContain('Нужен сайт с записью')
+
+    // A case that our own message already names is left out, though no trace knows it.
+    const named = await chatOf(ASK, { toldCases: [] })
+    named.messages = [
+      { ...(named.messages[0] as Dossier['messages'][number]), text: 'Делали для Лиса-Клиник.' },
+      ...named.messages.slice(1),
+    ]
+    expect((await recall(mind, named)).cases.map((c) => c.id)).toEqual([
+      'k-case-02',
+      'k-case-03',
+      'k-case-04',
+    ])
+    // A mind without the case search (the stub) offers none.
+    expect((await recall({ ...mind, cases: undefined }, d)).cases).toEqual([])
+  })
+
+  it('FR-CONV-3: the case query puts the client first and caps the words, a long order text cannot push the client out', async () => {
+    const seen: string[] = []
+    const mind = fakeMind()
+    const watched = {
+      ...mind,
+      cases: async (q: { text: string; scope: string; limit: number; exclude?: string[] }) => {
+        seen.push(q.text)
+        return (mind.cases ? mind.cases(q) : []) ?? []
+      },
+    }
+    const distinct = (text: string) =>
+      new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3))
+    const filler = (n: number, tag: string) =>
+      Array.from({ length: n }, (_, i) => `${tag}${i}`).join(' ')
+
+    // A long order: the client's words stay whole and first, the order words fill what is left of 32.
+    const d = await chatOf(ASK)
+    d.order = {
+      ...(d.order as NonNullable<Dossier['order']>),
+      text: `Нужен сайт ${filler(150, 'заказ')}`,
+    }
+    await recall(watched, d)
+    const query = seen.at(-1) ?? ''
+    expect(query.startsWith(ASK)).toBe(true)
+    expect(query).toContain('Сайт для клиники')
+    expect(query).toContain('заказ0')
+    expect(distinct(query).size).toBeLessThanOrEqual(32)
+    expect(query).not.toContain('заказ149')
+
+    // A long client turn alone fills the query: no word of the order is added, and the cap cuts nothing later.
+    const long = await chatOf(`Есть примеры работ? ${filler(60, 'слово')}`)
+    await recall(watched, long)
+    const longQuery = seen.at(-1) ?? ''
+    expect(longQuery).toContain('слово0')
+    expect(longQuery).not.toContain('Сайт для клиники')
+    expect(longQuery).not.toContain('заказ')
+    expect(distinct(longQuery).size).toBeLessThanOrEqual(32)
+  })
+
+  it('FR-CONV-3: a message of ours with the words of a descriptive title drops no case, a brand name does', async () => {
+    const d = await chatOf(ASK, { toldCases: [] })
+    d.messages = [
+      {
+        ...(d.messages[0] as Dossier['messages'][number]),
+        // «Сеть кофеен» is what the client of k-case-02 is, «Лиса-Клиник» is the name of k-case-01.
+        text: 'Делали для Лиса-Клиник, а у сети кофеен свой разговор.',
+      },
+      ...d.messages.slice(1),
+    ]
+    expect((await recall(fakeMind(), d)).cases.map((c) => c.id)).toEqual([
+      'k-case-02',
+      'k-case-03',
+      'k-case-04',
+    ])
+  })
+
+  it('FR-CONV-3: the Interlocutor input has a «Кейсы» section with each case, or says there is none', async () => {
+    const d = await chatOf(ASK)
+    const r = await recall(fakeMind(), d)
+    const text = formatInterlocutorInput(d, r, [])
+    for (const part of [
+      '## Кейсы',
+      '[k-case-01] Лиса-Клиник: онлайн-запись, Краснодар',
+      'Суть: Сделали для Лиса-Клиник: онлайн-запись, Краснодар сайт',
+      'Что делали: Собрали сайт, настроили запись и рекламу.',
+      'Где: Tilda, Яндекс Директ',
+      'Срок: 20 рабочих дней',
+      'Роль и масштаб: Под ключ, команда из двух человек.',
+      'Результат: Заявок стало в полтора раза больше.',
+      'Как показывать клиенту:\n- Компанию можно называть.',
+      '- Компанию не называть: NDA.',
+    ])
+      expect(text, part).toContain(part)
+    // Between the records of the mind and the examples of Boris.
+    expect(text.indexOf('## Записи разума')).toBeLessThan(text.indexOf('## Кейсы'))
+    expect(text.indexOf('## Кейсы')).toBeLessThan(text.indexOf('## Образцы Бориса'))
+    expect(formatInterlocutorInput(d, { ...r, cases: [] }, [])).toContain(
+      'Подходящих кейсов нет, не выдумывай',
+    )
+    const again = formatInterlocutorInput(d, r, [{ id: 'case.no_moment', detail: 'x' }], true)
+    expect(again).toContain('Кейс в этом ответе нельзя')
+    expect(again).not.toContain('[k-case-01]')
+  })
+
+  it('FR-CONV-4: a case in the plan comes with its moment and a case id may be cited as a fact', async () => {
+    const p = await plan(
+      await chatOf(ASK),
+      interlocutorAnswer({
+        text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+        fact_ids: ['k-process-start', 'k-case-01'],
+        case: choose('k-case-01'),
+      }),
+    )
+    expect(p.issues).toEqual([])
+    expect(p.output?.case).toMatchObject({ moment: 'asked', case_id: 'k-case-01' })
+    expect(p.recall.cases.map((c) => c.id)).toContain('k-case-01')
+    // The Checker was told the case and its moment.
+    const [checker] = await callsOf('checker')
+    expect(checker?.stdin).toContain('## Кейс в черновике')
+    expect(checker?.stdin).toContain('Повод: asked')
+    expect(checker?.stdin).toContain('[k-case-01]')
+  })
+
+  it('FR-CONV-4: the plan returns the case the final reply tells, and none when the reply has no valid case', async () => {
+    const good = interlocutorAnswer({
+      text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+      case: choose('k-case-01'),
+    })
+    expect((await plan(await chatOf(ASK), good)).case?.id).toBe('k-case-01')
+    // No case in the answer.
+    const none = interlocutorAnswer({ case: choose(null), text: 'Понимаю. Удобно созвониться?' })
+    expect((await plan(await chatOf(ASK), none)).case).toBeUndefined()
+    // A case named without a moment, then a rewrite that still names it: the id is no case of the plan.
+    const stubborn = interlocutorAnswer({
+      text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+      case: { moment: null, case_id: 'k-case-01', why: 'Клиент спросил про примеры' },
+    })
+    const refused = await plan(await chatOf(ASK), stubborn)
+    expect(refused.output?.case?.case_id).toBe('k-case-01')
+    expect(refused.issues.map((x) => x.id)).toContain('case.unknown')
+    expect(refused.case).toBeUndefined()
+    // A rewrite after another fault that tells the case well keeps it.
+    const dash = interlocutorAnswer({
+      text: `Делали для Лиса-Клиник ${String.fromCharCode(0x2014)} запись стала онлайн. Удобно созвониться?`,
+      case: choose('k-case-01'),
+    })
+    const fixed = await plan(await chatOf(ASK), { $sequence: [dash, good] })
+    expect(fixed.attempts).toBe(2)
+    expect(fixed.case?.id).toBe('k-case-01')
+  }, 30000)
+
+  it('FR-CONV-4: a failed case check rewrites the reply without a case', async () => {
+    const first = interlocutorAnswer({
+      text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+      case: { moment: null, case_id: 'k-case-01', why: 'Клиент спросил про примеры' },
+    })
+    const second = interlocutorAnswer({
+      text: 'Понимаю. Похожий опыт Борис покажет на созвоне. Удобно?',
+      case: choose(null),
+    })
+    const p = await plan(await chatOf(ASK), { $sequence: [first, second] })
+    expect(p.attempts).toBe(2)
+    expect(p.issues).toEqual([])
+    expect(p.output?.case?.case_id).toBeNull()
+    const [one, two] = await callsOf('interlocutor')
+    expect(one?.stdin).toContain('[k-case-01]')
+    expect(one?.stdin).not.toContain('Переделать')
+    // The rewrite says what failed, offers no case and forbids one.
+    expect(two?.stdin).toContain('## Переделать')
+    expect(two?.stdin).toContain('кейс назван без момента')
+    expect(two?.stdin).toContain('Кейс в этом ответе нельзя')
+    expect(two?.stdin).not.toContain('[k-case-01]')
+  })
+
+  it('FR-CONV-4: the second answer cannot name a case, so a reply that still does is a draft with the reasons', async () => {
+    const stubborn = interlocutorAnswer({
+      text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+      case: { moment: null, case_id: 'k-case-01', why: 'Клиент спросил про примеры' },
+    })
+    const p = await plan(await chatOf(ASK), stubborn)
+    expect(p.attempts).toBe(2)
+    expect(p.issues.map((x) => x.id)).toContain('case.unknown')
+    expect(p.decision.action).toBe('draft')
+    expect(p.decision.reason).toContain('не прошло проверку')
+  })
+
+  it('FR-CONV-4: the Checker’s note on the case fails the reply and sends the rewrite without it', async () => {
+    const answer = interlocutorAnswer({
+      text: 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+      case: choose('k-case-01'),
+    })
+    const p = await plan(
+      await chatOf(ASK),
+      {
+        $sequence: [
+          answer,
+          interlocutorAnswer({ case: choose(null), text: 'Понимаю. Удобно созвониться?' }),
+        ],
+      },
+      fakeMind(),
+      { $sequence: [{ ...CLEAN_CHECK, case: ['Звучит как реклама'] }, CLEAN_CHECK] },
+    )
+    expect(p.attempts).toBe(2)
+    expect(p.issues).toEqual([])
+    const [, two] = await callsOf('interlocutor')
+    expect(two?.stdin).toContain('Звучит как реклама')
+    expect(two?.stdin).toContain('Кейс в этом ответе нельзя')
+  })
+
+  describe('the link of a case', () => {
+    const LINK = 'https://lisa-klinik.example/'
+    const linked = (o: Parameters<typeof caseOf>[2] = {}) =>
+      caseOf('k-case-05', 'Лиса-Клиник: онлайн-запись, Краснодар', {
+        role: `Под ключ. Сайт проекта: ${LINK}`,
+        showRules: ['Компанию и ссылку можно называть.'],
+        ...o,
+      })
+    const mindOf = (c: ReturnType<typeof caseOf>) => ({ ...fakeMind(), cases: async () => [c] })
+    const answer = (moment: CaseMoment, text?: string) =>
+      interlocutorAnswer({
+        text: text ?? 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?',
+        case: choose('k-case-05', moment),
+      })
+
+    it('FR-CONV-4: the model writes no case link, the code adds it when the client asked', async () => {
+      for (const moment of ['asked', 'order_asks'] as const) {
+        const p = await plan(await chatOf(ASK), answer(moment), mindOf(linked()))
+        expect(p.issues, moment).toEqual([])
+        expect(p.output?.text, moment).toBe(
+          `Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?\n\n${LINK}`,
+        )
+      }
+      // A link the model wrote itself is a fault, and a rewrite does not get one added.
+      const own = await plan(
+        await chatOf(ASK),
+        answer('asked', `Делали для Лиса-Клиник: ${LINK}`),
+        mindOf(linked()),
+      )
+      expect(own.issues.map((x) => x.id)).toContain('case.link')
+    })
+
+    it('FR-CONV-4: no link without the moment, the rules, an open name or a public address', async () => {
+      const cases: [string, ReturnType<typeof caseOf>, CaseMoment][] = [
+        ['a doubt is no request for examples', linked(), 'doubt'],
+        [
+          'the rules do not name the link',
+          linked({ showRules: ['Компанию можно называть.'] }),
+          'asked',
+        ],
+        [
+          'the rules forbid the link',
+          linked({ showRules: ['Компанию можно называть, ссылку не давать.'] }),
+          'asked',
+        ],
+        [
+          'the rule allows one link and forbids another',
+          linked({ showRules: ['Ссылку на сайт можно давать, на презентацию нельзя.'] }),
+          'asked',
+        ],
+        [
+          'the link is allowed in one item and forbidden in the next',
+          linked({ showRules: ['Ссылку можно давать.', 'Ссылку на презентацию давать нельзя.'] }),
+          'asked',
+        ],
+        ['the company is closed', linked({ nameOpen: false }), 'asked'],
+        [
+          'a working folder is no public address',
+          linked({ role: 'Под ключ. Материалы: https://drive.google.com/drive/folders/abc' }),
+          'asked',
+        ],
+        ['the record has no link', linked({ role: 'Под ключ.' }), 'asked'],
+      ]
+      for (const [why, c, moment] of cases) {
+        // A closed company is not named in the text, the rest is.
+        const text = c.nameOpen
+          ? 'Делали для Лиса-Клиник, запись стала онлайн. Удобно созвониться?'
+          : 'Делали для клиники, запись стала онлайн. Удобно созвониться?'
+        const p = await plan(await chatOf(ASK), answer(moment, text), mindOf(c))
+        expect(p.issues, why).toEqual([])
+        expect(p.output?.text, why).toBe(text)
+      }
+    })
+  })
+
+  it('FR-CONV-3: the dossier counts a case as told only when the reply that told it went to the client', async () => {
+    const d = await dossierOf()
+    const told = (
+      id: string,
+      case_id: string | null,
+      outcome: string | null,
+      title = 'Лиса-Клиник: онлайн-запись',
+    ) =>
+      db.insert(convTurn).values({
+        id,
+        conversationId: d.conversationId,
+        anchorMessageId: 'm-1',
+        outcome,
+        understanding: case_id ? { case: { moment: 'asked', case_id, why: 'x', title } } : null,
+      })
+    await told('t-1', 'k-case-01', 'sent')
+    await told('t-2', null, 'sent')
+    await told('t-3', 'k-case-02', 'sent', 'Сеть кофеен: реклама, Сочи')
+    await told('t-4', 'k-case-01', 'sent')
+    // A shadow draft, a call to Boris, a failed turn, a turn our side's message cancelled and a turn still running
+    // told nothing to the client.
+    await told('t-5', 'k-case-05', 'drafted', 'Школа танцев: стратегия маркетинга, Казань')
+    await told('t-6', 'k-case-06', 'called_boris')
+    await told('t-7', 'k-case-07', 'failed')
+    await told('t-8', 'k-case-08', 'answered')
+    await told('t-9', 'k-case-09', 'closed')
+    await told('t-10', 'k-case-10', null)
+    await told('t-now', 'k-case-03', 'sent', 'Окна-Мастер: сайт и заявки, Москва')
+    const again = await buildDossier(db, d.conversationId, new Date(), {
+      night: settings.night,
+      turnId: 't-now',
+    })
+    expect(again.toldCases).toEqual([
+      { id: 'k-case-01', title: 'Лиса-Клиник: онлайн-запись' },
+      { id: 'k-case-02', title: 'Сеть кофеен: реклама, Сочи' },
+    ])
   })
 })

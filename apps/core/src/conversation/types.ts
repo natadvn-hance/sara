@@ -1,5 +1,6 @@
 import type {
   AuthorBasis,
+  CaseChoice,
   ChatAuthor,
   CheckId,
   ClientInfo,
@@ -89,6 +90,8 @@ export type Recall = {
   procedure: MindHit | null
   /** The constitution, the autonomy rules and the speech portrait: on every turn. */
   always: MindHit[]
+  /** Up to three cases of Hance that fit the client's words, none of them already told in this chat. */
+  cases: CaseHit[]
 }
 
 export type MindSearch = {
@@ -141,6 +144,18 @@ export type Dossier = {
   night: boolean
   lastOursAt: string | null
   remindersSent: number
+  /** Cases already told in this chat, from the traces of its earlier turns (left out: none). */
+  toldCases?: { id: string; title: string }[]
+}
+
+/** The case side of a reply's code checks (cases in a conversation). */
+export type CaseCheck = {
+  /** The cases the turn offered the Interlocutor under «Кейсы». */
+  offered: CaseHit[]
+  /** Cases already told in this chat. */
+  told: { id: string; title: string }[]
+  /** What the Interlocutor chose; null when its answer had no case. */
+  choice: CaseChoice | null
 }
 
 export type CheckInput = {
@@ -154,6 +169,8 @@ export type CheckInput = {
   clientTurnText: string
   ourPrevious: string[]
   bannedPhrases: string[]
+  /** The cases of this turn and the Interlocutor's choice; left out, only the ad and link checks of a case run. */
+  cases?: CaseCheck
 }
 
 export type CheckIssue = { id: CheckId; detail: string }
@@ -187,6 +204,8 @@ export type TurnPlan = {
   modelCallIds: string[]
   checkerRan: boolean
   failure: string | null
+  /** The case the final reply tells: one it was offered and no check refused; none when the reply has no valid case. */
+  case?: CaseHit
 }
 
 export type EngineDeps = { gateway: Gateway; mind: MindSearch }
