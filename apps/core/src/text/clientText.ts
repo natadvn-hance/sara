@@ -4,8 +4,65 @@
  * Long and medium dashes are written below as escapes, never as the characters (CI forbids the long one in files).
  */
 
-import { NOT_NAMES } from '../conversation/check/phrases'
 import { firstName } from '../leads/clientName'
+
+/**
+ * Words that open a message before a comma and are not a name (folded): «Понимаю, добрый день у вас был» is no
+ * «name, greeting». The same list is `NOT_NAMES` of the conversation module (conversation/check/phrases); it is kept
+ * here so this module needs nothing from it, and one of the two may import the other when both are on one branch.
+ */
+const NOT_NAMES = new Set([
+  'здравствуйте',
+  'здравствуй',
+  'привет',
+  'приветствую',
+  'добрый',
+  'доброе',
+  'доброго',
+  'добрая',
+  'доброй',
+  'спасибо',
+  'благодарю',
+  'хорошо',
+  'отлично',
+  'конечно',
+  'да',
+  'нет',
+  'итак',
+  'извините',
+  'простите',
+  'понимаю',
+  'понял',
+  'поняла',
+  'ясно',
+  'понятно',
+  'видимо',
+  'кстати',
+  'ладно',
+  'тогда',
+  'сейчас',
+  'смотрите',
+  'скажите',
+  'подскажите',
+  'вижу',
+  'согласна',
+  'согласен',
+  'договорились',
+  'отвечу',
+  'напишу',
+  'уточню',
+  'сделаем',
+  'посмотрим',
+  'обсудим',
+  'давайте',
+  'верно',
+  'точно',
+  'безусловно',
+  'разумеется',
+  'жаль',
+  'пожалуйста',
+  'еще',
+])
 
 // ---------------------------------------------------------------------------------------------------------------
 // Rules 3, 4, 15: dashes, the final period, paragraphs
