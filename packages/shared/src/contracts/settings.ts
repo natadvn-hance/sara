@@ -64,6 +64,12 @@ export const SETTINGS = {
    * not even Boris's own text, and a specialist message is not taken for Boris's.
    */
   'conv.v1_writes': { schema: z.boolean(), default: true },
+  /**
+   * Автопилот (режим черновиков): пока выключен, Сара сама не отправляет клиенту ни ответ, ни напоминание. Каждое
+   * сообщение приходит Борису карточкой, и уходит только по его нажатию («Отправить», «Изменить» или его текст).
+   * Включается позже, после экзамена и недели в тени, и только вместе с уровнем темы «сама» в `conv.autonomy`.
+   */
+  'conv.autopilot': { schema: z.boolean(), default: false },
   /** FR-CONV-7: the turn waits this long after the last client message the core heard... */
   'conv.quiet_after_message_s': { schema: z.number().int().positive(), default: 45 },
   /** ...and this long after the last «печатает». */

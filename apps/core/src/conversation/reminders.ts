@@ -1,13 +1,15 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { and, eq, like, notLike } from 'drizzle-orm'
+import { and, eq, inArray, like, notLike } from 'drizzle-orm'
 import { convTurn, deal, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { getSetting } from '../settings/store'
 import { clientTurnBefore, isRefusal } from './clientCues'
 import {
+  checkGround,
   dormantStep,
-  expireDormantTask,
   fallbackStep,
+  type Ground,
+  giveUpCard,
   giveUpDormant,
   groundStep,
   isLadderMessage,
@@ -53,18 +55,19 @@ export function setRemindDeps(x: RemindDeps): void {
 export const remindWorkflowId = (conversationId: string, anchor: string) =>
   `conv-remind:${conversationId}:${anchor}`
 
-/** Steps of the ladder: a day, three days, dormant, ten days, thirty days; the loop stops long before this. */
-const MAX_PLANS = 8
+/** Steps of the ladder: three reminders and the silence task; the loop stops at the task. */
+const MAX_PLANS = 5
 /** A model that gave no text is asked again every so often until the reminder is that late (design 5.11). */
 const FALLBACK_AFTER_MS = 3 * 3600_000
 const RETRY_EVERY_MS = 10 * 60_000
-/** Boris has this long to answer the task of a dormant client; with no answer the ladder ends. */
-const DORMANT_WAIT_S = 30 * 24 * 3600
-/** The dormant day is tried every hour for a day while something stands in its way, soon again after a failure. */
+/** The silence task is tried every hour for a day while something stands in its way, soon again after a failure. */
 const DORMANT_TRIES = 24
 const DORMANT_RETRY_MS = 3600_000
 const DORMANT_STEP_RETRY_MS = 10 * 60_000
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
+/** The card of a reminder that Telegram would not take is tried again every 10 minutes, 6 times, then given up. */
+const CARD_TRIES = 6
+const CARD_RETRY_MS = 10 * 60_000
 
 /**
  * The text of a reminder: the model's; when the model itself gave nothing (a limit, a failure) it is asked again every
@@ -143,38 +146,24 @@ async function askBoris(
 
 async function runRemind(conversationId: string, anchor: string): Promise<void> {
   const wf = remindWorkflowId(conversationId, anchor)
+  // How many steps are done, and when the one before went (or was due, if it was only skipped): the next wait
+  // counts from there (rule 11: 1 day, then 2 days after the first, 3 days after the second, 3 days after the third).
   let sent = 0
-  let continued = false
-  let lastSentAt: string | null = null
-  let continuedAt: string | null = null
+  let prevAt: string | null = null
   for (let k = 0; k < MAX_PLANS; k++) {
-    const next = await DBOS.runStep(
-      () => planNext(d(), conversationId, anchor, { sent, continued, lastSentAt, continuedAt }),
-      { name: `plan-${k}`, ...DB_STEP },
-    )
+    const next = await DBOS.runStep(() => planNext(d(), conversationId, anchor, { sent, prevAt }), {
+      name: `plan-${k}`,
+      ...DB_STEP,
+    })
     if (!next) return
     const wait = Date.parse(next.at) - (await DBOS.now())
     if (wait > 0) await DBOS.sleep(wait)
     const rowId = `${wf}:${next.step}`
     if (next.step === 'dormant') {
-      // Shadow has nobody to ask: the ladder ends at the dormant day.
-      if ((await askBoris(k, conversationId, anchor, rowId, next)) !== 'asked') return
-      const answer = await DBOS.recv<string>('decision', {
-        timeoutSeconds: d().dormantWaitS ?? DORMANT_WAIT_S,
-      })
-      if (answer !== 'remind') {
-        // No answer in the whole time: the task is closed, not left open with buttons that promise what will not come.
-        if (answer === null)
-          await DBOS.runStep(() => expireDormantTask(d(), rowId), {
-            name: `dormant-expire-${k}`,
-            ...DB_STEP,
-          })
-        return
-      }
-      continued = true
-      // «Через 10 суток» is true from the moment he pressed, not from the dormant day.
-      continuedAt = new Date(await DBOS.now()).toISOString()
-      continue
+      // The third reminder is the last: three silent days later Boris gets one task (in shadow only the trace) and the
+      // ladder is over. Nothing waits for his answer, «Закрыть» works on the task whenever he presses it.
+      await askBoris(k, conversationId, anchor, rowId, next)
+      return
     }
     const g = await DBOS.runStep(() => groundStep(d(), rowId, conversationId, anchor, next), {
       name: `ground-${k}`,
@@ -185,23 +174,45 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
       // unreadable chat, a pause of sending) is not repeated later, the next step comes at its own time.
       if (g.end) return
       sent++
+      prevAt = next.at
       continue
     }
     const text = await obtainText(k, conversationId, rowId, next, g.read)
     // The text may have taken hours: a reminder never goes in the quiet hours, it waits for the morning.
-    const hold = await DBOS.runStep(async () => quietUntil(d(), new Date()), {
+    const hold = await DBOS.runStep(async () => quietUntil(d(), new Date(), conversationId), {
       name: `quiet-${k}`,
       ...DB_STEP,
     })
     const rest = hold.until ? Date.parse(hold.until) - (await DBOS.now()) : 0
     if (rest > 0) await DBOS.sleep(rest)
-    const result = await DBOS.runStep(
+    let result = await DBOS.runStep(
       () => sendStep(d(), rowId, conversationId, anchor, next, text),
       { name: `send-${k}`, ...DB_STEP },
     )
+    // Drafts mode: Telegram not taking the card is a passing trouble, the step is tried again for an hour.
+    for (let a = 1; result.retry; a++) {
+      if (a >= (d().cardTries ?? CARD_TRIES)) {
+        await DBOS.runStep(() => giveUpCard(d(), rowId), {
+          name: `card-giveup-${k}`,
+          ...DB_STEP,
+        })
+        result = { outcome: 'failed', end: false }
+        break
+      }
+      await DBOS.sleep(d().cardRetryEveryMs ?? CARD_RETRY_MS)
+      result = await DBOS.runStep(() => sendStep(d(), rowId, conversationId, anchor, next, text), {
+        name: `send-${k}-r${a}`,
+        ...DB_STEP,
+      })
+    }
     if (result.end) return
-    if (result.outcome === 'sent' || result.outcome === 'drafted' || result.outcome === 'uncertain')
-      lastSentAt = new Date(await DBOS.now()).toISOString()
+    prevAt =
+      result.outcome === 'sent' ||
+      result.outcome === 'drafted' ||
+      result.outcome === 'carded' ||
+      result.outcome === 'uncertain'
+        ? new Date(await DBOS.now()).toISOString()
+        : next.at
     sent++
   }
 }
@@ -233,6 +244,14 @@ export async function startReminder(
   })(conversationId, lastOursMessageId)
 }
 
+/**
+ * The chat read again before the text of a reminder card goes to the client, hours after the card came (a press of
+ * Boris, FR-CONV-12): the same last word as at the wake-up of the step.
+ */
+export async function reminderGround(conversationId: string, anchor: string): Promise<Ground> {
+  return checkGround(d(), conversationId, anchor, { dormant: false })
+}
+
 const OPEN = ['PENDING', 'ENQUEUED', 'DELAYED'] as const
 
 /** The ids of the reminder processes of a conversation that are not over. */
@@ -255,21 +274,28 @@ export async function cancelReminders(
 }
 
 /**
- * The task for Boris about a quiet client is moot once the client or our side wrote: it is closed. The task of the
- * process `keep` (the one that goes on) stays.
+ * The task for Boris about a quiet client, and the card of a reminder that still waits for his press, are moot once
+ * the client or our side wrote: they are closed. The tasks of the process `keep` (the one that goes on) stay.
  */
 async function resolveDormantTasks(conversationId: string, keep?: string) {
-  await d()
+  const closed = await d()
     .db.update(task)
     .set({ state: 'resolved', resolution: 'answered', resolvedAt: new Date().toISOString() })
     .where(
       and(
-        eq(task.kind, 'conv_dormant'),
+        inArray(task.kind, ['conv_dormant', 'conv_draft']),
         like(task.entityId, `conv-remind:${conversationId}:%`),
         keep ? notLike(task.entityId, `${keep}:%`) : undefined,
         eq(task.state, 'open'),
       ),
     )
+    .returning({ rowId: task.entityId, kind: task.kind })
+  for (const c of closed)
+    if (c.kind === 'conv_draft')
+      await d()
+        .db.update(convTurn)
+        .set({ outcome: 'answered', decisionReason: 'разговор пошёл дальше: напоминание не нужно' })
+        .where(and(eq(convTurn.id, c.rowId), eq(convTurn.outcome, 'carded')))
 }
 
 /** A client who was dormant and wrote again is in the conversation again. */
@@ -345,11 +371,6 @@ export async function syncReminders(
   await startReminder(conv.id, anchor.platformMessageId)
 }
 
-/** DBOS tells a send to a process that never existed by this code (`DBOSNonExistentWorkflowError`, not exported). */
-const NON_EXISTENT_WORKFLOW = 16
-const isMissingWorkflow = (e: unknown) =>
-  (e as { dbosErrorCode?: number } | null)?.dbosErrorCode === NON_EXISTENT_WORKFLOW
-
 /** The only trace of a ladder that was not run: one row, whatever the shadow or the switch (a repeat adds none). */
 async function traceRefusal(conversationId: string, anchor: string, wf: string): Promise<void> {
   const now = new Date().toISOString()
@@ -369,22 +390,4 @@ async function traceRefusal(conversationId: string, anchor: string, wf: string):
       finishedAt: now,
     })
     .onConflictDoNothing()
-}
-
-/** Boris's answer on the dormant task reaches the process that waits for it (a process that is gone is fine). */
-export async function decideDormant(
-  reminderTurnId: string,
-  decision: 'remind' | 'close',
-): Promise<boolean> {
-  const wf = reminderTurnId.slice(0, reminderTurnId.lastIndexOf(':'))
-  // Only a process that still waits can be told; the caller says so plainly to Boris when it does not.
-  if ((await DBOS.getWorkflowStatus(wf))?.status !== 'PENDING') return false
-  try {
-    await DBOS.send(wf, decision, 'decision', `dormant:${reminderTurnId}:${decision}`)
-    return true
-  } catch (e) {
-    // DBOS names this error by its class only in the code: the error object's `name` is plain «Error».
-    if (!isMissingWorkflow(e)) throw e
-    return false
-  }
 }

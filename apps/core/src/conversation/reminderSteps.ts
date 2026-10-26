@@ -1,5 +1,5 @@
 import { type ChatMessage, formatCallback, newEventId, normalizeText } from '@sara/shared'
-import { and, asc, desc, eq, gte, like, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, isNotNull, like, ne, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
@@ -11,11 +11,13 @@ import { getSetting } from '../settings/store'
 import { clientTurnBefore, isRefusal, isThinking } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
+import { expireOldCards, sendReminderCard } from './reminderCard'
 import {
   nextReminder,
   type ReminderStep,
   type ReminderTone,
   reminderFallback,
+  type Waits,
 } from './reminderLadder'
 import { type TextStep, writeReminder } from './reminderText'
 import { getConversation } from './store'
@@ -36,18 +38,19 @@ export type RemindDeps = {
   fallbackAfterMs?: number
   /** How often a model that gave no text is asked again (default 10 minutes). */
   retryEveryMs?: number
-  /** How long the task for Boris waits for his answer (default 30 days). */
-  dormantWaitS?: number
-  /** The least time between two reminders (default a day); tests shorten it. */
+  /** The waits after the first reminder (2, 3 and 3 days, each from the step before); tests shorten them. */
+  waitsMs?: Waits
+  /** The least time between two reminders that really went out (default a day); tests shorten it. */
   minGapMs?: number
-  /** How often the dormant day is tried again while something stands in its way (default an hour). */
+  /** How often the silence task is tried again while something stands in its way (default an hour). */
   dormantRetryEveryMs?: number
   /** How often it is tried again after a failure, a Telegram outage say (default 10 minutes). */
   dormantStepRetryMs?: number
-  /** How many tries the dormant day gets before it is given up (default 24, a day). */
+  /** How many tries the silence task gets before it is given up (default 24, a day). */
   dormantTries?: number
-  /** The wait after «Напоминать дальше» (default 10 days); tests shorten it. */
-  afterPressMs?: number
+  /** How often a card that Telegram would not take is tried again (default 10 minutes), and how many tries (6). */
+  cardRetryEveryMs?: number
+  cardTries?: number
 }
 
 /** The step the ladder is at: when it is due, which reminder and in what tone. */
@@ -59,9 +62,12 @@ export type Ground =
   | { go: false; end: boolean; why: string }
 
 export type Sent = {
-  outcome: 'sent' | 'drafted' | 'skipped' | 'stopped' | 'failed' | 'uncertain'
+  /** `carded`: drafts mode, Boris has the card «Напомнить клиенту?» and nothing is queued. */
+  outcome: 'sent' | 'drafted' | 'carded' | 'skipped' | 'stopped' | 'failed' | 'uncertain'
   /** True when the ladder is over. */
   end: boolean
+  /** The card did not reach Boris (Telegram is down): the row stays open and the step is tried again. */
+  retry?: boolean
 }
 
 /** A turn that has not finished for longer than this is not running, it is stuck. */
@@ -151,11 +157,10 @@ export async function planNext(
   conversationId: string,
   anchor: string,
   st: {
+    /** How many steps of the ladder are done. */
     sent: number
-    continued: boolean
-    lastSentAt: string | null
-    /** When Boris pressed «Напоминать дальше»: the 10 and the 30 days count from there. */
-    continuedAt: string | null
+    /** When the step before went, or was due if it was only skipped: the next wait counts from there. */
+    prevAt: string | null
   },
 ): Promise<Planned | null> {
   const conv = await getConversation(d.db, conversationId)
@@ -178,22 +183,27 @@ export async function planNext(
     lastOursAt: m.sentAt,
     sent: st.sent,
     read: m.read,
-    continued: st.continued,
     now: new Date(),
-    lastSentAt: st.lastSentAt,
+    prevAt: st.prevAt,
     quiet: await getSetting(d.db, 'conv.reminder_quiet'),
-    minGapMs: d.minGapMs,
-    continuedAt: st.continuedAt,
-    afterPressMs: d.afterPressMs,
+    waitsMs: d.waitsMs,
     ...(thinking && { firstAfterMs: THINKING_FIRST_MS }),
   })
   return r ? { at: r.at.toISOString(), step: r.step, tone: r.tone } : null
 }
 
-/** The texts of the reminders this conversation's ladder sent: they stand in the chat as our side's messages. */
-export async function ladderTexts(db: Db, conversationId: string): Promise<Set<string>> {
-  const rows = await db
-    .select({ payload: outbox.payload })
+/**
+ * The reminders this conversation's ladder sent, as the chat shows them: they stand there as our side's messages. Those
+ * that went by themselves (the key of their process), those Boris sent with «Отправить» on the card of a reminder (the
+ * key of the card's task) and his own version of a reminder (what he wrote after «Изменить»). `confirmedAt` is when the
+ * service confirmed the message; null for a text that is only known as his version.
+ */
+async function ladderRows(
+  db: Db,
+  conversationId: string,
+): Promise<{ text: string; confirmedAt: string | null }[]> {
+  const own = await db
+    .select({ payload: outbox.payload, confirmedAt: outbox.confirmedAt })
     .from(outbox)
     .where(
       and(
@@ -201,12 +211,67 @@ export async function ladderTexts(db: Db, conversationId: string): Promise<Set<s
         like(outbox.idempotencyKey, `msg:conv-remind:${conversationId}:%`),
       ),
     )
-  return new Set(rows.map((r) => normalizeText((r.payload as { text?: string }).text ?? '')))
+  const pressed = await db
+    .select({ payload: outbox.payload, confirmedAt: outbox.confirmedAt })
+    .from(outbox)
+    .innerJoin(task, eq(outbox.idempotencyKey, sql`'msg:send:' || ${task.id}::text`))
+    .where(and(eq(outbox.kind, 'message'), like(task.entityId, `conv-remind:${conversationId}:%`)))
+  const edited = await db
+    .select({ text: convTurn.borisText })
+    .from(convTurn)
+    .where(
+      and(
+        eq(convTurn.conversationId, conversationId),
+        eq(convTurn.kind, 'reminder'),
+        isNotNull(convTurn.borisText),
+      ),
+    )
+  const editedTexts = new Set(edited.map((r) => normalizeText(r.text ?? '')))
+  const conv = await getConversation(db, conversationId)
+  // His version went through the outbox under his own key: it is found by its text in this chat.
+  const sentEdited =
+    conv && editedTexts.size > 0
+      ? (
+          await db
+            .select({ payload: outbox.payload, confirmedAt: outbox.confirmedAt })
+            .from(outbox)
+            .where(
+              and(eq(outbox.kind, 'message'), sql`${outbox.payload}->>'chatId' = ${conv.chatId}`),
+            )
+        ).filter((r) => editedTexts.has(normalizeText((r.payload as { text?: string }).text ?? '')))
+      : []
+  return [
+    ...[...own, ...pressed, ...sentEdited].map((r) => ({
+      text: normalizeText((r.payload as { text?: string }).text ?? ''),
+      confirmedAt: r.confirmedAt,
+    })),
+    ...edited.map((r) => ({ text: normalizeText(r.text ?? ''), confirmedAt: null })),
+  ]
 }
 
-/** One of the ladder's own reminders, which the sync stored as Sara's from the outbox. */
-export const isLadderMessage = (m: Pick<StoredMessage, 'author' | 'text'>, texts: Set<string>) =>
-  m.author === 'sara' && texts.has(normalizeText(m.text))
+/** The texts of the reminders this conversation's ladder sent: they stand in the chat as our side's messages. */
+export async function ladderTexts(db: Db, conversationId: string): Promise<Set<string>> {
+  return new Set((await ladderRows(db, conversationId)).map((r) => r.text))
+}
+
+/** When the last reminder of the ladder really went out (the service confirmed it), or null if none did. */
+export async function lastReminderWentAt(db: Db, conversationId: string): Promise<number | null> {
+  const times = (await ladderRows(db, conversationId))
+    .map((r) => (r.confirmedAt ? Date.parse(r.confirmedAt) : Number.NaN))
+    .filter((t) => !Number.isNaN(t))
+  return times.length > 0 ? Math.max(...times) : null
+}
+
+/**
+ * One of the ladder's own reminders, which the sync stored as Sara's from the outbox (or as Boris's own words when he
+ * changed the text of a reminder card).
+ */
+export const isLadderMessage = (
+  m: Pick<StoredMessage, 'author' | 'authorBasis' | 'text'>,
+  texts: Set<string>,
+) =>
+  (m.author === 'sara' || (m.author === 'boris' && m.authorBasis === 'say')) &&
+  texts.has(normalizeText(m.text))
 
 /** The account is paused, logged out or banned: nothing is written to its clients. */
 async function accountHolds(db: Db, accountId: string): Promise<boolean> {
@@ -344,15 +409,7 @@ export async function groundStep(
   return g
 }
 
-/** Boris did not answer the task of a quiet client in the whole time: it is closed, no button of it promises anything. */
-export async function expireDormantTask(d: RemindDeps, rowId: string): Promise<void> {
-  await d.db
-    .update(task)
-    .set({ state: 'resolved', resolution: 'expired', resolvedAt: new Date().toISOString() })
-    .where(and(eq(task.kind, 'conv_dormant'), eq(task.entityId, rowId), eq(task.state, 'open')))
-}
-
-/** The dormant day could not be told to Boris in the whole time it was tried: the row says why. */
+/** The silence task could not be told to Boris in the whole time it was tried: the row says why. */
 export async function giveUpDormant(d: RemindDeps, rowId: string, why: string): Promise<void> {
   await finishRow(d.db, rowId, {
     outcome: 'skipped',
@@ -361,14 +418,27 @@ export async function giveUpDormant(d: RemindDeps, rowId: string, why: string): 
   })
 }
 
+/** The least time between two reminders that really went out: a late press never puts two close together. */
+const MIN_GAP_MS = 24 * 3600_000
+
 /**
- * Whether it is the quiet hours of reminders now (`conv.reminder_quiet`) and when they end. The planned time was
- * outside them, but getting the text can take hours (a limit wait, a rewrite, the ready text), so a reminder due at
- * 22:30 could be sent at 01:30: the time is looked at again right before the send.
+ * How long a reminder still waits right before it goes, or null if it may go now. The planned time was outside the
+ * quiet hours (`conv.reminder_quiet`), but getting the text can take hours (a limit wait, a rewrite, the ready text),
+ * so a reminder due at 22:30 could be sent at 01:30: the time is looked at again here. And a day must have passed
+ * since the last reminder that really went out (Boris may have pressed a card late, after the wait of the next step
+ * was already running), so two reminders never reach a client 2 hours apart.
  */
-export async function quietUntil(d: RemindDeps, now: Date): Promise<{ until: string | null }> {
-  const end = moscowHoursEnd(now, await getSetting(d.db, 'conv.reminder_quiet'))
-  return { until: end ? end.toISOString() : null }
+export async function quietUntil(
+  d: RemindDeps,
+  now: Date,
+  conversationId: string,
+): Promise<{ until: string | null }> {
+  const went = await lastReminderWentAt(d.db, conversationId)
+  const gapEnd = went === null ? 0 : went + (d.minGapMs ?? MIN_GAP_MS)
+  const at = new Date(Math.max(now.getTime(), gapEnd))
+  const end = moscowHoursEnd(at, await getSetting(d.db, 'conv.reminder_quiet'))
+  const until = end ?? (at.getTime() > now.getTime() ? at : null)
+  return { until: until ? until.toISOString() : null }
 }
 
 /** The model's try at the text, in one step so a replay does not ask it again. Never throws: no text is the answer. */
@@ -507,6 +577,42 @@ async function deliver(
 }
 
 /**
+ * The reminder step is done when Boris has its card: the row says so together with its event. A press that came before
+ * this (the card is Boris's from the moment it is sent) has moved the row on: it is finished, not put back.
+ */
+async function endCard(
+  d: RemindDeps,
+  rowId: string,
+  conv: ConversationRow,
+  p: Planned,
+  text: string,
+): Promise<void> {
+  const [now] = await d.db
+    .select({ state: convTurn.state, outcome: convTurn.outcome })
+    .from(convTurn)
+    .where(eq(convTurn.id, rowId))
+  if (now?.state === 'finished') return
+  await d.db.transaction(async (tx) => {
+    await finishRow(tx, rowId, {
+      text,
+      ...((now?.outcome ?? 'carded') === 'carded' && { outcome: 'carded' }),
+      decision: 'draft',
+      decisionReason: 'карточка Борису: отправлю по его нажатию',
+    })
+    await journal(tx, 'conv.reminder_drafted', conv, rowId, { step: p.step, card: true })
+  })
+}
+
+/** The card could not be sent to Boris in all the tries: the row says why, the ladder goes on with its next step. */
+export async function giveUpCard(d: RemindDeps, rowId: string): Promise<void> {
+  await finishRow(d.db, rowId, {
+    outcome: 'failed',
+    decision: 'draft',
+    decisionReason: 'не смогла прислать карточку Борису',
+  })
+}
+
+/**
  * The end of a reminder step: the last check, then the shadow's record or the send through the message outbox. In
  * shadow nothing is queued, the draft is only the trace (design 5.11). The key is the process and the step, so a
  * repeat of this step after a crash sends the same message once, and the chat is not asked again.
@@ -544,9 +650,18 @@ export async function sendStep(
     await finishRow(d.db, rowId, {
       outcome: 'skipped',
       decision: 'nothing',
-      decisionReason: 'сейчас не отправляю: пауза, пауза аккаунта или режим тени',
+      decisionReason: 'сейчас не отправляю: пауза, пауза аккаунта, режим тени или режим черновиков',
     })
     return { outcome: 'skipped', end: false }
+  }
+  // Drafts mode: an earlier run of this step already sent Boris the card; it is not sent twice.
+  const [made] = await d.db
+    .select({ taskId: convTurn.taskId, state: convTurn.state })
+    .from(convTurn)
+    .where(eq(convTurn.id, rowId))
+  if (made?.taskId) {
+    if (made.state !== 'finished') await endCard(d, rowId, conv, p, text)
+    return { outcome: 'carded', end: false }
   }
   const g = await checkGround(d, conversationId, anchor, { dormant: false })
   if (!g.go) {
@@ -569,6 +684,17 @@ export async function sendStep(
       })
     return { outcome: 'drafted', end: false }
   }
+  // Drafts mode (FR-CONV-5): Sara sends nothing by herself, Boris gets the card and his press sends the text.
+  if (!(await getSetting(d.db, 'conv.autopilot'))) {
+    try {
+      await sendReminderCard(d, rowId, conv, p.step as 1 | 2 | 3, text)
+    } catch (e) {
+      console.error('reminder: the card did not go', e instanceof Error ? e.message : e)
+      return { outcome: 'failed', end: false, retry: true }
+    }
+    await endCard(d, rowId, conv, p, text)
+    return { outcome: 'carded', end: false }
+  }
   const id = await d.db.transaction((tx) =>
     queueMessage(tx, {
       key: rowId,
@@ -590,15 +716,16 @@ export async function sendStep(
   return deliver(d, rowId, conv, id, p)
 }
 
-/** The deal of a dormant client becomes dormant too; a stage that cannot (a booked meeting) stays as it is. */
-async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> {
-  if (!conv.dealId) return
+/** The deal of a client silent after the reminders becomes dormant; a stage that cannot (a booked meeting) stays. */
+async function dormantDeal(d: RemindDeps, conv: ConversationRow, sent: number): Promise<void> {
+  // Nothing went to him: his silence says nothing about the deal.
+  if (!conv.dealId || sent === 0) return
   try {
     await transition(d.db, {
       dealId: conv.dealId,
       to: 'dormant',
       actor: 'sara',
-      reason: 'клиент молчит 7 дней',
+      reason: silentReason(sent),
       correlationId: conv.id,
     })
   } catch (e) {
@@ -607,9 +734,13 @@ async function dormantDeal(d: RemindDeps, conv: ConversationRow): Promise<void> 
   }
 }
 
+const silentReason = (sent: number) =>
+  sent > 0 ? `клиент молчит после напоминаний: ${sent}` : 'клиент молчит, напоминания не уходили'
+
 /**
- * The seventh day: the client is dormant. In shadow only the trace says so. After the switch the deal, if there is
- * one, becomes dormant and Boris gets one task with «Закрыть» and «Напоминать дальше» (design 5.11).
+ * Three days after the third reminder the client is still silent. In shadow only the trace says so. After the switch
+ * the deal, if there is one, becomes dormant and Boris gets one task «Клиент молчит после трёх напоминаний» with
+ * «Закрыть» only: nothing more is written to the client (design 5.11, Boris's rule 11).
  */
 export async function dormantStep(
   d: RemindDeps,
@@ -619,6 +750,19 @@ export async function dormantStep(
 ): Promise<{ asked: boolean }> {
   const conv = await getConversation(d.db, conversationId)
   if (!conv) return { asked: false }
+  // How many reminders of this ladder really went (the cards may have been ignored, declined or held by a pause).
+  const [went] = await d.db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(convTurn)
+    .where(
+      and(
+        eq(convTurn.conversationId, conv.id),
+        eq(convTurn.kind, 'reminder'),
+        eq(convTurn.outcome, 'sent'),
+        like(convTurn.id, `${rowId.slice(0, rowId.lastIndexOf(':'))}:%`),
+      ),
+    )
+  const sent = went?.n ?? 0
   // The step ends when its work is done, so a row that is finished has its task too.
   const settle = async () => {
     if (await endedWith(d, rowId, 'dormant')) return
@@ -626,7 +770,7 @@ export async function dormantStep(
       await finishRow(tx, rowId, {
         outcome: 'dormant',
         decision: shadow ? 'trace' : 'task',
-        decisionReason: shadow ? 'в тени задача Борису только в трассе' : 'клиент молчит 7 дней',
+        decisionReason: shadow ? 'в тени задача Борису только в трассе' : silentReason(sent),
       })
       await journal(tx, 'conv.dormant', conv, rowId, { shadow })
     })
@@ -640,29 +784,16 @@ export async function dormantStep(
     .from(task)
     .where(and(eq(task.kind, 'conv_dormant'), eq(task.entityId, rowId)))
   if (have) {
-    await dormantDeal(d, conv)
+    await dormantDeal(d, conv, sent)
+    await expireOldCards(d.db, conv.id, rowId, 'больше напоминаний не будет')
     await settle()
     return { asked: true }
   }
   const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
-  const [sent] = await d.db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(convTurn)
-    .where(
-      and(
-        eq(convTurn.conversationId, conv.id),
-        eq(convTurn.kind, 'reminder'),
-        eq(convTurn.outcome, 'sent'),
-      ),
-    )
   const taskId = newEventId()
-  const button = (text: string, action: 'close' | 'remind') => ({
-    text,
-    callbackData: formatCallback(taskId, action),
-  })
   const m = await d.notifier.sendButtons(
-    CONV_TEXTS.dormant(l?.clientName || null, l?.title ?? null, sent?.n ?? 0),
-    [[button(CONV_TEXTS.buttons.close, 'close'), button(CONV_TEXTS.buttons.remind, 'remind')]],
+    CONV_TEXTS.dormant(l?.clientName || null, l?.title ?? null, sent),
+    [[{ text: CONV_TEXTS.buttons.close, callbackData: formatCallback(taskId, 'close') }]],
   )
   await d.db.transaction(async (tx) => {
     await tx.insert(task).values({
@@ -691,7 +822,9 @@ export async function dormantStep(
     })
   })
   // The deal moves only with the task: a task that could not be sent leaves it where it is (a retry follows).
-  await dormantDeal(d, conv)
+  await dormantDeal(d, conv, sent)
+  // After «Больше напоминать не буду» no reminder card may go: the ones that still wait are closed.
+  await expireOldCards(d.db, conv.id, rowId, 'больше напоминаний не будет')
   await settle()
   return { asked: true }
 }

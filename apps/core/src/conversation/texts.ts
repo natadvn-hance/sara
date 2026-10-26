@@ -1,4 +1,4 @@
-import { type ChatAuthor, plural, type Tone } from '@sara/shared'
+import type { ChatAuthor, Tone } from '@sara/shared'
 
 /** Texts of the conversation module for Boris (NFR-UX-1: plain Russian, no long dash). */
 
@@ -67,6 +67,18 @@ const wouldRu = (v: CardView) => {
   return reason || 'прислала бы тебе черновик'
 }
 
+const REMINDERS_AFTER: Record<number, string> = {
+  1: 'одного напоминания',
+  2: 'двух напоминаний',
+  3: 'трёх напоминаний',
+}
+
+const REMINDER_STEP_RU = {
+  1: 'Первое напоминание',
+  2: 'Второе напоминание',
+  3: 'Третье напоминание, последнее',
+} as const
+
 export const CONV_TEXTS = {
   authorUnclear: (chatId: string) =>
     `⚠️ В чате заказа ${chatId} не понимаю, кто написал последние сообщения: клиент или наша сторона. Пока ничего не отвечаю, посмотри сам.`,
@@ -89,7 +101,9 @@ export const CONV_TEXTS = {
         '',
       )
     const meta = [
-      v.decision === 'call_boris' ? null : `Сама бы: ${wouldRu(v)}.`,
+      v.decision === 'call_boris'
+        ? null
+        : `${v.shadow ? 'Сама бы' : 'Почему черновик'}: ${wouldRu(v)}.`,
       v.tone ? `Тон: ${TONE_RU[v.tone]}.` : null,
     ].filter(Boolean)
     if (meta.length) lines.push(meta.join(' '))
@@ -120,25 +134,83 @@ export const CONV_TEXTS = {
       } пишет: ${quote(words)}`,
     ),
 
-  /** The task for Boris when a client has been quiet for 7 days (FR-CONV-12, M4 design 5.11). */
-  dormant: (name: string | null, orderTitle: string | null, reminders: number) =>
+  /** How a send that ran on its own ended, as a new message to Boris (the press was answered at once). */
+  sendResult: (name: string | null, orderTitle: string | null, text: string) =>
+    hyphenated(
+      `${/^Отправила/.test(text) ? '✅' : '⚠️'} ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: ${text}`,
+    ),
+
+  /**
+   * The task for Boris when a client is silent three days after the last reminder (FR-CONV-12, M4 design 5.11);
+   * `sent` is how many reminders really went, which can be fewer than three (cards ignored, «Не надо», pauses).
+   */
+  dormant: (name: string | null, orderTitle: string | null, sent: number) => {
+    const order = orderTitle ? `заказ «${orderTitle}»` : null
+    const who = name
+      ? [name, order].filter(Boolean).join(', ')
+      : ['Клиент', order].filter(Boolean).join(', ')
+    const first =
+      sent > 0
+        ? `${name ? `${who}: клиент` : who} молчит после ${REMINDERS_AFTER[sent] ?? `${sent} напоминаний`}.`
+        : `${name ? `${who}: клиент` : who} молчит, а напоминания ему не уходили.`
+    return hyphenated(
+      [
+        `😴 ${first}`,
+        sent > 0
+          ? 'Ответа нет уже три дня после последнего. Больше напоминать не буду.'
+          : 'Больше напоминать не буду.',
+        'Закрыть разговор?',
+      ].join('\n'),
+    )
+  },
+
+  /**
+   * The card of a reminder in drafts mode: nothing goes to the client until Boris presses «Отправить» (FR-CONV-12).
+   * `step` is the step of the ladder: the first, second or third (the last) reminder.
+   */
+  reminderCard: (v: {
+    name: string | null
+    orderTitle: string | null
+    step: 1 | 2 | 3
+    text: string
+  }) =>
     hyphenated(
       [
-        `😴 ${[name ?? 'Клиент', orderTitle ? `заказ «${orderTitle}»` : null].filter(Boolean).join(', ')}: молчит 7 дней.`,
-        reminders > 0
-          ? `Напоминала ему ${reminders} ${plural(reminders, ['раз', 'раза', 'раз'])}, ответа нет.`
-          : 'Ответа нет.',
-        'Закрыть разговор или напомнить ему ещё раз через 10 суток? Это будет последнее напоминание.',
+        '⏰ Напомнить клиенту?',
+        [v.name ?? 'Клиент', v.orderTitle ? `заказ «${v.orderTitle}»` : null]
+          .filter(Boolean)
+          .join(', '),
+        `${REMINDER_STEP_RU[v.step]}: клиент не ответил на наше последнее сообщение.`,
+        '',
+        'Текст напоминания:',
+        v.text.trim(),
+        '',
+        'Без твоего нажатия клиенту ничего не уйдёт.',
       ].join('\n'),
     ),
 
   buttons: {
+    skip: 'Не надо',
     good: 'Хорошо',
     edit: 'Изменить',
     send: 'Отправить',
     take: 'Беру сам',
     close: 'Закрыть',
     giveBack: 'Вернуть Саре',
-    remind: 'Напоминать дальше',
   },
+}
+
+/** What Boris is told when he answers the card of a reminder (FR-CONV-12). */
+export const REMIND_TEXTS = {
+  /** The card is closed because the reminder is no longer wanted (the next came, the client wrote). */
+  notNeeded: 'Это напоминание уже не нужно.',
+  /** A press at night: the reminder goes at the end of the quiet hours, as every reminder does. */
+  held: (hour: number) => `Сейчас тихие часы: напоминание уйдёт в ${hour}:00 по Москве.`,
+  declined: 'Хорошо, это напоминание клиенту не отправляю.',
+  gone: (why: string) => `Напоминание уже не нужно: ${why}. Клиенту ничего не отправила.`,
+  notNow: (why: string) =>
+    `Сейчас не могу отправить напоминание: ${why}. Нажми «Отправить» позже, карточка остаётся.`,
+  stale: 'Клиент успел написать: напоминание не ушло. Посмотри чат.',
+  sent: 'Отправила напоминание клиенту.',
+  alreadyDone: 'Это напоминание уже обработано. Второй раз не отправляю.',
 }

@@ -118,6 +118,19 @@ describe('the draft card', () => {
     expect(row?.taskId).toBe(t?.id)
   })
 
+  it('FR-CONV-5: a draft card after the switch says why it is a draft, in shadow what Sara would do', async () => {
+    await turn('t-shadow')
+    await sendTurnCard({ db, notifier }, 't-shadow')
+    expect(sent[0]?.text).toContain('Сама бы: отправила бы.')
+    expect(sent[0]?.text).not.toContain('Почему черновик')
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await turn('t-live', { decisionReason: 'отправлю по твоему нажатию' })
+    await sendTurnCard({ db, notifier }, 't-live')
+    expect(sent[1]?.text).toContain('Почему черновик: отправлю по твоему нажатию.')
+    expect(sent[1]?.text).not.toContain('Сама бы')
+    expect(sent[1]?.text).not.toContain('Режим тени')
+  })
+
   it('FR-CONV-3: the turn trace and the card keep the case and why it was chosen', async () => {
     await turn('t-case', {
       understanding: {
@@ -231,6 +244,38 @@ describe('the draft card', () => {
     expect(await sendTurnCard({ db, notifier }, 't-call')).not.toBeNull()
     expect(sent).toHaveLength(11)
     expect(sent[10]?.text).toMatch(/просит созвон/)
+  })
+
+  it('FR-NOTIF-3: after the switch no card of a client’s answer is held back: the 11th draft card is sent', async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    for (let i = 0; i < 12; i++) {
+      await turn(`t-${i}`, { decisionReason: 'отправлю по твоему нажатию' })
+      expect(await sendTurnCard({ db, notifier }, `t-${i}`)).not.toBeNull()
+    }
+    expect(sent).toHaveLength(12)
+    // Each is a card with the buttons of drafts mode.
+    expect(sent[11]?.rows.flat().map((b) => b.callbackData.split(':')[2])).toEqual([
+      'send',
+      'edit',
+      'take',
+      'close',
+    ])
+    // A lowered cap does not hold them either.
+    await setSetting(db, 'conv.cards_per_day', 2, 'system')
+    await turn('t-more', { decisionReason: 'отправлю по твоему нажатию' })
+    expect(await sendTurnCard({ db, notifier }, 't-more')).not.toBeNull()
+  })
+
+  it('FR-NOTIF-3: the cap of the day still holds the cards of shadow, a switch made in the day frees the rest', async () => {
+    for (let i = 0; i < 11; i++) {
+      await turn(`s-${i}`)
+      await sendTurnCard({ db, notifier }, `s-${i}`)
+    }
+    expect(sent).toHaveLength(10)
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await turn('after')
+    expect(await sendTurnCard({ db, notifier }, 'after')).not.toBeNull()
+    expect(sent).toHaveLength(11)
   })
 
   it('FR-NOTIF-3: the dormant tasks of reminders do not use the cards of the day', async () => {

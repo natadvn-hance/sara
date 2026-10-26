@@ -14,10 +14,13 @@ import { onConvEdit, onConvPress, onConvReply } from './conversation/commands'
 import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
 import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
-import { sendTextNow, sendTurnReply } from './conversation/outbox'
+import { sendTurnReply } from './conversation/outbox'
 import { startReconcile } from './conversation/reconcile'
-import { decideDormant, setRemindDeps, syncReminders } from './conversation/reminders'
+import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
 import { registerConversationRoutes } from './conversation/routes'
+import { setSendDeps, startSendJob } from './conversation/sendFlow'
+import { prepareJob } from './conversation/sendJob'
+import { SEND_TEXTS } from './conversation/sendTexts'
 import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
@@ -93,8 +96,11 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const commandDeps = (): Parameters<typeof onConvPress>[0] => ({
     db,
     notifier: bot.notifier,
-    sendText: (c, text, author, o) => sendTextNow({ db, profi }, c, text, author, o),
-    decideDormant,
+    // A press never holds the bot: the send runs as its own process and Boris gets its result as a new message.
+    sendText: async (c, text, author, o) => {
+      const job = await prepareJob({ db }, c, text, author, o)
+      return job ? startSendJob(job) : SEND_TEXTS.failed
+    },
   })
   // A press on a conversation card goes to the conversation, every other press to the lead pipeline.
   const onPress = async (p: { taskId: string; action: TaskAction }) => {
@@ -185,6 +191,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
   setRemindDeps({ db, profi, gateway, mind, notifier: bot.notifier })
+  setSendDeps({ db, profi, notifier: bot.notifier, ground: reminderGround })
   const conversationDeps: ConversationEventDeps = {
     db,
     profi,

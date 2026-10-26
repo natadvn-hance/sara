@@ -201,6 +201,42 @@ describe('a conversation end to end', () => {
     expect(await count('conv.boris_wrote')).toBe(1)
   }, 40000)
 
+  it('FR-CONV-5: drafts mode end to end: after the switch nothing goes by itself, «Отправить» sends once', async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'boris')
+    await setSetting(db, 'outbound.messages', true, 'boris')
+    // Even a topic left at «сама» does not send while the autopilot is off.
+    await setSetting(db, 'conv.autonomy', { process: 'self' } as never, 'boris')
+    const chat = await oldChat()
+    await fake.addChatMessage({ chatId: chat, author: 'client', text: 'Как начнём?' })
+    await until(() => cards().length === 1)
+    await until(() => finished(1))
+    await settle()
+    expect(fake.messages).toHaveLength(0)
+    expect(await db.select().from(outbox)).toHaveLength(0)
+    const [t] = await turns()
+    expect(t?.decision).toBe('draft')
+    expect(cards()[0]?.text).toContain('Черновик ответа:')
+    expect(cards()[0]?.text).not.toContain('Режим тени')
+    const actions = cards()[0]
+      ?.reply_markup?.inline_keyboard.flat()
+      .map((b) => b.callback_data)
+    expect(actions?.map((a) => a.split(':')[2])).toEqual(['send', 'edit', 'take', 'close'])
+    tg.pushPress(BORIS, button('send'))
+    await until(() => fake.messages.length === 1)
+    // The press was answered at once, and the result came later as a message of its own.
+    await until(() => tg.answers.some((a) => a.text === 'Отправляю…'))
+    await until(() =>
+      tg.sent.some((m) => m.text.startsWith('✅') && m.text.includes('Отправила клиенту')),
+    )
+    tg.pushPress(BORIS, button('send'))
+    await settle()
+    expect(fake.messages).toHaveLength(1)
+    expect(fake.messages[0]?.idempotency_key).toMatch(/^msg:send:/)
+    const queued = (await db.select().from(outbox)).filter((o) => o.kind === 'message')
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.state).toBe('confirmed')
+  }, 50000)
+
   it('FR-CONV-12: a bid nobody answered gets a reminder process, and the client writing cancels it', async () => {
     const chat = await oldChat()
     await until(async () => (await theConversation()) !== undefined)

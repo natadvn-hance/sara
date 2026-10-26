@@ -1,6 +1,6 @@
 import type { TaskAction } from '@sara/shared'
 import type { Db } from '../db/client'
-import type { BorisMessage } from '../learning/inbox'
+import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { boundChat } from './binding'
 import type { Notifier } from './notifier'
 import { createTelegramRuntime, type TelegramRuntime } from './telegram'
@@ -19,7 +19,7 @@ export function createBotControl(d: {
   db: Db
   apiRoot?: string
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
-  onMessage?(m: BorisMessage): Promise<string>
+  onMessage?(m: BorisMessage): Promise<BorisReply>
   voiceDir?: string
 }): BotControl {
   let runtime: TelegramRuntime | null = null

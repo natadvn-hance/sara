@@ -36,6 +36,7 @@ beforeEach(async () => {
   }
   await setSetting(db, 'pipeline.conversations', true, 'system')
   await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'conv.autopilot', true, 'system')
   await setSetting(db, 'outbound.messages', true, 'system')
 })
 
@@ -115,6 +116,7 @@ describe('a reminder queued before a restart', () => {
       await resetDb(db)
       await setSetting(db, 'pipeline.conversations', true, 'system')
       await setSetting(db, 'conv.v1_writes', false, 'system')
+      await setSetting(db, 'conv.autopilot', true, 'system')
       await setSetting(db, 'outbound.messages', true, 'system')
       const { conv, rowId } = await queued()
       await db.update(account).set({ loginState: state }).where(eq(account.id, ACC))

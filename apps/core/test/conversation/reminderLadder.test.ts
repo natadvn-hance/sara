@@ -7,59 +7,74 @@ const DAY = 24 * HOUR
 const last = '2026-10-20T10:00:00.000Z'
 const lastMs = Date.parse(last)
 const at = (ms: number) => new Date(lastMs + ms)
-const base = { lastOursAt: last, read: false, continued: false, now: new Date(last) }
+const base = { lastOursAt: last, read: false, now: new Date(last) }
+const iso = (ms: number) => at(ms).toISOString()
 
 describe('the reminder ladder', () => {
-  it('FR-CONV-12: +24 h, +72 h, dormant at +7 days, then one last reminder 10 days after «Напоминать дальше»', () => {
+  it('FR-CONV-12: a day after our message, two days after the first, three after the second, and then the silence task', () => {
     expect(nextReminder({ ...base, sent: 0 })).toMatchObject({ at: at(DAY), step: 1 })
-    expect(nextReminder({ ...base, sent: 1 })).toMatchObject({ at: at(3 * DAY), step: 2 })
-    expect(nextReminder({ ...base, sent: 2 })).toMatchObject({ at: at(7 * DAY), step: 'dormant' })
-    // Boris said to go on without saying when: the 10 days count from the dormant day.
-    const go = { ...base, continued: true }
-    expect(nextReminder({ ...go, sent: 2 })).toMatchObject({ at: at(17 * DAY), step: 3 })
+    expect(nextReminder({ ...base, sent: 1, prevAt: iso(DAY) })).toMatchObject({
+      at: at(3 * DAY),
+      step: 2,
+    })
+    expect(nextReminder({ ...base, sent: 2, prevAt: iso(3 * DAY) })).toMatchObject({
+      at: at(6 * DAY),
+      step: 3,
+    })
+    // Three days of silence after the third reminder: the task for Boris, no message to the client.
+    expect(nextReminder({ ...base, sent: 3, prevAt: iso(6 * DAY) })).toMatchObject({
+      at: at(9 * DAY),
+      step: 'dormant',
+    })
   })
 
-  it('FR-CONV-12: «через 10 суток» counts from the press of «Напоминать дальше»', () => {
-    // Boris presses on day 9 after our message, two days after the dormant day.
-    const pressed = new Date(lastMs + 9 * DAY).toISOString()
-    const go = { ...base, continued: true, continuedAt: pressed, now: new Date(pressed) }
-    expect(nextReminder({ ...go, sent: 2 })).toMatchObject({ at: at(19 * DAY), step: 3 })
-    // A press that came after the dormant day long past: the 10 days still count from it, not from the anchor.
-    const late = new Date(lastMs + 40 * DAY).toISOString()
-    expect(nextReminder({ ...go, continuedAt: late, now: new Date(late), sent: 2 })?.at).toEqual(
-      at(50 * DAY),
+  it('FR-CONV-12: each wait counts from the step before when it went, not from our message', () => {
+    // The first reminder went late, 70 hours after our message: the second is two days after it.
+    expect(nextReminder({ ...base, sent: 1, prevAt: iso(70 * HOUR) })?.at).toEqual(
+      at(70 * HOUR + 2 * DAY),
     )
+    expect(nextReminder({ ...base, sent: 2, prevAt: iso(5 * DAY) })?.at).toEqual(at(8 * DAY))
+    expect(nextReminder({ ...base, sent: 3, prevAt: iso(8 * DAY) })?.at).toEqual(at(11 * DAY))
   })
 
-  it('FR-CONV-12: the wait after the press can be shortened, for the tests of the process', () => {
-    const go = { ...base, continued: true, continuedAt: last, now: new Date(last) }
-    expect(nextReminder({ ...go, sent: 2, afterPressMs: 1000 })?.at).toEqual(at(1000))
+  it('FR-CONV-12: a step that was only skipped counts from its own time, the ladder keeps its length', () => {
+    // No time of the step before is known: the ladder's own times are taken (1 + 2 = 3 days, + 3 = 6, + 3 = 9).
+    expect(nextReminder({ ...base, sent: 1 })?.at).toEqual(at(3 * DAY))
+    expect(nextReminder({ ...base, sent: 2 })?.at).toEqual(at(6 * DAY))
+    expect(nextReminder({ ...base, sent: 3 })?.at).toEqual(at(9 * DAY))
   })
 
-  it('FR-CONV-12: the third ping is the last: nothing follows it, and nothing follows the dormant day without Boris', () => {
-    const go = { ...base, continued: true }
-    expect(nextReminder({ ...go, sent: 3 })).toBeNull()
-    expect(nextReminder({ ...go, sent: 4 })).toBeNull()
-    expect(nextReminder({ ...base, sent: 3 })).toBeNull()
+  it('FR-CONV-12: the third reminder is the last: after the silence task nothing follows, and there is no way to go on', () => {
+    expect(nextReminder({ ...base, sent: 4 })).toBeNull()
     expect(nextReminder({ ...base, sent: 9 })).toBeNull()
+    const steps = [0, 1, 2, 3].map((n) => nextReminder({ ...base, sent: n })?.step)
+    expect(steps).toEqual([1, 2, 3, 'dormant'])
   })
 
-  it('FR-CONV-12: a client who went to think gets the first reminder after 48 hours, the second keeps its time', () => {
+  it('FR-CONV-12: a client who went to think gets the first reminder after 48 hours, the next waits keep their length', () => {
     expect(nextReminder({ ...base, sent: 0, firstAfterMs: 2 * DAY })).toMatchObject({
       at: at(2 * DAY),
       step: 1,
     })
-    const first = new Date(lastMs + 2 * DAY).toISOString()
-    expect(nextReminder({ ...base, sent: 1, lastSentAt: first })?.at).toEqual(at(3 * DAY))
+    const first = iso(2 * DAY)
+    expect(nextReminder({ ...base, sent: 1, prevAt: first })?.at).toEqual(at(4 * DAY))
     // Without the sign it is 24 hours as before.
     expect(nextReminder({ ...base, sent: 0 })?.at).toEqual(at(DAY))
+    // The ladder's own time for the second step follows the first one's longer wait.
+    expect(nextReminder({ ...base, sent: 1, firstAfterMs: 2 * DAY })?.at).toEqual(at(4 * DAY))
   })
 
-  it('FR-CONV-12: the last reminder, after «Напоминать дальше», is friendly, the others check in', () => {
-    const go = { ...base, continued: true }
+  it('FR-CONV-12: the waits can be shortened, for the tests of the process', () => {
+    const waitsMs = { second: 10, third: 20, silent: 30 }
+    expect(nextReminder({ ...base, sent: 1, prevAt: last, waitsMs })?.at).toEqual(at(10))
+    expect(nextReminder({ ...base, sent: 2, prevAt: last, waitsMs })?.at).toEqual(at(20))
+    expect(nextReminder({ ...base, sent: 3, prevAt: last, waitsMs })?.at).toEqual(at(30))
+  })
+
+  it('FR-CONV-12: the last reminder is friendly, the first two check in', () => {
     expect(nextReminder({ ...base, sent: 0 })?.tone).toBe('check_in')
     expect(nextReminder({ ...base, sent: 1 })?.tone).toBe('check_in')
-    expect(nextReminder({ ...go, sent: 2 })?.tone).toBe('friendly')
+    expect(nextReminder({ ...base, sent: 2 })?.tone).toBe('friendly')
   })
 
   it('FR-CONV-12: read and unread clients keep their mark, the timing is the same', () => {
@@ -109,26 +124,41 @@ describe('the reminder ladder', () => {
     )
   })
 
-  it('FR-CONV-12: two reminders never go back to back, a day passes after the one before', () => {
-    // The first went late, 70 hours after our message: the second is not at 72 but a day after the first.
-    const sentAt = new Date(lastMs + 70 * HOUR).toISOString()
-    expect(nextReminder({ ...base, sent: 1, lastSentAt: sentAt })?.at).toEqual(at(94 * HOUR))
-    // On time, the ladder's own time is later and stays.
-    const onTime = new Date(lastMs + DAY).toISOString()
-    expect(nextReminder({ ...base, sent: 1, lastSentAt: onTime })?.at).toEqual(at(3 * DAY))
-  })
-
-  it('FR-CONV-12: the dormant day is not moved by the quiet hours, it is a task for Boris', () => {
+  it('FR-CONV-12: the silence task is not moved by the quiet hours, it is a task for Boris', () => {
     const evening = '2026-10-20T20:30:00.000Z'
     const r = nextReminder({
       ...base,
       lastOursAt: evening,
       now: new Date(evening),
-      sent: 2,
+      sent: 3,
       quiet: { from: 23, to: 9 },
     })
     expect(r?.step).toBe('dormant')
-    expect(r?.at.toISOString()).toBe('2026-10-27T20:30:00.000Z')
+    // 23:30 Moscow, nine days after our message (1 + 2 + 3 + 3): inside the quiet hours of reminders, but it stays.
+    expect(r?.at.toISOString()).toBe('2026-10-29T20:30:00.000Z')
+  })
+
+  it('FR-CONV-12: a later reminder inside the quiet hours waits for 9:00 Moscow too', () => {
+    // The first went at 22:50 Moscow on Wednesday: two days later is 22:50 on Friday, daytime still.
+    const first = '2026-10-21T19:50:00.000Z'
+    expect(
+      nextReminder({
+        ...base,
+        sent: 1,
+        prevAt: first,
+        quiet: { from: 23, to: 9 },
+      })?.at.toISOString(),
+    ).toBe('2026-10-23T19:50:00.000Z')
+    // At 23:10 it is the night: the morning of Saturday.
+    const late = '2026-10-21T20:10:00.000Z'
+    expect(
+      nextReminder({
+        ...base,
+        sent: 1,
+        prevAt: late,
+        quiet: { from: 23, to: 9 },
+      })?.at.toISOString(),
+    ).toBe('2026-10-24T06:00:00.000Z')
   })
 })
 

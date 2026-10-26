@@ -10,6 +10,9 @@ import {
   titleOf,
 } from './questions'
 
+/** The answer to Boris's message: a line, or a line with the buttons that belong to it (a press goes the usual way). */
+export type BorisReply = string | { text: string; rows: { text: string; callbackData: string }[][] }
+
 export type BorisMessage = {
   text: string | null
   /** A voice message saved on disk, recognized here. */
@@ -37,12 +40,12 @@ export async function handleBorisMessage(
       voice: boolean
       messageId?: number
       at: Date
-    }): Promise<string | null>
+    }): Promise<BorisReply | null>
     /** M4: Boris's version of a reply after «Изменить» on a conversation card. */
-    onConvEdit?(a: DraftAnswer): Promise<string>
+    onConvEdit?(a: DraftAnswer): Promise<BorisReply>
   },
   m: BorisMessage,
-): Promise<string> {
+): Promise<BorisReply> {
   let text = m.text?.trim() ?? ''
   if (m.voicePath) {
     const heard = await d.transcriber.transcribe(m.voicePath)

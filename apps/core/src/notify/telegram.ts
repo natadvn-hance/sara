@@ -6,7 +6,7 @@ import { Bot, type Context, GrammyError } from 'grammy'
 import type { Db } from '../db/client'
 import { appendEvent } from '../journal/journal'
 import { quietNow } from '../leads/cardFlow'
-import type { BorisMessage } from '../learning/inbox'
+import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { bindChat, boundChat } from './binding'
 import { closedLeadCardText, leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
 import type { Notifier } from './notifier'
@@ -51,7 +51,7 @@ export function createTelegramRuntime(d: {
   db: Db
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   /** Boris's text or voice (saved to a file first); the answer goes back to him. */
-  onMessage?(m: BorisMessage): Promise<string>
+  onMessage?(m: BorisMessage): Promise<BorisReply>
   /** Where voice messages are saved while they are recognized (default: the system temp folder). */
   voiceDir?: string
 }): TelegramRuntime {
@@ -106,9 +106,16 @@ export function createTelegramRuntime(d: {
     await ctx.reply(TEXTS.bound)
   })
 
+  /** An answer to Boris's message: a line, with its buttons when it has some. */
+  const answer = (ctx: Context, r: BorisReply) =>
+    typeof r === 'string'
+      ? ctx.reply(r)
+      : ctx.reply(r.text, { reply_markup: { inline_keyboard: keyboard(r.rows) } })
+
   bot.on('message:text', async (ctx) => {
     if (!d.onMessage || ctx.message.text.startsWith('/')) return
-    await ctx.reply(
+    await answer(
+      ctx,
       await d.onMessage({
         text: ctx.message.text,
         voicePath: null,
@@ -139,7 +146,8 @@ export function createTelegramRuntime(d: {
         if (!res.ok || !file.file_path) throw new Error(`voice download: ${res.status}`)
         const path = join(dir, 'voice.oga')
         await writeFile(path, Buffer.from(await res.arrayBuffer()))
-        await ctx.reply(
+        await answer(
+          ctx,
           await onMessage({
             text: null,
             voicePath: path,

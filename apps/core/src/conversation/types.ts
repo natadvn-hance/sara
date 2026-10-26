@@ -178,6 +178,8 @@ export type CheckIssue = { id: CheckId; detail: string }
 export type PolicySettings = {
   /** Shadow: old Sara still writes to clients (conv.v1_writes). */
   v1Writes: boolean
+  /** Autopilot (conv.autopilot): off, Sara sends nothing by herself, a would-be «send» is a draft for Boris's press. */
+  autopilot: boolean
   /** The «Пишет клиентам» switch (outbound.messages). */
   outboundMessages: boolean
   accountPaused: boolean

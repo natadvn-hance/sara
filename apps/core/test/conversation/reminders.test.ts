@@ -1,18 +1,21 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type ChatMessage, newEventId } from '@sara/shared'
+import type { ChatMessage } from '@sara/shared'
 import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onConvPress } from '../../src/conversation/commands'
 import { checkGround } from '../../src/conversation/reminderSteps'
 import {
-  decideDormant,
+  openReminders,
   REMIND_MAX_RECOVERY_ATTEMPTS,
   type RemindDeps,
   reminderFallback,
   remindWorkflowId,
   setRemindDeps,
   startReminder,
+  syncReminders,
 } from '../../src/conversation/reminders'
+import { sendTextNow } from '../../src/conversation/sendJob'
+import { syncChat } from '../../src/conversation/sync'
 import { moscowHour, moscowHoursEnd } from '../../src/conversation/time'
 import {
   account,
@@ -148,9 +151,17 @@ const quiet = (agoMs: number, o: { read?: boolean } = {}): SeedMessage[] => [
   },
 ]
 
+/** After the switch with the autopilot on: Sara sends her reminders by herself (the drafts mode is its own block). */
 const live = async () => {
   await setSetting(db, 'conv.v1_writes', false, 'system')
+  await setSetting(db, 'conv.autopilot', true, 'system')
   await setSetting(db, 'outbound.messages', true, 'system')
+}
+
+/** The waits after the first reminder shortened to nothing: the whole ladder runs at once (the first still waits for its day). */
+const instant = () => {
+  deps.waitsMs = { second: 0, third: 0, silent: 0 }
+  deps.minGapMs = 0
 }
 
 async function useGateway(byRole: Record<string, unknown>, env: Record<string, string> = {}) {
@@ -219,7 +230,6 @@ beforeEach(async () => {
       if (bookedFails-- > 0) throw new Error('the meetings are not readable')
       return booked
     },
-    minGapMs: 0,
     fallbackAfterMs: 1500,
     retryEveryMs: 300,
   }
@@ -261,16 +271,17 @@ describe('a reminder in shadow', () => {
     expect(unread).toContain('Клиент прочитал наше сообщение: неизвестно')
   })
 
-  it('FR-CONV-12: after 7 days in shadow the dormant client is only in the trace, with no task for Boris', async () => {
-    const conv = await scene(quiet(8 * DAY), { deal: true })
+  it('FR-CONV-12: in shadow the silence after three reminders is only in the trace, with no task for Boris', async () => {
+    instant()
+    const conv = await scene(quiet(25 * HOUR), { deal: true })
     await startReminder(conv.id, 'm-1')
-    await until(done(3))
-    expect(await outcomes()).toEqual(['1=drafted', '2=drafted', 'dormant=dormant'])
+    await until(done(4))
+    expect(await outcomes()).toEqual(['1=drafted', '2=drafted', '3=drafted', 'dormant=dormant'])
     expect(await countEvents(db, 'conv.dormant')).toBe(1)
     expect(buttons).toHaveLength(0)
     expect(await db.select().from(task)).toHaveLength(0)
     expect(sends).toHaveLength(0)
-    // The deal is not touched in shadow, and the ladder ends: nobody can say «Напоминать дальше».
+    // The deal is not touched in shadow, and the ladder ends there: nothing follows the third reminder.
     expect((await db.select().from(deal))[0]?.stage).toBe('bid_sent')
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
   })
@@ -344,21 +355,24 @@ describe('a reminder after the switch', () => {
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
   })
 
-  it('FR-CONV-12: after 7 days the client is dormant and Boris gets one task', async () => {
+  it('FR-CONV-12: three reminders, three silent days, and Boris gets one task «Клиент молчит после трёх напоминаний» with «Закрыть» only', async () => {
     await live()
-    const conv = await scene(quiet(8 * DAY), { deal: true })
+    instant()
+    const conv = await scene(quiet(25 * HOUR), { deal: true })
     await startReminder(conv.id, 'm-1')
-    await until(done(3))
-    expect(await outcomes()).toEqual(['1=sent', '2=sent', 'dormant=dormant'])
-    // The second reminder is not stopped by the first one standing in the chat after our message.
+    await until(done(4))
+    expect(await outcomes()).toEqual(['1=sent', '2=sent', '3=sent', 'dormant=dormant'])
+    // The second and the third are not stopped by the earlier ones standing in the chat after our message.
     expect(sends.map((s) => s.key)).toEqual([
       `msg:conv-remind:${conv.id}:m-1:1`,
       `msg:conv-remind:${conv.id}:m-1:2`,
+      `msg:conv-remind:${conv.id}:m-1:3`,
     ])
     expect(buttons).toHaveLength(1)
-    expect(buttons[0]?.text).toMatch(/молчит 7 дней/)
+    expect(buttons[0]?.text).toMatch(/клиент молчит после трёх напоминаний/)
     expect(buttons[0]?.text).toMatch(/Анна/)
-    expect(buttons[0]?.rows.flat().map((b) => b.text)).toEqual(['Закрыть', 'Напоминать дальше'])
+    expect(buttons[0]?.rows.flat().map((b) => b.text)).toEqual(['Закрыть'])
+    expect(buttons[0]?.text).not.toMatch(/Напоминать дальше|10 суток|7 дней/)
     expect(buttons[0]?.text).not.toMatch(/[\u2013\u2014]/)
     const tasks = await db.select().from(task)
     expect(tasks).toHaveLength(1)
@@ -366,133 +380,72 @@ describe('a reminder after the switch', () => {
     expect(tasks[0]?.state).toBe('open')
     expect((await db.select().from(deal))[0]?.stage).toBe('dormant')
     expect(await countEvents(db, 'conv.dormant')).toBe(1)
-    // Nothing more goes on its own: the process waits for Boris.
-    await sleep(500)
-    expect(sends).toHaveLength(2)
-    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
-  })
-
-  it('FR-CONV-12: «Напоминать дальше» brings one more reminder, friendly, and it is the last', async () => {
-    await live()
-    // The 10 days after the press are a moment here.
-    deps.afterPressMs = 0
-    const conv = await scene(quiet(48 * DAY))
-    await startReminder(conv.id, 'm-1')
-    await until(async () => (await db.select().from(task)).length === 1)
-    const t = (await db.select().from(task))[0]
-    const press = {
-      db,
-      notifier: { sendText: async () => ({ messageId: 1 }) },
-      decideDormant,
-    }
-    const answer = await onConvPress(press, { taskId: t?.id ?? '', action: 'remind' })
-    expect(answer).toMatch(/10 суток/)
-    expect(answer).toMatch(/последн/)
-    expect(answer).not.toMatch(/30/)
-    await until(done(4))
-    expect(await outcomes()).toEqual(['1=sent', '2=sent', 'dormant=dormant', '3=sent'])
-    expect(sends).toHaveLength(3)
+    // The third is friendly, the first two check in; nothing is written to the client after it.
     const inputs = (await fake.calls()).map((c) => c.stdin)
     expect(inputs[2]).toContain('По счёту: 3 из 3')
     expect(inputs[2]).toContain('Тон: дружеский')
     expect(inputs[1]).toContain('Тон: обычный')
-    expect((await db.select().from(task))[0]?.resolution).toBe('remind')
-    // The process ends with it: there is no fourth.
+    // The ladder is over with the task: nothing waits for Boris, and a fourth reminder never comes.
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
+    expect(sends).toHaveLength(3)
     expect((await rows()).map((r) => r.id.split(':').at(-1))).not.toContain('4')
   })
 
-  it('FR-CONV-12: the 10 days of «Напоминать дальше» count from the press, not from the anchor', async () => {
+  it('FR-CONV-12: the waits are two days after the first reminder went and three after the second, not from our message', async () => {
     await live()
-    const conv = await scene(quiet(8 * DAY))
+    const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
-    await until(async () => (await db.select().from(task)).length === 1)
-    const pressedAt = Date.now()
-    const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) }, decideDormant }
-    await onConvPress(press, {
-      taskId: (await db.select().from(task))[0]?.id ?? '',
-      action: 'remind',
-    })
+    await until(done(1))
     const wf = remindWorkflowId(conv.id, 'm-1')
-    const planOf = async () =>
-      ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === 'plan-3')
-    await until(async () => (await planOf()) !== undefined)
-    const at = Date.parse(String(((await planOf())?.output as { at?: string } | undefined)?.at))
-    // About ten days from now (the quiet hours may move it to the next morning), long after the anchor's 17th day.
-    expect(at - pressedAt).toBeGreaterThanOrEqual(10 * DAY - 5000)
-    expect(at - pressedAt).toBeLessThan(10 * DAY + 10 * HOUR)
-    await sleep(300)
-    expect((await rows()).filter((r) => r.id.endsWith(':3'))).toHaveLength(0)
+    const planOf = async (name: string) =>
+      ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === name)
+    await until(async () => (await planOf('plan-1')) !== undefined)
+    const wentAt = Date.parse(String((await rows())[0]?.finishedAt))
+    const at = Date.parse(String(((await planOf('plan-1'))?.output as { at?: string })?.at))
+    // Two days after the first went (the quiet hours of the test are away from that time).
+    expect(Math.abs(at - (wentAt + 2 * DAY))).toBeLessThan(10_000)
   })
 
-  it('FR-CONV-12: «Закрыть» on the dormant task closes the conversation and ends the ladder', async () => {
+  it('FR-CONV-12: the second reminder keeps a day from the first that went, even when its own wait is over', async () => {
     await live()
-    const conv = await scene(quiet(8 * DAY), { deal: true })
+    deps.waitsMs = { second: 0 }
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const wf = remindWorkflowId(conv.id, 'm-1')
+    const quietStep = async () =>
+      ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === 'quiet-1')
+    await until(async () => (await quietStep()) !== undefined)
+    const wentAt = Date.parse(String((await rows())[0]?.finishedAt))
+    const held = ((await quietStep())?.output ?? {}) as { until?: string }
+    const until1 = Date.parse(String(held.until))
+    // A day after the first went, not a moment after: nothing else goes meanwhile.
+    expect(Math.abs(until1 - (wentAt + DAY))).toBeLessThan(10_000)
+    await sleep(500)
+    expect(sends).toHaveLength(1)
+    expect(await statusOf(wf)).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: «Закрыть» on the silence task closes the conversation', async () => {
+    await live()
+    instant()
+    const conv = await scene(quiet(25 * HOUR), { deal: true })
     await startReminder(conv.id, 'm-1')
     await until(async () => (await db.select().from(task)).length === 1)
     const t = (await db.select().from(task))[0]
-    const press = {
-      db,
-      notifier: { sendText: async () => ({ messageId: 1 }) },
-      decideDormant,
-    }
+    const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) } }
     await onConvPress(press, { taskId: t?.id ?? '', action: 'close' })
     expect((await db.select().from(conversation))[0]?.closedAt).not.toBeNull()
-    expect((await db.select().from(task))[0]?.state).toBe('resolved')
-    expect((await db.select().from(deal))[0]?.stage).toBe('lost')
-    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
-    expect(sends).toHaveLength(2)
-  })
-
-  it('FR-CONV-12: an answer of Boris for a process that is gone is harmless, and he is told plainly', async () => {
-    await live()
-    expect(await decideDormant('conv-remind:no-such-conversation:m-1:dormant', 'remind')).toBe(
-      false,
-    )
-    const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) }, decideDormant }
-    expect(await onConvPress(press, { taskId: newEventId(), action: 'remind' })).toBe(
-      'Это уже сделано.',
-    )
-    // A task whose process is over: the press does not promise a reminder.
-    const conv = await scene(quiet(8 * DAY))
-    const rowId = `conv-remind:${conv.id}:m-1:dormant`
-    await db.insert(convTurn).values({
-      id: rowId,
-      conversationId: conv.id,
-      kind: 'reminder',
-      anchorMessageId: 'm-1',
-    })
-    const taskId = newEventId()
-    await db.insert(task).values({
-      id: taskId,
-      kind: 'conv_dormant',
-      entityKind: 'conv_turn',
-      entityId: rowId,
-      telegramMessageId: 9,
-    })
-    const text = await onConvPress(press, { taskId, action: 'remind' })
-    expect(text).toMatch(/уже закончились/)
-    expect(text).not.toMatch(/напомню/)
     expect((await db.select().from(task))[0]).toMatchObject({
       state: 'resolved',
-      resolution: 'ended',
+      resolution: 'close',
     })
-    // The same press again, and a press on a task that expired, say the same.
-    expect(await onConvPress(press, { taskId, action: 'remind' })).toMatch(/уже закончились/)
-  })
-
-  it('FR-CONV-12: Boris not answering the dormant task closes it when the process stops waiting', async () => {
-    await live()
-    deps.dormantWaitS = 1
-    const conv = await scene(quiet(8 * DAY))
-    await startReminder(conv.id, 'm-1')
+    expect((await db.select().from(deal))[0]?.stage).toBe('lost')
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
-    const [t] = await db.select().from(task)
-    expect(t).toMatchObject({ kind: 'conv_dormant', state: 'resolved', resolution: 'expired' })
-    const press = { db, notifier: { sendText: async () => ({ messageId: 1 }) }, decideDormant }
-    expect(await onConvPress(press, { taskId: t?.id ?? '', action: 'remind' })).toMatch(
-      /уже закончились/,
-    )
+    expect(sends).toHaveLength(3)
+    // The same press again changes nothing, and no other button is a way to go on.
+    expect(await onConvPress(press, { taskId: t?.id ?? '', action: 'close' })).toMatch(/уже/)
+    expect(await onConvPress(press, { taskId: t?.id ?? '', action: 'send' })).toMatch(/уже/)
   })
 
   it('FR-CONV-12: no model text for 3 hours past the time means the ready text of old Sara', async () => {
@@ -531,6 +484,9 @@ describe('a reminder after the switch', () => {
     await live()
     await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_MODE: 'exit1' })
     deps.fallbackAfterMs = 600
+    // The second may follow the first at once; the third keeps its three days.
+    deps.waitsMs = { second: 0 }
+    deps.minGapMs = 0
     // Our message 4 days ago: the first and the second reminders are due.
     const conv = await scene(quiet(4 * DAY))
     await startReminder(conv.id, 'm-1')
@@ -567,13 +523,156 @@ describe('a reminder after the switch', () => {
   })
 })
 
-describe('the dormant day', () => {
-  /** The ladder that reaches the dormant day at once: our message 8 days ago, short waits for the retries. */
+describe('a reminder in drafts mode', () => {
+  /** After the switch, the autopilot at its default (off): Boris's press is the only way a reminder goes. */
+  const draftsMode = async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await setSetting(db, 'outbound.messages', true, 'system')
+  }
+  const press = (taskId: string, action: 'send' | 'skip') =>
+    onConvPress(
+      {
+        db,
+        notifier: { sendText: async () => ({ messageId: 1 }) },
+        sendText: (c, text, author, o) =>
+          sendTextNow(
+            { db, profi, ground: (cv, a) => checkGround(deps, cv, a, { dormant: false }) },
+            c,
+            text,
+            author,
+            o,
+          ),
+      },
+      { taskId, action },
+    )
+  const cardTask = async () => (await db.select().from(task))[0]
+
+  it('FR-CONV-12: the reminder comes to Boris as a card «Напомнить клиенту?» and nothing is queued', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=carded'])
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]?.text).toContain('Напомнить клиенту?')
+    expect(buttons[0]?.text).toContain(GOOD_TEXT)
+    expect(buttons[0]?.rows.flat().map((b) => b.text)).toEqual(['Отправить', 'Изменить', 'Не надо'])
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    expect(await cardTask()).toMatchObject({ kind: 'conv_draft', state: 'open' })
+    expect(await countEvents(db, 'conv.reminder_sent')).toBe(0)
+    // The process goes on to its next step; it does not wait for Boris's press.
+    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: «Отправить» sends the reminder once, and the ladder takes it for its own, not for a new beginning', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const t = await cardTask()
+    expect(await press(t?.id ?? '', 'send')).toBe('Отправила напоминание клиенту.')
+    expect(await press(t?.id ?? '', 'send')).toMatch(/уже/)
+    expect(sends).toEqual([
+      { key: `msg:send:${t?.id}`, text: GOOD_TEXT, expectLast: 'm-1', chatId: CHAT },
+    ])
+    expect((await rows())[0]?.outcome).toBe('sent')
+    expect(await countEvents(db, 'conv.reminder_sent')).toBe(1)
+    // The chat read after it: the reminder is our side's last message, and the process of m-1 stays the only one.
+    const wf = remindWorkflowId(conv.id, 'm-1')
+    const r = await syncChat({ db, profi }, conv, new Date(), { v1Writes: false })
+    await syncReminders(conv, r.messages)
+    expect(await openReminders(conv.id)).toEqual([wf])
+  })
+
+  it('FR-CONV-12: «Не надо» sends nothing, closes the step, and the ladder goes on to the next one', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const t = await cardTask()
+    expect(await press(t?.id ?? '', 'skip')).toMatch(/не отправляю/)
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    expect((await rows())[0]?.outcome).toBe('declined')
+    expect((await cardTask())?.resolution).toBe('skip')
+    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: Telegram not taking the card for a moment only delays it, one card comes', async () => {
+    await draftsMode()
+    deps.cardRetryEveryMs = 200
+    notifyFails = 2
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=carded'])
+    expect(buttons).toHaveLength(1)
+    expect(await db.select().from(task)).toHaveLength(1)
+  })
+
+  it('FR-CONV-12: a card that does not go in all the tries is a failed step in the trace, the process lives on', async () => {
+    await draftsMode()
+    deps.cardRetryEveryMs = 100
+    deps.cardTries = 3
+    notifyFails = 100
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const [r] = await rows()
+    expect(r).toMatchObject({ outcome: 'failed' })
+    expect(r?.decisionReason).toMatch(/карточку/)
+    expect(buttons).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: every reminder of the ladder is a card, the unanswered ones expire, and the silence task closes it', async () => {
+    await draftsMode()
+    instant()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(4))
+    expect(await outcomes()).toEqual(['1=expired', '2=expired', '3=expired', 'dormant=dormant'])
+    expect(buttons.map((b) => b.rows.flat().map((x) => x.text))).toEqual([
+      ['Отправить', 'Изменить', 'Не надо'],
+      ['Отправить', 'Изменить', 'Не надо'],
+      ['Отправить', 'Изменить', 'Не надо'],
+      ['Закрыть'],
+    ])
+    expect(buttons[2]?.text).toContain('Третье напоминание, последнее')
+    // Boris pressed nothing, so no reminder went: the task says it plainly.
+    expect(buttons[3]?.text).toContain('напоминания ему не уходили')
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    // Nothing waits for Boris but the silence task: no «third» reminder after «Больше напоминать не буду».
+    const open = (await db.select().from(task)).filter((t) => t.state === 'open')
+    expect(open.map((t) => t.kind)).toEqual(['conv_dormant'])
+  })
+
+  it('FR-CONV-12: the client answering closes the card that waits for Boris', async () => {
+    await draftsMode()
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    profi.chat.push(chatMsg('m-2', 'client', 'Да, давайте', ago(1000), CHAT))
+    const r = await syncChat({ db, profi }, conv, new Date(), { v1Writes: false })
+    await syncReminders(conv, r.messages)
+    expect(await cardTask()).toMatchObject({ state: 'resolved', resolution: 'answered' })
+    expect((await rows())[0]?.outcome).toBe('answered')
+    expect(await press((await cardTask())?.id ?? '', 'send')).toMatch(/уже/)
+    expect(sends).toHaveLength(0)
+  })
+})
+
+describe('the silence task', () => {
+  /** The ladder that reaches the silence task at once: the waits are nothing, short waits for the retries. */
   const dormantScene = async () => {
     await live()
+    instant()
     deps.dormantRetryEveryMs = 200
     deps.dormantStepRetryMs = 150
-    return scene(quiet(8 * DAY), { deal: true })
+    return scene(quiet(25 * HOUR), { deal: true })
   }
   const taskCount = async () => (await db.select().from(task)).length
   const stage = async () => (await db.select().from(deal))[0]?.stage
@@ -588,9 +687,8 @@ describe('the dormant day', () => {
     // Every try before the task went found the deal where it was.
     expect(dealStages.slice(0, 7)).toEqual(Array(7).fill('bid_sent'))
     expect(buttons).toHaveLength(1)
-    const wf = remindWorkflowId(conv.id, 'm-1')
-    await sleep(300)
-    expect(await statusOf(wf)).toBe('PENDING')
+    // The process is over with the task: nothing waits for Boris's press.
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
     expect((await rows()).filter((r) => r.id.endsWith(':dormant'))[0]?.outcome).toBe('dormant')
   })
 
@@ -599,7 +697,11 @@ describe('the dormant day', () => {
     bookedFails = 4
     await startReminder(conv.id, 'm-1')
     await until(async () => (await taskCount()) === 1)
-    await until(async () => (await stage()) === 'dormant')
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
+    // The three reminders were held back too, so nothing went to him: his silence says nothing about the deal.
+    expect(await outcomes()).toEqual(['1=skipped', '2=skipped', '3=skipped', 'dormant=dormant'])
+    expect(buttons[0]?.text).toContain('напоминания ему не уходили')
+    expect(await stage()).toBe('bid_sent')
   })
 
   it('FR-CONV-12: an unreadable chat does not stop the task, it goes to Boris and not to the client', async () => {
@@ -608,13 +710,13 @@ describe('the dormant day', () => {
       throw new Error('the chat page is not open')
     }
     await startReminder(conv.id, 'm-1')
-    await until(done(3))
+    await until(done(4))
     expect(await taskCount()).toBe(1)
-    expect(await outcomes()).toEqual(['1=skipped', '2=skipped', 'dormant=dormant'])
+    expect(await outcomes()).toEqual(['1=skipped', '2=skipped', '3=skipped', 'dormant=dormant'])
     expect(sends).toHaveLength(0)
   })
 
-  it('FR-CONV-12: a turn that runs at the dormant wake delays the task, which comes when the turn is over', async () => {
+  it('FR-CONV-12: a turn that runs at the silence wake delays the task, which comes when the turn is over', async () => {
     const conv = await dormantScene()
     const turnId = `conv-turn:${conv.id}:x`
     await db.insert(convTurn).values({
@@ -624,15 +726,19 @@ describe('the dormant day', () => {
       state: 'waiting',
     })
     await startReminder(conv.id, 'm-1')
-    await sleep(900)
+    // The three reminders are held back by the running turn; only then the silence step tries again.
+    await until(done(3))
+    await sleep(600)
     expect(await taskCount()).toBe(0)
     expect(await stage()).toBe('bid_sent')
     await db.update(convTurn).set({ state: 'finished' }).where(eq(convTurn.id, turnId))
     await until(async () => (await taskCount()) === 1)
-    await until(async () => (await stage()) === 'dormant')
+    // The reminders were held back by the turn too: no reminder went, so the deal stays where it was.
+    expect(buttons[0]?.text).toContain('напоминания ему не уходили')
+    expect(await stage()).toBe('bid_sent')
   })
 
-  it('FR-CONV-12: after a day of tries without success the dormant step is skipped and the deal stays', async () => {
+  it('FR-CONV-12: after a day of tries without success the silence step is skipped and the deal stays', async () => {
     const conv = await dormantScene()
     deps.dormantTries = 3
     bookedFails = 100

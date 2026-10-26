@@ -8,6 +8,7 @@ import { interlocutorAnswer } from '../helpers/conversation'
 
 const settings = (o: Partial<PolicySettings> = {}): PolicySettings => ({
   v1Writes: false,
+  autopilot: true,
   outboundMessages: true,
   accountPaused: false,
   night: { from: 23, to: 8 },
@@ -82,6 +83,84 @@ describe('rules of a reply', () => {
         callRequest: false,
       }).action,
     ).toBe('send')
+  })
+
+  it('FR-CONV-5: after the switch with the autopilot off a reply Sara could send is a draft for Boris’s press', () => {
+    const d = decide({
+      plan: plan(),
+      dossier: dossier(),
+      settings: settings({ autopilot: false }),
+      now: DAY,
+      callRequest: false,
+    })
+    expect(d).toMatchObject({
+      action: 'draft',
+      would: 'send',
+      reason: 'отправлю по твоему нажатию',
+      holdUntil: null,
+    })
+  })
+
+  it('FR-CONV-5: with the autopilot off the night does not hold a reply, it is a draft at once', () => {
+    const d = decide({
+      plan: plan(),
+      dossier: dossier(),
+      settings: settings({ autopilot: false }),
+      now: NIGHT,
+      callRequest: false,
+    })
+    expect(d).toMatchObject({ action: 'draft', reason: 'отправлю по твоему нажатию' })
+  })
+
+  it('FR-CONV-5: the autopilot changes nothing in shadow, nor a call for Boris, a forward or silence', () => {
+    const off = settings({ autopilot: false })
+    const shadow = decide({
+      plan: plan(),
+      dossier: dossier(),
+      settings: { ...off, v1Writes: true },
+      now: DAY,
+      callRequest: false,
+    })
+    expect(shadow.action).toBe('draft')
+    expect(shadow.reason).toMatch(/^режим тени; сама бы: /)
+    expect(
+      decide({
+        plan: plan({ move: 'call_boris' }),
+        dossier: dossier(),
+        settings: off,
+        now: DAY,
+        callRequest: false,
+      }).action,
+    ).toBe('call_boris')
+    expect(
+      decide({
+        plan: plan({ move: 'none', text: null }),
+        dossier: dossier(),
+        settings: off,
+        now: DAY,
+        callRequest: false,
+      }).action,
+    ).toBe('nothing')
+    expect(
+      decide({
+        plan: plan(),
+        dossier: dossier({ owner: 'boris', ownerReason: 'take' }),
+        settings: off,
+        now: DAY,
+        callRequest: false,
+      }).action,
+    ).toBe('forward')
+  })
+
+  it('FR-CONV-5: a pause keeps its own reason when the autopilot is off too', () => {
+    const d = decide({
+      plan: plan(),
+      dossier: dossier(),
+      settings: settings({ autopilot: false, outboundMessages: false }),
+      now: DAY,
+      callRequest: false,
+    })
+    expect(d).toMatchObject({ action: 'draft', reason: 'пауза «Пишет клиентам»' })
   })
 
   it('FR-CONV-4: a reply the Checker did not see is a draft «без Проверяющего», never sent', () => {
