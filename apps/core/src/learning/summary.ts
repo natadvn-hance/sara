@@ -27,7 +27,7 @@ const HELD_TEXTS = {
   button: (n: number) => `Показать №${n}`,
 }
 
-const mskParts = (d: Date) => {
+export const mskParts = (d: Date) => {
   const p = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Moscow',
     year: 'numeric',

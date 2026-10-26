@@ -15,6 +15,8 @@ export type BorisMessage = {
   /** A voice message saved on disk, recognized here. */
   voicePath: string | null
   replyToMessageId: number | null
+  /** The message's number in Telegram: a repeat of the same update is the same message. */
+  messageId?: number
   at: Date
 }
 
@@ -24,7 +26,21 @@ export type BorisMessage = {
  * A message that could be either (no reply, both kinds waiting) is stored nowhere: Sara asks which, naming the leads.
  */
 export async function handleBorisMessage(
-  d: { db: Db; transcriber: Transcriber; onDraftText?(a: DraftAnswer): Promise<string> },
+  d: {
+    db: Db
+    transcriber: Transcriber
+    onDraftText?(a: DraftAnswer): Promise<string>
+    /** M4: a reply to a conversation card is a command; null when the message replies to something else. */
+    onCardReply?(m: {
+      replyToMessageId: number | null
+      text: string
+      voice: boolean
+      messageId?: number
+      at: Date
+    }): Promise<string | null>
+    /** M4: Boris's version of a reply after «Изменить» on a conversation card. */
+    onConvEdit?(a: DraftAnswer): Promise<string>
+  },
   m: BorisMessage,
 ): Promise<string> {
   let text = m.text?.trim() ?? ''
@@ -34,7 +50,15 @@ export async function handleBorisMessage(
     text = heard
   }
   if (!text) return TEXTS.notAnAnswer
-  const a = { text, voice: m.voicePath !== null, at: m.at }
+  const a = { text, voice: m.voicePath !== null, messageId: m.messageId, at: m.at }
+  const command = await d.onCardReply?.({
+    replyToMessageId: m.replyToMessageId,
+    text,
+    voice: a.voice,
+    messageId: m.messageId,
+    at: m.at,
+  })
+  if (command) return command
   const q = await openQuestion(d.db, { replyToMessageId: m.replyToMessageId, at: m.at })
   if (!q) return TEXTS.notAnAnswer
   if ('ambiguous' in q) {
@@ -51,6 +75,8 @@ export async function handleBorisMessage(
   }
   if ((DRAFT_KINDS as string[]).includes(q.kind))
     return d.onDraftText ? d.onDraftText({ question: q, ...a }) : TEXTS.notAnAnswer
+  if (q.kind === 'conv_edit')
+    return d.onConvEdit ? d.onConvEdit({ question: q, ...a }) : TEXTS.notAnAnswer
   const answered = await d.db.transaction((tx) => markAnswered(tx, q, a))
   return answered ? TEXTS.noted(text, await titleOf(d.db, q)) : TEXTS.notAnAnswer
 }
