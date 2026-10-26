@@ -8,6 +8,13 @@ import { BUBBLE } from './pageShape'
 export const CHAT_INPUT = 'textarea[placeholder="Сообщение"]'
 export const CHAT_SEND_PATH = 'xpath=ancestor::div[3]//button[last()]'
 
+/** The address of a chat page without the chat's number: a map says nothing about whose chat it was. */
+export function anonymousChatUrl(url: string): string {
+  const at = new URL(url)
+  if (at.searchParams.has('id')) at.searchParams.set('id', '0')
+  return at.toString()
+}
+
 export type ChatBox = { tag: string; classes: string[]; testid: string | null }
 export type ChatButton = {
   /** Position among the buttons of the box, in page order. */

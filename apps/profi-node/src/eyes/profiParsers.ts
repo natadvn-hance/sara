@@ -316,8 +316,8 @@ export const profiParsers: Parsers = {
     return ids.slice(0, 8).map((chatId) => ({ chatId, unread: 1, lastAt: null }))
   },
 
-  async fromChatDom(page, chatId) {
-    await page.waitForSelector(MESSAGE, { timeout: 15000 }).catch(() => {})
+  async fromChatDom(page, chatId, o) {
+    await page.waitForSelector(MESSAGE, { timeout: o?.waitMs ?? 15000 }).catch(() => {})
     const raw = await page
       .locator(MESSAGE)
       .evaluateAll((els) =>

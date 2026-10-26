@@ -5,6 +5,7 @@ import { type BidRuntime, createBidTools } from './bid/bidTools'
 import { startFormCalibration } from './bid/calibration'
 import { type AccountBrowser, openAccountBrowser } from './browser/accountBrowser'
 import { checkEgress } from './browser/egress'
+import { createSendTools, type SendRuntime } from './chat/sendTools'
 import type { NodeConfig } from './config'
 import { createNodeDb } from './db/client'
 import { migrateNode } from './db/migrate'
@@ -84,6 +85,7 @@ export async function startProfiService(
   let closing = false
   const runtimes = new Map<string, AccountRuntime>()
   const bidRuntimes = new Map<string, BidRuntime>()
+  const sendRuntimes = new Map<string, SendRuntime>()
   const browsers = new Map<string, AccountBrowser>()
 
   for (const acc of c.accounts) {
@@ -164,18 +166,20 @@ export async function startProfiService(
       parsers,
     })
 
+    // Until the tab is on the site from its own IP there is no tab to work in: can() is false.
+    const inTab: Insurance['inTab'] = (f) =>
+      a.insurance
+        ? a.insurance.inTab(f)
+        : f({ go: async () => false, can: () => false, later: () => {} })
     bidRuntimes.set(acc.id, {
       watch: a.watch,
       eyes,
       page: () => ab.page,
       // The order pages get_order opens are where the form is mapped now that the minute check opens none of the board's.
       afterOrderPage: (id, may) => calibration.afterOrderPage(id, may),
-      // Until the tab is on the site from its own IP there is no tab to work in: can() is false.
-      inTab: (f) =>
-        a.insurance
-          ? a.insurance.inTab(f)
-          : f({ go: async () => false, can: () => false, later: () => {} }),
+      inTab,
     })
+    sendRuntimes.set(acc.id, { watch: a.watch, eyes, page: () => ab.page, inTab })
 
     // The site is opened only from the account's own IP; until then the tab stays away from it.
     const start = async () => {
@@ -242,6 +246,14 @@ export async function startProfiService(
   const tools = {
     ...readTools,
     ...createBidTools({ db, permitSecret: c.permitSecret, parsers, accounts: bidRuntimes }),
+    // Off unless the environment says so: deploying this changes nothing until Boris's «да» (SARA_NODE_SEND_MESSAGES=1).
+    ...createSendTools({
+      db,
+      permitSecret: c.permitSecret,
+      parsers,
+      accounts: sendRuntimes,
+      enabled: c.sendMessages,
+    }),
   }
   const host = c.production ? '0.0.0.0' : '127.0.0.1'
   const svc = await serveMcp(() => createProfiMcpServer(tools), c.port, undefined, host)

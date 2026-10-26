@@ -17,8 +17,12 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 
 export type FakeChat = {
   messages: FakeMessage[]
-  /** The message box: drawn (default), drawn without the field, or not at all (a closed chat). */
-  box?: 'normal' | 'no_field' | 'none'
+  /** The message box: drawn (default), without the field, without buttons, or not at all (a closed chat). */
+  box?: 'normal' | 'no_field' | 'no_buttons' | 'none'
+  /** Words left in the field from before (a draft). */
+  draft?: string
+  /** The field rewrites what is put in it (here it drops digits), so a text never stands in it whole. */
+  mangle?: boolean
   /**
    * What the send button does with text in the field: the message appears at once (works), after a while (late), or
    * never although the press went through (swallowed).
@@ -41,10 +45,14 @@ export function chatHtml(chatId: string, c: FakeChat): string {
     box === 'none'
       ? ''
       : `<div class="cw_composer"><div class="cw_inner"><div class="cw_row">
-${box === 'no_field' ? '' : '<textarea placeholder="Сообщение" rows="1"></textarea>'}
-<button type="button" aria-label="Прикрепить файл"><svg width="12" height="12"></svg></button>
+${box === 'no_field' ? '' : `<textarea placeholder="Сообщение" rows="1">${esc(c.draft ?? '')}</textarea>`}
+${
+  box === 'no_buttons'
+    ? ''
+    : `<button type="button" aria-label="Прикрепить файл"><svg width="12" height="12"></svg></button>
 <input type="file" hidden accept="image/*,.pdf" multiple>
-<button type="button" id="main" data-mode="mic" aria-label="Голосовое сообщение"><svg width="12" height="12"></svg></button>
+<button type="button" id="main" data-mode="${c.draft ? 'send' : 'mic'}" aria-label="Голосовое сообщение"><svg width="12" height="12"></svg></button>`
+}
 </div></div></div>`
   const enter = c.enterSends
     ? "field.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } })"
@@ -79,7 +87,10 @@ async function submit() {
   add(text)
 }
 if (field) {
-  field.addEventListener('input', morph)
+  field.addEventListener('input', () => {
+    ${c.mangle ? "field.value = field.value.replace(/[0-9]/g, '')" : ''}
+    morph()
+  })
   ${enter}
 }
 if (main) main.addEventListener('click', () => { if (main.dataset.mode === 'send') submit() })

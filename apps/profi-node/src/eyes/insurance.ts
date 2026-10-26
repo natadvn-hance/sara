@@ -1,5 +1,5 @@
 import type { AccountBrowser } from '../browser/accountBrowser'
-import { readChatFormMap } from './chatFormMap'
+import { anonymousChatUrl, readChatFormMap } from './chatFormMap'
 import type { Eyes } from './eyes'
 import { readFormMap } from './formMap'
 import { BUBBLE, bubbleShapes, pageShape } from './pageShape'
@@ -165,12 +165,9 @@ export function startInsurance(o: {
     try {
       const body = await readChatFormMap(o.ab.page)
       if (!body) return
-      // The chat's own number is left out of the address: the map says nothing about whose chat it was.
-      const at = new URL(o.ab.page.url())
-      at.search = at.search.replace(/\d+/g, '0')
       await o.eyes.onRaw({
         kind: 'dom',
-        url: at.toString(),
+        url: anonymousChatUrl(o.ab.page.url()),
         body,
         receivedAt: new Date().toISOString(),
       })

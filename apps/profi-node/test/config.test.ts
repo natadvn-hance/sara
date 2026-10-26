@@ -19,4 +19,11 @@ describe('node config', () => {
       /SARA_NODE_TOKEN/,
     )
   })
+
+  it('FR-CONV-9: sending messages to clients is off unless SARA_NODE_SEND_MESSAGES is 1', () => {
+    expect(loadNodeConfig({}).sendMessages).toBe(false)
+    expect(loadNodeConfig({ SARA_NODE_SEND_MESSAGES: '' }).sendMessages).toBe(false)
+    expect(loadNodeConfig({ SARA_NODE_SEND_MESSAGES: 'true' }).sendMessages).toBe(false)
+    expect(loadNodeConfig({ SARA_NODE_SEND_MESSAGES: '1' }).sendMessages).toBe(true)
+  })
 })

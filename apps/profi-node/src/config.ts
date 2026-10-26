@@ -20,6 +20,8 @@ export type NodeConfig = {
   headless: boolean
   accounts: z.infer<typeof Account>[]
   production: boolean
+  /** Messages to clients through the chat page: off unless SARA_NODE_SEND_MESSAGES=1 (M4, Boris's «да»). */
+  sendMessages: boolean
 }
 
 export function loadNodeConfig(env: NodeJS.ProcessEnv = process.env): NodeConfig {
@@ -44,5 +46,6 @@ export function loadNodeConfig(env: NodeJS.ProcessEnv = process.env): NodeConfig
     headless: env.PROFI_HEADLESS !== 'false',
     accounts: z.array(Account).parse(JSON.parse(env.PROFI_ACCOUNTS ?? '[]')),
     production,
+    sendMessages: env.SARA_NODE_SEND_MESSAGES === '1',
   }
 }
