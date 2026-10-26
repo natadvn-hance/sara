@@ -151,6 +151,26 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
     expect(fixClientText('Бот-Telegram и Яндекс-Direct')).toBe('Бот Telegram и Яндекс Direct')
   })
 
+  it('NFR-UX-1: a hyphen is decided between its two neighbours: Latin-only or numeric ones keep it, a Cyrillic one loses it', () => {
+    expect(fixClientText('Нужен Wi-Fi-роутер и e-mail-рассылка')).toBe(
+      'Нужен Wi-Fi роутер и e-mail рассылка',
+    )
+    expect(fixClientText('Делаем B2B-SaaS-платформу и CRM-систему')).toBe(
+      'Делаем B2B-SaaS платформу и CRM систему',
+    )
+    expect(fixClientText('Бот-Wi-Fi-тест')).toBe('Бот Wi-Fi тест')
+    expect(fixClientText('Нужен Wi-Fi-5 роутер, 5-летний срок')).toBe(
+      'Нужен Wi-Fi-5 роутер, 5-летний срок',
+    )
+  })
+
+  it('NFR-UX-1: a listed name keeps its hyphen with a Latin look-alike letter and inside a longer word', () => {
+    const latinC = String.fromCharCode(0x43)
+    expect(fixClientText(`Работаем с 1${latinC}-Битрикс`)).toBe(`Работаем с 1${latinC}-Битрикс`)
+    expect(fixClientText('Плагин 1С-Битрикс-интеграция')).toBe('Плагин 1С-Битрикс интеграция')
+    expect(fixClientText('Из Санкт-Петербурга-Сити')).toBe('Из Санкт-Петербурга-Сити')
+  })
+
   it('NFR-UX-1: a name of the list keeps its hyphen, in any case form', () => {
     expect(fixClientText('Мы партнёры 1С:Франчайзи и работаем с 1С-Битрикс')).toBe(
       'Мы партнёры 1С:Франчайзи и работаем с 1С-Битрикс',

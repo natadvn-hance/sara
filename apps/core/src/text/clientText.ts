@@ -133,43 +133,85 @@ export const HYPHEN_NAMES: readonly string[] = [
 
 /** The longest ending a case form of a listed name may have in one of its parts («Ростова-на-Дону», «Нью-Йорком»). */
 const CASE_ENDING_MAX = 3
-const keepsListedName = (word: string): boolean => {
-  const parts = word.toLowerCase().split('-')
-  return HYPHEN_NAMES.some((name) => {
-    const own = name.toLowerCase().split('-')
-    return (
-      own.length === parts.length &&
-      own.every((o, i) => {
-        const p = parts[i] ?? ''
+/** Latin letters that look like Cyrillic ones: a name typed with a Latin «C» in «1C-Битрикс» is the same name. */
+const LOOKALIKE: Record<string, string> = {
+  a: 'а',
+  b: 'в',
+  c: 'с',
+  e: 'е',
+  h: 'н',
+  k: 'к',
+  m: 'м',
+  o: 'о',
+  p: 'р',
+  t: 'т',
+  x: 'х',
+  y: 'у',
+}
+/** A part of a word to compare: lower case, a look-alike Latin letter as the Cyrillic one. */
+const likeCyrillic = (part: string): string =>
+  part.toLowerCase().replace(/[a-z]/g, (ch) => LOOKALIKE[ch] ?? ch)
+
+const LISTED = HYPHEN_NAMES.map((name) => name.split('-').map(likeCyrillic))
+
+/** The places between the parts of a word where a listed name has its own hyphen. */
+function listedHyphens(parts: string[]): boolean[] {
+  const keep = parts.slice(1).map(() => false)
+  const folded = parts.map(likeCyrillic)
+  for (const own of LISTED) {
+    if (own.length < 2) continue
+    for (let at = 0; at + own.length <= parts.length; at++) {
+      const same = own.every((o, j) => {
+        const p = folded[at + j] ?? ''
         return p.startsWith(o) && p.length - o.length <= CASE_ENDING_MAX
       })
-    )
-  })
+      if (same) for (let j = 0; j < own.length - 1; j++) keep[at + j] = true
+    }
+  }
+  return keep
 }
 
+/** Days of the week in short: «пн-пт», «сб-вс» keep their hyphen. */
+const WEEKDAY = /^(?:пн|вт|ср|чт|пт|сб|вс)$/iu
+const isNumber = (p: string) => /^\d+%?$/.test(p)
+const isLatin = (p: string) => /^[A-Za-z0-9]+$/.test(p) && /[A-Za-z]/.test(p)
+
 /**
- * Whether the hyphens of a word stay (rule 3). Boris writes «B2B компании», «Telegram бот», «SEO продвижение»: a hyphen
- * stays only in
- * - a number: a phone number, a date, a range («2-3», «10-15%») and a number with its ending («5-летний», «2-й»);
- * - a word that is Latin all through («Wi-Fi», «e-mail», «A-Store», «B2B-SaaS»);
- * - a name of `HYPHEN_NAMES`, and a Cyrillic proper name whose parts are all capitalized («Анна-Мария») or capitalized
- *   with a link word in lower case («Ростов-на-Дону»).
+ * Which hyphens of a word stay (rule 3), decided hyphen by hyphen between the two parts it joins. Boris writes
+ * «B2B компании», «Telegram бот», «SEO продвижение»: a hyphen stays only
+ * - next to a number: a phone number, a date, a range («2-3», «10-15%») and a number with its ending («5-летний», «2-й»);
+ * - between two parts that are Latin all through («Wi-Fi», «e-mail», «A-Store», «B2B-SaaS»), so «Wi-Fi-роутер» is
+ *   «Wi-Fi роутер»;
+ * - inside a name of `HYPHEN_NAMES` («1С-Битрикс», «Санкт-Петербурга», a Latin «C» for the Cyrillic one too);
+ * - in a short day of the week («пн-пт»);
+ * - in a Cyrillic proper name whose parts are all capitalized («Анна-Мария») or capitalized with a link word in lower
+ *   case («Ростов-на-Дону»).
  * In «что-то», «все-таки», «по-русски», «Что-то» (a capital at the start of a sentence), «SEO-продвижение» and
  * «B2B-сегмент» the hyphen goes. When in doubt about a name, its hyphen stays: a hurt name costs more.
  */
-function keepsHyphens(word: string): boolean {
+function withKeptHyphens(word: string): string {
   const parts = word.split('-')
-  if (parts.some((p) => /^\d+%?$/.test(p))) return true
-  if (parts.every((p) => /^[A-Za-z0-9]+$/.test(p) && /[A-Za-z]/.test(p))) return true
-  if (keepsListedName(word)) return true
-  // Latin and Cyrillic in one word is never a proper name of ours: «Telegram-бот», «SEO-продвижение», «Бот-Telegram».
-  if (/[A-Za-z]/.test(word)) return false
   const capital = (p: string) => /^\p{Lu}/u.test(p)
-  if (parts.every(capital)) return true
   const [head, ...rest] = parts
-  return (
-    capital(head ?? '') && rest.every((p) => capital(p) || NAME_LINKS.has(p)) && rest.some(capital)
-  )
+  const properName =
+    !/[A-Za-z]/.test(word) &&
+    (parts.every(capital) ||
+      (capital(head ?? '') &&
+        rest.every((p) => capital(p) || NAME_LINKS.has(p)) &&
+        rest.some(capital)))
+  const listed = listedHyphens(parts)
+  return parts.reduce((out, part, i) => {
+    if (i === 0) return part
+    const before = parts[i - 1] ?? ''
+    const keep =
+      properName ||
+      listed[i - 1] === true ||
+      isNumber(before) ||
+      isNumber(part) ||
+      (isLatin(before) && isLatin(part)) ||
+      (WEEKDAY.test(before) && WEEKDAY.test(part))
+    return `${out}${keep ? '-' : ' '}${part}`
+  }, '')
 }
 
 /** A dash with the spaces around it, a spaced or line-leading hyphen: all of them are the same dash to remove. */
@@ -192,9 +234,7 @@ function removeDashes(text: string): string {
     if (after === undefined || after === '\n' || /[,.;:!?)»]/.test(after)) return ''
     return ' '
   })
-  return gone.replace(WORD_WITH_HYPHEN, (word) =>
-    keepsHyphens(word) ? word : word.replaceAll('-', ' '),
-  )
+  return gone.replace(WORD_WITH_HYPHEN, withKeptHyphens)
 }
 
 /** The line without the period that closes it. «Хм..» and «Хм...» keep theirs, an emoji at the end stays. */
