@@ -90,9 +90,10 @@ function rowsFor(
 }
 
 /**
- * The card of a decided turn (M4 design 5.12): the shadow draft, a draft for Boris's «да», or a call for him. At most
- * conv.cards_per_day draft cards a Moscow day; a call for Boris always goes; at quiet hours without a sound. Null
- * when the day's cards are used up (the turn stays in the trace and in the evening summary).
+ * The card of a decided turn (M4 design 5.12): the shadow draft, a draft for Boris's «да», or a call for him. In
+ * shadow at most conv.cards_per_day draft cards a Moscow day; a call for Boris always goes; at quiet hours without a
+ * sound. After the switch no card is held back: a draft card is the client's only way to an answer (FR-NOTIF-3).
+ * Null when the day's shadow cards are used up (the turn stays in the trace and in the evening summary).
  */
 export async function sendTurnCard(
   d: CardDeps,
@@ -103,7 +104,8 @@ export async function sendTurnCard(
   if (t.cardMessageId !== null && t.taskId) return { taskId: t.taskId, messageId: t.cardMessageId }
   const now = new Date()
   const urgent = t.decision === 'call_boris'
-  if (!urgent) {
+  // The cap is for shadow, where the cards only teach. After the switch they are the answers to clients.
+  if (!urgent && (await getSetting(d.db, 'conv.v1_writes'))) {
     const [c] = await d.db
       .select({ n: sql<number>`count(*)::int` })
       .from(convTurn)

@@ -95,7 +95,9 @@ export const CONV_TEXTS = {
         '',
       )
     const meta = [
-      v.decision === 'call_boris' ? null : `Сама бы: ${wouldRu(v)}.`,
+      v.decision === 'call_boris'
+        ? null
+        : `${v.shadow ? 'Сама бы' : 'Почему черновик'}: ${wouldRu(v)}.`,
       v.tone ? `Тон: ${TONE_RU[v.tone]}.` : null,
     ].filter(Boolean)
     if (meta.length) lines.push(meta.join(' '))
