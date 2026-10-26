@@ -144,21 +144,41 @@
 
 ## RB-17 Разум на сервере: клон, обновление, предложения
 
-- **Где:** ядро читает папку `SARA_MIND_DIR` (по умолчанию `/data/mind` в
-  томе `sara-data`): клон `natadvn-hance/sara-mind`. Ядро в неё не пишет.
-- **Первый раз:** `git clone` репозитория в `/data/mind` на сервере
-  (ключ только на чтение). Без папки разум пуст: каждый ход идёт
-  черновиком с причиной «разум пуст».
-- **При выкладке:** `git -C /data/mind pull`; ядро при запуске
-  перестраивает индекс, если версия разума изменилась (`mind.indexed` в
-  журнале), или вручную `pnpm mind:index`.
+- **Где:** клон `natadvn-hance/sara-mind` на сервере в `/opt/sara-mind`;
+  ядро видит его только на чтение как `/data/mind` (`SARA_MIND_DIR` по
+  умолчанию, `infra/compose.prod.yml`). Ядро в него не пишет, программа
+  git в образе ядра не нужна: версию разума ядро читает из файлов `.git`.
+  Без клона разум пуст: в журнале нет `mind.indexed`, каждый ход идёт
+  черновиком без опоры.
+- **Первый раз** (разработка, с «да» Бориса), на сервере под
+  пользователем выкладки:
+  1. Ключ только на чтение:
+     `ssh-keygen -t ed25519 -N '' -C sara-mind-ro -f ~/.ssh/sara_mind_ro`,
+     и в `~/.ssh/config`:
+     `Host github-sara-mind` / `HostName github.com` / `User git` /
+     `IdentityFile ~/.ssh/sara_mind_ro` / `IdentitiesOnly yes`.
+  2. На GitHub: `natadvn-hance/sara-mind`, Settings, Deploy keys, Add
+     deploy key: содержимое `~/.ssh/sara_mind_ro.pub`, галочку «Allow
+     write access» не ставить.
+  3. `sudo mkdir -p /opt/sara-mind && sudo chown "$USER" /opt/sara-mind &&
+     git clone git@github-sara-mind:natadvn-hance/sara-mind.git /opt/sara-mind`.
+  4. Выкладка `pnpm deploy sara@<адрес>`: ядро поднимается с клоном и при
+     запуске строит индекс (дальше раз в час).
+- **При выкладке:** `scripts/deploy.sh` сам делает
+  `git -C /opt/sara-mind pull --ff-only` перед сборкой; без клона пишет
+  «Разума на сервере нет: RB-17» и выкладывает дальше.
+- **Вручную** (например, сразу после слияния в `sara-mind` без выкладки):
+  `git -C /opt/sara-mind pull --ff-only`, затем
+  `docker compose -f /opt/sara/infra/compose.prod.yml --env-file /opt/sara/.env exec core node --import tsx apps/core/src/mind/cli.ts index`.
 - **Предложения:** Сара копит их в `core.mind_proposal`. Разработка
   выгружает их в свой клон `pnpm mind:proposals --to <клон>`, открывает
   пул-реквест в `sara-mind`; после «да» Бориса `pnpm mind:accept --mind <клон> <путь>`
-  (на сервере не запускается) переносит запись из `proposals/` в разум, затем слияние и `git pull` на
-  сервере.
-- **Проверить:** `pnpm mind:check /data/mind/mind` без ошибок; в журнале
-  `mind.indexed` с новой версией.
+  (на сервере не запускается) переносит запись из `proposals/` в разум,
+  затем слияние и обновление клона на сервере.
+- **Проверить:** команда `index` выше печатает «Разум <версия> …: записей
+  в индексе N» с N больше нуля; в журнале `mind.indexed` с этой версией;
+  `docker compose … exec core node --import tsx scripts/mind-check.ts /data/mind/mind`
+  говорит «Разум в порядке».
 
 ## RB-18 Страницу заказа не прочитали
 
