@@ -45,7 +45,7 @@ const chat = () =>
 
 async function write(
   fake: FakeGateway,
-  o: { read?: boolean; tone?: 'check_in' | 'friendly'; step?: 1 | 2 | 3 | 4 } = {},
+  o: { read?: boolean; tone?: 'check_in' | 'friendly'; step?: 1 | 2 | 3 } = {},
 ) {
   const conv = await chat()
   return writeReminder(
@@ -88,7 +88,7 @@ describe('the text of a reminder', () => {
 
   it('FR-CONV-12: the input names the step, the tone, our last message and the whole chat', async () => {
     const fake = await fakeGateway(db, { reminder: GOOD })
-    await write(fake, { step: 4, tone: 'friendly' })
+    await write(fake, { step: 3, tone: 'friendly' })
     const stdin = (await fake.calls())[0]?.stdin ?? ''
     for (const heading of [
       '## Заказ',
@@ -100,7 +100,7 @@ describe('the text of a reminder', () => {
     ])
       expect(stdin, heading).toContain(heading)
     expect(stdin).toContain('Тон: дружеский')
-    expect(stdin).toContain('По счёту: 4 из 4')
+    expect(stdin).toContain('По счёту: 3 из 3')
     expect(stdin).toContain('Хорошо, на связи. Если появятся вопросы, пишите.')
     expect(stdin).toContain('<<< данные клиента\nСпасибо, посмотрю\n>>>')
   })

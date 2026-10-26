@@ -48,7 +48,7 @@ const shown = (s: string, max = 300) => {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t
 }
 
-const STEP_ORDER = ['1', '2', 'dormant', '3', '4']
+const STEP_ORDER = ['1', '2', 'dormant', '3']
 const stepOf = (r: Row) =>
   String((r.understanding as { step?: number | string } | null)?.step ?? '')
 

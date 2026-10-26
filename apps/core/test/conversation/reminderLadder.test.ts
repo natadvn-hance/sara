@@ -10,26 +10,20 @@ const at = (ms: number) => new Date(lastMs + ms)
 const base = { lastOursAt: last, read: false, continued: false, now: new Date(last) }
 
 describe('the reminder ladder', () => {
-  it('FR-CONV-12: +24 h, +72 h, dormant at +7 days, then +10 and +30 days after «Напоминать дальше»', () => {
+  it('FR-CONV-12: +24 h, +72 h, dormant at +7 days, then one last reminder 10 days after «Напоминать дальше»', () => {
     expect(nextReminder({ ...base, sent: 0 })).toMatchObject({ at: at(DAY), step: 1 })
     expect(nextReminder({ ...base, sent: 1 })).toMatchObject({ at: at(3 * DAY), step: 2 })
     expect(nextReminder({ ...base, sent: 2 })).toMatchObject({ at: at(7 * DAY), step: 'dormant' })
-    // Boris said to go on: the next steps count from the dormant day, one after the other.
+    // Boris said to go on without saying when: the 10 days count from the dormant day.
     const go = { ...base, continued: true }
     expect(nextReminder({ ...go, sent: 2 })).toMatchObject({ at: at(17 * DAY), step: 3 })
-    expect(nextReminder({ ...go, sent: 3 })).toMatchObject({ at: at(47 * DAY), step: 4 })
   })
 
-  it('FR-CONV-12: «через 10 суток» counts from the press of «Напоминать дальше», and the 30 days from the 10-day reminder', () => {
+  it('FR-CONV-12: «через 10 суток» counts from the press of «Напоминать дальше»', () => {
     // Boris presses on day 9 after our message, two days after the dormant day.
     const pressed = new Date(lastMs + 9 * DAY).toISOString()
     const go = { ...base, continued: true, continuedAt: pressed, now: new Date(pressed) }
     expect(nextReminder({ ...go, sent: 2 })).toMatchObject({ at: at(19 * DAY), step: 3 })
-    // The 10-day reminder went a bit late, in the evening of day 19: the 30 days count from it.
-    const third = new Date(lastMs + 19.25 * DAY).toISOString()
-    expect(nextReminder({ ...go, sent: 3, lastSentAt: third })?.at).toEqual(at(49.25 * DAY))
-    // Without a sending time the 30 days follow the planned 10-day time.
-    expect(nextReminder({ ...go, sent: 3 })?.at).toEqual(at(49 * DAY))
     // A press that came after the dormant day long past: the 10 days still count from it, not from the anchor.
     const late = new Date(lastMs + 40 * DAY).toISOString()
     expect(nextReminder({ ...go, continuedAt: late, now: new Date(late), sent: 2 })?.at).toEqual(
@@ -37,23 +31,15 @@ describe('the reminder ladder', () => {
     )
   })
 
-  it('FR-CONV-12: the waits after the press can be shortened, for the tests of the process', () => {
+  it('FR-CONV-12: the wait after the press can be shortened, for the tests of the process', () => {
     const go = { ...base, continued: true, continuedAt: last, now: new Date(last) }
-    const short = { third: 1000, fourth: 2000 }
-    expect(nextReminder({ ...go, sent: 2, afterPressMs: short })?.at).toEqual(at(1000))
-    expect(
-      nextReminder({
-        ...go,
-        sent: 3,
-        lastSentAt: new Date(lastMs + 1000).toISOString(),
-        afterPressMs: short,
-        minGapMs: 0,
-      })?.at,
-    ).toEqual(at(3000))
+    expect(nextReminder({ ...go, sent: 2, afterPressMs: 1000 })?.at).toEqual(at(1000))
   })
 
-  it('FR-CONV-12: after the last reminder, or without Boris saying to go on, there is nothing more', () => {
-    expect(nextReminder({ ...base, continued: true, sent: 4 })).toBeNull()
+  it('FR-CONV-12: the third ping is the last: nothing follows it, and nothing follows the dormant day without Boris', () => {
+    const go = { ...base, continued: true }
+    expect(nextReminder({ ...go, sent: 3 })).toBeNull()
+    expect(nextReminder({ ...go, sent: 4 })).toBeNull()
     expect(nextReminder({ ...base, sent: 3 })).toBeNull()
     expect(nextReminder({ ...base, sent: 9 })).toBeNull()
   })
@@ -69,12 +55,11 @@ describe('the reminder ladder', () => {
     expect(nextReminder({ ...base, sent: 0 })?.at).toEqual(at(DAY))
   })
 
-  it('FR-CONV-12: the last reminder is friendly, the others check in', () => {
+  it('FR-CONV-12: the last reminder, after «Напоминать дальше», is friendly, the others check in', () => {
     const go = { ...base, continued: true }
     expect(nextReminder({ ...base, sent: 0 })?.tone).toBe('check_in')
     expect(nextReminder({ ...base, sent: 1 })?.tone).toBe('check_in')
-    expect(nextReminder({ ...go, sent: 2 })?.tone).toBe('check_in')
-    expect(nextReminder({ ...go, sent: 3 })?.tone).toBe('friendly')
+    expect(nextReminder({ ...go, sent: 2 })?.tone).toBe('friendly')
   })
 
   it('FR-CONV-12: read and unread clients keep their mark, the timing is the same', () => {

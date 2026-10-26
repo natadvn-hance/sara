@@ -372,10 +372,10 @@ describe('a reminder after the switch', () => {
     expect(await statusOf(remindWorkflowId(conv.id, 'm-1'))).toBe('PENDING')
   })
 
-  it('FR-CONV-12: «Напоминать дальше» brings the 10-day and the 30-day reminders, the last one friendly', async () => {
+  it('FR-CONV-12: «Напоминать дальше» brings one more reminder, friendly, and it is the last', async () => {
     await live()
-    // The 10 and 30 days after the press are a moment here.
-    deps.afterPressMs = { third: 0, fourth: 0 }
+    // The 10 days after the press are a moment here.
+    deps.afterPressMs = 0
     const conv = await scene(quiet(48 * DAY))
     await startReminder(conv.id, 'm-1')
     await until(async () => (await db.select().from(task)).length === 1)
@@ -387,16 +387,19 @@ describe('a reminder after the switch', () => {
     }
     const answer = await onConvPress(press, { taskId: t?.id ?? '', action: 'remind' })
     expect(answer).toMatch(/10 суток/)
-    await until(done(5))
-    expect(await outcomes()).toEqual(['1=sent', '2=sent', 'dormant=dormant', '3=sent', '4=sent'])
-    expect(sends).toHaveLength(4)
+    expect(answer).toMatch(/последн/)
+    expect(answer).not.toMatch(/30/)
+    await until(done(4))
+    expect(await outcomes()).toEqual(['1=sent', '2=sent', 'dormant=dormant', '3=sent'])
+    expect(sends).toHaveLength(3)
     const inputs = (await fake.calls()).map((c) => c.stdin)
-    expect(inputs[2]).toContain('По счёту: 3 из 4')
-    expect(inputs[2]).toContain('Тон: обычный')
-    expect(inputs[3]).toContain('По счёту: 4 из 4')
-    expect(inputs[3]).toContain('Тон: дружеский')
+    expect(inputs[2]).toContain('По счёту: 3 из 3')
+    expect(inputs[2]).toContain('Тон: дружеский')
+    expect(inputs[1]).toContain('Тон: обычный')
     expect((await db.select().from(task))[0]?.resolution).toBe('remind')
+    // The process ends with it: there is no fourth.
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
+    expect((await rows()).map((r) => r.id.split(':').at(-1))).not.toContain('4')
   })
 
   it('FR-CONV-12: the 10 days of «Напоминать дальше» count from the press, not from the anchor', async () => {

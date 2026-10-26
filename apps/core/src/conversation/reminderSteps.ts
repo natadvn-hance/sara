@@ -46,8 +46,8 @@ export type RemindDeps = {
   dormantStepRetryMs?: number
   /** How many tries the dormant day gets before it is given up (default 24, a day). */
   dormantTries?: number
-  /** The waits after «Напоминать дальше» (default 10 and 30 days); tests shorten them. */
-  afterPressMs?: { third: number; fourth: number }
+  /** The wait after «Напоминать дальше» (default 10 days); tests shorten it. */
+  afterPressMs?: number
 }
 
 /** The step the ladder is at: when it is due, which reminder and in what tone. */
