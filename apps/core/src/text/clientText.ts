@@ -530,3 +530,76 @@ export function voiceIssues(i: VoiceInput): VoiceIssue[] {
     repeatIssue(i, own),
   ].filter((x): x is VoiceIssue => x !== null)
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Rule 13: «Вы бот?» goes to Boris
+
+const SEP = String.raw`[\s,]+`
+/** Words that may open a question before its subject: «А вы бот?», «Скажите, вы бот?». */
+const OPENER = `(?:(?:а|ну|так|и|вот|скажите|подскажите|слушайте|извините|простите|кстати|скажи|подскажи|слушай|ответьте|ответь|честно|только)${SEP}){0,3}`
+/** The one who is asked about: «вы», «ты», «это», «тут», «там». */
+const ASKED = '(?:вы|ты|это|тут|там)'
+/** Little words between the subject and the noun: «вы случайно не бот», «вы вообще живой». */
+const FILL = String.raw`(?:(?:тоже|сейчас|просто|случайно|вообще|же|ли|не|все|уже|правда|реально|точно|что|такой|на\s+самом\s+деле)${SEP}){0,3}`
+const PROGRAM = String.raw`(?:чат-?бот|бот|робот|нейросеть|нейронка|искусственный\s+интеллект|ии|ai|chat-?gpt|gpt|автоответчик|автомат|программа|алгоритм|машина|виртуальный\s+(?:ассистент|помощник)|автоматический\s+(?:ответ|ответчик|ассистент))`
+const PROGRAM_WITH = String.raw`(?:чат-?ботом|ботом|роботом|нейросетью|нейронкой|искусственным\s+интеллектом|ии|ai|chat-?gpt|автоответчиком|программой|алгоритмом|машиной|виртуальным\s+ассистентом)`
+const ALIVE = `(?:живой|живая|настоящий|настоящая|реальный|реальная)`
+const PERSON = `(?:человек|человеком)`
+const SPEAKS = `(?:отвечает|пишет|говорит|общается|ответил|написал|консультирует|отвечаете|пишете|говорите|общаетесь)`
+/** After the noun a question may only run on with a few words: «или человек», «отвечает», «на самом деле». */
+const RUN_ON = String.raw`(?:${SEP}(?:${SPEAKS}|или${SEP}(?:с${SEP})?\p{L}+|ли|да|нет|вообще|сейчас|тут|там|на\s+самом\s+деле))*`
+const TALKING = `(?:общаюсь|общаемся|говорю|говорим|разговариваю|разговариваем|переписываюсь|переписываемся|пишу)`
+
+const BOT_QUESTIONS = [
+  // «Вы бот?», «Это ИИ отвечает?», «Вы не бот или человек?»
+  `^${OPENER}${ASKED}${SEP}${FILL}${PROGRAM}${RUN_ON}$`,
+  // «Вы живой человек?», «Вы вообще живой?», «Вы человек?», «Это человек пишет?»
+  `^${OPENER}${ASKED}${SEP}${FILL}(?:${ALIVE}${SEP})?(?:${PERSON}|${ALIVE})${RUN_ON}$`,
+  // «Мне отвечает человек или программа?», «Меня консультирует ИИ?»
+  `^${OPENER}(?:мне|меня|нам|нас)${SEP}(?:сейчас${SEP}|тут${SEP})?(?:отвечает|пишет|консультирует|обслуживает|общается|отвечают|пишут)${SEP}(?:${PROGRAM}|${ALIVE}${SEP}${PERSON}|${PERSON}|${ALIVE})${RUN_ON}$`,
+  // «Я общаюсь с ботом?», «Я с роботом общаюсь?», «Я разговариваю с живым человеком?»
+  `^${OPENER}(?:я|мы)${SEP}(?:сейчас${SEP}|тут${SEP})?${TALKING}${SEP}с${SEP}(?:${PROGRAM_WITH}|живым${SEP}человеком|человеком)${RUN_ON}$`,
+  `^${OPENER}(?:я|мы)${SEP}с${SEP}(?:${PROGRAM_WITH}|живым${SEP}человеком|человеком)${SEP}${TALKING}${RUN_ON}$`,
+  // «Это вы лично пишете или бот?»
+  `^${OPENER}(?:это${SEP})?(?:вы|ты)${SEP}(?:лично${SEP})?(?:пишете|отвечаете|пишешь|отвечаешь)${SEP}или${SEP}${PROGRAM}$`,
+  // «Кто мне отвечает, человек?»
+  `^${OPENER}кто${SEP}(?:(?:мне|сейчас|тут)${SEP}){0,2}(?:отвечает|пишет)${SEP}(?:${PROGRAM}|(?:${ALIVE}${SEP})?${PERSON})${RUN_ON}$`,
+  // «С кем я общаюсь, с человеком или с ботом?»
+  `^(?:с${SEP}кем${SEP}(?:я${SEP})?${TALKING}${SEP})?с${SEP}(?:живым${SEP})?человеком${SEP}или${SEP}с${SEP}${PROGRAM_WITH}$`,
+].map((source) => new RegExp(source, 'u'))
+/** «Бот или человек?» alone: the whole sentence, never the tail of a longer one («Нужен сайт, бот или человек?»). */
+const BARE_CHOICE = new RegExp(
+  `^(?:${PROGRAM}${SEP}или${SEP}(?:${PERSON}|${ALIVE})|${PERSON}${SEP}или${SEP}${PROGRAM})$`,
+  'u',
+)
+const BOT_QUESTION_WORDS = 10
+
+/** A sentence the way the patterns read it: folded, only letters, digits, hyphens and commas, one space between. */
+const asked = (sentence: string) =>
+  fold(sentence)
+    .replace(/\s[-‒-―]+\s/g, ' ')
+    .replace(/[^\p{L}\p{N}\s,-]+/gu, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/**
+ * Whether the client asks if he is talking to a bot, a robot, a neural network or an AI, or if there is a living
+ * person: «Вы бот?», «Я с роботом общаюсь?», «Это ИИ отвечает?», «Вы живой человек?». A question about a bot as a
+ * service («Чат-бот для записи делаете?», «Вы делаете ботов?») is not one. Read per sentence, and per tail of a
+ * sentence after a comma («Здравствуйте, мне нужен сайт, вы бот?»); a sentence longer than 10 words is not read
+ * (a question about the nature of Sara is short). Such a message goes to Boris with a draft (rule 13).
+ */
+export function isBotQuestion(text: string): boolean {
+  for (const raw of text.split(/[.!?;\n…]+/)) {
+    const sentence = asked(raw)
+    if (!sentence || sentence.split(' ').length > BOT_QUESTION_WORDS) continue
+    if (BARE_CHOICE.test(sentence)) return true
+    const parts = sentence.split(', ')
+    for (let k = 0; k < parts.length; k++) {
+      const tail = parts.slice(k).join(', ')
+      if (BOT_QUESTIONS.some((re) => re.test(tail))) return true
+    }
+  }
+  return false
+}
