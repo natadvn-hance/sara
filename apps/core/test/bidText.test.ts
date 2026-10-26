@@ -100,8 +100,9 @@ describe('bidTextAt: the text of a bid at the moment it is sent (FR-LEAD-6, rule
     expect(bidTextAt('Юля, добрый день!\n\nТекст', 'Анна Петрова', M_1800)).toBe(
       'Юля, добрый вечер!\n\nТекст',
     )
+    // Not the name of the board: Boris's own sentence, with the part of the day of the moment.
     expect(bidTextAt('Доброго дня, Юля!\n\nТекст', 'Анна', M_1159)).toBe(
-      'Юля, доброе утро!\n\nТекст',
+      'Доброго утра, Юля!\n\nТекст',
     )
   })
 
@@ -119,6 +120,74 @@ describe('bidTextAt: the text of a bid at the moment it is sent (FR-LEAD-6, rule
     expect(bidTextAt('Здравствуйте, Ирина, вижу задачу. Когда старт?', 'Ирина', M_1800)).toBe(
       'Здравствуйте, Ирина, вижу задачу. Когда старт?',
     )
+  })
+
+  it('FR-LEAD-6: a first sentence that greets and says more keeps its words and takes the part of the day of the moment', () => {
+    expect(bidTextAt('Доброе утро, Ирина, спасибо!\n\nТекст', 'Ирина', M_1800)).toBe(
+      'Добрый вечер, Ирина, спасибо!\n\nТекст',
+    )
+    expect(bidTextAt('Добрый вечер, Ирина, вижу задачу. Когда старт?', 'Ирина', M_1159)).toBe(
+      'Доброе утро, Ирина, вижу задачу. Когда старт?',
+    )
+    expect(bidTextAt('Доброго дня, Ирина, вижу задачу. Когда старт?', 'Ирина', M_1159)).toBe(
+      'Доброго утра, Ирина, вижу задачу. Когда старт?',
+    )
+    expect(bidTextAt('Доброго дня, Ирина, вижу задачу. Когда старт?', 'Ирина', M_1800)).toBe(
+      'Доброго вечера, Ирина, вижу задачу. Когда старт?',
+    )
+    // Only the first sentence: a later «добрый день» is part of the text.
+    expect(bidTextAt('Доброе утро, Ирина, спасибо! Пожелаю добрый день', 'Ирина', M_1800)).toBe(
+      'Добрый вечер, Ирина, спасибо! Пожелаю добрый день',
+    )
+  })
+
+  it('FR-LEAD-6: the name of a greeting is the name of the board, in any case of letters', () => {
+    expect(bidTextAt('ирина, добрый день!\n\nТекст', 'Ирина Петрова', M_1800)).toBe(
+      'Ирина, добрый вечер!\n\nТекст',
+    )
+    expect(bidTextAt('Добрый день, ИРИНА!\n\nТекст', 'Ирина', M_1159)).toBe(
+      'Ирина, доброе утро!\n\nТекст',
+    )
+  })
+
+  it('FR-LEAD-6: a capitalised word before a greeting is no name unless the board gave it', () => {
+    // «Спасибо» and «Москва» stay words of the sentence: only the part of the day is the moment's.
+    expect(bidTextAt('Спасибо, добрый день!\n\nТекст', 'Ирина', M_1800)).toBe(
+      'Спасибо, добрый вечер!\n\nТекст',
+    )
+    expect(bidTextAt('Москва, добрый день!\n\nТекст', 'Ирина', M_1159)).toBe(
+      'Москва, доброе утро!\n\nТекст',
+    )
+    expect(bidTextAt('Москва, здравствуйте!\n\nТекст', 'Ирина', M_1800)).toBe(
+      'Москва, здравствуйте!\n\nТекст',
+    )
+    expect(bidTextAt('Спасибо, здравствуйте!\n\nТекст', 'Ирина', M_1800)).toBe(
+      'Спасибо, здравствуйте!\n\nТекст',
+    )
+    // The board's own name before «здравствуйте» is the greeting of the moment.
+    expect(bidTextAt('Ирина, здравствуйте!\n\nТекст', 'Ирина', M_1800)).toBe(
+      'Ирина, добрый вечер!\n\nТекст',
+    )
+  })
+
+  it('FR-LEAD-6: a name the board hides is never taken for the name of a greeting', () => {
+    expect(bidTextAt('Клиент, добрый день!\n\nТекст', 'Клиент 3', M_1800)).toBe(
+      'Клиент, добрый вечер!\n\nТекст',
+    )
+    expect(bidTextAt('Анна, здравствуйте!\n\nТекст', '', M_1800)).toBe(
+      'Анна, здравствуйте!\n\nТекст',
+    )
+  })
+
+  it("FR-LEAD-6: a greeting of Boris's with a part of the day counts at its longest too: «Доброго вечера» is 3 longer", () => {
+    const text = 'Доброго дня, Ирина, спасибо!\n\nТекст'
+    expect(bidLengthMax(text, 'Ирина')).toBe(bidTextAt(text, 'Ирина', M_1800).length)
+    expect(bidLengthMax(text, 'Ирина')).toBe(text.length + 3)
+    const full = `Доброго дня, Ирина, спасибо!\n\n${'а'.repeat(BID_TEXT_MAX - 'Доброго дня, Ирина, спасибо!'.length - 2)}`
+    expect(full.length).toBe(BID_TEXT_MAX)
+    expect(bidLengthMax(full, 'Ирина')).toBe(BID_TEXT_MAX + 3)
+    // Sent in the evening, it keeps the greeting it had rather than go over the form, and says so.
+    expect(bidTextDetail(full, 'Ирина', M_1800)).toEqual({ text: full, fallback: 'greeting_kept' })
   })
 
   it('FR-LEAD-6: a word that only begins like a greeting is not one', () => {

@@ -7,7 +7,7 @@ import {
   type ReplyProfile,
 } from '../direction/reply'
 import type { Gateway } from '../gateway/gateway'
-import { fixClientText, greetingFor } from '../text/clientText'
+import { fixClientText, greetingFor, moscowPartOfDay } from '../text/clientText'
 import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
@@ -139,32 +139,63 @@ export function editOf(text: string, clientName: string, now: Date = new Date())
   return `${greetingOf(clientName, now)}\n\n${rest.charAt(0).toUpperCase()}${rest.slice(1)}`
 }
 
-const NAME = String.raw`(\p{Lu}[\p{L}-]*)`
+const NAME = String.raw`(\p{L}[\p{L}-]*)`
 const GREETING_WORD = String.raw`(?:[Дд]обр(?:ый\s+день|ое\s+утро|ый\s+вечер|ого\s+(?:дня|утра|вечера|времени))|[Зз]дравствуй(?:те)?|[Пп]риветствую|[Пп]ривет)`
-/** A first sentence that is a greeting and nothing else, with a name before or after it, or none. */
+/** A first sentence that is a greeting and nothing else, with a word before or after it, or none. */
 const BARE_GREETING = new RegExp(
   String.raw`^(?:${NAME}[,\s]\s*)?${GREETING_WORD}(?:[,\s]\s*${NAME})?$`,
   'u',
 )
 
-/** The name of a first sentence that is a bare greeting (null when it has none), or false when it is something else. */
-function bareGreeting(sentence: string): { name: string | null } | false {
+const likeName = (s: string) => s.toLowerCase().replace(/ё/g, 'е')
+
+/**
+ * Whether a first sentence is a greeting and nothing else: «Добрый день!», «Здравствуйте, Ирина!», «ирина, добрый
+ * день!». The only name it may carry is the client's own first name on the board, in any case of letters; any other
+ * word before or after the greeting («Спасибо», «Москва», a name Boris chose) makes it Boris's own sentence. The name
+ * is the board's, or null for a greeting with no name.
+ */
+function bareGreeting(sentence: string, clientName: string): { name: string | null } | false {
   const m = BARE_GREETING.exec(
     sentence
       .trim()
       .replace(/[!.]+$/u, '')
       .trim(),
   )
-  return m ? { name: m[1] ?? m[2] ?? null } : false
+  if (!m) return false
+  const board = firstName(clientName)
+  const words = [m[1], m[2]].filter((w): w is string => w !== undefined)
+  if (words.some((w) => board === null || likeName(w) !== likeName(board))) return false
+  return { name: words.length > 0 ? board : null }
+}
+
+const NOMINATIVE = {
+  morning: 'доброе утро',
+  day: 'добрый день',
+  evening: 'добрый вечер',
+} as const
+const GENITIVE = { morning: 'доброго утра', day: 'доброго дня', evening: 'доброго вечера' } as const
+const PART_NOMINATIVE = /(?<!\p{L})([Дд])обр(?:ый\s+день|ое\s+утро|ый\s+вечер)(?!\p{L})/u
+const PART_GENITIVE = /(?<!\p{L})([Дд])оброго\s+(?:дня|утра|вечера)(?!\p{L})/u
+
+/** A greeting of Boris's own that says more: its part of the day («Доброе утро, Ирина, спасибо!») follows the moment, the rest stays. */
+function withPartOfDay(text: string, now: Date): string {
+  const part = moscowPartOfDay(now)
+  const first = FIRST_SENTENCE.exec(text)?.[0] ?? ''
+  const cased = (d: string, phrase: string) => `${d === 'Д' ? 'Д' : 'д'}${phrase.slice(1)}`
+  const fresh = first
+    .replace(PART_NOMINATIVE, (_m, d: string) => cased(d, NOMINATIVE[part]))
+    .replace(PART_GENITIVE, (_m, d: string) => cased(d, GENITIVE[part]))
+  return `${fresh}${text.slice(first.length)}`
 }
 
 /**
  * The text of a bid as it goes out at `now` (rules 3, 4, 5, 8, 15): the greeting of that moment in Moscow, then the body
  * through the voice rules. The stored draft keeps the greeting it was made with; when its first sentence is a greeting
  * and no more, in any form («Ирина, добрый день!», «Здравствуйте, Ирина!»), that sentence is swapped for the fresh one
- * with the same name (a name Boris wrote stays), and with no name there is none. A first sentence that greets and says
- * more is Boris's own and stays; a text with no greeting gets one with `clientName`. The card shows this text for its
- * moment and the outbox sends it for its own.
+ * with the client's name. A first sentence that greets and says more, or names someone else, is Boris's own: its words
+ * stay and only its part of the day («Доброе утро, Ирина, спасибо!») follows the moment. A text with no greeting gets
+ * one with `clientName`. The card shows this text for its moment and the outbox sends it for its own.
  */
 export function bidTextAt(stored: string, clientName: string, now: Date): string {
   return bidTextDetail(stored, clientName, now).text
@@ -180,7 +211,12 @@ export function bidTextDetail(
   now: Date,
 ): { text: string; fallback: BidTextFallback | null } {
   const p = split(stored, clientName)
-  if (p.whole !== null) return { text: p.whole, fallback: null }
+  if (p.own) {
+    const text = p.at(now)
+    return text.length <= BID_TEXT_MAX
+      ? { text, fallback: null }
+      : { text: p.kept, fallback: 'greeting_kept' }
+  }
   const fresh = greeted(p.rest, p.name, now)
   if (fresh.length <= BID_TEXT_MAX) return { text: fresh, fallback: null }
   // Only a draft of before this rule can be here (500 characters with «добрый день», 501 with «добрый вечер»): the name
@@ -191,20 +227,23 @@ export function bidTextDetail(
     : { text: p.kept, fallback: 'greeting_kept' }
 }
 
-/** A stored draft taken apart: the whole text when its own greeting stays, else the name of its greeting and the rest. */
+/**
+ * A stored draft taken apart: Boris's own greeting (its text for a moment), or the name of a bare greeting of ours and the
+ * rest of the text. `kept` is the draft as it was, tidied.
+ */
 function split(
   stored: string,
   clientName: string,
 ):
-  | { whole: string; kept: string }
-  | { whole: null; name: string | null; rest: string; kept: string } {
+  | { own: true; at: (now: Date) => string; kept: string }
+  | { own: false; name: string | null; rest: string; kept: string } {
   const text = stored.replace(/\r\n?/g, '\n').trim()
   const first = FIRST_SENTENCE.exec(text)?.[0] ?? ''
-  const bare = bareGreeting(first)
+  const bare = bareGreeting(first, clientName)
   const kept = plain(text)
-  if (!bare && greets(text)) return { whole: kept, kept }
+  if (!bare && greets(text)) return { own: true, at: (now) => withPartOfDay(kept, now), kept }
   return {
-    whole: null,
+    own: false,
     name: bare ? bare.name : clientName,
     rest: plain(bare ? text.slice(first.length) : text),
     kept,
@@ -223,9 +262,8 @@ const greeted = (rest: string, name: string | null, now: Date): string => {
  */
 export function bidLengthMax(stored: string, clientName: string): number {
   const p = split(stored, clientName)
-  if (p.whole !== null) return p.whole.length
-  const rest = p.rest
-  const name = p.name
+  if (p.own) return Math.max(...PARTS_OF_DAY.map((t) => p.at(t).length))
+  const { rest, name } = p
   return Math.max(...PARTS_OF_DAY.map((t) => greeted(rest, name, t).length))
 }
 
