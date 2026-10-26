@@ -225,8 +225,8 @@ describe('a waiting card is looked at again (FR-LEAD-5)', () => {
 describe('a card whose order closed (FR-LEAD-5)', () => {
   it('FR-LEAD-5: every message of the card is edited: no buttons, the closed line; the task ends, the lead is closed', async () => {
     const { id, taskId, messageId } = await shownCard()
-    // A reminder is a second message of the same card.
-    await app.pipeline.onReminder(taskId)
+    // A card sent again (a bid given back) is a second message of the same card.
+    await app.pipeline.resendCard(taskId)
     await until(() => leadCards().length === 2)
     const copy = leadCards().at(-1)?.message_id
     expect(copy).not.toBe(messageId)
@@ -238,7 +238,7 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
       expect(e.parse_mode).toBe('HTML')
       expect(e.text).toContain(TEXTS.closedOnSite)
       expect(e.text).toContain(TITLE)
-      // The reminder copy is closed as the plain card.
+      // The copy sent again is closed as the plain card.
       expect(e.text).not.toContain('Заявка ждёт решения')
     }
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
@@ -251,7 +251,7 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     expect(fake.orderReads).toHaveLength(reads)
   }, 60000)
 
-  it('FR-LEAD-5: a closed card does not come back as a reminder, and its buttons answer that it is done', async () => {
+  it('FR-LEAD-5: a closed card is not sent again, and its buttons answer that it is done', async () => {
     const { id, taskId } = await shownCard()
     fake.setOrderPage(id, { open: false })
     await app.recheck.tick(first())
@@ -269,7 +269,7 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
 
   it('FR-LEAD-5: a message Telegram refuses to edit does not stop the closing of the others', async () => {
     const { id, taskId, messageId } = await shownCard()
-    await app.pipeline.onReminder(taskId)
+    await app.pipeline.resendCard(taskId)
     await until(() => leadCards().length === 2)
     const copy = leadCards().at(-1)?.message_id ?? -1
     // The first card message was deleted by Boris in the chat.

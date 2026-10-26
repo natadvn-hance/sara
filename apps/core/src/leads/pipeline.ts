@@ -59,6 +59,10 @@ export type LeadPipelineDeps = {
 export type LeadPipeline = {
   onOrderSeen(e: EventEnvelope): Promise<void>
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
+  /**
+   * The wait for Boris's decision ran out. A card comes once and never again on Sara's own (Boris, 26.10.2026): a
+   * delivered card gets nothing here. A first card that never went out is delivered now, once, plain.
+   */
   onReminder(taskId: string): Promise<void>
   resendCard(taskId: string): Promise<void>
   /**
@@ -95,7 +99,6 @@ const ev = (
     | 'draft.priced'
     | 'task.created'
     | 'task.resolved'
-    | 'task.reminded'
     | 'card.sent',
   entity: { kind: string; id: string },
   correlationId: string,
@@ -590,7 +593,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       { name: 'card', retriesAllowed: true, backoffRate: 1, ...retry },
     )
   } catch (err) {
-    // The lead and its task stay; the reminder later brings the card back with its buttons.
+    // The lead and its task stay; the reminder later delivers the card once, with its buttons.
     const reason = err instanceof Error ? err.message.slice(0, 200) : 'card was not sent'
     await DBOS.runStep(
       () =>
@@ -656,10 +659,10 @@ async function cardOfFound(
 }
 
 /** The lead card for an open task. */
-async function cardOfTask(taskId: string, reminder: boolean): Promise<LeadCard | null> {
+async function cardOfTask(taskId: string): Promise<LeadCard | null> {
   const found = await leadOfTask(taskId)
   if (!found || found.task.state !== 'open') return null
-  return cardOfFound(found, reminder)
+  return cardOfFound(found, false)
 }
 
 /**
@@ -670,7 +673,7 @@ function cardSent(
   taskId: string,
   correlationId: string,
   messageId: number,
-  via: 'order' | 'summary' | 'edit' | 'reminder' | 'resend',
+  via: 'order' | 'summary' | 'edit' | 'resend',
 ): Promise<void> {
   return d().db.transaction(async (tx) => {
     await tx.update(task).set({ telegramMessageId: messageId }).where(eq(task.id, taskId))
@@ -686,7 +689,7 @@ function cardSent(
 }
 
 /**
- * Every message the card of this task went out as (its first card, reminders, cards sent again), edited as closed.
+ * Every message the card of this task went out as (its first card and the cards sent again), edited as closed.
  * The numbers come from the journal (card.sent) and from the task, which also holds those sent before the journal
  * kept them. One message Telegram will not edit never stops the others.
  */
@@ -727,9 +730,41 @@ async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof le
   }
 }
 
+/**
+ * Boris has the card of this task: its message number is on the task, or the journal wrote a card down for it. The
+ * journal alone is enough (a number lost from the task), and so is the number alone (a card from before the journal
+ * kept them).
+ */
+async function cardDelivered(taskId: string): Promise<boolean> {
+  const [t] = await d()
+    .db.select({ messageId: task.telegramMessageId })
+    .from(task)
+    .where(eq(task.id, taskId))
+  if (t?.messageId != null) return true
+  const [sent] = await d()
+    .db.select({ id: event.id })
+    .from(event)
+    .where(
+      and(eq(event.type, 'card.sent'), eq(event.entityKind, 'task'), eq(event.entityId, taskId)),
+    )
+    .limit(1)
+  return sent != null
+}
+
+/** The plain card of an open task, sent again now (silent in the quiet hours); a task not open gets nothing. */
+async function resendCardOf(taskId: string): Promise<void> {
+  const card = await cardOfTask(taskId)
+  if (!card) return
+  const m = await d().notifier.sendLeadCard(card, {
+    silent: await quietNow(d().db, new Date()),
+  })
+  const found = await leadOfTask(taskId)
+  if (found) await cardSent(taskId, found.lead.correlationId, m.messageId, 'resend')
+}
+
 /** The card of an open task, sent now. */
 async function sendCard(taskId: string, via: 'summary' | 'edit'): Promise<void> {
-  const card = await cardOfTask(taskId, false)
+  const card = await cardOfTask(taskId)
   const found = card ? await leadOfTask(taskId) : null
   if (card && found) {
     const m = await d().notifier.sendLeadCard(card)
@@ -932,8 +967,8 @@ async function bringCard(
     // A held order that has its draft (a race with the cap, an order held before drafts waited): the card goes at once.
     await sendCard(decisionId, 'summary')
   } else {
-    // A dropped or held order has no draft yet: the press is answered now, the card follows its draft (a reminder
-    // brings it back if this fails).
+    // A dropped or held order has no draft yet: the press is answered now, the card follows its draft (if this
+    // fails, the reminder delivers it once).
     void draftThenCard(l, decisionId).catch((err) =>
       console.error('want card failed', err instanceof Error ? err.message.slice(0, 200) : err),
     )
@@ -1109,30 +1144,13 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     async onReminder(taskId) {
-      const card = await cardOfTask(taskId, true)
-      if (!card) return
-      const m = await d().notifier.sendLeadCard(card, {
-        silent: await quietNow(d().db, new Date()),
-      })
-      const found = await leadOfTask(taskId)
-      if (found) {
-        await cardSent(taskId, found.lead.correlationId, m.messageId, 'reminder')
-        await appendEvent(
-          d().db,
-          ev('task.reminded', { kind: 'task', id: taskId }, found.lead.correlationId, 'sara'),
-        )
-      }
+      // Boris has the card: he is not sent it again, and nothing is journaled.
+      if (await cardDelivered(taskId)) return
+      // The first card never went out (Telegram was down): it is delivered now, once, as the plain card.
+      await resendCardOf(taskId)
     },
 
-    async resendCard(taskId) {
-      const card = await cardOfTask(taskId, false)
-      if (!card) return
-      const m = await d().notifier.sendLeadCard(card, {
-        silent: await quietNow(d().db, new Date()),
-      })
-      const found = await leadOfTask(taskId)
-      if (found) await cardSent(taskId, found.lead.correlationId, m.messageId, 'resend')
-    },
+    resendCard: resendCardOf,
 
     async closeOnSite(taskId, via) {
       const found = await leadOfTask(taskId)

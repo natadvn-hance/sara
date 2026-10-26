@@ -32,7 +32,10 @@ export type LeadCard = {
   score?: { value: number; version: number; reason: string } | null
   /** The Scorer did not answer: the card comes anyway, marked. */
   unscored?: boolean
-  /** The same card again as a reminder, with the buttons, so Boris can act on it. */
+  /**
+   * The layout with a line that the order waits for a decision. Sara sends no card as a reminder any more; only the
+   * length check of the «Разбор» message still builds it.
+   */
   reminder?: boolean
   /** The bid text with its greeting and the «Стоимость услуги» (FR-LEAD-6); none: the Analyst did not answer. */
   draft?: { text: string; priceRub: number | null } | null

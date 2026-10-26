@@ -271,13 +271,36 @@ describe('walking skeleton', () => {
     expect(l?.text).toContain('Нужен сайт')
   })
 
-  it('FR-NOTIF-1: a reminder carries the buttons again', async () => {
+  it('FR-LEAD-7: a delivered card is not sent again when the wait for the decision runs out', async () => {
     remindMs = 500
-    await fake.emitOrder({ order_id: orderId() })
-    await until(() => tg.sent.some((m) => m.text.startsWith('<b>⏰') && m.reply_markup))
-    const reminder = tg.sent.find((m) => m.text.startsWith('<b>⏰'))
-    expect(reminder?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
-  })
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    // The wait ran out long ago (500 ms): nothing came, nothing was journaled.
+    await settle()
+    await settle()
+    expect(cards()).toHaveLength(1)
+    expect(tg.sent.some((m) => m.text.startsWith('<b>⏰'))).toBe(false)
+    expect(await count('task.reminded')).toBe(0)
+    expect(await count('card.sent')).toBe(1)
+  }, 15000)
+
+  it('FR-NOTIF-1: a card that could not be sent arrives once, with the buttons, when the wait runs out', async () => {
+    remindMs = 5000
+    await app.bot.stop()
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(async () => (await count('notify.failed')) === 1)
+    await app.bot.start(tg.token)
+    expect(cards()).toHaveLength(0)
+    await until(() => cards().length === 1, 15000)
+    expect(cards()[0]?.text.startsWith('<b>🔔')).toBe(true)
+    expect(cards()[0]?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
+    await settle()
+    expect(cards()).toHaveLength(1)
+    expect(await count('task.reminded')).toBe(0)
+    expect(await count('card.sent')).toBe(1)
+  }, 30000)
 
   it('FR-NOTIF-1: a card is sent once the bot comes back within the retry window', async () => {
     await app.bot.stop()

@@ -136,7 +136,7 @@ async function openLead(
 const events = async () => (await db.select({ type: event.type }).from(event)).map((e) => e.type)
 
 describe('the card built from a lead', () => {
-  it('FR-LEAD-7: a reminder card has the whole order, the client and the разбор from the lead row', async () => {
+  it('FR-LEAD-7: a first card that never went out is delivered plain, with the whole order, the client and the разбор from the lead row', async () => {
     const taskId = await openLead('91001')
     await pipeline.onReminder(taskId)
     expect(cards).toHaveLength(1)
@@ -149,7 +149,6 @@ describe('the card built from a lead', () => {
       clientName: 'Ирина',
       text: 'Нужен сайт для клиники.\nУслуги, врачи, запись.',
       clientInfo: CLIENT,
-      reminder: true,
       analysis: {
         hiddenNeed: ANSWER.hidden_need,
         risk: ANSWER.risk,
@@ -157,8 +156,10 @@ describe('the card built from a lead', () => {
         reading: ANSWER.reading,
       },
     })
+    expect(cards[0]?.reminder).toBeFalsy()
     const text = leadCardText(cards[0] as LeadCard)
-    expect(text).toContain('<b>⏰ Сайт для клиники</b>')
+    expect(text).toContain('<b>🔔 Сайт для клиники</b>')
+    expect(text).not.toContain('Заявка ждёт решения')
     expect(text).toContain('Отзывы: +3 / −1 · «Перестала отвечать»')
     expect(text).toContain('https://profi.ru/backoffice/n.php?o=91001')
   })
@@ -177,7 +178,7 @@ describe('the card built from a lead', () => {
       draftAnalysis: null,
       clientInfo: null,
     })
-    await expect(pipeline.onReminder(taskId)).resolves.toBeUndefined()
+    await expect(pipeline.resendCard(taskId)).resolves.toBeUndefined()
     const c = cards[0] as LeadCard
     expect(c.clientInfo).toBeNull()
     expect(c.analysis).toBeNull()
@@ -191,7 +192,7 @@ describe('the card built from a lead', () => {
       draftAnalysis: { hidden_need: 5 },
       clientInfo: { reviews: 'много' },
     })
-    await expect(pipeline.onReminder(taskId)).resolves.toBeUndefined()
+    await expect(pipeline.resendCard(taskId)).resolves.toBeUndefined()
     expect(cards[0]?.analysis).toBeNull()
     expect(cards[0]?.clientInfo).toBeNull()
   })
@@ -204,7 +205,7 @@ describe('the card built from a lead', () => {
         condition: ANSWER.condition,
       },
     })
-    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
     expect(cards[0]?.analysis).toMatchObject({ hiddenNeed: ANSWER.hidden_need, reading: null })
   })
 })
@@ -219,14 +220,14 @@ describe('the messages of a card are all written down (FR-LEAD-7)', () => {
         .orderBy(event.recordedAt, event.id)
     ).map((e) => e.payload as { via: string; message_id: number })
 
-  it('FR-LEAD-7: a reminder card is written down with its message number and kept on the task', async () => {
+  it('FR-LEAD-7: a first card that never went out is written down as sent again, with its message number, and kept on the task', async () => {
     const taskId = await openLead('91101')
     await pipeline.onReminder(taskId)
     const [t] = await db.select().from(task).where(eq(task.id, taskId))
     expect(t?.telegramMessageId).toBe(11)
-    expect(await sentOf(taskId)).toMatchObject([{ via: 'reminder', message_id: 11 }])
-    // The reminder is still journalled as before.
-    expect(await events()).toContain('task.reminded')
+    expect(await sentOf(taskId)).toMatchObject([{ via: 'resend', message_id: 11 }])
+    // It is no reminder: Boris gets his card once, and the journal has no reminder.
+    expect(await events()).not.toContain('task.reminded')
   })
 
   it('FR-LEAD-7: a card sent again is written down with its message number', async () => {
@@ -243,6 +244,79 @@ describe('the messages of a card are all written down (FR-LEAD-7)', () => {
     await pipeline.resendCard(taskId)
     expect(cards).toHaveLength(0)
     expect(await sentOf(taskId)).toEqual([])
+  })
+})
+
+describe('a lead card comes once (FR-LEAD-7)', () => {
+  const journal = async () =>
+    (
+      await db
+        .select({ type: event.type, entityId: event.entityId, payload: event.payload })
+        .from(event)
+        .orderBy(event.recordedAt, event.id)
+    ).map((e) => `${e.type}:${e.entityId}:${JSON.stringify(e.payload)}`)
+
+  /** What the cards left in the journal (the direction seed has its own events). */
+  const cardEvents = async () =>
+    (await events()).filter((t) => t === 'card.sent' || t === 'task.reminded')
+
+  it('FR-LEAD-7: a delivered card plus the wait for the decision running out sends nothing and journals no task.reminded and no new card.sent', async () => {
+    const taskId = await openLead('91201')
+    // The card went out (its message number is on the task and in the journal).
+    await pipeline.resendCard(taskId)
+    const sent = cards.length
+    const before = await journal()
+    // The wait ran out: the reminder step calls this, once now, and again as a replayed run would.
+    await pipeline.onReminder(taskId)
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(sent)
+    expect(texts).toEqual([])
+    expect(await journal()).toEqual(before)
+    expect(await events()).not.toContain('task.reminded')
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t).toMatchObject({ state: 'open', telegramMessageId: 11 })
+  })
+
+  it('FR-LEAD-7: a card that kept only its message number on the task (sent before the journal knew it) is not sent again', async () => {
+    const taskId = await openLead('91202')
+    await db.update(task).set({ telegramMessageId: 7 }).where(eq(task.id, taskId))
+    await pipeline.onReminder(taskId)
+    expect(cards).toEqual([])
+    expect(await events()).not.toContain('card.sent')
+    expect(await events()).not.toContain('task.reminded')
+  })
+
+  it('FR-LEAD-7: a card that kept only its card.sent in the journal is not sent again', async () => {
+    const taskId = await openLead('91203')
+    await pipeline.resendCard(taskId)
+    await db.update(task).set({ telegramMessageId: null }).where(eq(task.id, taskId))
+    const sent = cards.length
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(sent)
+    expect((await events()).filter((t) => t === 'card.sent')).toHaveLength(1)
+    expect(await events()).not.toContain('task.reminded')
+  })
+
+  it('FR-LEAD-7: a first card that never went out arrives once, plain, written down as sent again; the next wait sends nothing more', async () => {
+    const taskId = await openLead('91204')
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.reminder).toBeFalsy()
+    expect(leadCardText(cards[0] as LeadCard)).toContain('<b>🔔 Сайт для клиники</b>')
+    expect(await cardEvents()).toEqual(['card.sent'])
+    const [t] = await db.select().from(task).where(eq(task.id, taskId))
+    expect(t?.telegramMessageId).toBe(11)
+    await pipeline.onReminder(taskId)
+    expect(cards).toHaveLength(1)
+    expect(await cardEvents()).toEqual(['card.sent'])
+  })
+
+  it('FR-LEAD-7: a task that is no longer open, or does not exist, gets nothing from the wait', async () => {
+    const taskId = await openLead('91205', {}, 'resolved')
+    await pipeline.onReminder(taskId)
+    await pipeline.onReminder(newEventId())
+    expect(cards).toEqual([])
+    expect(await cardEvents()).toEqual([])
   })
 })
 
@@ -281,13 +355,13 @@ describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
 
   it('FR-LEAD-5: every message of the card is edited once: the one of the task and each one the journal knows', async () => {
     const taskId = await openLead('93002')
-    // Two cards went out (a reminder and a resend): the task keeps the last, the journal has both.
-    await pipeline.onReminder(taskId)
+    // Two cards went out (the first and one sent again): the task keeps the last, the journal has both.
+    await pipeline.resendCard(taskId)
     await pipeline.resendCard(taskId)
     expect((await taskRow(taskId))?.telegramMessageId).toBe(12)
     await pipeline.closeOnSite(taskId, 'recheck')
     expect(closedCards.map((c) => c.messageId).sort()).toEqual([11, 12])
-    // The card is the plain one: not the reminder layout, whichever message it replaces.
+    // The card is the plain one, whichever message it replaces.
     for (const c of closedCards) {
       expect(c.card).toMatchObject({ taskId, orderId: '93002', title: 'Сайт для клиники' })
       expect(c.card.reminder).toBeFalsy()
@@ -310,9 +384,9 @@ describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
 
   it('FR-LEAD-5: a message Telegram will not edit does not stop the closing of the others', async () => {
     const taskId = await openLead('93005')
-    await pipeline.onReminder(taskId)
     await pipeline.resendCard(taskId)
-    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
+    await pipeline.resendCard(taskId)
     brokenEdits = new Set([12])
     await expect(pipeline.closeOnSite(taskId, 'recheck')).resolves.toBeUndefined()
     expect(closedCards.map((c) => c.messageId).sort()).toEqual([11, 13])
@@ -348,7 +422,7 @@ describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
 
   it('FR-LEAD-5: closing twice changes nothing the second time', async () => {
     const taskId = await openLead('93008')
-    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
     await pipeline.closeOnSite(taskId, 'recheck')
     await pipeline.closeOnSite(taskId, 'recheck')
     expect(closedCards).toHaveLength(1)
@@ -405,7 +479,7 @@ describe('the «Разбор» press', () => {
   it('FR-LEAD-7: a long order text, cut on the card, comes whole in the message', async () => {
     const text = `Начало заявки. ${'Подробности и ещё подробности. '.repeat(300)}Конец заявки.`
     const taskId = await openLead('92004', { text })
-    await pipeline.onReminder(taskId)
+    await pipeline.resendCard(taskId)
     expect((cards[0] as LeadCard).text).toBe(text)
     expect(leadCardText(cards[0] as LeadCard)).toContain('…</blockquote>')
     await pipeline.onPress({ taskId, action: 'razbor' })
