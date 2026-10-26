@@ -94,6 +94,22 @@ describe('Profi-MCP service end to end', () => {
     })
     expect(site.bids.map((b) => [b.orderId, b.price])).toEqual([[orderId, '30000']])
   }, 90000)
+
+  it('FR-CONV-9: the service answers send_message over MCP, and with the node switch off nothing is written', async () => {
+    const profi = createProfiClient({ url: svc.url, permitSecret: 'dev-permit-secret' })
+    const sent = profi.sendMessage({
+      account_id: 'hance-marketing',
+      chat_id: 'c-1',
+      text: 'Добрый день! Когда вам удобно созвониться?',
+      expect_last_message_id: null,
+      idempotency_key: 'msg:c-1:1',
+    })
+    // A valid permit reaches the tool, which is off unless SARA_NODE_SEND_MESSAGES=1: the answer says so, no chat page.
+    await expect(sent).rejects.toMatchObject({
+      errorClass: 'INTERNAL',
+      message: expect.stringContaining('выключена'),
+    })
+  }, 60000)
 })
 
 describe('account on a wrong IP', () => {
