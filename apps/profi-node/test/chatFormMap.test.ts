@@ -78,6 +78,22 @@ describe('the map of the chat message box (M4, calibrating the send)', () => {
     expect(await ab.page.inputValue('textarea')).toBe(DRAFT)
   })
 
+  it('FR-CONV-9: long numbers in test ids, labels and classes (an order or chat number) are left out of the map', async () => {
+    await ab.page.setContent(
+      `<div data-testid="chat-94001133"><div class="room-94001133"><div data-testid="composer_94001133">
+<textarea placeholder="Сообщение" aria-label="Написать в чат 94001133" name="m94001133"></textarea>
+<button aria-label="Отправить в чат 94001133" data-testid="send-94001133" class="btn-94001133">В чат 94001133</button>
+</div></div></div>`,
+    )
+    const map = await readChatFormMap(ab.page)
+    expect(map).not.toBeNull()
+    const all = JSON.stringify(map)
+    expect(all).not.toMatch(/\d{5,}/)
+    // The shape is still there: numbers became 0, short numbers (an index, a size) stay.
+    expect(map?.testids).toContain('chat-0')
+    expect(map?.buttons[0]).toMatchObject({ aria: 'Отправить в чат 0', testid: 'send-0' })
+  })
+
   it('FR-CONV-9: a page without a field to write in has no map yet', async () => {
     await ab.page.setContent(chatHtml('1', { ...CHAT, box: 'none' }))
     expect(await readChatFormMap(ab.page)).toBeNull()

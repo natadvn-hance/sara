@@ -84,8 +84,10 @@ export async function readChatFormMap(page: Page): Promise<ChatFormMap | null> {
   return page
     .evaluate(
       ({ bubble, inputCss, sendPath }) => {
+        // A long number (an order or chat number in a test id, a label or a class) says whose chat it was: it becomes 0.
+        const scrub = (s: string) => s.replace(/\d{5,}/g, '0')
         const clip = (s: string | null | undefined, n: number) => {
-          const t = (s ?? '').replace(/\s+/g, ' ').trim()
+          const t = scrub((s ?? '').replace(/\s+/g, ' ').trim())
           return t === '' ? null : t.slice(0, n)
         }
         const shown = (el: Element) =>
@@ -93,7 +95,7 @@ export async function readChatFormMap(page: Page): Promise<ChatFormMap | null> {
           el.getBoundingClientRect().width > 0
         const attr = (el: Element, a: string) => clip(el.getAttribute(a), 80)
         const inBubble = (el: Element) => !!el.closest(bubble)
-        const classesOf = (el: Element) => [...el.classList].slice(0, 8)
+        const classesOf = (el: Element) => [...el.classList].slice(0, 8).map(scrub)
         const boxOf = (el: Element) => ({
           tag: el.tagName.toLowerCase(),
           classes: classesOf(el),
@@ -225,7 +227,7 @@ export async function readChatFormMap(page: Page): Promise<ChatFormMap | null> {
           ...new Set(
             [...document.querySelectorAll('[data-testid]')]
               .filter((el) => !inBubble(el))
-              .map((el) => el.getAttribute('data-testid') ?? ''),
+              .map((el) => scrub(el.getAttribute('data-testid') ?? '')),
           ),
         ]
           .filter(Boolean)
