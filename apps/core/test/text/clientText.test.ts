@@ -117,6 +117,42 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
     expect(fixClientText(`Скидка 10% ${LONG} 15%`)).toBe('Скидка 10%-15%')
   })
 
+  it('NFR-UX-1: a spaced dash between two numbers that is no range becomes a comma, not a hyphen', () => {
+    expect(fixClientText(`Цена 5000 ${LONG} 3 этапа`)).toBe('Цена 5000, 3 этапа')
+    expect(fixClientText(`Берём 20 ${MEDIUM} 10 штук`)).toBe('Берём 20, 10 штук')
+    expect(fixClientText(`Ровно 100 ${LONG} 100 штук`)).toBe('Ровно 100, 100 штук')
+    expect(fixClientText('Сайт 2 - 1 этап')).toBe('Сайт 2, 1 этап')
+  })
+
+  it('NFR-UX-1: a spaced dash from the smaller number to the greater one is still a range, as time and thousands are', () => {
+    expect(fixClientText(`От 30 ${MEDIUM} 60 тысяч`)).toBe('От 30-60 тысяч')
+    expect(fixClientText(`С 9:00 ${LONG} 18:00`)).toBe('С 9:00-18:00')
+    expect(fixClientText(`С 9:30 ${LONG} 9:45`)).toBe('С 9:30-9:45')
+    expect(fixClientText(`От 50${NBSP}000 ${LONG} 60${NBSP}000 ₽`)).toBe(
+      `От 50${NBSP}000-60${NBSP}000 ₽`,
+    )
+    expect(fixClientText('Сроки 2 - 3 недели, 1,5 - 2 месяца')).toBe(
+      'Сроки 2-3 недели, 1,5-2 месяца',
+    )
+  })
+
+  it('NFR-UX-1: a dash with no space around it between numbers is a hyphen: a range, a phone, a date', () => {
+    expect(fixClientText(`Телефон 8${LONG}800${LONG}555`)).toBe('Телефон 8-800-555')
+    expect(fixClientText(`Дата 26${MEDIUM}10${MEDIUM}2026`)).toBe('Дата 26-10-2026')
+    expect(fixClientText(`Этапов 5${LONG}3`)).toBe('Этапов 5-3')
+  })
+
+  it('NFR-UX-1: short forms keep their hyphen: days of the week, «р-н», «г-н», «ж-д»', () => {
+    expect(fixClientText('Работаем пн-пт, сб-вс выходной, Пн-Пт тоже')).toBe(
+      'Работаем пн-пт, сб-вс выходной, Пн-Пт тоже',
+    )
+    expect(
+      fixClientText('Офис в Советском р-не, письмо г-ну Иванову, г-жа Петрова, ж-д билет'),
+    ).toBe('Офис в Советском р-не, письмо г-ну Иванову, г-жа Петрова, ж-д билет')
+    // But not every pair of short words: that is a common word.
+    expect(fixClientText('Нужен пн-кто и вт-что')).toBe('Нужен пн кто и вт что')
+  })
+
   it('NFR-UX-1: a number before a dash and a word after it is not a range', () => {
     expect(fixClientText(`Берём 5 ${LONG} это мало`)).toBe('Берём 5 это мало')
   })

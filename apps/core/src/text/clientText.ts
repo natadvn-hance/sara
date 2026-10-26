@@ -129,6 +129,12 @@ export const HYPHEN_NAMES: readonly string[] = [
   'Wi-Fi',
   '1С-Битрикс',
   '1С:Франчайзи',
+  // Short forms of words: «в р-не», «г-ну Иванову», «ж-д билет».
+  'р-н',
+  'г-н',
+  'г-жа',
+  'ж-д',
+  'т-во',
 ]
 
 /** The longest ending a case form of a listed name may have in one of its parts («Ростова-на-Дону», «Нью-Йорком»). */
@@ -219,12 +225,38 @@ const DASH_SIGN = new RegExp(
   `${GAP}*[${DASH}]+${GAP}*|${GAP}+-+(?=${GAP}|$)${GAP}*|^-+${GAP}+`,
   'gmu',
 )
-/** A dash between two numbers is a range, and a range is written with a short hyphen: «2-3 недели», «10-15%». */
-const DASH_RANGE = new RegExp(`(?<=\\d%?)(?:${GAP}*[${DASH}]+${GAP}*|${GAP}+-${GAP}+)(?=\\d)`, 'gu')
+/** A dash with numbers on both sides: a range, a phone, a date, or something that is no range at all. */
+const NUMBER_DASH = new RegExp(
+  `(?<=\\d%?)(?:${GAP}*[${DASH}]+${GAP}*|${GAP}+-${GAP}+)(?=\\d)`,
+  'gu',
+)
+const NUMBER_BEFORE = /(\d+(?:[ \u00a0]\d{3})*(?:[.,:]\d+)?)%?$/u
+const NUMBER_AFTER = /^\d+(?:[ \u00a0]\d{3})*(?:[.,:]\d+)?/u
+/** The value of a number as written («50 000», «1,5», «9:30»), to tell which of two is the greater. */
+function valueOf(written: string): number {
+  const t = written.replace(/[ \u00a0]/g, '')
+  if (t.includes(':')) {
+    const [h, m] = t.split(':')
+    return Number(h) + Number(m) / 60
+  }
+  return Number(t.replace(',', '.'))
+}
+/**
+ * A dash between two numbers is a range, and a range is written with a short hyphen: «2-3 недели», «10-15%», «9:00-18:00».
+ * With no space around it nothing else is possible (a phone, a date). With spaces it is a range only from the smaller
+ * number to the greater one; «5000 - 3 этапа» is two things said one after the other, so a comma stands there.
+ */
+function numberDash(dash: string, at: number, whole: string): string {
+  if (!/[ \t\u00a0]/.test(dash)) return '-'
+  const left = NUMBER_BEFORE.exec(whole.slice(0, at))?.[1]
+  const right = NUMBER_AFTER.exec(whole.slice(at + dash.length))?.[0]
+  if (left === undefined || right === undefined) return '-'
+  return valueOf(left) < valueOf(right) ? '-' : ', '
+}
 const WORD_WITH_HYPHEN = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)+/gu
 
 function removeDashes(text: string): string {
-  const ranged = text.replace(DASH_RANGE, '-')
+  const ranged = text.replace(NUMBER_DASH, numberDash)
   const gone = ranged.replace(DASH_SIGN, (m, offset: number, whole: string) => {
     const before = whole[offset - 1]
     const after = whole[offset + m.length]
