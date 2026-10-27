@@ -7,6 +7,14 @@ export function formatRub(n: number): string {
   return `${digits}${NBSP}₽`
 }
 
+/**
+ * The top of the price range a bid gives in «Стоимость услуги» (Boris, 27.10.2026: «как старая Сара, закономерный
+ * диапазон»): half again over «от», rounded up to a thousand, and always at least a thousand over it.
+ */
+export function priceUpTo(fromRub: number): number {
+  return Math.max(fromRub + 1000, Math.ceil((fromRub * 1.5) / 1000) * 1000)
+}
+
 /** The Russian word for n things: forms for 1, 2-4 and 5 (1 решение, 2 решения, 5 решений; 11-14 решений). */
 export function plural(
   n: number,

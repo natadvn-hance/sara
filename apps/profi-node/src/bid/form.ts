@@ -1,3 +1,4 @@
+import { priceUpTo } from '@sara/shared'
 import type { Locator, Page } from 'playwright'
 
 // The October form as the order answer names it (boOrderScreen.form): «stavka» is «Стоимость услуги», «comments4client»
@@ -171,7 +172,8 @@ export async function readPayment(
 
 /**
  * Fills the price (empty for null) and the text, then reads them back: what the form did not take whole stops. The
- * live form (25.10.2026) has a range «От» «До» without names: the price goes to «От», «До» stays empty. A single
+ * live form (25.10.2026) has a range «От» «До» without names: the price goes to «От», and «До» gets the top of the
+ * range (`priceUpTo`, Boris 27.10.2026), or stays empty when there is no price. A single
  * «stavka» field («Сумма») is taken too.
  */
 export async function fillForm(
@@ -189,17 +191,20 @@ export async function fillForm(
   const price = range ? from : (await single.count()) === 1 ? single : null
   if (!price && v.priceRub !== null) return 'no_field'
   const want = v.priceRub === null ? '' : String(v.priceRub)
+  // «До» is the top of the range Sara gives, never what the page filled itself.
+  const wantTo = v.priceRub === null ? '' : String(priceUpTo(v.priceRub))
   try {
     if (price) await price.fill(want, { timeout: 5000 })
-    // «До» stays empty, even when the page filled it itself.
     const hasTo = range && (await to.count()) === 1
-    if (hasTo) await to.fill('', { timeout: 5000 })
+    if (hasTo) await to.fill(wantTo, { timeout: 5000 })
     await text.fill(v.text, { timeout: 5000 })
     const gotText = await text.inputValue()
     const gotPrice = price ? (await price.inputValue()).replace(/[^\d]/g, '') : ''
     const gotTo = hasTo ? await to.inputValue() : ''
     // A textarea keeps line breaks as \n whatever was typed.
-    return gotText === v.text.replace(/\r\n?/g, '\n') && gotPrice === want && gotTo === ''
+    return gotText === v.text.replace(/\r\n?/g, '\n') &&
+      gotPrice === want &&
+      gotTo.replace(/[^\d]/g, '') === (hasTo ? wantTo : '')
       ? 'ok'
       : 'not_taken'
   } catch {

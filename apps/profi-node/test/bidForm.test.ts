@@ -85,16 +85,16 @@ describe('the live bid form (calibrated by the opened-form map)', () => {
     expect(await readPayment(ab.page, 354)).toMatchObject({ dueRub: null, way: 'wallet' })
   })
 
-  it('FR-LEAD-8: the price goes to «От», «До» stays empty, the text to its field', async () => {
+  it('FR-LEAD-8: the price goes to «От», the top of the range to «До», the text to its field', async () => {
     await ab.page.setContent(liveForm('<div>Кошелёк</div>'))
     const text = 'Добрый день! Сделаем сайт с онлайн-записью. Какие услуги в приоритете?'
     expect(await fillForm(ab.page, { priceRub: 15000, text })).toBe('ok')
     expect(await ab.page.getByLabel('От', { exact: true }).inputValue()).toBe('15000')
-    expect(await ab.page.getByLabel('До', { exact: true }).inputValue()).toBe('')
+    expect(await ab.page.getByLabel('До', { exact: true }).inputValue()).toBe('23000')
     expect(await ab.page.locator('textarea').first().inputValue()).toBe(text)
   })
 
-  it('FR-LEAD-8: a «До» the page filled itself is emptied, and a price field outside the form is left alone', async () => {
+  it('FR-LEAD-8: a «До» the page filled itself is replaced by the range top, and a price field outside the form is left alone', async () => {
     await ab.page.setContent(
       liveForm('<div>Кошелёк</div>', {
         to: '50000',
@@ -103,7 +103,7 @@ describe('the live bid form (calibrated by the opened-form map)', () => {
     )
     expect(await fillForm(ab.page, { priceRub: 15000, text: 'Добрый день!' })).toBe('ok')
     expect(await ab.page.getByLabel('От', { exact: true }).inputValue()).toBe('15000')
-    expect(await ab.page.getByLabel('До', { exact: true }).inputValue()).toBe('')
+    expect(await ab.page.getByLabel('До', { exact: true }).inputValue()).toBe('23000')
     expect(await ab.page.getByPlaceholder('Сумма').inputValue()).toBe('')
   })
 

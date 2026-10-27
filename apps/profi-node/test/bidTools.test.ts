@@ -416,7 +416,7 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     const input = bid(id)
     const out = await tools().submitBid(input)
     expect(out).toEqual({ found_on_page: true, spent_rub: 71, balance_after_rub: 4929 })
-    expect(site.bids).toEqual([{ orderId: id, price: '15000', text: input.text }])
+    expect(site.bids).toEqual([{ orderId: id, price: '15000', priceTo: '23000', text: input.text }])
     const maps = (await db.select().from(rawEvent)).filter(
       (r) => (r.body as { what?: string } | null)?.what === 'bid_form',
     )
