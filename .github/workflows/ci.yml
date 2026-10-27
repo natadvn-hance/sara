@@ -86,7 +86,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, sara-mac]
     # A full run takes about 10 minutes; a job stuck past this (the Mac asleep) frees the runner for the rest.
-    timeout-minutes: 40
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       # Each runner keeps its own pnpm and package store: two jobs at once in one store break each other's writes.
