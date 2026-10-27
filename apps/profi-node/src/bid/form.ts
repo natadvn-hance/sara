@@ -162,10 +162,16 @@ export async function readPayment(
   // Every other word of the footer is the way: a picker with the wallet among others is not the wallet.
   const rest = lines.filter((l, i) => i !== at && i !== dueAt && !PRESS.test(l))
   const wayText = rest.join(' ') || null
+  // Live 27.10.2026 (orders 95468549, 95469521, wallet 5049 ₽): with money enough the footer names no way at all,
+  // only «К оплате: N ₽» and the button, and the wallet pays. A footer with no way is the wallet only when the amount
+  // due is read and the wallet covers it; with too little money Profi.ru shows a bank way (СБП) instead.
+  const silentWallet =
+    wayText === null && dueRub !== null && walletRub !== null && walletRub >= dueRub
   const wallet =
-    !!wayText &&
-    (WALLET.test(wayText) ||
-      (AMOUNT.test(wayText) && walletRub !== null && rubIn(wayText) === walletRub))
+    silentWallet ||
+    (!!wayText &&
+      (WALLET.test(wayText) ||
+        (AMOUNT.test(wayText) && walletRub !== null && rubIn(wayText) === walletRub)))
   return { dueRub, way: wallet ? 'wallet' : 'other', wayText }
 }
 

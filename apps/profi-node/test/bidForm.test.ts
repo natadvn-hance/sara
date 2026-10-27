@@ -53,7 +53,6 @@ describe('the live bid form (calibrated by the opened-form map)', () => {
     await ab.page.setContent(liveForm('<div>354 ₽</div>'))
     expect((await readPayment(ab.page, 354)).way).toBe('wallet')
     for (const way of [
-      '',
       '<div>Недостаточно средств на балансе</div>',
       '<div>Картой</div>',
       '<div>Кошелёк: недостаточно средств</div>',
@@ -66,6 +65,15 @@ describe('the live bid form (calibrated by the opened-form map)', () => {
       await ab.page.setContent(liveForm(way))
       expect((await readPayment(ab.page, 354)).way).toBe('other')
     }
+  })
+
+  it('FR-LEAD-8: a footer that names no way is the wallet only when the wallet covers the amount due (live 27.10)', async () => {
+    await ab.page.setContent(liveForm(''))
+    expect(await readPayment(ab.page, 5049)).toEqual({ dueRub: 120, way: 'wallet', wayText: null })
+    expect((await readPayment(ab.page, 23)).way).toBe('other')
+    expect((await readPayment(ab.page, null)).way).toBe('other')
+    await ab.page.setContent(liveForm('', { due: '<div>К оплате:</div>' }))
+    expect((await readPayment(ab.page, 5049)).way).toBe('other')
   })
 
   it('FR-LEAD-8: the way is read in the footer only, never from a «payment-methods» block elsewhere', async () => {
