@@ -32,6 +32,8 @@ const LOCKED = new Set<Topic>(LOCKED_TOPICS)
 export const EXAM_SETTINGS: PolicySettings = {
   v1Writes: false,
   outboundMessages: true,
+  // As if Sara sent by herself: a would-be send is graded as a send, not turned into a draft for Boris.
+  autopilot: true,
   accountPaused: false,
   night: { from: 23, to: 8 },
   autonomy: Object.fromEntries(
