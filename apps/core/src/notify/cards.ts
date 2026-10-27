@@ -202,6 +202,8 @@ const CAP = {
   tag: 80,
   draft: 1000,
   reading: 1500,
+  line: 200,
+  who: 90,
 } as const
 
 const NO_TEXT = 'Текста заявки нет.'
@@ -270,93 +272,125 @@ function verdictLine(c: LeadCard): string {
 
 function headLines(c: LeadCard): string[] {
   const title = clean(c.title, CAP.title)
-  const budget = c.budgetText?.trim()
-    ? `бюджет ${clean(c.budgetText, CAP.short)}`
-    : 'бюджет не указан'
+  const budget = c.budgetText?.trim() ? clean(c.budgetText, CAP.short) : 'бюджет не указан'
   const fee =
     c.bidPriceRub > 0 ? `отклик ${formatRub(c.bidPriceRub)}` : 'цена отклика пока неизвестна'
-  const facts = [c.city.trim() ? clean(c.city, CAP.short) : null, budget, fee].filter(Boolean)
+  const facts = [c.score ? `🎯 <b>балл ${c.score.value}</b>` : null, `💰 ${budget}`, `🧾 ${fee}`]
   return [
     ...(c.reminder ? [`<b>⏰ ${title}</b>`, '<i>Заявка ждёт решения</i>'] : [`<b>🔔 ${title}</b>`]),
-    facts.join(' · '),
+    ...(c.city.trim() ? [`📍 ${clean(c.city, CAP.short)}`] : []),
+    facts.filter(Boolean).join('  ·  '),
   ]
 }
 
 /** «На Профи.ру с 7 сентября 2020» as the site writes it; a bare date gets the beginning. */
 const sinceText = (s: string) =>
-  /^на\s+профи\.ру/i.test(s) ? s : `На Профи.ру с ${s.replace(/^с\s+/i, '')}`
+  /^на\s+профи\.ру/i.test(s) ? s : `на Профи.ру с ${s.replace(/^с\s+/i, '')}`
 
+/** The client in one line (Boris, sample 3, 27.10.2026): name, since when, the phone, the reviews. */
 function clientLines(c: LeadCard): string[] {
   const info = c.clientInfo ?? null
   // The order page's name is the fuller one; the list may give a first name or none.
   const name = info?.name?.trim() || c.clientName.trim()
-  const lines = [`<b>Клиент:</b> ${name ? clean(name, CAP.short) : 'имя не указано'}`]
-  if (!info) return lines
-  const since = info.on_profi_since?.trim()
-  const facts = [
-    since ? clean(sinceText(since), CAP.short) : null,
-    info.phone_verified ? 'номер подтверждён' : null,
-  ].filter(Boolean)
-  if (facts.length > 0) lines.push(facts.join(' · '))
-  const tags = info.review_tags
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .slice(0, 3)
-    .map((t) => `«${clean(t, CAP.tag)}»`)
-  const reviews = [
-    info.reviews ? `+${info.reviews.positive} / −${info.reviews.negative}` : null,
-    tags.length > 0 ? tags.join(', ') : null,
-  ].filter(Boolean)
-  if (reviews.length > 0) lines.push(`Отзывы: ${reviews.join(' · ')}`)
-  return lines
+  const parts = [`👤 <b>${name ? clean(name, CAP.short) : 'имя не указано'}</b>`]
+  if (info) {
+    const since = info.on_profi_since?.trim()
+    if (since) parts.push(clean(sinceText(since).replace(/^На /, 'на '), CAP.short))
+    if (info.phone_verified) parts.push('номер подтверждён')
+    const tags = info.review_tags
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .map((t) => `«${clean(t, CAP.tag)}»`)
+    if (info.reviews && info.reviews.positive + info.reviews.negative === 0 && tags.length === 0)
+      parts.push('отзывов пока нет')
+    else if (info.reviews || tags.length > 0)
+      parts.push(
+        [
+          info.reviews ? `отзывы +${info.reviews.positive} / −${info.reviews.negative}` : null,
+          tags.length > 0 ? tags.join(', ') : null,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      )
+  }
+  return [parts.join(' · ')]
 }
 
 const orderLines = (shown: string) => [
-  '<b>Заявка</b>',
+  '<b>📄 Текст заявки</b>',
   `<blockquote expandable>${esc(shown)}</blockquote>`,
 ]
 
-function whyLines(c: LeadCard): string[] {
+/** A line of the card is one thought: the first sentence, at most `max` characters, without the final period. */
+const line = (s: string | null | undefined, max: number = CAP.line) => {
+  const t = (s ?? '').trim()
+  const first = t.split(/(?<=[.!?])\s+(?=[А-ЯЁA-Z«])/)[0] ?? t
+  return esc(clip(noPeriod(first), max))
+}
+
+/** The Scorer's reason as a plus and a minus: it often reads «Заказ подходит: … Минусы: …». */
+function plusMinus(reason: string): { plus: string; minus: string | null } {
+  const r = reason.trim().replace(/^(заказ\s+)?(подходит|возможно)\s*:\s*/i, '')
+  const [plus = '', ...rest] = r.split(/\s*Минус(?:ы)?\s*:\s*/i)
+  return { plus, minus: rest.length > 0 ? rest.join(' ') : null }
+}
+
+function whyBlocks(c: LeadCard): string[][] {
+  const reason = c.score?.reason ?? c.reason ?? ''
+  const pm = plusMinus(reason)
+  // An old lead without a score keeps the Sorter's own words («Подходит: …», «Возможно: …»).
   const why = c.score
     ? [
-        `<b>Балл ${c.score.value}</b> (правила v${c.score.version}). ${clean(c.score.reason, CAP.reason)}`,
+        '<b>Почему подходит</b>',
+        ...(pm.plus.trim() ? [`➕ ${line(pm.plus)}`] : []),
+        ...(pm.minus?.trim() ? [`➖ ${line(pm.minus)}`] : []),
       ]
-    : [verdictLine(c), ...(c.unscored ? ['Без оценки: Оценщик не ответил'] : [])]
+    : [verdictLine(c)]
+  if (c.unscored) why.push('Без оценки: Оценщик не ответил')
   const a = c.analysis
-  if (!a) return why
+  if (!a) return [why]
+  const who = a.reading?.who?.trim()
   const need = a.hiddenNeed.trim()
-  const risk = noPeriod(a.risk.trim())
+  const risk = a.risk.trim()
   const condition = a.condition.trim()
-  const riskAndCondition = [
-    risk ? `<b>Риск:</b> ${esc(clip(risk, CAP.reason))}.` : null,
-    condition ? `<b>Условие:</b> ${clean(condition, CAP.reason)}` : null,
-  ].filter(Boolean)
-  return [
-    ...why,
-    ...(need ? [`<b>Разбор:</b> ${clean(need, CAP.reason)}`] : []),
-    ...(riskAndCondition.length > 0 ? [riskAndCondition.join(' ')] : []),
-  ]
+  // «Брать, если сроки понятны» already says it: the label takes «Брать, если», the line the rest.
+  const takeIf = /^брать,?\s+если\s+/i.test(condition)
+  const analysis = [
+    who ? `<b>Кто клиент:</b> ${line(who, CAP.who)}` : null,
+    need ? `<b>Хочет:</b> ${line(need)}` : null,
+    risk ? `<b>Риск:</b> ${line(risk)}` : null,
+    condition
+      ? takeIf
+        ? `<b>Брать, если:</b> ${line(condition.replace(/^брать,?\s+если\s+/i, ''))}`
+        : `<b>Условие:</b> ${line(condition)}`
+      : null,
+  ].filter((x): x is string => x !== null)
+  return analysis.length > 0 ? [why, analysis] : [why]
 }
 
 function draftLines(c: LeadCard): string[] {
   if (!c.draft) return [NO_DRAFT]
-  const price = c.draft.priceRub ? formatRub(c.draft.priceRub) : NO_PRICE
+  const price = c.draft.priceRub ? `  ·  услуга ${formatRub(c.draft.priceRub)}` : ''
   return [
-    '<b>Черновик отклика</b>',
+    `<b>✍️ Отклик</b>${price}`,
     `<blockquote>${clean(c.draft.text, CAP.draft)}</blockquote>`,
     ...(c.draft.note ? [`<i>${c.draft.note}</i>`] : []),
-    `Стоимость услуги: ${price}`,
+    ...(c.draft.priceRub ? [] : [`Стоимость услуги: ${NO_PRICE}`]),
   ]
 }
 
-/** `shown` is the part of the order text the card carries; `last` is a block after the link (the closed line). */
+/**
+ * `shown` is the part of the order text the card carries; `last` is a block after the link (the closed line).
+ * Boris chose this layout from three samples on 27.10.2026: the main facts first, the order text last and folded.
+ */
 function cardHtml(c: LeadCard, shown: string, last: string | null = null): string {
   return [
     headLines(c),
     clientLines(c),
-    orderLines(shown),
-    whyLines(c),
+    ...whyBlocks(c),
     draftLines(c),
+    orderLines(shown),
     [linkLine(c.orderId)],
     ...(last ? [[last]] : []),
   ]

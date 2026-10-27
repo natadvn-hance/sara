@@ -240,10 +240,10 @@ describe('the draft on the card', () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
-    expect(cards()[0]?.text).toContain(`<b>Черновик отклика</b>\n<blockquote>${DRAFT}</blockquote>`)
-    expect(cards()[0]?.text).toContain(`Стоимость услуги: 90${NBSP}000${NBSP}₽`)
+    expect(cards()[0]?.text).toContain(`<blockquote>${DRAFT}</blockquote>`)
+    expect(cards()[0]?.text).toContain(`услуга 90${NBSP}000${NBSP}₽`)
     expect(cards()[0]?.text).toContain(
-      '<b>Разбор:</b> Боится долгого запуска\n<b>Риск:</b> Объём больше, чем звучит. <b>Условие:</b> Брать, если сроки понятны',
+      '<b>Хочет:</b> Боится долгого запуска\n<b>Риск:</b> Объём больше, чем звучит\n<b>Брать, если:</b> сроки понятны',
     )
     expect(await leadOf(id)).toMatchObject({
       draftText: DRAFT,
@@ -297,7 +297,7 @@ describe('the draft on the card', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('Черновика нет: Аналитик не ответил.')
-    expect(cards()[0]?.text).not.toContain('<b>Разбор:</b>')
+    expect(cards()[0]?.text).not.toContain('<b>Хочет:</b>')
     expect(await leadOf(id)).toMatchObject({
       draftText: null,
       draftPriceRub: null,
@@ -333,7 +333,7 @@ describe('the draft on the card', () => {
     const [t] = await db.select().from(task).where(eq(task.entityId, id))
     await app.pipeline.resendCard(t?.id ?? '')
     await until(() => cards().length === 2)
-    expect(cards()[1]?.text).toContain(`<b>Черновик отклика</b>\n<blockquote>${DRAFT}</blockquote>`)
+    expect(cards()[1]?.text).toContain(`<blockquote>${DRAFT}</blockquote>`)
   })
 
   it('FR-LEAD-7: «Взял бы» brings a card with a draft', async () => {
@@ -348,7 +348,7 @@ describe('the draft on the card', () => {
     await until(() => tg.answers.some((a) => a.text === 'Пишу черновик, пришлю карточку'))
     await until(() => cards().some((m) => button(m, 'bid') !== ''))
     expect(cards().find((m) => button(m, 'bid') !== '')?.text).toContain(
-      `<b>Черновик отклика</b>\n<blockquote>${DRAFT}</blockquote>`,
+      `<blockquote>${DRAFT}</blockquote>`,
     )
     expect(await leadOf(id)).toMatchObject({ draftText: DRAFT, draftPriceRub: 90000 })
   })
@@ -435,10 +435,8 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     tg.pushText(111, NEW, ask)
     await until(() => said(SAVED))
     expect(cards()).toHaveLength(2)
-    expect(cards()[1]?.text).toContain(
-      `<b>Черновик отклика</b>\n<blockquote>Ирина, добрый день!\n\n${NEW}</blockquote>`,
-    )
-    expect(cards()[1]?.text).toContain(`Стоимость услуги: 90${NBSP}000${NBSP}₽`)
+    expect(cards()[1]?.text).toContain(`<blockquote>Ирина, добрый день!\n\n${NEW}</blockquote>`)
+    expect(cards()[1]?.text).toContain(`услуга 90${NBSP}000${NBSP}₽`)
     expect(await leadOf(id)).toMatchObject({
       draftText: `Ирина, добрый день!\n\n${NEW}`,
       draftPriceRub: 90000,
@@ -610,9 +608,10 @@ describe('the laid-out card', () => {
     expect(card).toMatchObject({ parse_mode: 'HTML', link_preview_options: { is_disabled: true } })
     expect(card?.text.split('\n').slice(0, 2)).toEqual([
       '<b>🔔 Сайт &lt;для&gt; клиники</b>',
-      `Краснодар · бюджет до 150 000 ₽ · отклик 210${NBSP}₽`,
+      '📍 Краснодар',
     ])
-    expect(card?.text).toContain('<b>Клиент:</b> Ирина')
+    expect(card?.text).toContain(`💰 до 150 000 ₽  ·  🧾 отклик 210${NBSP}₽`)
+    expect(card?.text).toContain('👤 <b>Ирина</b>')
     expect(card?.text).toContain(
       '<blockquote expandable>Нужен сайт &amp; запись &lt;b&gt;онлайн&lt;/b&gt;.\nСрок: месяц.</blockquote>',
     )
@@ -654,7 +653,7 @@ describe('the laid-out card', () => {
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain('…</blockquote>')
     expect(cards()[0]?.text).not.toContain('Конец заявки.')
-    expect(cards()[0]?.text).toContain('<b>Черновик отклика</b>')
+    expect(cards()[0]?.text).toContain('<b>✍️ Отклик</b>')
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
     const all = tg.sent.filter((m) => !m.reply_markup && m.text.includes('<blockquote expandable>'))
