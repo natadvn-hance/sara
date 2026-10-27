@@ -59,4 +59,18 @@ describe('the Analyst role writes the text of a bid in the voice of Boris (26.10
     const meta = JSON.parse(await readFile(join(ROLE, 'meta.json'), 'utf8')) as { version: number }
     expect(meta.version).toBeGreaterThanOrEqual(4)
   })
+
+  it('FR-LEAD-6: the bid opens with a human phrase after the greeting, from the openers Boris gave on 27.10', async () => {
+    const text = await role()
+    for (const opener of [
+      'понимаю, о чём вы',
+      'Если я правильно понял, то',
+      'Спасибо за понятное описание',
+      'Вы очень точно подметили',
+    ])
+      expect(text).toContain(opener)
+    expect(text).toContain('каждый раз разное')
+    const meta = JSON.parse(await readFile(join(ROLE, 'meta.json'), 'utf8')) as { version: number }
+    expect(meta.version).toBeGreaterThanOrEqual(5)
+  })
 })
