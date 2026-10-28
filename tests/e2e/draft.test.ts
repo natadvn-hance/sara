@@ -545,8 +545,9 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
     // The second request is closed too: a later plain message does not rewrite the draft.
     expect((await editRequests()).map((q) => q.answeredAt !== null)).toEqual([true, true])
+    // A plain message with nothing open goes to the Secretary (ADR-027): here the fake CLI's «Готово.».
     tg.pushText(111, 'спасибо')
-    await until(() => said('Пока я понимаю только ответы на мои вопросы'))
+    await until(() => said('Готово.'))
     expect((await leadOf(id))?.draftText).toBe(`Ирина, добрый день!\n\n${NEW}`)
     expect(cards()).toHaveLength(2)
   })

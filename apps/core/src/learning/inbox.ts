@@ -45,16 +45,22 @@ export type AnswerDeps = {
   onConvEdit?(a: DraftAnswer): Promise<BorisReply>
 }
 
-/**
- * Words that ask Sara for something rather than answer her: a request or a question word first, or a question mark
- * at the end. Such words after a «почему?» go to the Secretary, who tells a reason from a request (M7 design 10).
- */
-const REQUEST_START =
-  /^(?:(?:откликн|пропуст|постав|сним|выключ|включ|покаж|расскаж|напиш|перепиш|верн|закро|возьм|найд|провер|посмотр|объясн|отправ)\p{L}*|ответь|беру|пришли|дай|давай|что|как|какие|какой|какая|какую|сколько|скок|где|когда|кто|зачем|почему|есть|можно|сара)(?![\p{L}-])/iu
+/** A word to Sara that only a request starts with: an imperative, «беру», her name. */
+const COMMAND_START =
+  /^(?:откликнись|откликайся|пропусти|поставь|сними|выключи|включи|покажи|расскажи|напиши|перепиши|верни|закрой|возьми|беру|найди|проверь|посмотри|глянь|объясни|отправь|отправляй|ответь|пришли|дай|давай|сара)(?![\p{L}-])/iu
+/** A question to Sara: a question word first, or a question mark at the end. */
+const QUESTION_START =
+  /^(?:что|как|какие|какой|какая|какую|сколько|скок|где|когда|кто|зачем|почему|есть|можно)(?![\p{L}-])/iu
 
-export function looksLikeRequest(text: string): boolean {
+/**
+ * Words that ask Sara for something rather than answer her open question (M7 design 10): such words go to the
+ * Secretary with the question, who tells an answer from a request. While a new bid text is awaited only a command
+ * counts: a bid often asks the client something («Когда нужен запуск?»), and that text must reach the card.
+ */
+export function looksLikeRequest(text: string, o: { bidText: boolean }): boolean {
   const t = text.trim()
-  return REQUEST_START.test(t) || /\?[\s)]*$/.test(t)
+  if (COMMAND_START.test(t)) return true
+  return !o.bidText && (QUESTION_START.test(t) || /\?[\s)]*$/.test(t))
 }
 
 /** Boris's words as the answer to this question: a new bid text, his version of a client reply, or a reason. */
@@ -118,8 +124,10 @@ export async function handleBorisMessage(
   if (d.onSecretary) {
     const words = { ...a, replyToText: m.replyToText ?? null }
     if (!q) return d.onSecretary({ ...words, questions: [] })
-    if (m.replyToMessageId === null && looksLikeRequest(text))
-      return d.onSecretary({ ...words, questions: 'ambiguous' in q ? q.ambiguous : [q] })
+    const questions = 'ambiguous' in q ? q.ambiguous : [q]
+    const bidText = questions.some((x) => (DRAFT_KINDS as string[]).includes(x.kind))
+    if (m.replyToMessageId === null && looksLikeRequest(text, { bidText }))
+      return d.onSecretary({ ...words, questions })
   }
   if (!q) return TEXTS.notAnAnswer
   if ('ambiguous' in q) {

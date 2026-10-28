@@ -196,7 +196,8 @@ describe('the Secretary in the bot', () => {
     moreEnv = { FAKE_CLAUDE_DELAY_MS: '1500' }
     const before = await answered()
     tg.pushText(111, 'что в очереди')
-    await until(async () => (await turnCount()) === 1)
+    // «печатает…» goes when the turn starts; the fake CLI answers 1.5 s later.
+    await until(() => tg.actions.length > 0)
     tg.pushText(111, 'и ещё')
     tg.pushText(111, 'про кофейни тоже')
     await until(async () => (await answered()) === before + 2)

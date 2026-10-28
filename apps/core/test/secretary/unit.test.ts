@@ -66,19 +66,33 @@ describe('the Secretary, its parts', () => {
     )
   })
 
-  it('FR-NOTIF-4: words that ask for something are told from a reason', () => {
+  it('FR-NOTIF-4: words that ask for something are told from a reason, and a bid text stays a bid text', () => {
+    const why = { bidText: false }
+    const bid = { bidText: true }
     for (const t of [
       'откликнись на 95147898',
+      'Покажи очередь',
+      'Сара, глянь заявки',
+      'поставь на паузу',
+    ]) {
+      expect(looksLikeRequest(t, why), t).toBe(true)
+      expect(looksLikeRequest(t, bid), t).toBe(true)
+    }
+    for (const t of [
       'Что в очереди',
       'почему не откликнулась?',
-      'поставь на паузу',
-      'Сара, глянь заявки',
       'скок на балансе',
       'а это дорого?',
     ])
-      expect(looksLikeRequest(t), t).toBe(true)
-    for (const t of ['дорого', 'не наш профиль', 'что-то не то с бюджетом', 'клиент странный'])
-      expect(looksLikeRequest(t), t).toBe(false)
+      expect(looksLikeRequest(t, why), t).toBe(true)
+    for (const t of [
+      'Понимаю вашу задачу. Когда нужен запуск?',
+      'Как быстро нужен сайт?',
+      'Посмотрим сайт вместе',
+    ])
+      expect(looksLikeRequest(t, bid), t).toBe(false)
+    for (const t of ['дорого', 'не наш профиль', 'что-то не то с бюджетом', 'Давайте позже'])
+      expect(looksLikeRequest(t, why), t).toBe(false)
   })
 
   it('FR-NOTIF-4: the answer reaches Telegram as plain text without a long dash, in parts that fit', () => {
