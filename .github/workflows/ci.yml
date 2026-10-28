@@ -7,7 +7,7 @@ on:
   # The whole suite once a night (03:00 MSK) and by hand; pushes and PRs run only the tests their changes touch
   # (Boris, 28.10.2026: the Mac could not keep up with two full runs at once).
   schedule:
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 permissions:
