@@ -159,10 +159,117 @@ function Decide({ v }: { v: LeadView }) {
   )
 }
 
+/** The bid text with its price range; while the decision is open it is edited here, the card in Telegram stays. */
+function BidCard({ v }: { v: LeadView }) {
+  const { press, busy } = usePress()
+  const [draft, setDraft] = useState<{ text: string; price: string } | null>(null)
+  const open = v.task?.open === true
+  const text = draft ? draft.text : (v.bid.text ?? '')
+  const over = text.length > v.bid.limit
+  const price = draft
+    ? draft.price.trim() === ''
+      ? null
+      : Number(draft.price)
+    : v.bid.priceFromRub
+  const priceOk = price === null || (Number.isInteger(price) && price > 0)
+  return (
+    <Card
+      title="Отклик"
+      icon="send"
+      i={4}
+      end={
+        <span className="mono" style={{ color: over ? 'var(--danger)' : 'var(--muted)' }}>
+          {text.length}/{v.bid.limit}
+        </span>
+      }
+    >
+      {draft ? (
+        <div className="grid" style={{ gap: 12 }}>
+          <label className="kv" htmlFor="bid-text">
+            <span className="muted" style={{ fontSize: 13 }}>
+              Текст отклика: приветствие Сара поставит сама по времени отправки
+            </span>
+            <textarea
+              id="bid-text"
+              className="quote"
+              rows={9}
+              value={draft.text}
+              onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+              style={{ font: 'inherit', color: 'inherit', resize: 'vertical' }}
+            />
+          </label>
+          <label className="kv" htmlFor="bid-price" style={{ maxWidth: 260 }}>
+            <span className="muted" style={{ fontSize: 13 }}>
+              Стоимость услуги «от», ₽ («до» Сара посчитает сама)
+            </span>
+            <input
+              id="bid-price"
+              className="quote mono"
+              inputMode="numeric"
+              value={draft.price}
+              onChange={(e) => setDraft({ ...draft, price: e.target.value.replace(/[^\d]/g, '') })}
+              style={{ padding: '10px 14px' }}
+            />
+          </label>
+          <div className="actions">
+            <Btn
+              look="primary"
+              icon="check"
+              disabled={busy !== null || over || !priceOk || text.trim() === ''}
+              onClick={async () => {
+                const ok = await press('text', `/api/leads/${encodeURIComponent(v.lead.id)}/text`, {
+                  text: draft.text,
+                  priceRub: price,
+                })
+                if (ok) setDraft(null)
+              }}
+            >
+              Сохранить
+            </Btn>
+            <Btn onClick={() => setDraft(null)}>Отмена</Btn>
+          </div>
+        </div>
+      ) : v.bid.text ? (
+        <div className="quote">{v.bid.text}</div>
+      ) : (
+        <Empty title="Текста отклика ещё нет">Сара напишет его после разбора заявки.</Empty>
+      )}
+      {draft ? null : (
+        <>
+          <div className="chips">
+            <Pill>
+              Стоимость услуги:{' '}
+              {v.bid.priceFromRub === null
+                ? 'не указана'
+                : `от ${rub(v.bid.priceFromRub)} до ${rub(v.bid.priceToRub)}`}
+            </Pill>
+            <Pill>Цена отклика: {rub(v.lead.feeRub)}</Pill>
+          </div>
+          {open ? (
+            <div className="actions">
+              <Btn
+                size="sm"
+                icon="book"
+                onClick={() =>
+                  setDraft({
+                    text: v.bid.text ?? '',
+                    price: v.bid.priceFromRub === null ? '' : String(v.bid.priceFromRub),
+                  })
+                }
+              >
+                Изменить текст
+              </Btn>
+            </div>
+          ) : null}
+        </>
+      )}
+    </Card>
+  )
+}
+
 function Lead({ v }: { v: LeadView }) {
   const l = v.lead
   const s = v.score
-  const bidLen = v.bid.text?.length ?? 0
   return (
     <div className="grid">
       <A to="/leads" className="back">
@@ -265,37 +372,7 @@ function Lead({ v }: { v: LeadView }) {
         </Card>
       ) : null}
 
-      <Card
-        title="Отклик"
-        icon="send"
-        i={4}
-        end={
-          <span
-            className="mono"
-            style={{ color: bidLen > v.bid.limit ? 'var(--danger)' : 'var(--muted)' }}
-          >
-            {bidLen}/{v.bid.limit}
-          </span>
-        }
-      >
-        {v.bid.text ? (
-          <div className="quote">{v.bid.text}</div>
-        ) : (
-          <Empty title="Текста отклика ещё нет">Сара напишет его после разбора заявки.</Empty>
-        )}
-        <div className="chips">
-          <Pill>
-            Стоимость услуги:{' '}
-            {v.bid.priceFromRub === null
-              ? 'не указана'
-              : `от ${rub(v.bid.priceFromRub)} до ${rub(v.bid.priceToRub)}`}
-          </Pill>
-          <Pill>Цена отклика: {rub(l.feeRub)}</Pill>
-        </div>
-        <p className="muted" style={{ fontSize: 13 }}>
-          Править текст пока можно кнопкой «Изменить» на карточке в Telegram.
-        </p>
-      </Card>
+      <BidCard v={v} />
 
       <Decide v={v} />
     </div>

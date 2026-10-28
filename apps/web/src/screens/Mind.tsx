@@ -55,7 +55,7 @@ function Overview({ v, current }: { v: MindView; current: string | null }) {
                 <span className="row-main">
                   <span className="row-title">{r.title}</span>
                   <span className="row-sub">
-                    {r.scope === 'common' ? 'общее для Hance' : r.scope}
+                    {r.scope === 'common' || r.scope === 'shared' ? 'общее для Hance' : r.scope}
                     {r.topic ? ` · ${r.topic}` : ''} · v{r.version}
                   </span>
                 </span>
@@ -133,7 +133,7 @@ function RecordView({ v }: { v: MindRecordView }) {
       <header className="grid reveal" style={{ gap: 10 }}>
         <div className="chips">
           <Pill>{r.type}</Pill>
-          <Pill>{r.scope === 'common' ? 'общее для Hance' : r.scope}</Pill>
+          <Pill>{r.scope === 'common' || r.scope === 'shared' ? 'общее для Hance' : r.scope}</Pill>
           <Pill>версия {r.version}</Pill>
           {r.topic ? <Pill>{r.topic}</Pill> : null}
         </div>
