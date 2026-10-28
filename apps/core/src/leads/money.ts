@@ -50,7 +50,7 @@ type Day = { sent: number; spent: number; pending: number; pendingRub: number; q
  * The Moscow day of `now` from the journal (bid.sent, spend.recorded), plus the bids that may still spend:
  * queued ones and today's unsure ones. Failed and given back bids spent nothing.
  */
-async function dayOf(tx: DbOrTx, now: Date): Promise<Day> {
+export async function dayOf(tx: DbOrTx, now: Date): Promise<Day> {
   const r = await tx.execute<Day>(sql`
     with d as (
       select ((${now.toISOString()}::timestamptz at time zone 'Europe/Moscow')::date::timestamp
