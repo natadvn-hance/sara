@@ -1,5 +1,5 @@
 import { SETTINGS, TASK_ACTIONS, type TaskAction } from '@sara/shared'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { AppDeps } from '../api/deps'
@@ -21,6 +21,8 @@ export const PULT_TEXTS = {
   noFee: 'Нужна цена отклика, которую ты видел.',
   locked: 'Это меняется не здесь: включает разработчик после проверок, выключить можно паузой.',
   badValue: 'Такое значение не подходит.',
+  noText: 'Нужен текст отклика или стоимость услуги.',
+  decided: 'Заявка уже решена, текст больше не правится.',
 } as const
 
 /**
@@ -33,7 +35,35 @@ export const PULT_ACTIONS: Record<string, readonly TaskAction[]> = {
   conv_draft: ['send', 'take', 'close', 'skip'],
 }
 
+const DONE_RU: Partial<Record<TaskAction, string>> = {
+  bid: 'отклик',
+  skip: 'пропущено',
+  send: 'отправлено',
+  take: 'клиент твой',
+  close: 'закрыто',
+}
+
+/** A task the press decided gets its Telegram card marked, so the chat keeps no live buttons (M7 design 2). */
+async function markCard(d: AppDeps, taskId: string, action: TaskAction): Promise<void> {
+  const [t] = await d.db.select().from(task).where(eq(task.id, taskId))
+  if (!t || t.state === 'open' || !t.telegramMessageId) return
+  try {
+    await d.bot.notifier.markDone?.(
+      t.telegramMessageId,
+      `Решено в приложении: ${DONE_RU[action] ?? 'готово'}`,
+    )
+  } catch (e) {
+    console.error('card not marked', e instanceof Error ? e.message.slice(0, 200) : e)
+  }
+}
+
 const PressBody = z.object({ expectedFeeRub: z.number().int().optional() })
+const TextBody = z
+  .object({
+    text: z.string().trim().min(1).max(2000).nullable().default(null),
+    priceRub: z.number().int().positive().max(100_000_000).nullable().default(null),
+  })
+  .refine((b) => b.text !== null || b.priceRub !== null)
 const Period = z.object({ period: z.enum(['7', '30']).default('7') })
 const Year = z.object({ year: z.coerce.number().int().min(2020).max(2100).optional() })
 
@@ -90,7 +120,23 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
         if (changed) return reply.code(409).send({ error: changed, code: 'fee_changed' })
       }
       if (!d.onPress) return reply.code(503).send({ error: PULT_TEXTS.starting })
-      return { message: await d.onPress({ taskId: id, action: a }) }
+      const message = await d.onPress({ taskId: id, action: a })
+      await markCard(d, id, a)
+      return { message }
+    })
+
+    scoped.post('/api/leads/:id/text', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const body = TextBody.safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.noText })
+      const [t] = await d.db
+        .select({ id: task.id })
+        .from(task)
+        .where(and(eq(task.entityId, id), eq(task.kind, 'lead_decision'), eq(task.state, 'open')))
+      if (!t) return reply.code(409).send({ error: PULT_TEXTS.decided })
+      if (!d.saveBidText) return reply.code(503).send({ error: PULT_TEXTS.starting })
+      const r = await d.saveBidText({ taskId: t.id, ...body.data })
+      return r.saved ? { message: r.message } : reply.code(409).send({ error: r.message })
     })
 
     scoped.post('/api/settings/:key', async (req, reply) => {

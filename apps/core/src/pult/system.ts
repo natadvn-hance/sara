@@ -162,6 +162,28 @@ export async function systemView(d: AppDeps & { backupLog?: string }): Promise<S
   parts.push(await linkPart(d.db), await backupPart(d.backupLog, now))
 
   const limit = await claudeLimit(d.db)
+  // The status check knows only its own probe; the roles working in the last two hours say as much (M7, 28.10).
+  const claude = parts.find((p) => p.id === 'claude')
+  if (claude && claude.tone !== 'ok' && !limit.limited) {
+    const [last] = await d.db
+      .select({ at: modelCall.startedAt })
+      .from(modelCall)
+      .where(
+        and(
+          eq(modelCall.ok, true),
+          gt(modelCall.startedAt, new Date(now.getTime() - 2 * 3600 * 1000).toISOString()),
+        ),
+      )
+      .orderBy(desc(modelCall.startedAt))
+      .limit(1)
+    if (last)
+      Object.assign(claude, {
+        tone: 'ok',
+        text: 'Работает: Сара думает и пишет',
+        fix: null,
+        at: last.at,
+      })
+  }
   const since = new Date(now.getTime() - DAY_MS).toISOString()
   const roles = await d.db
     .select({
