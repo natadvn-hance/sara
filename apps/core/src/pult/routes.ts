@@ -29,7 +29,8 @@ export const PULT_TEXTS = {
  */
 export const PULT_ACTIONS: Record<string, readonly TaskAction[]> = {
   lead_decision: ['bid', 'skip'],
-  conv_draft: ['send', 'take', 'close'],
+  // A reply card: «Отправить», «Беру сам», «Закрыть»; a reminder card: «Отправить», «Не надо» (skip).
+  conv_draft: ['send', 'take', 'close', 'skip'],
 }
 
 const PressBody = z.object({ expectedFeeRub: z.number().int().optional() })

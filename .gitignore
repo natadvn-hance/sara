@@ -8,3 +8,4 @@ test-results/
 .superpowers/
 *.log
 .DS_Store
+dist-demo/

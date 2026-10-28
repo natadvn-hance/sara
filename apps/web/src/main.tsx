@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import './design/tokens.css'
+import './design/pult.css'
 
 const client = new QueryClient()
 const root = document.getElementById('root')
