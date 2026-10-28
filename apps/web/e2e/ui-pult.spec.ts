@@ -1,0 +1,181 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { expect, type Page, test } from '@playwright/test'
+import pg from 'pg'
+import { dbUrl } from './dbUrl'
+
+const PASSWORD = 'длинныйпароль1'
+const LEAD = '990101'
+const CONV = '0b6f6c1e-5a4b-4c1d-9e2f-0a1b2c3d4e5f'
+const LEAD_TASK = '1d2c3b4a-0000-4000-8000-000000000101'
+const DRAFT_TASK = '1d2c3b4a-0000-4000-8000-000000000102'
+
+/**
+ * The M7 screens against the real core: made-up rows go straight into the e2e database, the pult reads them through
+ * the API, and its buttons reach the same functions as the Telegram buttons (bids and messages stay paused, so a
+ * press spends and sends nothing). The rows are removed afterwards, so the other specs see the database as before.
+ */
+const STATE = join(tmpdir(), 'sara-e2e-pult-m7-state.json')
+test.use({ storageState: STATE })
+
+async function sql(text: string, values: unknown[] = []) {
+  const client = new pg.Client({ connectionString: dbUrl('sara_web') })
+  await client.connect()
+  try {
+    await client.query(text, values)
+  } finally {
+    await client.end()
+  }
+}
+
+async function clean() {
+  await sql('delete from core.task where id = any($1::uuid[])', [[LEAD_TASK, DRAFT_TASK]])
+  await sql('delete from core.conv_turn where conversation_id = $1', [CONV])
+  await sql('delete from core.chat_message where conversation_id = $1', [CONV])
+  await sql('delete from core.conversation where id = $1', [CONV])
+  await sql('delete from core.lead_score where lead_id = $1', [LEAD])
+  await sql('delete from core.lead where id = $1', [LEAD])
+  await sql(`delete from core.setting where key = 'money.daily_bids'`)
+  await sql(`delete from core.setting_history where key = 'money.daily_bids'`)
+}
+
+test.beforeAll(async ({ playwright }) => {
+  const api = await playwright.request.newContext({
+    baseURL: 'http://127.0.0.1:5174',
+    storageState: { cookies: [], origins: [] },
+  })
+  const first = await api.post('/api/setup/password', { data: { password: PASSWORD } })
+  if (first.status() === 409)
+    expect((await api.post('/api/login', { data: { password: PASSWORD } })).ok()).toBe(true)
+  await api.storageState({ path: STATE })
+  await api.dispose()
+
+  await clean()
+  await sql(
+    `insert into core.lead (id, account_id, title, category, city, text, client_name, budget_text, bid_price_rub,
+       seen_at, status, correlation_id, draft_text, draft_price_rub, draft_analysis)
+     values ($1, 'hance-marketing', 'Стратегия для студии керамики', 'Маркетинг', 'Краснодар',
+       'Нужна стратегия продвижения на полгода.', 'Вероника', 'до 60 000 ₽', 240, now() - interval '20 minutes',
+       'queued', gen_random_uuid(), 'Вероника, добрый день! Если я правильно понял, то...', 40000,
+       '{"hidden_need":"поток записей, а не документ","risk":"мало денег на каналы","condition":"созвон"}')`,
+    [LEAD],
+  )
+  await sql(
+    `insert into core.lead_score (id, lead_id, version, score, decision, stop_factor, red_flags, axes, reason,
+       confidence, model, backtest)
+     values (gen_random_uuid(), $1, 1, 88, 'show', null, '[]', '[]', 'стратегия для малого бизнеса', 0.9, 'haiku', false)`,
+    [LEAD],
+  )
+  await sql(
+    `insert into core.task (id, kind, entity_kind, entity_id) values ($1, 'lead_decision', 'lead', $2)`,
+    [LEAD_TASK, LEAD],
+  )
+  await sql(
+    `insert into core.conversation (id, account_id, chat_id, order_id, origin) values ($1, 'hance-marketing', 'e2e-chat', $2, 'sara')`,
+    [CONV, LEAD],
+  )
+  await sql(
+    `insert into core.chat_message (id, account_id, chat_id, order_id, platform_message_id, side, author, author_basis,
+       text, sent_at, source, conversation_id)
+     values (gen_random_uuid(), 'hance-marketing', 'e2e-chat', $1, 'e2e-m1', 'client', 'client', 'side',
+       'Здравствуйте! Сколько стоит?', now() - interval '5 minutes', 'live', $2)`,
+    [LEAD, CONV],
+  )
+  await sql(
+    `insert into core.conv_turn (id, conversation_id, anchor_message_id, state, text, understanding)
+     values ('e2e-turn', $1, 'e2e-m1', 'carded', 'Вероника, добрый день! Цена от 40 000 до 60 000 ₽.', '{"why":"клиент спросил цену"}')`,
+    [CONV],
+  )
+  await sql(
+    `insert into core.task (id, kind, entity_kind, entity_id) values ($1, 'conv_draft', 'conv_turn', 'e2e-turn')`,
+    [DRAFT_TASK],
+  )
+})
+
+test.afterAll(clean)
+
+const overflowOf = (page: Page) =>
+  page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+
+test('FR-UI-1: «Сегодня» shows what waits for Boris and leads to the lead and the client', async ({
+  page,
+}) => {
+  await page.goto('/today')
+  await expect(page.getByRole('heading', { name: 'Сара на смене' })).toBeVisible()
+  await expect(page.getByText('1 заявка ждёт решения')).toBeVisible()
+  await expect(page.getByText('Вероника: черновик ждёт «Отправить»')).toBeVisible()
+  await page.getByText('1 заявка ждёт решения').click()
+  await expect(page).toHaveURL(/\/leads$/)
+  await expect(page.getByRole('link', { name: /Стратегия для студии керамики/ })).toBeVisible()
+})
+
+test('FR-UI-5, FR-UI-6: a lead shows its score, разбор and price range; «Откликнуться» is the Telegram press', async ({
+  page,
+}) => {
+  await page.goto(`/leads/${LEAD}`)
+  await expect(page.getByRole('heading', { name: 'Стратегия для студии керамики' })).toBeVisible()
+  await expect(page.getByText('поток записей, а не документ')).toBeVisible()
+  await expect(page.getByText(/от 40\s000\s₽ до 60\s000\s₽/)).toBeVisible()
+  await page.getByRole('button', { name: /Откликнуться за 240/ }).click()
+  await page.getByRole('button', { name: 'Да, откликнуться' }).click()
+  // Bids are paused in the e2e core: the press answers as the bot would, and nothing is spent.
+  await expect(page.getByRole('status')).toHaveText(
+    'Отправка откликов на паузе. Включи её и нажми снова.',
+  )
+})
+
+test('FR-CONV-11: a draft goes only by «Отправить», the card press; in the shadow it says so', async ({
+  page,
+}) => {
+  await page.goto('/conversations')
+  await page
+    .getByRole('link', { name: /Вероника/ })
+    .first()
+    .click()
+  await expect(
+    page.getByRole('region', { name: 'Переписка' }).getByText('Здравствуйте! Сколько стоит?'),
+  ).toBeVisible()
+  await expect(page.getByText('Вероника, добрый день! Цена от 40 000 до 60 000 ₽.')).toBeVisible()
+  await page.getByRole('button', { name: 'Отправить' }).click()
+  await expect(page.getByRole('status')).toHaveText(/Режим тени/)
+})
+
+test('FR-OPS-1: a limit changes from the settings', async ({ page }) => {
+  await page.goto('/settings')
+  await expect(page.getByRole('heading', { name: 'Настройки Сары' })).toBeVisible()
+  await page.getByRole('button', { name: 'Меньше: Откликов в день' }).click()
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status')).toHaveText('Сохранила.')
+  await expect(page.getByLabel('Откликов в день', { exact: true })).toHaveValue('9')
+  await expect(page.getByText('Тратит деньги на отклики')).toBeVisible()
+})
+
+test('FR-UI-1: analytics, the mind and the health open from the menu', async ({ page }) => {
+  await page.goto('/analytics')
+  await expect(page.getByRole('heading', { name: 'Итоги по-честному' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Сводка по месяцам' })).toBeVisible()
+  await page.goto('/mind')
+  await expect(page.getByRole('heading', { name: 'Разум Сары' })).toBeVisible()
+  await page.goto('/health')
+  await expect(page.getByRole('heading', { name: 'Состояние системы' })).toBeVisible()
+  await expect(page.getByText('Узел Профи.ру')).toBeVisible()
+})
+
+test('FR-UI-3: the pult fits a 360 px phone without horizontal scroll and has the tabs', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 740 })
+  for (const path of [
+    '/today',
+    `/leads/${LEAD}`,
+    `/conversations/${CONV}`,
+    '/analytics',
+    '/settings',
+    '/health',
+  ]) {
+    await page.goto(path)
+    await expect(page.getByRole('navigation', { name: 'Разделы' }).last()).toBeVisible()
+    await page.waitForTimeout(300)
+    expect(await overflowOf(page), path).toBeLessThanOrEqual(0)
+  }
+})

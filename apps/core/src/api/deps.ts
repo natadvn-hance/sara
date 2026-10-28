@@ -1,3 +1,4 @@
+import type { TaskAction } from '@sara/shared'
 import type { Db } from '../db/client'
 import type { Gateway } from '../gateway/gateway'
 import type { BotControl } from '../notify/botControl'
@@ -17,6 +18,10 @@ export type AppDeps = {
   accountId?: string
   /** Accounts of this server with the IP each must go out from (FR-ACC-1). */
   accounts?: AccountConfig[]
+  /** The press of a Telegram button, for the pult's buttons: the same function, the same events (M7 design 2). */
+  onPress?: (p: { taskId: string; action: TaskAction }) => Promise<string>
+  /** The host's backup log for the health screen (config.backupLog). */
+  backupLog?: string
 }
 
 export type AccountConfig = { id: string; title: string; egressIp: string }

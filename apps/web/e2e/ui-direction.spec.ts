@@ -88,7 +88,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await expect(page.getByRole('heading', { name: /^Правила v\d+$/ })).toBeVisible()
     expect(await overflowOf(page)).toBeLessThanOrEqual(0)
     const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
-    expect(background).toBe(scheme === 'dark' ? 'rgb(18, 18, 18)' : 'rgb(250, 249, 247)')
+    expect(background).toBe(scheme === 'dark' ? 'rgb(12, 8, 6)' : 'rgb(241, 236, 231)')
   })
 }
 
@@ -181,7 +181,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.getByText('Как это запишется').click()
     expect(await overflowOf(page)).toBeLessThanOrEqual(0)
     const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
-    expect(background).toBe(scheme === 'dark' ? 'rgb(18, 18, 18)' : 'rgb(250, 249, 247)')
+    expect(background).toBe(scheme === 'dark' ? 'rgb(12, 8, 6)' : 'rgb(241, 236, 231)')
   })
 }
 
@@ -434,7 +434,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.getByText('Почему так').click()
     expect(await overflowOf(page)).toBeLessThanOrEqual(0)
     const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
-    expect(background).toBe(scheme === 'dark' ? 'rgb(18, 18, 18)' : 'rgb(250, 249, 247)')
+    expect(background).toBe(scheme === 'dark' ? 'rgb(12, 8, 6)' : 'rgb(241, 236, 231)')
   })
 }
 
@@ -686,7 +686,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.getByText('Почему так').first().click()
     expect(await overflowOf(page)).toBeLessThanOrEqual(0)
     const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
-    expect(background).toBe(scheme === 'dark' ? 'rgb(18, 18, 18)' : 'rgb(250, 249, 247)')
+    expect(background).toBe(scheme === 'dark' ? 'rgb(12, 8, 6)' : 'rgb(241, 236, 231)')
   })
 }
 

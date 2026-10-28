@@ -220,6 +220,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     production: config.production,
     telegramApiRoot: config.telegramApiRoot,
     accounts: config.accounts,
+    onPress,
+    backupLog: config.backupLog,
   }
   await seedAccounts(db, config.accounts)
   for (const a of config.accounts) {

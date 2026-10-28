@@ -5,16 +5,8 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   ref?: Ref<HTMLButtonElement>
 }
 
+/** The pages built before M7 take the pult's pill buttons (design/pult.css). */
 export function Button({ variant = 'primary', className = '', ...rest }: Props) {
-  const look =
-    variant === 'primary'
-      ? 'bg-accent text-white hover:opacity-90'
-      : 'bg-surface text-text border border-border hover:border-muted'
-  return (
-    <button
-      type="button"
-      className={`min-h-11 rounded-md px-4 font-medium disabled:opacity-50 ${look} ${className}`}
-      {...rest}
-    />
-  )
+  const look = variant === 'primary' ? 'btn-primary' : 'btn-ghost'
+  return <button type="button" className={`btn ${look} ${className}`} {...rest} />
 }

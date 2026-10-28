@@ -1,9 +1,6 @@
 import type { ReactNode } from 'react'
 
+/** The pages built before M7 take the pult's glass card (design/pult.css). */
 export function Card({ children }: { children: ReactNode }) {
-  return (
-    <section className="grid gap-4 rounded-lg border border-border bg-surface p-4 sm:p-6">
-      {children}
-    </section>
-  )
+  return <section className="card">{children}</section>
 }
