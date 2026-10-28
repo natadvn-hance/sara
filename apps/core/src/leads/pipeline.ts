@@ -9,6 +9,7 @@ import {
   type TaskAction,
 } from '@sara/shared'
 import { and, desc, eq, isNull, ne } from 'drizzle-orm'
+import type { MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
 import { getProfile } from '../direction/profile'
@@ -30,6 +31,7 @@ import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
+import { casesForBid } from './bidCases'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import {
   BID_TEXT_MAX,
@@ -60,6 +62,8 @@ export type LeadPipelineDeps = {
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** The clock of the greeting a bid text carries (Moscow time of day); tests fix it. */
   now?: () => Date
+  /** The case search of the mind: a bid may tell a case that fits the order (Boris, 28.10.2026). */
+  mind?: Pick<MindSearch, 'cases'>
 }
 
 export type LeadPipeline = {
@@ -253,10 +257,14 @@ async function draftFor(
   try {
     // The direction's format and cases for the Analyst; a profile that cannot be read leaves the draft as it was.
     const profile = await getProfile(d().db, opts.accountId).catch(() => null)
+    // A direction with its own case library keeps it; otherwise the cases of the mind that fit the order.
+    const mindCases =
+      profile && profile.cases.length > 0 ? [] : await casesForBid(d().mind, o, opts.accountId)
     const { accountId: _account, ...rest } = opts
     return await writeDraft(d().gateway, o, {
       ...rest,
       ...(profile ? { profile } : {}),
+      mindCases,
       now: greetingMoment(),
     })
   } catch (err) {
