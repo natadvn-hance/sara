@@ -50,8 +50,8 @@ export function createTelegramRuntime(d: {
   apiRoot?: string
   db: Db
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
-  /** Boris's text or voice (saved to a file first); the answer goes back to him. */
-  onMessage?(m: BorisMessage): Promise<BorisReply>
+  /** Boris's text or voice (saved to a file first); the answer goes back to him (null: it comes on its own later). */
+  onMessage?(m: BorisMessage): Promise<BorisReply | null>
   /** Where voice messages are saved while they are recognized (default: the system temp folder). */
   voiceDir?: string
 }): TelegramRuntime {
@@ -106,11 +106,17 @@ export function createTelegramRuntime(d: {
     await ctx.reply(TEXTS.bound)
   })
 
-  /** An answer to Boris's message: a line, with its buttons when it has some. */
-  const answer = (ctx: Context, r: BorisReply) =>
-    typeof r === 'string'
-      ? ctx.reply(r)
-      : ctx.reply(r.text, { reply_markup: { inline_keyboard: keyboard(r.rows) } })
+  /** An answer to Boris's message: a line, with its buttons when it has some; none when it comes later. */
+  const answer = async (ctx: Context, r: BorisReply | null) => {
+    if (r === null) return
+    if (typeof r === 'string') await ctx.reply(r)
+    else await ctx.reply(r.text, { reply_markup: { inline_keyboard: keyboard(r.rows) } })
+  }
+  /** The words of the message Boris replied to, so the Secretary sees what «это» is. */
+  const repliedText = (ctx: Context) => {
+    const r = ctx.message?.reply_to_message
+    return r?.text ?? r?.caption ?? null
+  }
 
   bot.on('message:text', async (ctx) => {
     if (!d.onMessage || ctx.message.text.startsWith('/')) return
@@ -120,6 +126,7 @@ export function createTelegramRuntime(d: {
         text: ctx.message.text,
         voicePath: null,
         replyToMessageId: ctx.message.reply_to_message?.message_id ?? null,
+        replyToText: repliedText(ctx),
         messageId: ctx.message.message_id,
         at: new Date(),
       }),
@@ -131,6 +138,7 @@ export function createTelegramRuntime(d: {
     if (!onMessage) return
     const fileId = ctx.message.voice.file_id
     const replyTo = ctx.message.reply_to_message?.message_id ?? null
+    const replyToText = repliedText(ctx)
     const messageId = ctx.message.message_id
     // Recognition takes seconds: it runs on its own, so the bot keeps answering presses meanwhile.
     void (async () => {
@@ -152,6 +160,7 @@ export function createTelegramRuntime(d: {
             text: null,
             voicePath: path,
             replyToMessageId: replyTo,
+            replyToText,
             messageId,
             at: new Date(),
           }),
@@ -308,6 +317,9 @@ export function createTelegramRuntime(d: {
           },
         })
         return { messageId: m.message_id }
+      },
+      async typing() {
+        await bot.api.sendChatAction(await chat(), 'typing')
       },
       async editText(messageId, text, rows) {
         await bot.api

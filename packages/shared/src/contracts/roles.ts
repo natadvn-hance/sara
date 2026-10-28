@@ -3,6 +3,8 @@ import { DirectionRulesShape } from './direction'
 
 export const MODELS = ['haiku', 'sonnet', 'opus'] as const
 export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const
+/** The CLI's `--effort` levels; a role without one runs at the CLI's default. */
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
 export const RoleMeta = z.object({
   name: z.string().min(1),
@@ -11,6 +13,7 @@ export const RoleMeta = z.object({
   fallbackModel: z.enum(MODELS).optional(),
   priority: z.enum(PRIORITIES),
   timeoutMs: z.number().int().positive(),
+  effort: z.enum(EFFORTS).optional(),
 })
 export type RoleMeta = z.infer<typeof RoleMeta>
 

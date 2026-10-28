@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import type { TaskAction } from '@sara/shared'
 import { eq } from 'drizzle-orm'
@@ -33,8 +34,9 @@ import { createGateway, withoutLimitWait } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
-import { handleBorisMessage } from './learning/inbox'
+import { answerQuestion, handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
+import { titleOf } from './learning/questions'
 import { ensureMindIndex } from './mind/indexer'
 import { createMindSearch } from './mind/search'
 import { createMindWriter } from './mind/writer'
@@ -42,10 +44,14 @@ import { type BotControl, createBotControl } from './notify/botControl'
 import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
+import { systemView } from './pult/system'
 import { startSchoolJobs } from './school/jobs'
 import { registerSchoolRoutes } from './school/routes'
 import type { SchoolDeps } from './school/types'
 import { registerScreenProxy } from './screen/screenProxy'
+import { createTurnKeys, registerSecretaryMcp, SECRETARY_MCP_PATH } from './secretary/mcp'
+import { createSecretary, type Secretary } from './secretary/secretary'
+import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
@@ -93,6 +99,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
 
   let pipeline: LeadPipeline | null = null
+  // ADR-027: Boris's free words go to the Secretary once the core listens; until then the bot says Sara is starting.
+  let secretary: Secretary | null = null
+  let secretaryTools: SecretaryDeps | null = null
+  const turnKeys = createTurnKeys()
   const commandDeps = (): Parameters<typeof onConvPress>[0] => ({
     db,
     notifier: bot.notifier,
@@ -127,6 +137,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
             pipeline ? pipeline.onDraftText(a) : Promise.resolve('Сара ещё запускается'),
           onCardReply: (r) => onConvReply(commandDeps(), r),
           onConvEdit: (a) => onConvEdit(commandDeps(), a),
+          onSecretary: (w) =>
+            secretary ? secretary.take(w) : Promise.resolve('Сара ещё запускается'),
         },
         m,
       ),
@@ -165,6 +177,24 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     now: o.now,
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
+  secretaryTools = {
+    db,
+    notifier: bot.notifier,
+    onPress,
+    saveBidText: (p) => lp.saveBidText(p),
+    commands: commandDeps(),
+    answerQuestion: (q, a) =>
+      answerQuestion(
+        {
+          db,
+          onDraftText: (x) => lp.onDraftText(x),
+          onConvEdit: (x) => onConvEdit(commandDeps(), x),
+        },
+        q,
+        a,
+      ),
+    system: () => systemView(deps),
+  }
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
   const mind = createMindSearch(db)
   const refreshMind = () =>
@@ -275,7 +305,19 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   }
   registerSchoolRoutes(app, school)
   registerConversationRoutes(app, commandDeps())
+  registerSecretaryMcp(app, { keys: turnKeys, deps: () => secretaryTools })
   const url = await app.listen({ port: config.port, host: config.host })
+  const port = (app.server.address() as AddressInfo).port
+  secretary = createSecretary({
+    db,
+    converse: gateway.converse,
+    notifier: bot.notifier,
+    keys: turnKeys,
+    mcpUrl: () => `http://127.0.0.1:${port}${SECRETARY_MCP_PATH}`,
+    dataDir: config.dataDir,
+    publicUrl: config.publicUrl,
+    titleOf: (q) => titleOf(db, q),
+  })
 
   const token = await secrets.get('telegram_bot_token')
   if (token) await bot.start(token).catch((e) => console.error('Telegram bot did not start', e))

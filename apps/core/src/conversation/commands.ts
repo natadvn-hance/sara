@@ -456,7 +456,7 @@ export async function onConvEdit(
  * yet. Sara shows the exact words back with «Отправить» and «Изменить»; only the press on «Отправить» sends them
  * (design 5.10). The words are kept in a row of their own, so a later version never changes what this press sends.
  */
-async function proposeSay(
+export async function proposeSay(
   d: CommandDeps,
   parent: typeof convTurn.$inferSelect,
   text: string,

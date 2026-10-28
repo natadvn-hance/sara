@@ -775,3 +775,20 @@ export const autonomyCounter = core.table(
   },
   (t) => [primaryKey({ columns: [t.topic, t.scope] })],
 )
+
+/**
+ * The Secretary's chat with Boris (ADR-027): his words and Sara's answers, the memory of the conversation. Kept a
+ * week: the words may name clients, and the answers to old questions are of no use.
+ */
+export const secretaryMessage = core.table(
+  'secretary_message',
+  {
+    id: uuid('id').primaryKey(),
+    /** 'boris' or 'sara'. */
+    author: text('author').notNull(),
+    text: text('text').notNull(),
+    at: ts('at').notNull().defaultNow(),
+    telegramMessageId: bigint('telegram_message_id', { mode: 'number' }),
+  },
+  (t) => [index('secretary_message_at').on(t.at)],
+)

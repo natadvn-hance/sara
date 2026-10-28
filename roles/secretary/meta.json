@@ -1,0 +1,8 @@
+{
+  "name": "secretary",
+  "version": 1,
+  "model": "opus",
+  "effort": "medium",
+  "priority": "P0",
+  "timeoutMs": 240000
+}

@@ -79,6 +79,8 @@ export type LimitChange = 'started' | 'adopted' | 'ended'
 
 export type LimitGuard = {
   active(): boolean
+  /** When the limit that holds now ends, as far as a CLI answer said; null without a limit or a known reset. */
+  resetAt(): Date | null
   /** A limit answer from a CLI run that started at `runStartedAt` (epoch ms): turns the limit on or updates its reset. */
   hit(resetAt: Date | null, runStartedAt: number): void
   /** The model answered a run that started at `runStartedAt`: the limit, if any, is over and the waiting calls go. */
@@ -147,6 +149,7 @@ export function createLimitGuard(o: {
 
   return {
     active: () => state !== null,
+    resetAt: () => state?.resetAt ?? null,
     hit(resetAt, runStartedAt) {
       if (stopped) return
       if (!state) {

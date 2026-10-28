@@ -8,10 +8,16 @@ import { event, modelCall } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { SecretStore } from '../secrets/store'
-import { buildClaudeArgs, type CliRun, roleJsonSchema, runClaude } from './claudeCli'
+import {
+  buildClaudeArgs,
+  buildConverseArgs,
+  type CliRun,
+  roleJsonSchema,
+  runClaude,
+} from './claudeCli'
 import { createLimitGuard, createLimitNotice, type LimitGuard, parseResetAt } from './limit'
 import { createSlots } from './queue'
-import { type Redacted, redact, restore } from './redact'
+import { type Redacted, type Redactor, redact, restore } from './redact'
 import { loadRole, type RoleName } from './roles'
 
 export type GatewayErrorClass =
@@ -59,6 +65,38 @@ export type Gateway = {
   ): Promise<RoleCallResult<T>>
 }
 
+/** A conversation turn (ADR-027): the role answers in words and may use the tools of one MCP server. */
+export type ConverseOptions = {
+  /**
+   * The turn's hiding of client data (ADR-016), shared with the tools: the input goes through it, and the answer is
+   * restored by it, with the tags the tools' answers added during the run.
+   */
+  redactor: Redactor
+  /** The MCP config file the CLI loads, its server's name and the tools allowed: no other tool exists for the run. */
+  mcp: { configPath: string; server: string; tools: string[] }
+  correlationId?: string
+  /** A run that would spend more stops (`--max-budget-usd`): a loop of tools never eats the subscription. */
+  maxBudgetUsd?: number
+}
+
+export type ConverseResult =
+  | { ok: true; text: string; durationMs: number; modelCallId: string }
+  | {
+      ok: false
+      errorClass: GatewayErrorClass
+      message: string
+      durationMs: number
+      modelCallId: string
+      /** limit_reached: when the limit ends, if a CLI answer said. */
+      resetAt: Date | null
+    }
+
+export type Converse = (
+  role: RoleName,
+  input: string,
+  o: ConverseOptions,
+) => Promise<ConverseResult>
+
 const MINUTE_MS = 60_000
 /** How far back the journal is read for a limit: the answers of one model since its last good one. */
 const LIMIT_HISTORY = 500
@@ -78,16 +116,8 @@ function classify<T>(
   schema: ZodType<T>,
   tags: Map<string, string>,
 ): { ok: true; output: T } | { ok: false; errorClass: GatewayErrorClass; message: string } {
-  if (run.timedOut)
-    return { ok: false, errorClass: 'timeout', message: 'Claude did not answer in time' }
-  if (run.code !== 0) {
-    const text = `${run.stdout}\n${run.stderr}`
-    if (LIMIT_TEXT.test(text))
-      return { ok: false, errorClass: 'limit_reached', message: text.trim().slice(0, 300) }
-    if (AUTH_TEXT.test(text))
-      return { ok: false, errorClass: 'not_connected', message: text.trim().slice(0, 300) }
-    return { ok: false, errorClass: 'cli_failed', message: text.trim().slice(0, 300) }
-  }
+  const failed = failureOf(run)
+  if (failed) return { ok: false, ...failed }
   let parsed: { structured_output?: unknown }
   try {
     parsed = JSON.parse(run.stdout)
@@ -102,6 +132,53 @@ function classify<T>(
   if (!checked.success)
     return { ok: false, errorClass: 'bad_output', message: checked.error.message.slice(0, 300) }
   return { ok: true, output: checked.data }
+}
+
+/** The failure of a run by its exit, the same for both kinds of call. */
+function failureOf(run: CliRun): { errorClass: GatewayErrorClass; message: string } | null {
+  if (run.timedOut) return { errorClass: 'timeout', message: 'Claude did not answer in time' }
+  if (run.code === 0) return null
+  const text = `${run.stdout}\n${run.stderr}`
+  if (LIMIT_TEXT.test(text))
+    return { errorClass: 'limit_reached', message: text.trim().slice(0, 300) }
+  if (AUTH_TEXT.test(text))
+    return { errorClass: 'not_connected', message: text.trim().slice(0, 300) }
+  return { errorClass: 'cli_failed', message: text.trim().slice(0, 300) }
+}
+
+/** A conversation turn's answer: the words of the result, or why there are none (a stop on the budget is one). */
+function classifyText(
+  run: CliRun,
+):
+  | { ok: true; text: string; costUsd: number | null; turns: number | null }
+  | (Outcome & { ok: false }) {
+  const failed = failureOf(run)
+  if (failed) return { ok: false, ...failed }
+  let parsed: {
+    subtype?: string
+    is_error?: boolean
+    result?: unknown
+    total_cost_usd?: number
+    num_turns?: number
+  }
+  try {
+    parsed = JSON.parse(run.stdout)
+  } catch {
+    return { ok: false, errorClass: 'bad_output', message: 'CLI output is not JSON' }
+  }
+  const words = typeof parsed.result === 'string' ? parsed.result.trim() : ''
+  if (parsed.is_error || (parsed.subtype && parsed.subtype !== 'success')) {
+    const message = `${parsed.subtype ?? 'error'}: ${words}`.slice(0, 300)
+    if (LIMIT_TEXT.test(words)) return { ok: false, errorClass: 'limit_reached', message }
+    return { ok: false, errorClass: 'cli_failed', message }
+  }
+  if (!words) return { ok: false, errorClass: 'bad_output', message: 'no result text' }
+  return {
+    ok: true,
+    text: words,
+    costUsd: typeof parsed.total_cost_usd === 'number' ? parsed.total_cost_usd : null,
+    turns: typeof parsed.num_turns === 'number' ? parsed.num_turns : null,
+  }
 }
 
 /**
@@ -119,7 +196,7 @@ export function createGateway(d: {
   /** Boris hears of the limit's start and end; without it the gateway keeps quiet. */
   notifier?: Pick<Notifier, 'sendText'>
   limit?: { probeEveryMs?: number; maxWaitMs?: number }
-}): Gateway & { stop(): void } {
+}): Gateway & { converse: Converse; stop(): void } {
   const slots = createSlots(d.concurrency ?? 2)
   const maxWaitMs = d.limit?.maxWaitMs ?? 6 * 60 * MINUTE_MS
   const notice = createLimitNotice(async (text) => d.notifier?.sendText(text))
@@ -239,6 +316,7 @@ export function createGateway(d: {
     result: Outcome,
     durationMs: number,
     waitedMs: number,
+    extra: Record<string, unknown> = {},
   ): Promise<RoleCallResult<unknown>> {
     const id = newEventId()
     await d.db.insert(modelCall).values({
@@ -274,6 +352,7 @@ export function createGateway(d: {
         ...(!result.ok && result.resetAt ? { resetAt: result.resetAt } : {}),
         ...(waitedMs > 0 ? { waitedMs } : {}),
         ...redacted,
+        ...extra,
       },
     })
     if (result.ok) return { ok: true, output: result.output, durationMs, modelCallId: id }
@@ -337,8 +416,107 @@ export function createGateway(d: {
     }
   }
 
+  /**
+   * One conversation turn (ADR-027). Boris waits in the chat, so a limit is never waited out: while it holds the turn
+   * does not run and the answer says when it ends. The run takes a slot like any call, P0 first.
+   */
+  async function converse(
+    role: RoleName,
+    input: string,
+    o: ConverseOptions,
+  ): Promise<ConverseResult> {
+    const { meta, promptPath } = await loadRole(d.rolesDir, role)
+    await limitRead
+    const guard = guards[meta.model]
+    const c: Call = {
+      role,
+      meta,
+      opts: { correlationId: o.correlationId, redact: {} },
+      hidden: {
+        text: o.redactor.hide(input),
+        tags: o.redactor.tags,
+        counts: o.redactor.counts,
+        named: o.redactor.named,
+      },
+    }
+    const failed = async (
+      startedAt: string,
+      result: Outcome & { ok: false },
+      durationMs: number,
+      resetAt: Date | null,
+    ): Promise<ConverseResult> => {
+      const r = await record(c, startedAt, result, durationMs, 0)
+      return {
+        ok: false,
+        errorClass: result.errorClass,
+        message: result.message,
+        durationMs,
+        modelCallId: r.modelCallId,
+        resetAt,
+      }
+    }
+    if (guard.active())
+      return failed(
+        new Date().toISOString(),
+        { ok: false, errorClass: 'limit_reached', message: 'the Claude limit still holds' },
+        0,
+        guard.resetAt(),
+      )
+    const token = (await d.secrets.get('claude_oauth_token'))?.replace(/\s+/g, '') || null
+    if (!token)
+      return failed(
+        new Date().toISOString(),
+        { ok: false, errorClass: 'not_connected', message: 'no Claude token' },
+        0,
+        null,
+      )
+    await slots.acquire(meta.priority)
+    const startedAt = new Date().toISOString()
+    const ranAt = Date.now()
+    let run: CliRun
+    try {
+      const cwd = join(d.dataDir, 'claude-cwd')
+      await mkdir(cwd, { recursive: true })
+      run = await runClaude({
+        bin: d.claudeBin,
+        args: buildConverseArgs(meta, promptPath, o.mcp, o.maxBudgetUsd),
+        input: c.hidden.text,
+        token,
+        cwd,
+        timeoutMs: meta.timeoutMs,
+        extraEnv: typeof d.extraEnv === 'function' ? d.extraEnv() : d.extraEnv,
+      })
+    } finally {
+      slots.release(meta.priority)
+    }
+    const out = classifyText(run)
+    if (!out.ok && out.errorClass === 'limit_reached') {
+      const resetAt = parseResetAt(`${run.stdout}\n${run.stderr}`, new Date())
+      guard.hit(resetAt, ranAt)
+      return failed(
+        startedAt,
+        { ...out, ...(resetAt && { resetAt: resetAt.toISOString() }) },
+        run.durationMs,
+        resetAt,
+      )
+    }
+    if (out.ok || out.errorClass === 'bad_output') guard.answered(ranAt)
+    if (!out.ok) return failed(startedAt, out, run.durationMs, null)
+    const r = await record(c, startedAt, { ok: true, output: null }, run.durationMs, 0, {
+      ...(out.costUsd !== null && { costUsd: out.costUsd }),
+      ...(out.turns !== null && { turns: out.turns }),
+    })
+    return {
+      ok: true,
+      text: restore(out.text, o.redactor.tags),
+      durationMs: run.durationMs,
+      modelCallId: r.modelCallId,
+    }
+  }
+
   return {
     call,
+    converse,
     stop() {
       for (const g of Object.values(guards)) g.stop()
     },

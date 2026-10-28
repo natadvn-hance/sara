@@ -20,6 +20,8 @@ export type Notifier = {
     rows: { text: string; callbackData: string }[][],
     o?: { loud?: boolean },
   ): Promise<{ messageId: number }>
+  /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
+  typing?(): Promise<void>
   /** Changes a sent message without a sound (M4: the shadow card gets the real reply); rows keep its buttons. */
   editText?(
     messageId: number,

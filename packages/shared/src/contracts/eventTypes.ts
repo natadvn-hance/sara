@@ -112,6 +112,8 @@ export const EVENT_TYPES = [
   'autonomy.changed',
   'exam.judge_trusted',
   'exam.golden_worse',
+  /** ADR-027: one turn of the Secretary: which tools it used and how it ended, never the words. */
+  'secretary.answered',
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]

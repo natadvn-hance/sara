@@ -82,7 +82,76 @@ process.stdin.on('end', async () => {
     process.stdout.write('not json')
     return
   }
+  // A conversation turn (ADR-027): the role's answer is a script {calls: [{name, arguments}], answer}. The calls go to
+  // the MCP server of --mcp-config like the real CLI's; "{{n}}" in the answer is the text of call n's result.
+  if (argv.includes('--mcp-config')) {
+    const script = picked ?? { calls: [], answer: 'Готово.' }
+    const results = await callTools(argOf('--mcp-config'), script.calls ?? [])
+    if (log) appendFileSync(log, `${JSON.stringify({ tools: results })}\n`)
+    const answer = String(script.answer ?? '').replace(
+      /\{\{(\d+)\}\}/g,
+      (_, n) => results[n]?.text ?? '',
+    )
+    process.stdout.write(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: answer,
+        total_cost_usd: 0.01,
+        num_turns: results.length + 1,
+      }),
+    )
+    return
+  }
   const result = { type: 'result', subtype: 'success', is_error: false, result: 'done' }
   if (mode !== 'no_structured') result.structured_output = JSON.parse(output)
   process.stdout.write(JSON.stringify(result))
 })
+
+/** The calls of a script over stateless Streamable HTTP, each after its own initialize, as a real client may. */
+async function callTools(configPath, calls) {
+  const config = JSON.parse(readFileSync(configPath, 'utf8'))
+  const server = Object.values(config.mcpServers ?? {})[0]
+  const post = async (body) => {
+    const res = await fetch(server.url, {
+      method: 'POST',
+      headers: {
+        ...server.headers,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify(body),
+    })
+    return { status: res.status, body: await res.text() }
+  }
+  const out = []
+  let id = 0
+  for (const c of calls) {
+    await post({
+      jsonrpc: '2.0',
+      id: ++id,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'fake-claude', version: '0' },
+      },
+    })
+    const r = await post({
+      jsonrpc: '2.0',
+      id: ++id,
+      method: 'tools/call',
+      params: { name: c.name, arguments: c.arguments ?? {} },
+    })
+    let text = `HTTP ${r.status}`
+    let isError = true
+    try {
+      const parsed = JSON.parse(r.body)
+      text = parsed.result?.content?.[0]?.text ?? JSON.stringify(parsed.error ?? parsed)
+      isError = Boolean(parsed.result?.isError ?? parsed.error)
+    } catch {}
+    out.push({ name: c.name, status: r.status, text, isError })
+  }
+  return out
+}

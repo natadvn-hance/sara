@@ -30,6 +30,8 @@ export type FakeTelegram = {
   /** Edits Telegram accepted, in order (refused ones are not here): closed cards, the M4 shadow card. */
   edited: EditedMessage[]
   answers: { callback_query_id: string; text?: string }[]
+  /** sendChatAction calls («печатает…»), in order. */
+  actions: string[]
   pushStart(chatId: number): void
   pushPress(chatId: number, data: string): string
   /** A text message from Boris, optionally a reply to one of the bot's messages. */
@@ -112,6 +114,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   const shown = new Map<number, string>()
   const editErrors = new Map<number, string>()
   const answers: { callback_query_id: string; text?: string }[] = []
+  const actions: string[] = []
   const updates: Record<string, unknown>[] = []
   let nextUpdate = 1
   let nextMessage = 100
@@ -249,6 +252,9 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
         case 'answerCallbackQuery':
           answers.push(params)
           return reply(true)
+        case 'sendChatAction':
+          actions.push(String(params.action))
+          return reply(true)
         default:
           return reply(true)
       }
@@ -264,6 +270,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     sent,
     edited,
     answers,
+    actions,
     pushStart(chatId) {
       updates.push({
         update_id: nextUpdate++,

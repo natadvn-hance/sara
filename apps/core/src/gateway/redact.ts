@@ -106,16 +106,29 @@ function namePattern(names: (string | null | undefined)[]): RegExp | null {
 
 const TAG = /\[\s*(телефон|почта|ссылка|имя)\s*(\d+)\s*\]/giu
 
+/** One hiding that spans several texts: a value keeps its tag in all of them, so one restore fits every answer. */
+export type Redactor = {
+  /** The text with this redactor's tags; a value seen in an earlier text keeps the tag it got there. */
+  hide(text: string): string
+  /** Tag → the value it hides, as written in the input. */
+  readonly tags: Map<string, string>
+  /** How many different values of each kind were hidden so far. */
+  readonly counts: Record<Kind, number>
+  /** True when names were given to look for: without one, a name inside the text went through. */
+  readonly named: boolean
+}
+
 /**
  * Hides phones, e-mails, links, @-handles and the given names behind tags like `[телефон 1]` (ADR-016). One
- * value gets one tag; numbers already used by tags in the text are skipped, so restore never mistakes them.
+ * value gets one tag; numbers already used by tags in a text are skipped, so restore never mistakes them.
  */
-export function redact(text: string, names: (string | null | undefined)[] = []): Redacted {
-  const used = new Set([...text.matchAll(TAG)].map((m) => `${m[1]?.toLowerCase()} ${m[2]}`))
+export function createRedactor(names: (string | null | undefined)[] = []): Redactor {
+  const used = new Set<string>()
   const tags = new Map<string, string>()
   const byValue = new Map<string, string>()
   const counts: Record<Kind, number> = { phone: 0, email: 0, link: 0, name: 0 }
   const next: Record<Kind, number> = { phone: 0, email: 0, link: 0, name: 0 }
+  const nameRe = namePattern(names)
   const tagFor = (kind: Kind, value: string) => {
     const known = byValue.get(`${kind}:${value}`)
     if (known) return known
@@ -128,16 +141,30 @@ export function redact(text: string, names: (string | null | undefined)[] = []):
     counts[kind]++
     return full
   }
-  let out = text
-  for (const [kind, re] of PATTERNS) {
-    out = out.replace(re, (m) => {
-      const [value, tail] = kind === 'link' ? splitTail(m) : [m, '']
-      return `${tagFor(kind, value)}${tail}`
-    })
+  return {
+    hide(text) {
+      for (const m of text.matchAll(TAG)) used.add(`${m[1]?.toLowerCase()} ${m[2]}`)
+      let out = text
+      for (const [kind, re] of PATTERNS) {
+        out = out.replace(re, (m) => {
+          const [value, tail] = kind === 'link' ? splitTail(m) : [m, '']
+          return `${tagFor(kind, value)}${tail}`
+        })
+      }
+      if (nameRe) out = out.replace(nameRe, (m) => tagFor('name', m))
+      return out
+    },
+    tags,
+    counts,
+    named: nameRe !== null,
   }
-  const nameRe = namePattern(names)
-  if (nameRe) out = out.replace(nameRe, (m) => tagFor('name', m))
-  return { text: out, tags, counts, named: nameRe !== null }
+}
+
+/** One text hidden on its own (ADR-016): see `createRedactor`. */
+export function redact(text: string, names: (string | null | undefined)[] = []): Redacted {
+  const r = createRedactor(names)
+  const out = r.hide(text)
+  return { text: out, tags: r.tags, counts: r.counts, named: r.named }
 }
 
 /** A tag like `[имя 3]` is in the text: one that `restore` did not know stays as the model wrote it. */
