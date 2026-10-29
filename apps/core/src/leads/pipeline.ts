@@ -883,7 +883,7 @@ async function feeThenCard(l: LeadRow, taskId: string): Promise<void> {
   const read = await readPage(l.accountId, l.id)
   if (read.ok && (read.page.bid_price_rub > 0 || pageVerdict(read) !== 'go'))
     return draftThenCard(l, taskId, read)
-  await d().notifier.sendText(TEXTS.feeUnknown(l.title))
+  await d().notifier.sendText(TEXTS.feeUnknown(l.title), { place: 'leads' })
 }
 
 /**
@@ -924,6 +924,7 @@ async function draftThenCard(
       await deliverDecision(taskId, 'skip')
       await d().notifier.sendText(
         verdict === 'closed' ? CARD_FLOW_TEXTS.pageClosed : CARD_FLOW_TEXTS.pageBidAlready,
+        { place: 'leads' },
       )
     }
     return
@@ -950,7 +951,7 @@ async function onAnalysis(taskId: string): Promise<string> {
   const card = await cardOfFound(found, true)
   try {
     for (const message of analysisMessages({ ...card, unscored: !card.score })) {
-      await d().notifier.sendText(message, { html: true })
+      await d().notifier.sendText(message, { html: true, place: 'leads' })
     }
   } catch (err) {
     // Reading is harmless to repeat: Boris presses again.

@@ -42,7 +42,9 @@ async function whoOf(job: SendJob): Promise<{ name: string | null; title: string
 
 async function tell(job: SendJob, text: string): Promise<void> {
   const who = await whoOf(job)
-  await d().notifier.sendText(CONV_TEXTS.sendResult(who.name, who.title, text))
+  await d().notifier.sendText(CONV_TEXTS.sendResult(who.name, who.title, text), {
+    place: { conversation: job.conversationId },
+  })
 }
 
 async function runSend(job: SendJob): Promise<void> {

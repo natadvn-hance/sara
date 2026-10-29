@@ -208,6 +208,55 @@ export const ownerAuth = core.table(
   (t) => [check('owner_auth_single_row', sql`${t.id} = 1`)],
 )
 
+/** Boris's forum (docs/product/telegram-forum.md): the group with topics his messages go to once he bound it. */
+export const telegramForum = core.table(
+  'telegram_forum',
+  {
+    id: integer('id').primaryKey().default(1),
+    chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+    title: text('title'),
+    /** The topic of new orders; null in the General topic. */
+    leadsThreadId: integer('leads_thread_id'),
+    boundAt: ts('bound_at').notNull().defaultNow(),
+  },
+  (t) => [check('telegram_forum_single_row', sql`${t.id} = 1`)],
+)
+
+/** The topic of one client's order in a forum; the key is the order's number, `conv:<id>` for a chat without one. */
+export const forumTopic = core.table(
+  'forum_topic',
+  {
+    chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+    key: text('key').notNull(),
+    threadId: integer('thread_id').notNull(),
+    conversationId: uuid('conversation_id'),
+    /** The name without the stage a closed topic gets. */
+    name: text('name').notNull(),
+    closedAt: ts('closed_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.chatId, t.key] }),
+    uniqueIndex('forum_topic_thread').on(t.chatId, t.threadId),
+  ],
+)
+
+/**
+ * A message in a forum. The core knows it by this row's id with a minus, and a message of Boris's own chat by its
+ * Telegram number, so the numbers of the two chats never meet in a task or a card.
+ */
+export const telegramPost = core.table(
+  'telegram_post',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+    messageId: integer('message_id').notNull(),
+    threadId: integer('thread_id'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('telegram_post_message').on(t.chatId, t.messageId)],
+)
+
 /** Versions of an account's direction rules (FR-ACC-2); exactly one is active per account. */
 export const directionVersion = core.table(
   'direction_version',

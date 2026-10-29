@@ -54,6 +54,7 @@ export function createBotControl(d: {
       sendButtons: (t, rows, o) => current().notifier.sendButtons(t, rows, o),
       editText: async (id, t, rows) => current().notifier.editText?.(id, t, rows),
       markDone: async (id, note) => current().notifier.markDone?.(id, note),
+      closeTopic: async (place, outcome) => current().notifier.closeTopic?.(place, outcome),
     },
   }
 }

@@ -110,7 +110,8 @@ async function send(
 ): Promise<void> {
   let m: { messageId: number }
   try {
-    m = await d.notifier.sendText(text)
+    // A question about a lead stands by its card in the topic of new orders; a rule's «почему?» in the general one.
+    m = await d.notifier.sendText(text, q.kind === 'why_decline' ? undefined : { place: 'leads' })
   } catch (e) {
     // Not asked: the row goes, so it takes no place of the day and answers nothing.
     await d.db.delete(question).where(eq(question.id, id))

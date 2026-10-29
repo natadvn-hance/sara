@@ -279,9 +279,10 @@ async function giveBack(outboxId: string, p: BidPayload, reason: string): Promis
   })
 }
 
-async function tell(text: string, p: BidPayload): Promise<void> {
+/** A word about a bid: by the card in «Заявки»; once the bid is on Profi.ru, in the client's own topic (`client`). */
+async function tell(text: string, p: BidPayload, o: { client?: boolean } = {}): Promise<void> {
   try {
-    await d().notifier.sendText(text)
+    await d().notifier.sendText(text, { place: o.client ? { order: p.leadId } : 'leads' })
   } catch (err) {
     await appendEvent(d().db, {
       ...ev('notify.failed', p, { kind: 'lead', id: p.leadId }, { channel: 'telegram' }),
@@ -464,9 +465,12 @@ async function lookForUnsure(outboxId: string, p: BidPayload): Promise<void> {
       { name: 'confirmFound', ...DB_STEP },
     )
     if (first)
-      await DBOS.runStep(() => tell(TEXTS.bidFoundLater(p.title, p.priceRub), p), {
-        name: 'tellFound',
-      })
+      await DBOS.runStep(
+        () => tell(TEXTS.bidFoundLater(p.title, p.priceRub), p, { client: true }),
+        {
+          name: 'tellFound',
+        },
+      )
     return
   }
 }
@@ -522,7 +526,9 @@ async function deliver(outboxId: string): Promise<void> {
         ...DB_STEP,
       })
       if (first)
-        await DBOS.runStep(() => tell(TEXTS.bidAlreadyThere(p.title), p), { name: 'tellAlready' })
+        await DBOS.runStep(() => tell(TEXTS.bidAlreadyThere(p.title), p, { client: true }), {
+          name: 'tellAlready',
+        })
       return
     }
     const first = await DBOS.runStep(() => confirmBid(d().db, outboxId, final), {
@@ -531,7 +537,9 @@ async function deliver(outboxId: string): Promise<void> {
     })
     // What was spent, not the fee on the card.
     if (first)
-      await DBOS.runStep(() => tell(TEXTS.bidSent(p.title, final.spent), p), { name: 'tellSent' })
+      await DBOS.runStep(() => tell(TEXTS.bidSent(p.title, final.spent), p, { client: true }), {
+        name: 'tellSent',
+      })
     // The series Boris approved with the bid follows it in a process of its own (Boris, 29.10.2026); only a bid this
     // run confirmed has one. Behind a patch, so a run recorded before the series ends as it began.
     const series = p.followUps ?? []

@@ -20,6 +20,8 @@ export type BorisMessage = {
   replyToMessageId: number | null
   /** The message's number in Telegram: a repeat of the same update is the same message. */
   messageId?: number
+  /** Written in a client's topic of the forum: the words are about this client (docs/product/telegram-forum.md). */
+  client?: { conversationId: string | null; orderId: string | null }
   at: Date
 }
 
@@ -43,6 +45,14 @@ export async function handleBorisMessage(
     }): Promise<BorisReply | null>
     /** M4: Boris's version of a reply after «Изменить» on a conversation card. */
     onConvEdit?(a: DraftAnswer): Promise<BorisReply>
+    /** Words in a client's topic that answer no card and no question: an instruction about this client. */
+    onClientText?(m: {
+      conversationId: string | null
+      text: string
+      voice: boolean
+      messageId?: number
+      at: Date
+    }): Promise<BorisReply>
   },
   m: BorisMessage,
 ): Promise<BorisReply> {
@@ -62,6 +72,15 @@ export async function handleBorisMessage(
     at: m.at,
   })
   if (command) return command
+  // In a client's topic an answer to a question is a reply to it; any other words are about the client.
+  if (m.client && d.onClientText) {
+    const asked =
+      m.replyToMessageId === null
+        ? null
+        : await openQuestion(d.db, { replyToMessageId: m.replyToMessageId, at: m.at })
+    if (!asked || 'ambiguous' in asked)
+      return d.onClientText({ conversationId: m.client.conversationId, ...a })
+  }
   const q = await openQuestion(d.db, { replyToMessageId: m.replyToMessageId, at: m.at })
   if (!q) return TEXTS.notAnAnswer
   if ('ambiguous' in q) {
