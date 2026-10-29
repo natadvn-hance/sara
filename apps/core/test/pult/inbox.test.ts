@@ -422,7 +422,11 @@ describe('the bell: every message of Sara with its state', () => {
       link: `/leads/${LEAD}`,
       taskId: LEAD_TASK,
     })
-    expect(list.items[2]).toMatchObject({ taskId: DRAFT_TASK, body: 'Можете позвонить?' })
+    expect(list.items[2]).toMatchObject({
+      taskId: DRAFT_TASK,
+      body: 'Можете позвонить?',
+      link: `/clients/${CONV}`,
+    })
     expect(list.items[0]).toMatchObject({ questionId: WHY, link: `/leads/${LEAD}` })
     expect(list.unseen).toBe(4)
   })
