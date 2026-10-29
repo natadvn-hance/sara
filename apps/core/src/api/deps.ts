@@ -3,6 +3,7 @@ import type { Gateway } from '../gateway/gateway'
 import type { QuestionRow } from '../learning/questions'
 import type { BotControl } from '../notify/botControl'
 import type { ProfiClient } from '../profi/client'
+import type { MindWriter } from '../school/types'
 import type { SecretStore } from '../secrets/store'
 import type { Press } from '../tasks/resolve'
 
@@ -48,6 +49,8 @@ export type AppDeps = {
     saved: boolean
     message: string
   }>
+  /** The one writer of the mind (M5, ADR-025): Boris's «да» from the pult goes through it; unset, it waits. */
+  mindWriter?: MindWriter
   /** The host's backup log for the health screen (config.backupLog). */
   backupLog?: string
 }

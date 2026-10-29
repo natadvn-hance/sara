@@ -365,6 +365,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     mindDir: config.mindDir,
     publicUrl: config.publicUrl,
   }
+  // «Да» to a proposal from the pult goes through the same writer as the lessons (ADR-025).
+  deps.mindWriter = school.writer
   registerSchoolRoutes(app, school)
   registerConversationRoutes(app, commandDeps())
   registerSecretaryMcp(app, { keys: turnKeys, deps: () => secretaryTools })
