@@ -36,7 +36,7 @@ test('FR-SET-1: wizard goes through password, telegram and claude and resumes af
   await expect(page.getByText('Готово. Сара на связи.')).toBeVisible()
 
   await page.getByRole('link', { name: 'Состояние системы' }).click()
-  await expect(page.getByRole('heading', { name: 'Состояние системы' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Состояние', exact: true })).toBeVisible()
   await expect(page.getByText('База данных')).toBeVisible()
 })
 

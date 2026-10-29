@@ -91,7 +91,21 @@ function answer(method: string, url: URL, body: unknown): unknown {
     }
   if (p === '/api/notices') return g.notices
   if (p === '/api/today') return f.today(Number(url.searchParams.get('period') ?? 7))
-  if (p === '/api/leads') return f.leadQueue
+  if (p === '/api/leads') {
+    // Two numbers (Boris, 29.10.2026): the fit is today's score, the chance is still being worked out.
+    const order = url.searchParams.get('order') ?? 'combined'
+    const queue = f.leadQueue.queue.map((r) => ({
+      ...r,
+      scores: {
+        fit: { value: r.score, reasons: [] },
+        chance: { value: null, reasons: [] },
+        combined: r.score,
+      },
+      heldUntil: state.held.get(r.id) ?? null,
+    }))
+    if (order === 'chance') queue.sort((a, b) => a.feeRub - b.feeRub)
+    return { ...f.leadQueue, queue }
+  }
   if (p.startsWith('/api/leads/')) {
     const id = decodeURIComponent(p.split('/')[3] ?? '')
     const v = f.lead(id)
@@ -100,7 +114,20 @@ function answer(method: string, url: URL, body: unknown): unknown {
       ? {
           ...v,
           hold: held ? { requestId: 'r1', executeAt: held } : null,
-          score: v.score ? { ...v.score, confidence: 0.82 } : null,
+          score: v.score
+            ? {
+                ...v.score,
+                confidence: 0.82,
+                scores: {
+                  fit: {
+                    value: v.score.value,
+                    reasons: [v.score.reason, ...v.score.axes.map((a) => a.why)],
+                  },
+                  chance: { value: null, reasons: [] },
+                  combined: v.score.value,
+                },
+              }
+            : null,
         }
       : null
   }

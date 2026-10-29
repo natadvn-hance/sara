@@ -86,13 +86,7 @@ export function InboxScreen() {
   const q = useScreen<InboxView>('/api/inbox')
   return (
     <div className="page">
-      <Head
-        eyebrow="Решения в одно нажатие"
-        title="Входящие,"
-        accent="что ждёт"
-        after="тебя"
-        lead="Заявки, черновики ответов, вопросы Сары и срочное. Нажатие здесь то же, что кнопка на карточке в Telegram: карточка там закроется сама."
-      />
+      <Head title="Входящие" lead="Решение здесь закрывает карточку в Telegram." />
       <Screen q={q}>{(v) => <Body v={v} />}</Screen>
     </div>
   )

@@ -1,5 +1,5 @@
 import type { LineTone } from '@sara/shared'
-import type { ButtonHTMLAttributes, CSSProperties, PointerEvent, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react'
 import { navigate } from '../app/router'
 import { Icon } from './icons'
 
@@ -12,7 +12,7 @@ type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   icon?: string
 }
 
-/** A pill button; its label rolls up on hover, as on the landing. */
+/** A pill button with its label (pult v2: plain, no rolling label). */
 export function Btn({
   look = 'ghost',
   size = 'md',
@@ -32,14 +32,7 @@ export function Btn({
   return (
     <button type="button" className={cls.filter(Boolean).join(' ')} {...rest}>
       {icon ? <Icon name={icon} /> : null}
-      {typeof children === 'string' ? (
-        <span className="btn-label">
-          <span>{children}</span>
-          <span aria-hidden="true">{children}</span>
-        </span>
-      ) : (
-        children
-      )}
+      {children}
     </button>
   )
 }
@@ -72,13 +65,6 @@ export function A({
   )
 }
 
-/** The coral light follows the pointer over a card. */
-function glow(e: PointerEvent<HTMLElement>) {
-  const r = e.currentTarget.getBoundingClientRect()
-  e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
-  e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`)
-}
-
 export function Card({
   title,
   icon,
@@ -101,7 +87,6 @@ export function Card({
     <section
       className={`card reveal ${className}`}
       style={{ '--i': i } as CSSProperties}
-      onPointerMove={glow}
       aria-label={label ?? title}
     >
       {title || end ? (
@@ -122,9 +107,11 @@ export function Card({
   )
 }
 
-/** The page head: an eyebrow, a title with one accent word in the serif italic, and actions. */
+/**
+ * The page head (pult v2, cleaner): one plain heading and, when it helps, one short line of what to do here. The
+ * accent word and the eyebrow of the landing are kept out of the working screens.
+ */
 export function Head({
-  eyebrow,
   title,
   accent,
   after,
@@ -138,20 +125,11 @@ export function Head({
   lead?: ReactNode
   end?: ReactNode
 }) {
+  const text = [title, accent, after].filter(Boolean).join(' ').replace(/,\s*$/, '')
   return (
-    <header className="head reveal">
+    <header className="head">
       <div className="head-main">
-        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
-        <h1 className="h1">
-          {title}
-          {accent ? (
-            <>
-              {' '}
-              <em className="accent-word">{accent}</em>
-            </>
-          ) : null}
-          {after ? ` ${after}` : null}
-        </h1>
+        <h1 className="h1">{text}</h1>
         {lead ? <p className="lead">{lead}</p> : null}
       </div>
       {end ? <div className="actions">{end}</div> : null}
