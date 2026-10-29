@@ -35,6 +35,7 @@ async function clean() {
     [LEAD_TASK, DRAFT_TASK],
   ])
   await sql('delete from core.lead_label where lead_id = $1', [LEAD])
+  await sql('delete from core.bid_hold where task_id = any($1::uuid[])', [[LEAD_TASK]])
   await sql('delete from core.task where id = any($1::uuid[])', [[LEAD_TASK, DRAFT_TASK]])
   await sql('delete from core.conv_turn where conversation_id = $1', [CONV])
   await sql('delete from core.chat_message where conversation_id = $1', [CONV])
@@ -112,7 +113,7 @@ test('FR-UI-1: «Сегодня» shows what waits for Boris and leads to the le
   page,
 }) => {
   await page.goto('/today')
-  await expect(page.getByRole('heading', { name: 'Сара на смене' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /^Сегодня, / })).toBeVisible()
   await expect(page.getByText('1 заявка ждёт решения')).toBeVisible()
   await expect(page.getByText('Вероника: черновик ждёт «Отправить»')).toBeVisible()
   await page.getByText('1 заявка ждёт решения').click()
@@ -127,12 +128,17 @@ test('FR-UI-5, FR-UI-6: a lead shows its score, разбор and price range; «
   await expect(page.getByRole('heading', { name: 'Стратегия для студии керамики' })).toBeVisible()
   await expect(page.getByText('поток записей, а не документ')).toBeVisible()
   await expect(page.getByText(/от 40\s000\s₽ до 60\s000\s₽/)).toBeVisible()
+  // Both numbers: the fit is today's score, the chance is still being worked out (Boris, 29.10.2026).
+  const why = page.getByRole('region', { name: 'Почему так' })
+  await expect(why.getByText('Насколько наше')).toBeVisible()
+  await expect(why.getByText('Шанс дойти до денег')).toBeVisible()
+  await expect(why.getByText('считается')).toBeVisible()
+  // ST-M7-04: the bid waits ten seconds in the core, and «Отменить» stops it.
   await page.getByRole('button', { name: /Откликнуться за 240/ }).click()
-  await page.getByRole('button', { name: 'Да, откликнуться' }).click()
-  // Bids are paused in the e2e core: the press answers as the bot would, and nothing is spent.
-  await expect(page.getByRole('status')).toHaveText(
-    'Отправка откликов на паузе. Включи её и нажми снова.',
-  )
+  await expect(page.getByText(/Откликаюсь за 240\s₽ через 10 секунд/)).toBeVisible()
+  await page.getByRole('button', { name: 'Отменить' }).click()
+  await expect(page.getByText('Отменила, отклик не ушёл.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Откликнуться за 240/ })).toBeVisible()
 })
 
 test('FR-CONV-11: a draft goes only by «Отправить», the card press; in the shadow it says so', async ({
@@ -153,7 +159,7 @@ test('FR-CONV-11: a draft goes only by «Отправить», the card press; i
 
 test('FR-OPS-1: a limit changes from the settings', async ({ page }) => {
   await page.goto('/settings')
-  await expect(page.getByRole('heading', { name: 'Настройки Сары' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Настройки', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Меньше: Откликов в день' }).click()
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByRole('status')).toHaveText('Сохранила.')
@@ -163,12 +169,12 @@ test('FR-OPS-1: a limit changes from the settings', async ({ page }) => {
 
 test('FR-UI-1: analytics, the mind and the health open from the menu', async ({ page }) => {
   await page.goto('/analytics')
-  await expect(page.getByRole('heading', { name: 'Итоги по-честному' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Итоги', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Сводка по месяцам' })).toBeVisible()
   await page.goto('/mind')
-  await expect(page.getByRole('heading', { name: 'Разум Сары' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Разум', exact: true })).toBeVisible()
   await page.goto('/health')
-  await expect(page.getByRole('heading', { name: 'Состояние системы' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Состояние', exact: true })).toBeVisible()
   await expect(page.getByText('Узел Профи.ру')).toBeVisible()
 })
 

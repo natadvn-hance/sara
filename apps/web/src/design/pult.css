@@ -257,7 +257,7 @@
 
 .page {
   display: grid;
-  gap: 22px;
+  gap: 18px;
 }
 
 .head {
@@ -271,16 +271,17 @@
 
 .head-main {
   display: grid;
-  gap: 12px;
+  gap: 6px;
   min-width: 0;
 }
 
+/* Pult v2, cleaner (Boris, 29.10.2026): one plain heading per screen, no accent word, no eyebrow. */
 .h1 {
   margin: 0;
-  font-size: clamp(30px, 4.2vw, 48px);
-  line-height: 1.04;
-  letter-spacing: -0.045em;
-  font-weight: 500;
+  font-size: clamp(24px, 2.6vw, 30px);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-weight: 600;
   text-wrap: balance;
 }
 
@@ -341,10 +342,15 @@
 }
 
 .lead {
-  max-width: 44em;
-  color: var(--text-2);
-  font-size: 15.5px;
+  margin: 0;
+  max-width: 52em;
+  color: var(--muted);
+  font-size: 14px;
   text-wrap: pretty;
+}
+
+.small {
+  font-size: 13px;
 }
 
 /* Cards */
@@ -357,31 +363,9 @@
   padding: 20px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--surface);
   overflow: hidden;
-  isolation: isolate;
   min-width: 0;
-}
-
-.card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  background: radial-gradient(
-    420px circle at var(--mx, 50%) var(--my, -40%),
-    var(--glow),
-    transparent 45%
-  );
-  opacity: 0;
-  transition: opacity 0.4s;
-  pointer-events: none;
-}
-
-.card:hover::before {
-  opacity: 1;
 }
 
 .card-head {
@@ -655,14 +639,6 @@
 
 .btn-label > span + span {
   transform: translateY(110%);
-}
-
-.btn:not(:disabled):hover .btn-label > span:first-child {
-  transform: translateY(-110%);
-}
-
-.btn:not(:disabled):hover .btn-label > span + span {
-  transform: translateY(0);
 }
 
 .btn-primary {
@@ -1342,11 +1318,6 @@ table.t tr.total td {
 
 /* Motion: blocks rise out of a blur, as on the landing; nothing moves for those who asked for less */
 
-.reveal {
-  animation: rise 0.9s var(--ease) both;
-  animation-delay: calc(var(--i, 0) * 70ms);
-}
-
 @keyframes rise {
   from {
     opacity: 0;
@@ -1599,4 +1570,83 @@ select.field {
 
 .topbar > .pill .row-title {
   max-width: none;
+}
+
+/* Pult v2: the two numbers of a lead, the queue's toolbar */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toolbar > .seg {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.nums {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.num-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.num-pill b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.num-pill.is-pending b,
+.num b.is-pending {
+  font-family: var(--font-sans);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.score-pair {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 560px) {
+  .score-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.score-block {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.num b.is-pending {
+  font-size: 20px;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+.reasons {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 14px;
 }

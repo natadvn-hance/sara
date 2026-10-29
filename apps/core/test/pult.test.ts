@@ -388,7 +388,7 @@ describe('the pult screens read the core', () => {
 })
 
 describe('the pult acts only through the Telegram buttons', () => {
-  it('FR-UI-6: a bid goes to the press function with the price Boris saw, a changed price is refused', async () => {
+  it('FR-UI-6, ST-M7-04: a bid is held at the price Boris saw, a changed price is refused', async () => {
     expect((await post(`/api/tasks/${LEAD_TASK}/bid`)).status).toBe(400)
     const changed = await post(`/api/tasks/${LEAD_TASK}/bid`, { expectedFeeRub: 200 })
     expect(changed.status).toBe(409)
@@ -396,9 +396,9 @@ describe('the pult acts only through the Telegram buttons', () => {
       `Цена изменилась: было ${formatRub(200)}, стало ${formatRub(240)}. Нажми ещё раз.`,
     )
     expect(presses).toEqual([])
-    const ok = await post(`/api/tasks/${LEAD_TASK}/bid`, { expectedFeeRub: 240 })
-    expect(ok).toEqual({ status: 200, body: { message: 'Принято.' } })
-    expect(presses).toEqual([{ taskId: LEAD_TASK, action: 'bid', source: 'pult', reason: null }])
+    // Without the bid hold wired the pult says Sara is starting; the hold itself is tested in leads/hold.test.ts.
+    expect((await post(`/api/tasks/${LEAD_TASK}/bid`, { expectedFeeRub: 240 })).status).toBe(503)
+    expect(presses).toEqual([])
   })
 
   it('FR-CONV-11: «Отправить» on a draft is the card press; actions of another kind are refused', async () => {

@@ -123,12 +123,7 @@ export function NoticesScreen() {
   const q = useScreen<NoticeList>('/api/notices')
   return (
     <div className="page">
-      <Head
-        eyebrow="Telegram и пульт вместе"
-        title="Уведомления"
-        accent="Сары"
-        lead="Заявки, черновики, клиент написал, встречи, срочное и сводки. Новое, просмотрено, решено."
-      />
+      <Head title="Уведомления" />
       <Screen q={q}>{(v) => <Body v={v} />}</Screen>
     </div>
   )

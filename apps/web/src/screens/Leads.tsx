@@ -1,10 +1,11 @@
-import type { LeadQueue, LeadView } from '@sara/shared'
+import type { LeadQueue, LeadRow, LeadView, QueueOrder, ScorePart } from '@sara/shared'
 import { useState } from 'react'
 import { usePress, useScreen } from '../app/data'
 import { ago, count, rub, waited, waitTone } from '../app/format'
 import { idOf, usePath } from '../app/router'
 import { Icon } from '../ui/icons'
-import { A, Btn, Card, Empty, Head, Pill, Screen } from '../ui/kit'
+import { A, Btn, Card, Empty, Head, Pill, Screen, Seg } from '../ui/kit'
+import { HoldBar, SKIP_REASONS } from '../ui/task'
 
 /** «Заявки» (M7 design 5.3): the queue by value, one lead with why its score, the разбор, the bid and the decision. */
 
@@ -15,85 +16,157 @@ const DECIDED: Record<LeadQueue['decided'][number]['decision'], string> = {
   other: 'решена',
 }
 
-function Queue({ q, current }: { q: LeadQueue; current: string | null }) {
+const ORDER_KEY = 'sara.leads.order'
+
+/** The order Boris chose last time on this device; the two numbers together by default. */
+function readOrder(): QueueOrder {
+  try {
+    const o = window.localStorage.getItem(ORDER_KEY)
+    return o === 'fit' || o === 'chance' ? o : 'combined'
+  } catch {
+    return 'combined'
+  }
+}
+
+const ORDER_RU: Record<QueueOrder, string> = {
+  combined: 'Вместе',
+  fit: 'Насколько наше',
+  chance: 'Шанс',
+}
+
+/** The two numbers of a lead in one line: «наше 72 · шанс считается». */
+function Numbers({ r }: { r: LeadRow }) {
+  const fit = r.scores?.fit.value ?? r.score
+  const chance = r.scores?.chance.value ?? null
+  return (
+    <span className="nums">
+      <span className="num-pill">
+        наше <b>{fit ?? '?'}</b>
+      </span>
+      <span className={`num-pill${chance === null ? ' is-pending' : ''}`}>
+        шанс <b>{chance ?? 'считается'}</b>
+      </span>
+    </span>
+  )
+}
+
+function QueueRow({ r, current }: { r: LeadRow; current: string | null }) {
+  const tone = waitTone(r.seenAt)
+  return (
+    <A to={`/leads/${encodeURIComponent(r.id)}`} className="row" current={r.id === current}>
+      <span className="row-main">
+        <span className="row-title">{r.title}</span>
+        <span className="row-sub">
+          {r.city} · <span className="mono">{rub(r.feeRub)}</span> ·{' '}
+          <span className={tone === 'ok' ? '' : `tone-${tone === 'warn' ? 'warn' : 'bad'}`}>
+            {waited(r.seenAt)}
+          </span>
+          {r.heldUntil ? ' · откликаюсь' : ''}
+        </span>
+        <Numbers r={r} />
+      </span>
+    </A>
+  )
+}
+
+function Queue({
+  q,
+  current,
+  order,
+  setOrder,
+}: {
+  q: LeadQueue
+  current: string | null
+  order: QueueOrder
+  setOrder: (o: QueueOrder) => void
+}) {
+  const [view, setView] = useState<'queue' | 'decided'>('queue')
   return (
     <div className="grid">
       {q.paused ? <p className="callout tone-wait">{q.paused}</p> : null}
-      <Card
-        title="Ждут решения"
-        icon="leads"
-        end={<span className="mono muted">{q.queue.length}</span>}
-      >
-        {q.queue.length === 0 ? (
-          <Empty title="Очередь пуста">
-            Заявки, которые подходят под правила, появятся здесь, самая ценная сверху.
-          </Empty>
-        ) : (
-          <div className="list">
-            {q.queue.map((l) => (
-              <A
-                key={l.id}
-                to={`/leads/${encodeURIComponent(l.id)}`}
-                className="row"
-                current={l.id === current}
-              >
-                <span className={`score${(l.score ?? 0) >= 70 ? ' is-high' : ''}`} title="балл">
-                  {l.score ?? '?'}
-                </span>
-                <span className="row-main">
-                  <span className="row-title">{l.title}</span>
-                  <span className="row-sub">
-                    {l.city} · <span className="mono">{rub(l.feeRub)}</span> ·{' '}
-                    <span
-                      style={{
-                        color: `var(--${waitTone(l.seenAt) === 'ok' ? 'muted' : waitTone(l.seenAt) === 'warn' ? 'warn' : 'danger'})`,
-                      }}
-                    >
-                      {waited(l.seenAt)}
+      <div className="toolbar">
+        <Seg
+          label="Какие заявки"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'queue', label: `Ждут ${q.queue.length}` },
+            { value: 'decided', label: 'Решённые' },
+          ]}
+        />
+        {view === 'queue' ? (
+          <Seg
+            label="Порядок"
+            value={order}
+            onChange={setOrder}
+            options={(['combined', 'fit', 'chance'] as const).map((o) => ({
+              value: o,
+              label: ORDER_RU[o],
+            }))}
+          />
+        ) : null}
+      </div>
+      {view === 'queue' ? (
+        <Card>
+          {q.queue.length === 0 ? (
+            <Empty title="Очередь пуста">
+              Подходящие заявки появятся здесь, самая ценная сверху.
+            </Empty>
+          ) : (
+            <div className="list">
+              {q.queue.map((r) => (
+                <QueueRow key={r.id} r={r} current={current} />
+              ))}
+            </div>
+          )}
+          {q.older > 0 ? (
+            <p className="muted small">
+              Ещё {count(q.older, ['заявка старше', 'заявки старше', 'заявок старше'])} суток не
+              показаны.
+            </p>
+          ) : null}
+        </Card>
+      ) : (
+        <Card>
+          {q.decided.length === 0 ? (
+            <Empty title="За месяц решений не было" />
+          ) : (
+            <div className="list">
+              {q.decided.map((d) => (
+                <A
+                  key={d.id}
+                  to={`/leads/${encodeURIComponent(d.id)}`}
+                  className="row"
+                  current={d.id === current}
+                >
+                  <span className="row-main">
+                    <span className="row-title" style={{ fontWeight: 400 }}>
+                      {d.title}
+                    </span>
+                    <span className="row-sub">
+                      {DECIDED[d.decision]}
+                      {d.reason ? `, ${d.reason}` : ''} · {ago(d.at)}
+                      {d.decision === 'bid' ? ` · ${rub(d.feeRub)}` : ''}
                     </span>
                   </span>
-                </span>
-              </A>
-            ))}
-          </div>
-        )}
-        {q.older > 0 ? (
-          <p className="muted" style={{ fontSize: 13 }}>
-            Ещё {count(q.older, ['заявка старше', 'заявки старше', 'заявок старше'])} суток не
-            показаны: на старый заказ отклик почти не окупается.
-          </p>
-        ) : null}
-      </Card>
-      {q.decided.length ? (
-        <Card title="Решено за сутки" icon="check">
-          <div className="list">
-            {q.decided.map((d) => (
-              <A
-                key={d.id}
-                to={`/leads/${encodeURIComponent(d.id)}`}
-                className="row"
-                current={d.id === current}
-              >
-                <span className="row-main">
-                  <span className="row-title" style={{ fontWeight: 400 }}>
-                    {d.title}
-                  </span>
-                  <span className="row-sub">
-                    {DECIDED[d.decision]} · {ago(d.at)}
-                  </span>
-                </span>
-              </A>
-            ))}
-          </div>
+                </A>
+              ))}
+            </div>
+          )}
         </Card>
-      ) : null}
+      )}
     </div>
   )
 }
 
+/**
+ * The decision: «Откликнуться» waits ten seconds in the core and can be cancelled; «Пропустить» asks why here, one
+ * tap on a reason or none; «Перепроверить» reads the order page now.
+ */
 function Decide({ v }: { v: LeadView }) {
   const { press, busy } = usePress()
-  const [confirm, setConfirm] = useState(false)
+  const [skipping, setSkipping] = useState(false)
+  const [reason, setReason] = useState('')
   const t = v.task
   if (!t) return null
   if (!t.open)
@@ -103,41 +176,69 @@ function Decide({ v }: { v: LeadView }) {
         {t.resolution === 'bid'
           ? 'отклик'
           : t.resolution === 'skip'
-            ? 'пропущена'
+            ? `пропущена${v.label?.reason ? `, ${v.label.reason}` : ''}`
             : (t.resolution ?? 'закрыта')}
         .
       </p>
     )
   const fee = v.lead.feeRub
+  const base = `/api/leads/${encodeURIComponent(v.lead.id)}`
+  const skip = (why: string | null) => press('skip', `${base}/skip`, why ? { reason: why } : {})
   return (
-    <div className="sticky-actions reveal">
+    <div className="sticky-actions">
       {v.obstacles.length ? (
-        <div className="callout tone-warn">
-          <strong>Сейчас отклик не уйдёт:</strong>
-          <span>{v.obstacles.join(', ')}.</span>
+        <p className="callout tone-warn">
+          Сейчас отклик не уйдёт: {v.obstacles.join(', ')}.{' '}
           <A to="/settings" className="link">
             Лимиты и паузы
           </A>
-        </div>
+        </p>
       ) : null}
-      {confirm ? (
-        <div className="grid" style={{ gap: 10 }}>
-          <p>
-            Потратить <strong>{rub(fee)}</strong> на отклик на «{v.lead.title}»?
-          </p>
-          <div className="actions">
-            <Btn
-              look="primary"
-              icon="send"
+      {v.hold ? (
+        <HoldBar executeAt={v.hold.executeAt} feeRub={fee} cancelPath={`${base}/bid/cancel`} />
+      ) : skipping ? (
+        <div className="grid" style={{ gap: 8 }}>
+          <span className="text-2">Почему пропускаешь? Можно без причины.</span>
+          <div className="chips">
+            {SKIP_REASONS.map((r) => (
+              <button
+                key={r}
+                type="button"
+                className="pill is-btn"
+                disabled={busy !== null}
+                onClick={() => skip(r)}
+              >
+                {r}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="pill is-btn"
               disabled={busy !== null}
-              onClick={async () => {
-                await press('bid', `/api/tasks/${t.id}/bid`, { expectedFeeRub: fee })
-                setConfirm(false)
-              }}
+              onClick={() => skip(null)}
             >
-              Да, откликнуться
+              без причины
+            </button>
+          </div>
+          <div className="actions">
+            <input
+              className="field"
+              aria-label="Причина своими словами"
+              placeholder="Или своими словами"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <Btn
+              size="sm"
+              look="primary"
+              disabled={busy !== null || !reason.trim()}
+              onClick={() => skip(reason.trim())}
+            >
+              Пропустить
             </Btn>
-            <Btn onClick={() => setConfirm(false)}>Нет</Btn>
+            <Btn size="sm" onClick={() => setSkipping(false)}>
+              Отмена
+            </Btn>
           </div>
         </div>
       ) : (
@@ -146,14 +247,52 @@ function Decide({ v }: { v: LeadView }) {
             look="primary"
             icon="send"
             disabled={busy !== null || fee <= 0}
-            onClick={() => setConfirm(true)}
+            onClick={() => press('bid', `${base}/bid`, { expectedFeeRub: fee })}
           >
             {fee > 0 ? `Откликнуться за ${rub(fee)}` : 'Цена отклика неизвестна'}
           </Btn>
-          <Btn disabled={busy !== null} onClick={() => press('skip', `/api/tasks/${t.id}/skip`)}>
+          <Btn disabled={busy !== null} onClick={() => setSkipping(true)}>
             Пропустить
           </Btn>
+          <Btn
+            size="sm"
+            icon="refresh"
+            disabled={busy !== null}
+            onClick={() => press('recheck', `${base}/recheck`)}
+          >
+            Перепроверить
+          </Btn>
         </div>
+      )}
+    </div>
+  )
+}
+
+/** One of the two numbers with its reasons; a number still being worked out says so. */
+function ScoreBlock({
+  title,
+  part,
+  hint,
+}: {
+  title: string
+  part: ScorePart | undefined
+  hint: string
+}) {
+  const value = part?.value ?? null
+  return (
+    <div className="score-block">
+      <div className="num">
+        <b className={value === null ? 'is-pending' : ''}>{value ?? 'считается'}</b>
+        <small>{title}</small>
+      </div>
+      {part && part.reasons.length ? (
+        <ul className="reasons">
+          {part.reasons.slice(0, 4).map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted small">{hint}</p>
       )}
     </div>
   )
@@ -345,41 +484,61 @@ function Lead({ v }: { v: LeadView }) {
 
       {s ? (
         <Card
-          title={`Почему ${s.value}`}
+          title="Почему так"
           icon="target"
-          i={2}
           end={<span className="mono muted">правила v{s.rulesVersion}</span>}
         >
-          <div className="num">
-            <b>{s.value}</b>
-            <small>{s.threshold === null ? 'баллов' : `из 100, порог ${s.threshold}`}</small>
+          <div className="score-pair">
+            <ScoreBlock
+              title="Насколько наше"
+              part={s.scores?.fit ?? { value: s.value, reasons: [s.reason] }}
+              hint="Соответствие Hance по правилам отбора."
+            />
+            <ScoreBlock
+              title="Шанс дойти до денег"
+              part={s.scores?.chance}
+              hint="Сара научится считать шанс сделки со следующим обновлением оценки."
+            />
           </div>
-          <p>{s.reason}</p>
+          <p className="muted small">
+            {s.threshold === null ? '' : `Порог ${s.threshold}. `}
+            {s.confidence !== null && s.confidence !== undefined
+              ? `Уверенность Сары ${Math.round(s.confidence * 100)}%. `
+              : ''}
+            <A to={`/settings/rules/${encodeURIComponent(l.accountId)}`} className="link">
+              Правила отбора
+            </A>
+          </p>
           {s.stopFactor ? <p className="callout tone-bad">Стоп-фактор: {s.stopFactor}</p> : null}
           {s.redFlags.length ? (
             <p className="callout tone-warn">Флаги: {s.redFlags.join(', ')}</p>
           ) : null}
-          <div className="bars">
-            {s.axes.map((a) => (
-              <div className="bar" key={a.title}>
-                <div className="bar-top">
-                  <span>
-                    {a.title}
-                    {a.weight !== null ? (
-                      <span className="muted mono"> · вес {a.weight}%</span>
-                    ) : null}
-                  </span>
-                  <span className="mono">{a.score}</span>
-                </div>
-                <div className="bar-track">
-                  <span style={{ width: `${a.score}%` }} />
-                </div>
-                <span className="muted" style={{ fontSize: 13 }}>
-                  {a.why}
-                </span>
+          {s.axes.length ? (
+            <details>
+              <summary>
+                <Icon name="right" /> По осям правил
+              </summary>
+              <div className="bars" style={{ marginTop: 12 }}>
+                {s.axes.map((a) => (
+                  <div className="bar" key={a.title}>
+                    <div className="bar-top">
+                      <span>
+                        {a.title}
+                        {a.weight !== null ? (
+                          <span className="muted mono"> · вес {a.weight}%</span>
+                        ) : null}
+                      </span>
+                      <span className="mono">{a.score}</span>
+                    </div>
+                    <div className="bar-track">
+                      <span style={{ width: `${a.score}%` }} />
+                    </div>
+                    <span className="muted small">{a.why}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </details>
+          ) : null}
         </Card>
       ) : null}
 
@@ -427,20 +586,23 @@ function Lead({ v }: { v: LeadView }) {
 export function LeadsScreen() {
   const path = usePath()
   const id = idOf(path, 'leads')
-  const list = useScreen<LeadQueue>('/api/leads')
+  const [order, setOrder] = useState<QueueOrder>(readOrder)
+  const pick = (o: QueueOrder) => {
+    setOrder(o)
+    try {
+      window.localStorage.setItem(ORDER_KEY, o)
+    } catch {}
+  }
+  const list = useScreen<LeadQueue>(`/api/leads?order=${order}`)
   const one = useScreen<LeadView>(id ? `/api/leads/${encodeURIComponent(id)}` : null)
   return (
     <div className={`page${id ? ' has-detail' : ''}`}>
-      <Head
-        eyebrow="Очередь по ценности"
-        title="Заявки,"
-        accent="которые ждут"
-        after="тебя"
-        lead="Сверху самая ценная: балл, потом цена отклика. Решение здесь то же, что кнопка на карточке в Telegram."
-      />
+      <Head title="Заявки" />
       <div className={`split${id ? ' has-detail' : ''}`}>
         <div className="split-list">
-          <Screen q={list}>{(q) => <Queue q={q} current={id} />}</Screen>
+          <Screen q={list}>
+            {(q) => <Queue q={q} current={id} order={order} setOrder={pick} />}
+          </Screen>
         </div>
         <div className="split-detail">
           {id ? (

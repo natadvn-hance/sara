@@ -32,6 +32,9 @@ export const EVENT_TYPES = [
   /** Boris set the «Стоимость услуги» after «Изменить» or the price question (before, after). */
   'draft.priced',
   'bid.requested',
+  /** Pult v2: a bid from the pult waits ten seconds to be cancelled (task_id, request_id, fee_rub, execute_at). */
+  'bid.held',
+  'bid.hold_cancelled',
   'bid.sent',
   'bid.failed',
   /** A message of the series after the bid went into the order's chat (n: its place in the series). */

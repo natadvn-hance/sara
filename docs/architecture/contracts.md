@@ -249,6 +249,11 @@ Code, и единственное, что их связывает, это кон
   (`InboxView`), вопрос Сары `POST /api/questions/{id}/answer {text}` и
   `/skip`. Журнал `JournalView`, трасса `TraceView`, поиск `SearchView`
   в `packages/shared/src/contracts/journal.ts`.
+- Заявки (пульт v2): `GET /api/leads?order=combined|fit|chance`, балл двумя
+  числами `LeadScores` («Насколько наше», «Шанс дойти до денег», сочетание,
+  `combinedScore`); `POST /api/leads/{id}/bid {expectedFeeRub}` ставит
+  отклик с отсрочкой 10 секунд, `/bid/cancel` отменяет, `/skip {reason?}`,
+  `/recheck` перечитывает заказ.
 - Вход: пароль владельца (сессия в cookie) или подпись Telegram Mini App
   в заголовке `Authorization: tma <initData>` на каждом запросе (проверка
   подписи токеном бота, возраста до 24 часов и номера пользователя);
