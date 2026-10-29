@@ -165,7 +165,7 @@ describe('the card built from a lead', () => {
     const text = leadCardText(cards[0] as LeadCard)
     expect(text).toContain('<b>🔔 Сайт для клиники</b>')
     expect(text).not.toContain('Заявка ждёт решения')
-    expect(text).toContain('Отзывы: +3 / −1 · «Перестала отвечать»')
+    expect(text).toContain('отзывы +3 / −1 «Перестала отвечать»')
     expect(text).toContain('https://profi.ru/backoffice/n.php?o=91001')
   })
 
@@ -227,7 +227,7 @@ describe('the card built from a lead', () => {
     expect(c.clientInfo).toBeNull()
     expect(c.analysis).toBeNull()
     const text = leadCardText(c)
-    expect(text).toContain('<b>Клиент:</b> Ирина\n\n<b>Заявка</b>')
+    expect(text).toContain('👤 <b>Ирина</b>\n\n')
     expect(text).toContain('Черновика нет')
   })
 

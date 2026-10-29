@@ -57,28 +57,30 @@ const full: LeadCard = {
 }
 
 describe('the lead card layout', () => {
-  it('FR-LEAD-7: the whole card in order: head, client, order text, score, разбор, draft, link', () => {
+  it('FR-LEAD-7: the whole card in order (Boris, sample 3): head, client, why, разбор, bid, order text, link', () => {
     expect(leadCardText(full).split('\n')).toEqual([
       '<b>🔔 Сайт для клиники</b>',
-      `Краснодар · бюджет до 150 000 ₽ · отклик 210${NBSP}₽`,
+      '📍 Краснодар',
+      `🎯 <b>балл 68</b>  ·  💰 до 150 000 ₽  ·  🧾 отклик 210${NBSP}₽`,
       '',
-      '<b>Клиент:</b> Ирина',
-      'На Профи.ру с 7 сентября 2020 · номер подтверждён',
-      'Отзывы: +3 / −1 · «Перестала отвечать», «Торговалась», «Вежливая»',
+      '👤 <b>Ирина</b> · на Профи.ру с 7 сентября 2020 · номер подтверждён · отзывы +3 / −1 «Перестала отвечать», «Торговалась», «Вежливая»',
       '',
-      '<b>Заявка</b>',
-      '<blockquote expandable>Нужен сайт для клиники.',
-      'Услуги, врачи, запись.</blockquote>',
+      '<b>Почему подходит</b>',
+      '➕ Зрелый бизнес, понятная задача',
       '',
-      '<b>Балл 68</b> (правила v1). Зрелый бизнес, понятная задача',
-      '<b>Разбор:</b> Боится долгого запуска',
-      '<b>Риск:</b> Объём больше, чем звучит. <b>Условие:</b> Брать, если сроки понятны',
+      '<b>Кто клиент:</b> Владелец небольшой клиники',
+      '<b>Хочет:</b> Боится долгого запуска',
+      '<b>Риск:</b> Объём больше, чем звучит',
+      '<b>Брать, если:</b> сроки понятны',
       '',
-      '<b>Черновик отклика</b>',
+      `<b>✍️ Отклик</b>  ·  услуга 90${NBSP}000${NBSP}₽`,
       '<blockquote>Ирина, добрый день!',
       '',
       'Понимаю задачу.</blockquote>',
-      `Стоимость услуги: 90${NBSP}000${NBSP}₽`,
+      '',
+      '<b>📄 Текст заявки</b>',
+      '<blockquote expandable>Нужен сайт для клиники.',
+      'Услуги, врачи, запись.</blockquote>',
       '',
       LINK,
     ])
@@ -86,22 +88,20 @@ describe('the lead card layout', () => {
 
   it('FR-LEAD-6: a note on the draft stands under it, in italics, before the price', () => {
     const text = leadCardText({ ...card, draft: { ...DRAFT, note: TEXTS.greetingNameDropped } })
-    expect(text).toContain(
-      `Понимаю задачу.</blockquote>\n<i>${TEXTS.greetingNameDropped}</i>\nСтоимость услуги:`,
-    )
+    expect(text).toContain(`Понимаю задачу.</blockquote>\n<i>${TEXTS.greetingNameDropped}</i>`)
     expect(leadCardText({ ...card, draft: { ...DRAFT, note: null } })).not.toContain('<i>')
   })
 
   it('FR-LEAD-7: the head says what the client budget and the bid fee are when they are unknown', () => {
     const lines = leadCardText({ ...card, budgetText: null, bidPriceRub: 0 }).split('\n')
-    expect(lines[1]).toBe('Краснодар · бюджет не указан · цена отклика пока неизвестна')
+    expect(lines[2]).toBe('💰 бюджет не указан  ·  🧾 цена отклика пока неизвестна')
   })
 
   it('FR-LEAD-7: the client block without client info is the name alone', () => {
     const text = leadCardText({ ...card, clientInfo: null })
-    expect(text).toContain('<b>Клиент:</b> Ирина\n\n<b>Заявка</b>')
-    expect(text).not.toContain('Отзывы')
-    expect(text).not.toContain('На Профи.ру с')
+    expect(text).toContain('👤 <b>Ирина</b>\n\n')
+    expect(text).not.toContain('отзывы')
+    expect(text).not.toContain('на Профи.ру с')
   })
 
   it('FR-LEAD-7: client info with parts missing shows only the parts the site gave', () => {
@@ -113,25 +113,25 @@ describe('the lead card layout', () => {
       review_tags: [],
     }
     const text = leadCardText({ ...card, clientInfo: info })
-    expect(text).toContain('<b>Клиент:</b> Ирина\n\n<b>Заявка</b>')
+    expect(text).toContain('👤 <b>Ирина</b>\n\n')
     const some = leadCardText({
       ...card,
       clientInfo: { ...info, reviews: { positive: 0, negative: 2 }, review_tags: ['Грубил'] },
     })
-    expect(some).toContain('<b>Клиент:</b> Ирина\nОтзывы: +0 / −2 · «Грубил»\n\n<b>Заявка</b>')
+    expect(some).toContain('👤 <b>Ирина</b> · отзывы +0 / −2 «Грубил»\n\n')
   })
 
   it('FR-LEAD-7: the since text is as the site writes it, or gets its beginning', () => {
     const since = (s: string) =>
       leadCardText({ ...card, clientInfo: { ...CLIENT, on_profi_since: s, phone_verified: null } })
-    expect(since('На Профи.ру с 7 сентября 2020')).toContain('\nНа Профи.ру с 7 сентября 2020\n')
-    expect(since('7 сентября 2020')).toContain('\nНа Профи.ру с 7 сентября 2020\n')
+    expect(since('На Профи.ру с 7 сентября 2020')).toContain(' · на Профи.ру с 7 сентября 2020 · ')
+    expect(since('7 сентября 2020')).toContain(' · на Профи.ру с 7 сентября 2020 · ')
   })
 
   it('FR-LEAD-7: the client name on the card comes from client info when the list gave none', () => {
     const text = leadCardText({ ...card, clientName: '', clientInfo: { ...CLIENT, name: 'Анна' } })
-    expect(text).toContain('<b>Клиент:</b> Анна')
-    expect(leadCardText({ ...card, clientName: '' })).toContain('<b>Клиент:</b> имя не указано')
+    expect(text).toContain('👤 <b>Анна</b>')
+    expect(leadCardText({ ...card, clientName: '' })).toContain('👤 <b>имя не указано</b>')
   })
 
   it('FR-LEAD-7: the name from the order page wins over the one from the list: it is the fuller one', () => {
@@ -140,22 +140,23 @@ describe('the lead card layout', () => {
       clientName: 'Ира',
       clientInfo: { ...CLIENT, name: 'Ирина Петрова' },
     })
-    expect(text).toContain('<b>Клиент:</b> Ирина Петрова')
-    expect(text).not.toContain('<b>Клиент:</b> Ира\n')
+    expect(text).toContain('👤 <b>Ирина Петрова</b>')
+    expect(text).not.toContain('👤 <b>Ира</b>')
     const blank = leadCardText({
       ...card,
       clientName: 'Ира',
       clientInfo: { ...CLIENT, name: '  ' },
     })
-    expect(blank).toContain('<b>Клиент:</b> Ира\n')
+    expect(blank).toContain('👤 <b>Ира</b>')
   })
 
   it('FR-LEAD-7: a reminder is the same card with a line that it waits', () => {
     const lines = leadCardText({ ...full, reminder: true }).split('\n')
-    expect(lines.slice(0, 3)).toEqual([
+    expect(lines.slice(0, 4)).toEqual([
       '<b>⏰ Сайт для клиники</b>',
       '<i>Заявка ждёт решения</i>',
-      `Краснодар · бюджет до 150 000 ₽ · отклик 210${NBSP}₽`,
+      '📍 Краснодар',
+      `🎯 <b>балл 68</b>  ·  💰 до 150 000 ₽  ·  🧾 отклик 210${NBSP}₽`,
     ])
     expect(lines.at(-1)).toBe(LINK)
   })
@@ -164,17 +165,18 @@ describe('the lead card layout', () => {
     const text = leadCardText(card)
     expect(text.split('\n')).toEqual([
       '<b>🔔 Сайт для клиники</b>',
-      `Краснодар · бюджет до 150 000 ₽ · отклик 210${NBSP}₽`,
+      '📍 Краснодар',
+      `💰 до 150 000 ₽  ·  🧾 отклик 210${NBSP}₽`,
       '',
-      '<b>Клиент:</b> Ирина',
-      '',
-      '<b>Заявка</b>',
-      '<blockquote expandable>Нужен сайт для клиники.',
-      'Услуги, врачи, запись.</blockquote>',
+      '👤 <b>Ирина</b>',
       '',
       'Подходит: Нужен сайт',
       '',
       'Черновика нет: Аналитик не ответил. Нажми «Изменить» и пришли текст, а цену услуги отдельной строкой, например «цена 5000».',
+      '',
+      '<b>📄 Текст заявки</b>',
+      '<blockquote expandable>Нужен сайт для клиники.',
+      'Услуги, врачи, запись.</blockquote>',
       '',
       LINK,
     ])
@@ -204,7 +206,7 @@ describe('the lead card layout', () => {
 
   it('FR-LEAD-7: the order text is empty on a card of a lead without one: the block says so', () => {
     expect(leadCardText({ ...card, text: '  ' })).toContain(
-      '<b>Заявка</b>\n<blockquote expandable>Текста заявки нет.</blockquote>',
+      '<b>📄 Текст заявки</b>\n<blockquote expandable>Текста заявки нет.</blockquote>',
     )
   })
 })
@@ -213,21 +215,22 @@ describe('the lead card odd values', () => {
   it('FR-LEAD-7: an empty part of the short разбор is left out, not shown as a broken line', () => {
     const lines = (a: Partial<typeof ANALYSIS>) =>
       leadCardText({ ...card, analysis: { ...ANALYSIS, ...a } }).split('\n')
-    expect(lines({ hiddenNeed: ' ', risk: '' })).toContain(
-      '<b>Условие:</b> Брать, если сроки понятны',
+    expect(lines({ hiddenNeed: ' ', risk: '' })).toContain('<b>Брать, если:</b> сроки понятны')
+    expect(lines({ condition: 'Не брать без бюджета' })).toContain(
+      '<b>Условие:</b> Не брать без бюджета',
     )
-    expect(lines({ hiddenNeed: ' ', risk: '' }).join('\n')).not.toContain('<b>Разбор:</b>')
+    expect(lines({ hiddenNeed: ' ', risk: '' }).join('\n')).not.toContain('<b>Хочет:</b>')
     expect(lines({ hiddenNeed: ' ', risk: '' }).join('\n')).not.toContain('<b>Риск:</b>')
-    expect(lines({ condition: '' })).toContain('<b>Риск:</b> Объём больше, чем звучит.')
+    expect(lines({ condition: '' })).toContain('<b>Риск:</b> Объём больше, чем звучит')
     const none = lines({ hiddenNeed: '', risk: '', condition: ' ' }).join('\n')
-    expect(none).not.toMatch(/Разбор:|Риск:|Условие:/)
+    expect(none).not.toMatch(/Хочет:|Риск:|Брать, если:|Условие:/)
   })
 
   it('FR-LEAD-7: a since text that already starts with «с» does not get a second one', () => {
     const since = (t: string) =>
       leadCardText({ ...card, clientInfo: { ...CLIENT, on_profi_since: t, phone_verified: null } })
-    expect(since('с 7 сентября 2020')).toContain('\nНа Профи.ру с 7 сентября 2020\n')
-    expect(since('С 7 сентября 2020')).toContain('\nНа Профи.ру с 7 сентября 2020\n')
+    expect(since('с 7 сентября 2020')).toContain(' · на Профи.ру с 7 сентября 2020 · ')
+    expect(since('С 7 сентября 2020')).toContain(' · на Профи.ру с 7 сентября 2020 · ')
   })
 })
 
@@ -239,7 +242,7 @@ describe('the plain text fallback', () => {
     expect(plain.length).toBeLessThanOrEqual(4096)
     expect(plain.endsWith('https://profi.ru/backoffice/n.php?o=90001')).toBe(true)
     expect(plain).not.toMatch(/<\/?[a-z]/)
-    expect(plain).toContain('Стоимость услуги')
+    expect(plain).toContain('услуга 90')
   })
 
   it('FR-LEAD-7: a short card is just its text without markup, entities decoded, the link written out', () => {
@@ -275,14 +278,14 @@ describe('the lead card escaping', () => {
     expect(text).toContain(`<b>🔔 ${escaped}</b>`)
     expect(text).toContain(`<blockquote expandable>${escaped}</blockquote>`)
     expect(text).toContain(`<blockquote>${escaped}</blockquote>`)
-    expect(text).toContain(`<b>Клиент:</b> ${escaped}`)
+    expect(text).toContain(`👤 <b>${escaped}</b>`)
     // Only the tags the card itself writes are left.
     const tags = [...text.matchAll(/<\/?([a-z]+)[^>]*>/g)].map((m) => m[1])
     expect(new Set(tags)).toEqual(new Set(['b', 'a', 'blockquote']))
   })
 
   it('FR-LEAD-7: the name from the list is escaped when the order page gave none', () => {
-    expect(leadCardText({ ...card, clientName: evil })).toContain(`<b>Клиент:</b> ${escaped}`)
+    expect(leadCardText({ ...card, clientName: evil })).toContain(`👤 <b>${escaped}</b>`)
   })
 
   it('FR-LEAD-7: the verdict line of a card without a score is escaped too', () => {
@@ -317,8 +320,8 @@ describe('the lead card length', () => {
     expect(telegramTextLength(r.html)).toBeGreaterThan(3900)
     expect(r.html).toMatch(/…<\/blockquote>/)
     // Everything after the order text is still on the card.
-    expect(r.html).toContain('<b>Балл 68</b>')
-    expect(r.html).toContain('Стоимость услуги')
+    expect(r.html).toContain('<b>балл 68</b>')
+    expect(r.html).toContain('услуга 90')
     expect(r.html.endsWith(LINK)).toBe(true)
   })
 

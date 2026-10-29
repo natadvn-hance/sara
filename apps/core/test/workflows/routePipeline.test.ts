@@ -85,7 +85,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 15000) {
   throw new Error('condition not met in time')
 }
 
-const cards = () => tg.sent.filter((m) => m.reply_markup && m.text.includes('Заявка')).length
+const cards = () => tg.sent.filter((m) => m.reply_markup && m.text.includes('Текст заявки')).length
 
 describe('the router in the lead pipeline (FR-LEAD-4)', () => {
   it('FR-LEAD-4: with one account the order is routed to it and its card comes as before', async () => {

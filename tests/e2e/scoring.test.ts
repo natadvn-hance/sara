@@ -117,9 +117,8 @@ describe('scoring in the lead pipeline', () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
-    expect(cards()[0]?.text).toContain(
-      '<b>Балл 70</b> (правила v1). Зрелый бизнес, понятная задача',
-    )
+    expect(cards()[0]?.text).toContain('🎯 <b>балл 70</b>')
+    expect(cards()[0]?.text).toContain('➕ Зрелый бизнес, понятная задача')
     const scores = await db.select().from(leadScore).where(eq(leadScore.leadId, id))
     expect(scores).toHaveLength(1)
     expect(scores[0]).toMatchObject({ score: 70, decision: 'show', version: 1, model: 'haiku' })
