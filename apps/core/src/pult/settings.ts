@@ -13,19 +13,19 @@ type Meta = { title: string; hint?: string; edit: SettingRow['edit']; kind: Sett
 export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
   'outbound.bids': {
     title: 'Тратит деньги на отклики',
-    hint: 'Выключить можно здесь. Включает разработчик после проверок.',
-    edit: 'stop_only',
+    hint: 'Выключено: «Откликнуться» ничего не тратит и отвечает, что пауза. Каждый отклик всё равно только по твоему нажатию.',
+    edit: 'confirm',
     kind: 'flag',
   },
   'outbound.messages': {
     title: 'Пишет клиентам',
-    hint: 'Выключить можно здесь. Включает разработчик после проверок.',
-    edit: 'stop_only',
+    hint: 'Выключено: даже твоё «Отправить» ждёт, пока не включишь. В режиме черновиков клиенту уходит только нажатое.',
+    edit: 'confirm',
     kind: 'flag',
   },
   'conv.autopilot': {
     title: 'Автопилот разговоров',
-    hint: 'Выключен: клиенту уходит только то, что ты отправил кнопкой «Отправить».',
+    hint: 'Выключен: клиенту уходит только то, что ты отправил кнопкой «Отправить». Включается после экзамена Сары, не отсюда.',
     edit: 'stop_only',
     kind: 'flag',
   },
@@ -34,8 +34,8 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
   'conv.v1_writes': { title: 'Клиентам пишет старая Сара', edit: 'locked', kind: 'flag' },
   'conv.reminders': {
     title: 'Напоминает замолчавшим клиентам',
-    hint: 'Выключить можно здесь. Включает разработчик.',
-    edit: 'stop_only',
+    hint: 'Напоминание приходит тебе черновиком, клиенту уходит только по «Отправить».',
+    edit: 'confirm',
     kind: 'flag',
   },
   'school.on': { title: 'Ночная школа', edit: 'locked', kind: 'flag' },
@@ -67,10 +67,16 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
   },
   'conv.cards_per_day': { title: 'Карточек разговоров в день', edit: 'free', kind: 'count' },
   'cards.quiet_hours': {
-    title: 'Тихие часы карточек',
-    hint: 'По Москве, карточки приходят без звука.',
-    edit: 'locked',
+    title: 'Тихие часы',
+    hint: 'По Москве: карточки и push приходят без звука, срочное звонит всегда.',
+    edit: 'free',
     kind: 'hours',
+  },
+  'notify.push': {
+    title: 'Push на телефон и компьютер',
+    hint: 'Что звонит на телефоне и компьютере. В Telegram приходит всё, как раньше.',
+    edit: 'free',
+    kind: 'other',
   },
   'reminder.decision_after_min': {
     title: 'Повторить недошедшую карточку через, мин',
@@ -79,11 +85,16 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
   },
   'conv.night': {
     title: 'Ночь для клиентов',
-    hint: 'Ночью уходят только срочные ответы.',
-    edit: 'locked',
+    hint: 'По Москве: ночью клиентам уходят только срочные ответы.',
+    edit: 'free',
     kind: 'hours',
   },
-  'conv.reminder_quiet': { title: 'Без напоминаний клиентам', edit: 'locked', kind: 'hours' },
+  'conv.reminder_quiet': {
+    title: 'Без напоминаний клиентам',
+    hint: 'По Москве.',
+    edit: 'free',
+    kind: 'hours',
+  },
   'secretary.turns_per_day': {
     title: 'Ответов Сары в чате в день',
     hint: 'Разговор с Сарой идёт на Opus и тратит общую подписку Claude.',
@@ -125,6 +136,7 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'conv.cards_per_day',
       'reminder.decision_after_min',
       'cards.quiet_hours',
+      'notify.push',
       'conv.night',
       'conv.reminder_quiet',
       'secretary.turns_per_day',
@@ -132,11 +144,15 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
   },
 ]
 
-/** Whether the pult may set this value: free keys any valid value, stop-only keys only `false`. */
-export function pultMay(key: string, value: unknown): key is SettingKey {
+/**
+ * Whether the pult may set this value: free keys any valid value; a pause or an outgoing switch off always and on
+ * only with Boris's second press (`confirm`); stop-only keys only `false`; locked keys never.
+ */
+export function pultMay(key: string, value: unknown, confirm = false): key is SettingKey {
   const m = SETTING_META[key as SettingKey]
   if (!m || m.edit === 'locked') return false
   if (m.edit === 'stop_only') return value === false
+  if (m.edit === 'confirm') return value === false || confirm
   return true
 }
 

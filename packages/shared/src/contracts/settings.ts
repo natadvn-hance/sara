@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { LOCKED_TOPICS, TOPICS, type Topic } from './conversation'
+import { NOTICE_KINDS, type NoticeKind } from './entities'
 
 const hours = z.object({
   from: z.number().int().min(0).max(23),
@@ -115,6 +116,16 @@ export const SETTINGS = {
    * turns the chat off.
    */
   'secretary.turns_per_day': { schema: z.number().int().nonnegative(), default: 60 },
+  /**
+   * Pult v2, design 6: which kinds of notifications ring on the phone and the computer (Web Push). Telegram gets all
+   * of them as before; the quiet hours make a push silent, an urgent one rings always.
+   */
+  'notify.push': {
+    schema: z.record(z.enum(NOTICE_KINDS), z.boolean()),
+    default: Object.fromEntries(
+      NOTICE_KINDS.map((k) => [k, k !== 'summary' && k !== 'system']),
+    ) as Record<NoticeKind, boolean>,
+  },
   /** FR-MIND-2: local vectors beside the full-text search, when they proved cheap. */
   'mind.vectors': { schema: z.boolean(), default: false },
   /** M5: the school's jobs and lesson batches; off until the deploy turns it on, as pipeline.*. */

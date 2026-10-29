@@ -270,6 +270,12 @@ Code, и единственное, что их связывает, это кон
   подписи токеном бота, возраста до 24 часов и номера пользователя);
   WebSocket живого экрана входит одноразовым билетом `/api/screen/ticket`.
 - Ключи переключения (`PROTECTED_KEYS`) меняются только через `/cutover`.
+- Настройки (пульт v2): `POST /api/settings/{key} {value, confirm?}`; паузы и
+  исходящие (`outbound.bids`, `outbound.messages`, `conv.reminders`) выключаются
+  сразу, включаются только с `confirm: true` (второе нажатие); автопилот только
+  выключается. Порог: `GET /api/settings/threshold/{accountId}?value=` (подсказка
+  по оценкам 7 дней), `POST /api/settings/threshold/{accountId} {value,
+  expectedVersion}` создаёт новую версию правил.
 - Схема: `GET /api/openapi.json`, строится из схем zod пульта
   (`packages/shared/src/contracts/pult.ts`, `z.toJSONSchema`).
 
