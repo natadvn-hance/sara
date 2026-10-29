@@ -1,14 +1,25 @@
 # The pult's own address, plus older addresses that keep answering (links already sent in Telegram).
 {$SARA_DOMAIN} {$SARA_DOMAIN_ALIASES} {
-	encode zstd gzip
 	# /internal is only for Profi-MCP inside Docker; never from outside (T4).
 	@internal path /internal/*
 	respond @internal 404
+	# The pult's live stream (SSE) goes through uncompressed and unbuffered, event by event.
+	handle /api/stream {
+		reverse_proxy core:3300 {
+			flush_interval -1
+		}
+	}
 	handle /api/* {
+		encode zstd gzip
 		reverse_proxy core:3300
 	}
 	handle {
+		encode zstd gzip
 		root * /srv
+		# The pult opens as a Telegram Mini App (pult v2 design 7): only Telegram may frame it.
+		header Content-Security-Policy "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org"
+		# The service worker of Web Push is never kept stale.
+		header /sw.js Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server
 	}

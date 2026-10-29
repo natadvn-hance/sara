@@ -1,4 +1,4 @@
-import type { TaskAction } from '@sara/shared'
+import type { NoticeKind, TaskAction } from '@sara/shared'
 import type { Db } from '../db/client'
 import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { boundChat } from './binding'
@@ -22,6 +22,8 @@ export function createBotControl(d: {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onMessage?(m: BorisMessage): Promise<BorisReply | null>
   voiceDir?: string
+  /** A new notice of the bell: the phone and the computer ring (Web Push). */
+  onNotice?: (kind: NoticeKind) => void
 }): BotControl {
   let runtime: TelegramRuntime | null = null
   const current = (): TelegramRuntime => {
@@ -61,6 +63,7 @@ export function createBotControl(d: {
         closeTopic: async (place, outcome) => current().notifier.closeTopic?.(place, outcome),
       },
       d.db,
+      d.onNotice,
     ),
   }
 }

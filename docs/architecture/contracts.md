@@ -270,6 +270,10 @@ Code, и единственное, что их связывает, это кон
   подписи токеном бота, возраста до 24 часов и номера пользователя);
   WebSocket живого экрана входит одноразовым билетом `/api/screen/ticket`.
 - Ключи переключения (`PROTECTED_KEYS`) меняются только через `/cutover`.
+- Web Push (пульт v2): `GET /api/push/key` (публичный ключ VAPID),
+  `POST /api/push/subscribe {subscription, label}`, `POST /api/push/unsubscribe
+  {endpoint}`, `GET /api/push/latest` (последнее уведомление для проснувшегося
+  сервис-воркера, `silent` в тихие часы, кроме срочного). Сам push без данных.
 - Настройки (пульт v2): `POST /api/settings/{key} {value, confirm?}`; паузы и
   исходящие (`outbound.bids`, `outbound.messages`, `conv.reminders`) выключаются
   сразу, включаются только с `confirm: true` (второе нажатие); автопилот только

@@ -45,6 +45,7 @@ import { createMindSearch } from './mind/search'
 import { createMindWriter } from './mind/writer'
 import { type BotControl, createBotControl } from './notify/botControl'
 import { TEXTS } from './notify/cards'
+import { pushNotice } from './notify/push'
 import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
@@ -183,6 +184,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         m,
       ),
     voiceDir: join(config.dataDir, 'voice'),
+    // Each new notice rings the phone and the computer of the kinds Boris chose (pult v2 design 6).
+    onNotice: (kind) => void pushNotice({ db, secrets, publicUrl: config.publicUrl }, kind),
   })
   const gateway = createGateway({
     db,
@@ -305,6 +308,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     accounts: config.accounts,
     onPress,
     answerQuestion,
+    publicUrl: config.publicUrl,
     bids: { hold: holdBid, cancel: cancelHold, recheck: recheckLead },
     saveBidText: (p) =>
       pipeline
