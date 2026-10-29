@@ -222,6 +222,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     telegramApiRoot: config.telegramApiRoot,
     accounts: config.accounts,
     onPress,
+    saveBidText: (p) =>
+      pipeline
+        ? pipeline.saveBidText(p)
+        : Promise.resolve({ saved: false, message: 'Сара ещё запускается' }),
     backupLog: config.backupLog,
   }
   await seedAccounts(db, config.accounts)

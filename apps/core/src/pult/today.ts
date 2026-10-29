@@ -16,11 +16,62 @@ const hhmm = (iso: string) =>
   new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: MSK })
 
 const QUESTION_RU: Record<string, string> = {
-  why_skip: 'Почему пропустил заявку?',
-  why_want: 'Почему взял заявку?',
-  conv_edit: 'Жду твой вариант ответа клиенту',
-  draft_text: 'Жду новый текст отклика',
-  draft_price: 'Жду стоимость услуги для отклика',
+  why_skip: 'Сара спрашивает, почему ты пропустил заявку',
+  why_want: 'Сара спрашивает, почему ты взял бы заявку',
+  why_decline: 'Сара спрашивает, почему ты отказался',
+  edit_draft: 'Сара ждёт новый текст отклика',
+  edit_price: 'Сара ждёт стоимость услуги для отклика',
+  conv_edit: 'Сара ждёт твой вариант ответа клиенту',
+}
+/** A question left unanswered this long is no longer waited for on «Сегодня». */
+const QUESTION_FRESH_MS = 48 * 3600 * 1000
+
+/** The wallet: the newer of the account row and the last balance the node reported. */
+async function walletOf(db: Db): Promise<{ balanceRub: number | null; at: string | null }> {
+  const [acc] = await db.select().from(account).orderBy(account.id).limit(1)
+  const [ev] = await db
+    .select({
+      at: event.occurredAt,
+      rub: sql<number | null>`(${event.payload}->>'balance_rub')::int`,
+    })
+    .from(event)
+    .where(eq(event.type, 'profi.balance_changed'))
+    .orderBy(desc(event.occurredAt))
+    .limit(1)
+  const fromAcc = acc?.balanceRub !== null && acc?.balanceRub !== undefined
+  if (ev?.rub !== null && ev?.rub !== undefined && (!fromAcc || (acc?.balanceAt ?? '') < ev.at))
+    return { balanceRub: ev.rub, at: ev.at }
+  return fromAcc
+    ? { balanceRub: acc?.balanceRub ?? null, at: acc?.balanceAt ?? null }
+    : { balanceRub: null, at: null }
+}
+
+/** The order a question is about: the lead itself, the task of its card, or the conversation of a reply. */
+async function questionTargets(db: Db, qs: (typeof question.$inferSelect)[]) {
+  const ids = qs.map((q) => q.entityId).concat('')
+  const leads = await db
+    .select({ id: lead.id, title: lead.title })
+    .from(lead)
+    .where(inArray(lead.id, ids))
+  const uuids = ids
+    .filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+    .concat('00000000-0000-0000-0000-000000000000')
+  const tasks = await db
+    .select({ id: task.id, leadId: lead.id, title: lead.title })
+    .from(task)
+    .innerJoin(lead, eq(lead.id, task.entityId))
+    .where(inArray(task.id, uuids))
+  const turns = await db
+    .select({ id: convTurn.id, conversationId: convTurn.conversationId })
+    .from(convTurn)
+    .where(inArray(convTurn.id, ids))
+  const out = new Map<string, { title: string | null; link: string }>()
+  for (const l of leads)
+    out.set(l.id, { title: l.title, link: `/leads/${encodeURIComponent(l.id)}` })
+  for (const t of tasks)
+    out.set(t.id, { title: t.title, link: `/leads/${encodeURIComponent(t.leadId)}` })
+  for (const t of turns) out.set(t.id, { title: null, link: `/conversations/${t.conversationId}` })
+  return out
 }
 
 /** The worst first, in Boris's words; the rest of the list goes to the detail line. */
@@ -104,12 +155,12 @@ async function periodOf(db: Db, days: number): Promise<TodayView['period']> {
 
 export async function todayView(db: Db, days: number, now = new Date()): Promise<TodayView> {
   const queue = await leadQueue(db, now)
-  const [acc] = await db.select().from(account).orderBy(account.id).limit(1)
+  const wallet = await walletOf(db)
   const cheapest = queue.queue
     .filter((l) => l.feeRub > 0)
     .map((l) => l.feeRub)
     .sort((a, b) => a - b)[0]
-  const balance = acc?.balanceRub ?? null
+  const balance = wallet.balanceRub
   const shortRub =
     balance !== null && cheapest !== undefined && balance < cheapest ? cheapest - balance : null
 
@@ -142,28 +193,26 @@ export async function todayView(db: Db, days: number, now = new Date()): Promise
   const questions = await db
     .select()
     .from(question)
-    .where(isNull(question.answeredAt))
+    .where(
+      and(
+        isNull(question.answeredAt),
+        gt(question.askedAt, new Date(now.getTime() - QUESTION_FRESH_MS).toISOString()),
+      ),
+    )
     .orderBy(desc(question.askedAt))
     .limit(5)
-  const qTitles = new Map(
-    (
-      await db
-        .select({ id: lead.id, title: lead.title })
-        .from(lead)
-        .where(inArray(lead.id, questions.map((q) => q.entityId).concat('')))
-    ).map((l) => [l.id, l.title]),
-  )
-  for (const q of questions)
+  const targets = await questionTargets(db, questions)
+  for (const q of questions) {
+    const target = targets.get(q.entityId)
     items.push({
       id: `q:${q.id}`,
       kind: 'question',
-      title: QUESTION_RU[q.kind] ?? 'Сара спрашивает в Telegram',
-      sub: qTitles.get(q.entityId)
-        ? `«${qTitles.get(q.entityId)}», ответь в Telegram`
-        : 'ответь в Telegram',
+      title: QUESTION_RU[q.kind] ?? 'Сара спрашивает',
+      sub: target?.title ? `«${target.title}», ответь в Telegram` : 'ответь в Telegram',
       at: q.askedAt,
-      link: qTitles.has(q.entityId) ? `/leads/${encodeURIComponent(q.entityId)}` : null,
+      link: target?.link ?? null,
     })
+  }
   const rules = await db
     .select()
     .from(task)
@@ -194,7 +243,7 @@ export async function todayView(db: Db, days: number, now = new Date()): Promise
       questions: questions.length,
       items,
     },
-    wallet: { balanceRub: balance, at: acc?.balanceAt ?? null, shortRub },
+    wallet: { balanceRub: balance, at: wallet.at, shortRub },
     day: {
       bids: day.sent,
       bidsCap: await getSetting(db, 'money.daily_bids'),

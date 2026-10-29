@@ -134,6 +134,7 @@ beforeEach(async () => {
   await seedDirection(db, 'hance-marketing')
   tg.sent.length = 0
   tg.answers.length = 0
+  tg.markups.length = 0
   fake.bids.length = 0
   tg.pushStart(111)
   await until(() => tg.sent.length === 1)
@@ -421,6 +422,70 @@ describe('the bid', () => {
 })
 
 // Each case walks the whole bot path; on the Mac runner with two CI runs at once 5 seconds was too short.
+describe('the pult', { timeout: 30000 }, () => {
+  const NEW = 'Понимаю вашу задачу. Когда нужен запуск?'
+  /** The owner's session for the pult's API: the password is set anew, the database was emptied. */
+  async function owner(): Promise<string> {
+    const r = await fetch(`${app.url}/api/setup/password`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'длинныйпароль1' }),
+    })
+    return (r.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
+  }
+  const post = async (cookie: string, path: string, body: object) => {
+    const r = await fetch(`${app.url}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify(body),
+    })
+    return { status: r.status, body: (await r.json()) as { message?: string; error?: string } }
+  }
+
+  it('FR-LEAD-7: the pult saves a new text and price with no new card, and the bid goes with them', async () => {
+    const cookie = await owner()
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const r = await post(cookie, `/api/leads/${id}/text`, { text: NEW, priceRub: 70000 })
+    expect(r).toEqual({
+      status: 200,
+      body: {
+        message: 'Записала новый текст и цену услуги для «Сайт для стоматологической клиники»',
+      },
+    })
+    expect(cards()).toHaveLength(1)
+    expect(await leadOf(id)).toMatchObject({
+      draftText: `Ирина, добрый день!\n\n${NEW}`,
+      draftPriceRub: 70000,
+    })
+    expect((await eventsOf('draft.edited', id)).map((e) => e.payload)).toEqual([
+      { before: CLEAN, after: NEW, voice: false },
+    ])
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    expect(fake.bids[0]).toMatchObject({ text: `Ирина, добрый день!\n\n${NEW}`, price_rub: 70000 })
+    // Decided: the text is no longer edited.
+    expect((await post(cookie, `/api/leads/${id}/text`, { text: NEW })).status).toBe(409)
+  })
+
+  it('FR-UI-6: a press in the pult marks the Telegram card, so no live button is left', async () => {
+    const cookie = await owner()
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const [t] = await db
+      .select()
+      .from(task)
+      .where(and(eq(task.entityId, id), eq(task.kind, 'lead_decision')))
+    expect((await post(cookie, `/api/tasks/${t?.id}/skip`, {})).status).toBe(200)
+    await until(() => tg.markups.some((m) => m.message_id === t?.telegramMessageId))
+    expect(tg.markups.at(-1)?.reply_markup?.inline_keyboard).toEqual([
+      [{ text: 'Решено в приложении: пропущено', callback_data: 'done' }],
+    ])
+  })
+})
+
 describe('«Изменить»', { timeout: 30000 }, () => {
   const NEW = 'Понимаю вашу задачу. Когда нужен запуск?'
 

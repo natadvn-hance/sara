@@ -1033,6 +1033,16 @@ details > summary .ic {
   border-bottom-left-radius: 6px;
 }
 
+.bubble.is-profi {
+  justify-self: center;
+  max-width: min(92%, 560px);
+  background: transparent;
+  border-style: dashed;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+
 .bubble-meta {
   font-size: 11.5px;
   color: var(--muted);

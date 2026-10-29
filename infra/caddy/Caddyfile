@@ -1,4 +1,5 @@
-{$SARA_DOMAIN} {
+# The pult's own address, plus older addresses that keep answering (links already sent in Telegram).
+{$SARA_DOMAIN} {$SARA_DOMAIN_ALIASES} {
 	encode zstd gzip
 	# /internal is only for Profi-MCP inside Docker; never from outside (T4).
 	@internal path /internal/*

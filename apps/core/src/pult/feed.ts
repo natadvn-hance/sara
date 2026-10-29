@@ -1,7 +1,8 @@
-import { type FeedItem, formatRub, type LineTone } from '@sara/shared'
-import { desc, inArray } from 'drizzle-orm'
+import { type FeedItem, formatRub, type LineTone, type SettingKey } from '@sara/shared'
+import { desc, eq, inArray, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
-import { conversation, event, lead } from '../db/schema'
+import { conversation, convTurn, event, lead, task } from '../db/schema'
+import { SETTING_META } from './settings'
 
 /**
  * The feed of «Сегодня»: Sara's steps from the journal in Boris's words (M7). Only the types below are shown; the
@@ -10,7 +11,9 @@ import { conversation, event, lead } from '../db/schema'
 
 type Row = typeof event.$inferSelect
 type Said = { area: FeedItem['area']; tone: LineTone; text: string }
-type Names = { lead: Map<string, string>; client: Map<string, string> }
+/** What a card was about: its task's lead or conversation, by the task's id. */
+type Card = { area: FeedItem['area']; text: string; link: string | null }
+type Names = { lead: Map<string, string>; client: Map<string, string>; card: Map<string, Card> }
 
 const q = (s: string | undefined) => (s ? `«${s}»` : 'заявку')
 const num = (p: unknown, k: string): number | null => {
@@ -42,10 +45,13 @@ const SAYS: Record<string, (e: Row, n: Names) => Said | null> = {
     tone: 'ok',
     text: `Написала отклик на ${q(n.lead.get(e.entityId))}`,
   }),
-  'card.sent': (e, n) =>
-    e.entityKind === 'lead' || n.lead.has(e.entityId)
+  'card.sent': (e, n) => {
+    const c = n.card.get(e.entityId)
+    if (c) return { area: c.area, tone: 'wait', text: c.text }
+    return n.lead.has(e.entityId)
       ? { area: 'lead', tone: 'wait', text: `Прислала тебе карточку ${q(n.lead.get(e.entityId))}` }
-      : { area: 'conv', tone: 'wait', text: 'Прислала тебе карточку разговора' },
+      : { area: 'lead', tone: 'wait', text: 'Прислала тебе карточку' }
+  },
   'lead.skipped': (e, n) => ({
     area: 'lead',
     tone: 'ok',
@@ -77,7 +83,7 @@ const SAYS: Record<string, (e: Row, n: Names) => Said | null> = {
   'conv.message_heard': (e, n) => ({
     area: 'conv',
     tone: 'wait',
-    text: `${who(e, n)} написал в чат`,
+    text: `${who(e, n)}: новое сообщение в чате`,
   }),
   'conv.turn_drafted': (e, n) => ({
     area: 'conv',
@@ -145,11 +151,11 @@ const SAYS: Record<string, (e: Row, n: Names) => Said | null> = {
       text: rub === null ? 'Кошелёк изменился' : `На кошельке ${formatRub(rub)}`,
     }
   },
-  'setting.changed': (e) => ({
-    area: 'system',
-    tone: 'ok',
-    text: `Изменена настройка ${e.entityId}`,
-  }),
+  // Only the settings the pult names; the wizard's progress and the like are plumbing.
+  'setting.changed': (e) => {
+    const title = SETTING_META[e.entityId as SettingKey]?.title
+    return title ? { area: 'system', tone: 'ok', text: `Изменена настройка «${title}»` } : null
+  },
 }
 
 /** The event types the feed shows. */
@@ -159,10 +165,12 @@ function who(e: Row, n: Names): string {
   return n.client.get(e.entityId) ?? 'клиент'
 }
 
-function linkOf(e: Row): string | null {
+function linkOf(e: Row, n: Names): string | null {
+  const card = e.type === 'card.sent' ? n.card.get(e.entityId) : undefined
+  if (card) return card.link
   if (e.entityKind === 'lead') return `/leads/${encodeURIComponent(e.entityId)}`
   if (e.entityKind === 'conversation') return `/conversations/${e.entityId}`
-  if (e.type.startsWith('profi.')) return '/system'
+  if (e.type.startsWith('profi.')) return '/health'
   if (e.type.startsWith('mind.') || e.type.startsWith('school.')) return '/mind'
   return null
 }
@@ -181,7 +189,59 @@ export async function clientNames(db: DbOrTx, ids: string[]): Promise<Map<string
         .where(inArray(lead.id, orders))
     : []
   const byOrder = new Map(leads.map((l) => [l.id, l.name]))
-  for (const c of convs) out.set(c.id, (c.orderId && byOrder.get(c.orderId)) || `чат ${c.chatId}`)
+  // A chat begun by old Sara has no lead here: the name is taken from our own greeting («Дарья, добрый день!»).
+  const unnamed = convs.filter((c) => !(c.orderId && byOrder.get(c.orderId))).map((c) => c.id)
+  const greeted = unnamed.length
+    ? await db.execute<{ conversation_id: string; text: string }>(sql`
+        select distinct on (conversation_id) conversation_id, text from core.chat_message
+        where conversation_id in ${unnamed} and side <> 'client'
+          and text ~ '^[А-ЯЁ][а-яё]{1,20}, (добрый|доброе|здравствуйте)'
+        order by conversation_id, sent_at`)
+    : { rows: [] }
+  const byGreeting = new Map(
+    greeted.rows.map((r) => [r.conversation_id, r.text.split(',')[0]?.trim() ?? '']),
+  )
+  for (const c of convs)
+    out.set(
+      c.id,
+      (c.orderId && byOrder.get(c.orderId)) ||
+        byGreeting.get(c.id) ||
+        (c.orderId ? `Клиент по заказу ${c.orderId}` : `Чат ${c.chatId}`),
+    )
+  return out
+}
+
+/** The cards behind `card.sent` events: a lead card names its order, a conversation card its client. */
+async function cardsOf(db: DbOrTx, taskIds: string[]): Promise<Map<string, Card>> {
+  const out = new Map<string, Card>()
+  const ids = taskIds.filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+  if (ids.length === 0) return out
+  const leadCards = await db
+    .select({ id: task.id, leadId: lead.id, title: lead.title })
+    .from(task)
+    .innerJoin(lead, eq(lead.id, task.entityId))
+    .where(inArray(task.id, ids))
+  for (const c of leadCards)
+    out.set(c.id, {
+      area: 'lead',
+      text: `Прислала тебе карточку «${c.title}»`,
+      link: `/leads/${encodeURIComponent(c.leadId)}`,
+    })
+  const convCards = await db
+    .select({ id: task.id, conversationId: convTurn.conversationId })
+    .from(task)
+    .innerJoin(convTurn, sql`${convTurn.id} = ${task.entityId}`)
+    .where(inArray(task.id, ids))
+  const who = await clientNames(
+    db,
+    convCards.map((c) => c.conversationId),
+  )
+  for (const c of convCards)
+    out.set(c.id, {
+      area: 'conv',
+      text: `Прислала тебе черновик ответа: ${who.get(c.conversationId) ?? 'клиент'}`,
+      link: `/conversations/${c.conversationId}`,
+    })
   return out
 }
 
@@ -201,6 +261,10 @@ export async function readFeed(db: DbOrTx, limit = 40): Promise<FeedItem[]> {
         .where(inArray(lead.id, leadIds))
     : []
   const names: Names = {
+    card: await cardsOf(
+      db,
+      rows.filter((r) => r.type === 'card.sent' && r.entityKind === 'task').map((r) => r.entityId),
+    ),
     lead: new Map(titles.map((t) => [t.id, t.title])),
     client: await clientNames(
       db,
@@ -210,7 +274,7 @@ export async function readFeed(db: DbOrTx, limit = 40): Promise<FeedItem[]> {
   const out: FeedItem[] = []
   for (const r of rows) {
     const said = SAYS[r.type]?.(r, names)
-    if (said) out.push({ id: r.id, at: r.occurredAt, link: linkOf(r), ...said })
+    if (said) out.push({ id: r.id, at: r.occurredAt, link: linkOf(r, names), ...said })
   }
   return out
 }
