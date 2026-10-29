@@ -51,7 +51,7 @@ describe('the paths of the pult', () => {
     expect(sectionOf('/')).toBe('inbox')
     expect(sectionOf('/today')).toBe('today')
     expect(sectionOf('/leads/95210417')).toBe('leads')
-    expect(sectionOf('/accounts/hance-marketing/direction')).toBe('settings')
+    expect(sectionOf('/accounts/hance-marketing/direction')).toBe('accounts')
     expect(sectionOf('/search?q=анна')).toBe('search')
     expect(idOf('/leads/95210417', 'leads')).toBe('95210417')
     expect(idOf('/leads', 'leads')).toBeNull()
