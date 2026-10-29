@@ -156,6 +156,8 @@ export type HistoryDeps = {
   /** The node has messages of this chat already: the live check reads it. */
   knownChat(orderId: string): Promise<boolean>
   keep(messages: StoredMessage[]): Promise<number>
+  /** The site's address: the reader opens its pages itself (see open). */
+  baseUrl: string
   chatsPath: string
   chatPath(orderId: string, filter: string): string
   /** The wait between two pages, at random within it. */
@@ -209,15 +211,32 @@ export async function readHistory(d: HistoryDeps): Promise<string> {
     return r
   }
 
+  // A chat page does not fire «load» in 30 s, its messenger keeps a request open: on 29.10.2026 the first pass stopped
+  // on a list it had in fact opened, and the miss stopped the live checks for 5 minutes as a lost connection. So the
+  // reader opens a page itself, up to its HTML, and the site's own answer is the sign that it opened. Nothing here
+  // reports to the connection guard; the feed's pages still do.
+  async function open(path: string, kind: 'list' | 'chat', since: string): Promise<boolean> {
+    await d
+      .page()
+      .goto(`${d.baseUrl}${path}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      .catch(() => null)
+    for (let waited = 0; ; waited += 2000) {
+      if ((await d.answers(kind, since)).length > 0) return true
+      if (waited >= 20_000) return false
+      await sleep(2000)
+    }
+  }
+
   // 1. The lists: both tabs, scrolled down until they hold all their chats or stop growing.
   for (const filter of ['open', 'archive']) {
     if ((await d.flag()) !== 'go') return stop('флаг снят')
     const since = at()
-    const r = await whenFree(async (t) => {
-      if (!(await t.go(filter === 'open' ? d.chatsPath : `${d.chatsPath}?filter=archive`)))
-        return 'список чатов не открылся'
+    const r = await whenFree(async () => {
+      const path = filter === 'open' ? d.chatsPath : `${d.chatsPath}?filter=archive`
+      const opened = await open(path, 'list', since)
       if (await looksBlocked()) return 'страница похожа на блокировку'
-      await sleep(3000)
+      if (!opened) return 'список чатов не ответил'
+      await sleep(1500)
       for (let i = 0, still = 0; i < 20 && still < 3; i++) {
         const seen = listedChats(await d.answers('list', since))
         const n = seen.chats.filter((c) => c.filter === filter).length
@@ -259,10 +278,12 @@ export async function readHistory(d: HistoryDeps): Promise<string> {
     if ((await d.flag()) !== 'go') return stop(`флаг снят, прочитано ${done} из ${todo.length}`)
     const since = at()
     const got = await whenFree<{ messages: StoredMessage[]; complete: boolean } | string>(
-      async (t) => {
-        if (!(await t.go(d.chatPath(c.orderId, c.filter)))) return 'страница чата не открылась'
+      async () => {
+        const opened = await open(d.chatPath(c.orderId, c.filter), 'chat', since)
         if (await looksBlocked()) return 'страница похожа на блокировку'
-        await sleep(3000)
+        // A chat page without its answer counts as empty: two in a row stop the pass below.
+        if (!opened) return { messages: [], complete: false }
+        await sleep(1500)
         let h = chatHistory(await d.answers('chat', since), c.orderId)
         // Older messages come as the list is scrolled up; a chat that does not grow twice is as long as it gets.
         for (
