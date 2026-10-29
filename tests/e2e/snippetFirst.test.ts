@@ -355,7 +355,7 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     const id = orderId()
     fake.setOrderPage(id, { bid_price_rub: 145, client_info: CLIENT })
     await wantDropped(id)
-    await until(() => cards().some((m) => m.text.includes('Черновик отклика')))
+    await until(() => cards().some((m) => m.text.includes('✍️ Отклик')))
     expect(fake.orderReads).toEqual([id])
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 145, clientInfo: CLIENT })
     expect(cards().at(-1)?.text).toContain(`отклик 145${NBSP}₽`)

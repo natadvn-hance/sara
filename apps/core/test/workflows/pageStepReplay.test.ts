@@ -90,7 +90,7 @@ describe('a run recorded before the order page step', () => {
     // A slow Telegram: the card is at the bot while the card step is still waiting for the answer.
     tg.setSendDelay(700)
     await fake.emitOrder({ order_id: id, bid_price_rub: 0 })
-    await until(() => tg.sent.some((m) => m.reply_markup && m.text.includes('Заявка')))
+    await until(() => tg.sent.some((m) => m.reply_markup && m.text.includes('Текст заявки')))
     expect(fake.orderReads).toEqual([id])
     const cardsBefore = tg.sent.filter((m) => m.reply_markup).length
 
@@ -163,7 +163,7 @@ describe('a run recorded before the order page step', () => {
     tg.sent.length = 0
     const id = `${Date.now()}`
     await fake.emitOrder({ order_id: id, bid_price_rub: 0 })
-    await until(() => tg.sent.some((m) => m.reply_markup && m.text.includes('Заявка')))
+    await until(() => tg.sent.some((m) => m.reply_markup && m.text.includes('Текст заявки')))
     const cardsBefore = tg.sent.filter((m) => m.reply_markup).length
     const sys = new pg.Client({ connectionString: systemDatabaseUrl(testDatabaseUrl()) })
     await sys.connect()
