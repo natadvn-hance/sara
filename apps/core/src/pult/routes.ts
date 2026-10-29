@@ -8,7 +8,7 @@ import { question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { markSeen, noticeList, putAway } from '../notify/center'
 import { latestForPush, pushPublicKey, subscribe, unsubscribe } from '../notify/push'
-import { setSetting } from '../settings/store'
+import { getSetting, setSetting } from '../settings/store'
 import { analyticsView } from './analytics'
 import {
   addMeeting,
@@ -26,7 +26,7 @@ import { feeChanged, leadQueue, leadView } from './leads'
 import { mindRecordView, mindView } from './mind'
 import { decideProposal } from './mindDecide'
 import { searchView } from './search'
-import { pultMay, settingsView } from './settings'
+import { pultMay, SWITCH_ON_KEYS, settingsView } from './settings'
 import { registerStreamRoute } from './stream'
 import { systemView } from './system'
 import { setThreshold, thresholdHint } from './threshold'
@@ -39,6 +39,8 @@ export const PULT_TEXTS = {
   noFee: 'Нужна цена отклика, которую ты видел.',
   locked: 'Это меняется не здесь: включает разработчик после проверок, выключить можно паузой.',
   confirmOn: 'Включение просит второго нажатия.',
+  switchOff:
+    'Включение из пульта выключено в настройках «Пульт»: включи там или попроси разработчика.',
   badValue: 'Такое значение не подходит.',
   noText: 'Нужен текст отклика или стоимость услуги.',
   decided: 'Заявка уже решена.',
@@ -219,6 +221,8 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       return v ?? reply.code(404).send({ error: PULT_TEXTS.notFound })
     })
     scoped.get('/api/settings', async () => settingsView(d.db))
+    // What the frame needs before any screen: the tabs Boris chose.
+    scoped.get('/api/prefs', async () => ({ tabs: await getSetting(d.db, 'pult.tabs') }))
     scoped.get('/api/system', async () => systemView(d))
     scoped.get('/api/journal', async (req) =>
       journalView(d.db, JournalQuery.parse(req.query ?? {})),
@@ -397,6 +401,12 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       if (!(key in SETTINGS)) return reply.code(404).send({ error: PULT_TEXTS.notFound })
       if (!pultMay(key, value, body.confirm === true))
         return reply.code(403).send({ error: PULT_TEXTS.locked })
+      if (
+        value === true &&
+        SWITCH_ON_KEYS.includes(key) &&
+        !(await getSetting(d.db, 'pult.switch_on'))
+      )
+        return reply.code(403).send({ error: PULT_TEXTS.switchOff })
       const parsed = SETTINGS[key].schema.safeParse(value)
       if (!parsed.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
       await setSetting(d.db, key, parsed.data as never, 'boris')

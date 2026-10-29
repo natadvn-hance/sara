@@ -14,6 +14,22 @@ const AUTONOMY_DEFAULT = Object.fromEntries(
 ) as Record<Topic, Level>
 
 export const SETUP_STEPS = ['password', 'telegram', 'claude', 'profi'] as const
+
+/** The pult's sections that may stand among the four tabs at the bottom of the phone (pult v2 design 2). */
+export const PULT_TAB_SECTIONS = [
+  'inbox',
+  'leads',
+  'clients',
+  'today',
+  'meetings',
+  'mind',
+  'notices',
+  'journal',
+  'analytics',
+  'settings',
+  'health',
+] as const
+export type PultTabSection = (typeof PULT_TAB_SECTIONS)[number]
 export type SetupStep = (typeof SETUP_STEPS)[number]
 
 /** C7: every setting with its type and default. */
@@ -116,6 +132,22 @@ export const SETTINGS = {
    * turns the chat off.
    */
   'secretary.turns_per_day': { schema: z.number().int().nonnegative(), default: 60 },
+  /**
+   * Pult v2, design 2: the four tabs at the bottom of the phone and the Mini App, in order; «Ещё» holds the rest.
+   * Boris's choice, kept here so a change needs no deploy.
+   */
+  'pult.tabs': {
+    schema: z
+      .array(z.enum(PULT_TAB_SECTIONS))
+      .length(4)
+      .refine((t) => new Set(t).size === t.length, { message: 'вкладки не повторяются' }),
+    default: ['inbox', 'leads', 'clients', 'today'] as PultTabSection[],
+  },
+  /**
+   * Pult v2, design 8: the pauses and the outgoing («Тратит деньги», «Пишет клиентам», «Напоминает клиентам») may be
+   * turned on from the pult with a second press. Off: the pult only turns them off, as before.
+   */
+  'pult.switch_on': { schema: z.boolean(), default: true },
   /**
    * Pult v2, design 6: which kinds of notifications ring on the phone and the computer (Web Push). Telegram gets all
    * of them as before; the quiet hours make a push silent, an urgent one rings always.
