@@ -220,7 +220,7 @@ function RecordView({ v }: { v: MindRecordView }) {
         ) : (
           <div className="list">
             {v.used.map((u) => (
-              <A key={u.turnId} to={`/conversations/${u.conversationId}`} className="row">
+              <A key={u.turnId} to={`/clients/${u.conversationId}`} className="row">
                 <span className="row-main">
                   <span className="row-title" style={{ fontWeight: 400 }}>
                     Ответ клиенту

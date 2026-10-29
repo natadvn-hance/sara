@@ -70,7 +70,7 @@ async function questionTargets(db: Db, qs: (typeof question.$inferSelect)[]) {
     out.set(l.id, { title: l.title, link: `/leads/${encodeURIComponent(l.id)}` })
   for (const t of tasks)
     out.set(t.id, { title: t.title, link: `/leads/${encodeURIComponent(t.leadId)}` })
-  for (const t of turns) out.set(t.id, { title: null, link: `/conversations/${t.conversationId}` })
+  for (const t of turns) out.set(t.id, { title: null, link: `/clients/${t.conversationId}` })
   return out
 }
 
@@ -188,7 +188,7 @@ export async function todayView(db: Db, days: number, now = new Date()): Promise
       title: `${names.get(d.conversationId) ?? 'Клиент'}: ${d.reminder ? 'напоминание' : 'черновик'} ждёт «Отправить»`,
       sub: null,
       at: d.at,
-      link: `/conversations/${d.conversationId}`,
+      link: `/clients/${d.conversationId}`,
     })
   const questions = await db
     .select()

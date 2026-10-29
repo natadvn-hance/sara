@@ -86,6 +86,7 @@
 | | `origin` | enum `sara`, `v1` | Н | кто сделал отклик |
 | | `owner`, `owner_reason` | enum `sara`, `boris`, `paused`; `take`, `wrote`, `topic` | Н | кто ведёт и почему |
 | | `boris_note` | text | П | указание Бориса при возврате Саре |
+| | `note`, `service`, `outcome`, `outcome_reason`, `amount_rub`, `outcome_at` (пульт v2) | text; enum `won`, `lost`; int | П | заметка Бориса для лога клиентов (Сара её не читает), тип услуги, итог сделки и сумма договора; итог главнее этапа сделки в воронке |
 | | `closed_at`, `handled_through`, `last_client_heard_at`, `typing_at`, `unclear_count` | | Н | закрыт ли, до какого сообщения клиента отвечено, когда ядро слышало клиента и «печатает», сколько неясных авторов подряд |
 | `chat_message` (M4) | `id` | uuid | Н | вся переписка, живая и выгруженная, уникально `account_id` и `platform_message_id` |
 | | `side` | enum `client`, `specialist`, `system`, `unknown` | Н | сторона на площадке |
@@ -104,7 +105,7 @@
 | `task` | `id`, `kind`, `entity_kind`, `entity_id`, `priority`, `due_at`, `state` (`open`, `resolved`, `expired`), `resolution`, `telegram_message_id` | Н | что ждёт Бориса |
 | `outbox` | `id`, `kind` (`bid`, `message`), `idempotency_key` (уникален), `payload`, `permit`, `attempts`, `state` (`queued`, `confirmed`, `uncertain`, `failed`), `confirmed_at`, `error_class` | П | действия наружу. Отклик, который служба не нажала, строку удаляет (заявка снова у Бориса, следующее нажатие это новая строка со своим процессом `outbox:<id>`); `failed` остаётся у закрытого заказа (`ORDER_CLOSED`) и у отклика, который уже был на странице (`ALREADY_ON_PAGE`). `uncertain` позже сверяется с `get_order` и становится `confirmed`, если отклик нашёлся. Ключи сообщений клиентам (`kind = 'message'`): `msg:<ход>:<круг>` (ответ Сары), `msg:conv-remind:<разговор>:<сообщение>:<шаг>` (напоминание само), `msg:send:<задача карточки>` (нажатие «Отправить»), `msg:say:…` (текст Бориса); при выключенном `conv.autopilot` остаются только последние два (RB-22) |
 | `commitment` | `id`, `deal_id`, `what`, `due_at`, `workflow_id`, `state` | Н | обещания с таймером |
-| `meeting` | `id`, `deal_id`, `starts_at`, `duration_min`, `channel`, `brief`, `outcome`, `amount_rub` | Н | встречи |
+| `meeting` (пульт v2) | `id`, `conversation_id`, `title`, `starts_at`, `channel`, `note`, `outcome` (`held`, `missed`, `moved`), `amount_rub`, `created_by`, `created_at`, `updated_at` | Н | встречи, записанные Борисом; итог `held` с суммой записывает договор клиента. Созвоны, о которых только идёт речь в чате (сделка `call_proposed`, `call_booked`), показываются рядом без строки |
 | `availability` | `id`, `weekday`, `from_time`, `to_time`, `slot_min`, `max_per_day`, `exceptions` (jsonb) | Н | свободное время Бориса |
 | `spend` | `id`, `lead_id`, `account_id`, `amount_rub`, `balance_before`, `balance_after`, `at`, `outbox_id` | Н | траты |
 | `model_call` | `id`, `role`, `role_version`, `model`, `priority`, `started_at`, `duration_ms`, `ok`, `error_class`, `est_tokens_in`, `est_tokens_out`, `pseudonymized` (bool; false, если вызов нёс слова клиента, а имени клиента не знал, и имя в тексте могло уйти) | Н | вызовы Claude, без текста |

@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   AnalyticsView,
-  ConvList,
-  ConvView,
+  ClientList,
+  ClientView,
   formatRub,
   LeadQueue,
   LeadView,
@@ -251,7 +251,8 @@ describe('the pult screens read the core', () => {
       '/api/journal',
       '/api/search?q=ab',
       '/api/leads',
-      '/api/conversations',
+      '/api/clients',
+      '/api/meetings',
       '/api/analytics',
       '/api/mind',
       '/api/settings',
@@ -300,17 +301,15 @@ describe('the pult screens read the core', () => {
   })
 
   it('FR-CONV-11: a client with the chat and the open draft that «Отправить» would send', async () => {
-    const list = ConvList.parse((await get('/api/conversations')).body)
-    expect(list.rows[0]).toMatchObject({ id: CONV, name: 'Вероника', group: 'waiting' })
+    const list = ClientList.parse((await get('/api/clients')).body)
+    expect(list.rows[0]).toMatchObject({ id: CONV, name: 'Вероника', waits: true, stage: 'Отклик' })
     expect(list.drafting).toContain('старая Сара')
-    const v = ConvView.parse((await get(`/api/conversations/${CONV}`)).body)
+    const v = ClientView.parse((await get(`/api/clients/${CONV}`)).body)
     expect(v.messages[0]?.text).toBe('Здравствуйте! Сколько стоит?')
-    expect(v.draft).toMatchObject({
-      taskId: DRAFT_TASK,
-      kind: 'reply',
-      why: 'клиент спросил цену',
-      tone: 'спокойный',
-    })
+    expect(v.tasks.map((t) => [t.kind, t.id])).toEqual([['conv_draft', `task:${DRAFT_TASK}`]])
+    expect(v.tasks[0]?.text).toBe(
+      'Вероника, добрый день! Цена зависит от объёма, давайте созвонимся.',
+    )
     expect(v.sendHold).toContain('старая Сара')
   })
 
@@ -502,9 +501,9 @@ describe('the pult on the live data (28.10.2026)', () => {
         msg('d1', 'specialist', 'sara_v1', 'Дарья, добрый день! Заказ по-прежнему актуален?', 30),
         msg('d2', 'specialist', 'system', 'Вернули на баланс 137 руб.', 20),
       ])
-    const row = ConvList.parse((await get('/api/conversations')).body).rows.find((r) => r.id === id)
+    const row = ClientList.parse((await get('/api/clients')).body).rows.find((r) => r.id === id)
     expect(row).toMatchObject({ name: 'Дарья', lastSide: 'profi' })
-    const v = ConvView.parse((await get(`/api/conversations/${id}`)).body)
+    const v = ClientView.parse((await get(`/api/clients/${id}`)).body)
     expect(v.messages.map((m) => m.side)).toEqual(['us', 'profi'])
     expect(v.chatUrl).toBe('https://profi.ru/backoffice/r.php?id=88690561')
   })

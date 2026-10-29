@@ -68,7 +68,10 @@ export const ClientView = z.object({
   orderId: z.string().nullable(),
   orderTitle: z.string().nullable(),
   chatUrl: z.string().nullable(),
+  /** Boris's own note for the client log; Sara never reads it. */
   note: z.string().nullable(),
+  /** Boris's instruction to Sara for this client (given with «Вернуть Саре»), which every turn reads. */
+  instruction: z.string().nullable(),
   service: z.string().nullable(),
   outcome: ClientOutcome.nullable(),
   spentRub: rub,
