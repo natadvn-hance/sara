@@ -13,21 +13,40 @@ import { SetupPage } from './pages/Setup'
 import { AnalyticsScreen } from './screens/Analytics'
 import { ConversationsScreen } from './screens/Conversations'
 import { HealthScreen } from './screens/Health'
+import { InboxScreen } from './screens/Inbox'
+import { JournalScreen } from './screens/Journal'
 import { LeadsScreen } from './screens/Leads'
 import { MindScreen } from './screens/Mind'
+import { NoticesScreen } from './screens/Notices'
+import { SearchScreen } from './screens/Search'
 import { SettingsScreen } from './screens/Settings'
 import { TodayScreen } from './screens/Today'
 
-/** The first page: the wizard until the setup is done, then «Сегодня». */
+/** A section that comes with the next update: said plainly, with the way back. */
+function SoonScreen({ title }: { title: string }) {
+  return (
+    <div className="page">
+      <header className="head reveal">
+        <div className="head-main">
+          <h1 className="h1">{title}</h1>
+          <p className="lead">Этот раздел появится со следующим обновлением пульта.</p>
+        </div>
+      </header>
+    </div>
+  )
+}
+
+/** The first page: the wizard until the setup is done, then the Inbox (pult v2 design 2). */
 function Home() {
   useEffect(() => {
     api<SetupState>('/api/setup')
-      .then((s) => go(s.next === 'done' ? '/today' : '/setup'))
+      .then((s) => go(s.next === 'done' ? '/inbox' : '/setup'))
       .catch(() => go('/setup'))
   }, [])
   return <p className="p-4">Загружаю…</p>
 }
 
+/** The accounts' own pages keep their addresses (links already sent in Telegram, the rules pages of M3). */
 function Accounts({ path }: { path: string }) {
   const login = /^\/accounts\/([^/]+)\/login/.exec(path)
   if (login?.[1]) return <LiveScreenPage accountId={decodeURIComponent(login[1])} />
@@ -43,15 +62,25 @@ function Accounts({ path }: { path: string }) {
 }
 
 const SCREENS: Record<string, (path: string) => ReactNode> = {
-  today: () => <TodayScreen />,
+  inbox: () => <InboxScreen />,
   leads: () => <LeadsScreen />,
-  conversations: () => <ConversationsScreen />,
-  analytics: () => <AnalyticsScreen />,
+  clients: () => <ConversationsScreen />,
+  today: () => <TodayScreen />,
+  meetings: () => <SoonScreen title="Встречи" />,
   mind: () => <MindScreen />,
-  settings: () => <SettingsScreen />,
+  settings: (path) =>
+    path.startsWith('/accounts') ? <Accounts path={path} /> : <SettingsScreen />,
   health: () => <HealthScreen />,
-  accounts: (path) => <Accounts path={path} />,
+  journal: () => <JournalScreen />,
+  notices: () => <NoticesScreen />,
+  search: () => <SearchScreen />,
+  analytics: () => <AnalyticsScreen />,
   more: () => <MoreScreen />,
+  // The old address of the chats keeps opening the clients.
+  conversations: (path) => {
+    go(path.replace('/conversations', '/clients'))
+    return null
+  },
 }
 
 export function App() {
@@ -61,5 +90,6 @@ export function App() {
   if (path === '/' || path === '') return <Home />
   const screen = SCREENS[sectionOf(path)]
   if (!screen) return <Home />
-  return <Shell>{screen(path)}</Shell>
+  // The pages match the path alone; their own query (`?run=`) they read from the address themselves.
+  return <Shell>{screen(path.split('?')[0] ?? path)}</Shell>
 }

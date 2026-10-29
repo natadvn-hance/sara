@@ -1,5 +1,4 @@
 import { join } from 'node:path'
-import type { TaskAction } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
@@ -36,10 +35,12 @@ import { type CardRecheck, startCardRecheck } from './leads/recheck'
 import { SERIES_DELAYS, type SeriesDeps, setSeriesDeps } from './leads/series'
 import { handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
+import { DRAFT_KINDS, markAnswered, type QuestionRow, titleOf } from './learning/questions'
 import { ensureMindIndex } from './mind/indexer'
 import { createMindSearch } from './mind/search'
 import { createMindWriter } from './mind/writer'
 import { type BotControl, createBotControl } from './notify/botControl'
+import { TEXTS } from './notify/cards'
 import { createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
@@ -49,6 +50,7 @@ import type { SchoolDeps } from './school/types'
 import { registerScreenProxy } from './screen/screenProxy'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
+import { createResolver, type Press } from './tasks/resolve'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
 
@@ -105,11 +107,34 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       return job ? startSendJob(job) : SEND_TEXTS.failed
     },
   })
-  // A press on a conversation card goes to the conversation, every other press to the lead pipeline.
-  const onPress = async (p: { taskId: string; action: TaskAction }) => {
+  // A press on a conversation card goes to the conversation, every other press to the lead pipeline; the resolver
+  // around it marks the Telegram card when the press came from the pult (pult v2 design 3).
+  const press = async (p: Press) => {
     const [t] = await db.select({ kind: task.kind }).from(task).where(eq(task.id, p.taskId))
     if (t?.kind.startsWith('conv_')) return onConvPress(commandDeps(), p)
     return pipeline ? pipeline.onPress(p) : 'Сара ещё запускается'
+  }
+  const onPress = createResolver({
+    db,
+    press,
+    // The bot is made below with this very press; the card is marked through it once it exists.
+    notifier: {
+      markDone: async (id, note) => {
+        await bot.notifier.markDone?.(id, note)
+      },
+    },
+  })
+  /** Boris's answer from the pult takes the same path as his reply in Telegram. */
+  const answerQuestion = async (q: QuestionRow, text: string): Promise<string> => {
+    const a = { question: q, text, voice: false, at: new Date() }
+    if ((DRAFT_KINDS as string[]).includes(q.kind))
+      return pipeline ? pipeline.onDraftText(a) : 'Сара ещё запускается'
+    if (q.kind === 'conv_edit') {
+      const r = await onConvEdit(commandDeps(), a)
+      return typeof r === 'string' ? r : r.text
+    }
+    const ok = await db.transaction((tx) => markAnswered(tx, q, a))
+    return ok ? TEXTS.noted(text, await titleOf(db, q)) : TEXTS.notAnAnswer
   }
   const transcriber = createTranscriber({
     ffmpegBin: config.ffmpegBin,
@@ -226,6 +251,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     telegramApiRoot: config.telegramApiRoot,
     accounts: config.accounts,
     onPress,
+    answerQuestion,
     saveBidText: (p) =>
       pipeline
         ? pipeline.saveBidText(p)

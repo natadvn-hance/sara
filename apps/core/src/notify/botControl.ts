@@ -2,6 +2,7 @@ import type { TaskAction } from '@sara/shared'
 import type { Db } from '../db/client'
 import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { boundChat } from './binding'
+import { withNoticeLog } from './center'
 import type { Notifier } from './notifier'
 import { createTelegramRuntime, type TelegramRuntime } from './telegram'
 
@@ -47,13 +48,17 @@ export function createBotControl(d: {
     isBound: async () => (await boundChat(d.db)) !== null,
     botUsername: () => runtime?.botUsername() ?? null,
     lastError: () => runtime?.lastError() ?? null,
-    notifier: {
-      sendLeadCard: (c, o) => current().notifier.sendLeadCard(c, o),
-      closeLeadCard: (id, c) => current().notifier.closeLeadCard(id, c),
-      sendText: (t, o) => current().notifier.sendText(t, o),
-      sendButtons: (t, rows, o) => current().notifier.sendButtons(t, rows, o),
-      editText: async (id, t, rows) => current().notifier.editText?.(id, t, rows),
-      markDone: async (id, note) => current().notifier.markDone?.(id, note),
-    },
+    // Every send leaves a notice for the pult's bell (pult v2 design 6).
+    notifier: withNoticeLog(
+      {
+        sendLeadCard: (c, o) => current().notifier.sendLeadCard(c, o),
+        closeLeadCard: (id, c) => current().notifier.closeLeadCard(id, c),
+        sendText: (t, o) => current().notifier.sendText(t, o),
+        sendButtons: (t, rows, o) => current().notifier.sendButtons(t, rows, o),
+        editText: async (id, t, rows) => current().notifier.editText?.(id, t, rows),
+        markDone: async (id, note) => current().notifier.markDone?.(id, note),
+      },
+      d.db,
+    ),
   }
 }
