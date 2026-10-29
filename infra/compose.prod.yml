@@ -9,6 +9,7 @@ services:
     ports: ["443:443", "80:80"]
     environment:
       SARA_DOMAIN: ${SARA_DOMAIN}
+      SARA_DOMAIN_ALIASES: ${SARA_DOMAIN_ALIASES:-}
     volumes: [caddy-data:/data]
     depends_on: [core]
     networks: [edge]

@@ -356,7 +356,7 @@ function promiseIssues(text: string): CheckIssue[] {
 }
 
 /** The numbers of a text as keys («50 тысяч» is 50000), phones, times and dates left out. */
-const numberKeys = (s: string): Set<string> =>
+export const numberKeys = (s: string): Set<string> =>
   new Set(numbersIn(cutOut(s, true).rest).map((n) => n.key))
 
 /** The code checks of a reply (FR-CONV-4, M4 design 5.6): every problem found, each with a reason Boris can read. */

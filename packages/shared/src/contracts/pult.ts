@@ -181,7 +181,7 @@ export const ConvRow = z.object({
   group: z.enum(['waiting', 'boris', 'sara', 'closed']),
   last: z.string().nullable(),
   lastAt: at.nullable(),
-  lastSide: z.enum(['client', 'us']).nullable(),
+  lastSide: z.enum(['client', 'us', 'profi']).nullable(),
 })
 export type ConvRow = z.infer<typeof ConvRow>
 
@@ -190,7 +190,7 @@ export type ConvList = z.infer<typeof ConvList>
 
 export const ConvMessage = z.object({
   id: z.string(),
-  side: z.enum(['client', 'us']),
+  side: z.enum(['client', 'us', 'profi']),
   author: z.string(),
   text: z.string(),
   at,

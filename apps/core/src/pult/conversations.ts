@@ -6,7 +6,6 @@ import type { Db, DbOrTx } from '../db/client'
 import { chatMessage, conversation, convTurn, lead, mindIndex, task } from '../db/schema'
 import { getSetting } from '../settings/store'
 import { clientNames } from './feed'
-import { orderUrl } from './leads'
 
 /** «Переписки» (M7 design 5.4): who waits for Boris, whose client it is, the chat and the open draft. */
 
@@ -51,10 +50,11 @@ export async function conversationList(db: DbOrTx): Promise<ConvList> {
     ? await db.execute<{
         conversation_id: string
         side: string
+        author: string
         text: string
         sent_at: string
       }>(sql`
-        select distinct on (conversation_id) conversation_id, side, text, sent_at
+        select distinct on (conversation_id) conversation_id, side, author, text, sent_at
         from core.chat_message where conversation_id in ${ids}
         order by conversation_id, sent_at desc`)
     : { rows: [] }
@@ -81,18 +81,26 @@ export async function conversationList(db: DbOrTx): Promise<ConvList> {
           : 'sara'
     return {
       id: c.id,
-      name: names.get(c.id) ?? `чат ${c.chatId}`,
+      name: names.get(c.id) ?? `Чат ${c.chatId}`,
       title: c.orderId ? (titles.get(c.orderId) ?? null) : null,
       group,
       last: m ? m.text.slice(0, 160) : null,
       lastAt: m ? new Date(m.sent_at).toISOString() : null,
-      lastSide: m ? (m.side === 'client' ? 'client' : 'us') : null,
+      lastSide: m ? sideOf(m.side, m.author) : null,
     }
   })
   return { rows, drafting: await draftingNote(db) }
 }
 
 const authorOf = (a: string) => AUTHOR_RU[a as ChatAuthor] ?? a
+
+/** Profi.ru's own lines in a chat («Вернули на баланс…») are neither the client's nor ours. */
+const sideOf = (side: string, author: string): 'client' | 'us' | 'profi' =>
+  author === 'system' ? 'profi' : side === 'client' ? 'client' : 'us'
+
+/** The chat on Profi.ru (r.php, the chat page the node reads). */
+const chatUrl = (chatId: string) =>
+  `https://profi.ru/backoffice/r.php?id=${encodeURIComponent(chatId)}`
 
 export async function conversationView(db: Db, id: string): Promise<ConvView | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null
@@ -128,16 +136,16 @@ export async function conversationView(db: Db, id: string): Promise<ConvView | n
   }
   return {
     id: c.id,
-    name: names.get(id) ?? `чат ${c.chatId}`,
+    name: names.get(id) ?? `Чат ${c.chatId}`,
     owner: c.owner === 'boris' ? 'boris' : 'sara',
     closed: c.closedAt !== null,
     orderId: c.orderId,
     orderTitle: l?.title ?? null,
-    chatUrl: c.orderId ? orderUrl(c.orderId) : null,
+    chatUrl: chatUrl(c.chatId),
     note: c.borisNote,
     messages: msgs.map((m) => ({
       id: m.id,
-      side: m.side === 'client' ? 'client' : 'us',
+      side: sideOf(m.side, m.author),
       author: authorOf(m.author),
       text: m.text,
       at: m.sentAt,

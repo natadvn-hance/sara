@@ -1,4 +1,5 @@
 import { AnalystOutput, type ClientInfo, type ProfiOrder, plural } from '@sara/shared'
+import type { CaseHit } from '../conversation/types'
 import {
   analystProfileText,
   bidCeiling,
@@ -8,6 +9,7 @@ import {
 } from '../direction/reply'
 import type { Gateway } from '../gateway/gateway'
 import { fixClientText, greetingFor, moscowPartOfDay } from '../text/clientText'
+import { bidCaseProblems, bidCasesText, chosenCase } from './bidCases'
 import { firstName, namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
@@ -33,13 +35,13 @@ export type Draft = {
   priceRub: number | null
   attempts: number
   analysis: Analysis
-  /** The ids of the direction's cases that went into the text (their links are the library's). */
+  /** The ids of the cases that went into the text: the direction's (their links are the library's) and the mind's. */
   cases?: string[]
 }
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
   text: null
-  reason: 'no_answer' | 'too_long' | 'not_plain' | 'has_tag'
+  reason: 'no_answer' | 'too_long' | 'not_plain' | 'has_tag' | 'bad_case'
   attempts: number
   analysis: Analysis | null
 }
@@ -382,7 +384,14 @@ const chars = (n: number) => `${n} ${plural(n, ['знак', 'знака', 'зн�
 export async function writeDraft(
   gw: Gateway,
   o: DraftSource,
-  opts: { correlationId?: string; causationId?: string; profile?: ReplyProfile; now?: Date } = {},
+  opts: {
+    correlationId?: string
+    causationId?: string
+    profile?: ReplyProfile
+    /** Cases of the mind that fit the order (Boris, 28.10.2026); the text may tell one of them. */
+    mindCases?: CaseHit[]
+    now?: Date
+  } = {},
 ): Promise<Draft | DraftMiss> {
   // The direction's own format and cases (FR-LEAD-6); with none the numbers and the input are what they always were.
   const profile: ReplyProfile = opts.profile ?? { reply_format: null, cases: [] }
@@ -393,25 +402,35 @@ export async function writeDraft(
   // that fits the ceiling stays whole and the cases that do not fit are the ones left out.
   const bodyCeiling = ceiling - longest.length - 2
   const maxBody = Math.max(Math.min(MIN_BODY, bodyCeiling), bodyCeiling - caseReserve(profile))
-  const base = analystInput(o, maxBody, analystProfileText(profile))
+  const mindCases = opts.mindCases ?? []
+  const extra = [analystProfileText(profile), bidCasesText(mindCases)].filter((t) => t !== '')
+  const base = analystInput(o, maxBody, extra.join('\n\n'))
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
   let analysis: Analysis | null = null
   const redact = { names: namesToHide(o.client_name, o.client_info?.name) }
   for (let attempts = 1; attempts <= 2; attempts++) {
-    const { profile: _profile, now: _now, ...callOpts } = opts
+    const { profile: _profile, now: _now, mindCases: _cases, ...callOpts } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
     const text = draftOf(r.output.text, o.client_name, now)
     const longestLength = bidLengthMax(text, o.client_name)
+    // Only a bid offered the mind's cases is checked for them; one without stays as it always was.
+    const caseProblem =
+      body && mindCases.length > 0
+        ? bidCaseProblems(body, mindCases, r.output.case_ids)[0]
+        : undefined
     if (!body || NOT_PLAIN.test(body)) {
       reason = 'not_plain'
       input = `${base}\n\nПрошлый вариант был не простой текст. Напиши только сам текст отклика, без JSON и разметки.`
     } else if (BRACKETED.test(body)) {
       reason = 'has_tag'
       input = `${base}\n\nВ прошлом варианте остались метки в квадратных скобках. Напиши текст без них, словами.`
+    } else if (caseProblem) {
+      reason = 'bad_case'
+      input = `${base}\n\nВ прошлом варианте с кейсом что то не так: ${caseProblem}. Перепиши: кейс только из списка, по его правилам показа, или без кейса.`
     } else if (longestLength > ceiling) {
       reason = 'too_long'
       input = `${base}\n\nПрошлый вариант вышел ${chars(longestLength)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
@@ -419,6 +438,8 @@ export async function writeDraft(
       // The program puts the links in: the model only named the ids, and only the library's count. They are fitted
       // behind the longest greeting of the day, so the bid fits whenever it is sent.
       const hello = greetingOf(o.client_name, now)
+      // A case of the mind is told in the text itself, with no link: only its id is kept.
+      const told = chosenCase(mindCases, r.output.case_ids)
       const placed = placeCases(
         `${longest}${text.slice(hello.length)}`,
         profile,
@@ -429,7 +450,7 @@ export async function writeDraft(
         priceRub: priceWithin(r.output.price_rub, o.budget_text),
         attempts,
         analysis,
-        cases: placed.shown,
+        cases: told ? [...placed.shown, told.id] : placed.shown,
       }
     }
   }

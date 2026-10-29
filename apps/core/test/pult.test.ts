@@ -29,6 +29,8 @@ import {
   lead,
   leadScore,
   mindProposal,
+  modelCall,
+  question,
   setting,
   task,
 } from '../src/db/schema'
@@ -43,6 +45,7 @@ afterAll(close)
 
 let t: TestApp
 let presses: { taskId: string; action: TaskAction }[] = []
+let edits: { taskId: string; text: string | null; priceRub: number | null }[] = []
 const LEAD = '95000001'
 const LEAD_TASK = '11111111-1111-4111-8111-111111111111'
 const CONV = '22222222-2222-4222-8222-222222222222'
@@ -207,10 +210,15 @@ async function seed(d: Db) {
 beforeEach(async () => {
   await resetDb(db)
   presses = []
+  edits = []
   t = await buildTestApp(db, {}, undefined, {
     onPress: async (p) => {
       presses.push(p)
       return 'Принято.'
+    },
+    saveBidText: async (p) => {
+      edits.push(p)
+      return { saved: true, message: 'Записала.' }
     },
   })
   await t.app.inject({
@@ -413,5 +421,112 @@ describe('the pult acts only through the Telegram buttons', () => {
     const v = SettingsView.parse((await get('/api/settings')).body)
     expect(v.groups.flatMap((g) => g.rows).find((r) => r.key === 'money.daily_bids')?.value).toBe(7)
     expect(v.history[0]).toMatchObject({ key: 'outbound.bids', by: 'boris', value: false })
+  })
+})
+
+describe('the pult on the live data (28.10.2026)', () => {
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+  const ev = (type: string, entityKind: string, entityId: string, payload: object, m: number) => ({
+    id: newEventId(),
+    type,
+    v: 1,
+    entityKind,
+    entityId,
+    accountId: 'hance-marketing',
+    actor: 'sara',
+    occurredAt: minutesAgo(m),
+    correlationId: newEventId(),
+    payload,
+  })
+
+  it('FR-LEAD-9: the wallet is the newer of the account row and the balance the node last reported', async () => {
+    await db
+      .insert(event)
+      .values(ev('profi.balance_changed', 'account', 'hance-marketing', { balance_rub: 4415 }, 1))
+    const v = TodayView.parse((await get('/api/today')).body)
+    expect(v.wallet.balanceRub).toBe(4415)
+  })
+
+  it('FR-UI-6: a question names its order and leads to it; one left unanswered for days is not waited for', async () => {
+    await db.insert(question).values([
+      { id: newEventId(), kind: 'edit_draft', entityId: LEAD_TASK, askedAt: minutesAgo(3) },
+      { id: newEventId(), kind: 'why_skip', entityId: LEAD, askedAt: minutesAgo(3 * 24 * 60) },
+    ])
+    const items = TodayView.parse((await get('/api/today')).body).waiting.items.filter(
+      (i) => i.kind === 'question',
+    )
+    expect(items).toEqual([
+      expect.objectContaining({
+        title: 'Сара ждёт новый текст отклика',
+        sub: '«Стратегия продвижения для студии керамики», ответь в Telegram',
+        link: `/leads/${LEAD}`,
+      }),
+    ])
+  })
+
+  it('FR-UI-1: a lead card in the feed names its order, not «разговор»', async () => {
+    await db.insert(event).values(ev('card.sent', 'task', LEAD_TASK, { via: 'first' }, 1))
+    const feed = TodayView.parse((await get('/api/today')).body).feed
+    expect(feed.map((f) => f.text)).not.toContain('Изменена настройка setup.progress')
+    expect(feed.find((f) => f.text.startsWith('Прислала'))).toMatchObject({
+      text: 'Прислала тебе карточку «Стратегия продвижения для студии керамики»',
+      link: `/leads/${LEAD}`,
+    })
+  })
+
+  it("FR-CONV-11: a chat begun by old Sara is named from our greeting, Profi.ru's lines are its own", async () => {
+    const id = '44444444-4444-4444-8444-444444444444'
+    await db
+      .insert(conversation)
+      .values({ id, accountId: 'hance-marketing', chatId: '88690561', origin: 'v1' })
+    const msg = (n: string, side: string, author: string, text: string, m: number) => ({
+      id: newEventId(),
+      accountId: 'hance-marketing',
+      chatId: '88690561',
+      platformMessageId: n,
+      side,
+      author,
+      authorBasis: 'side',
+      text,
+      sentAt: minutesAgo(m),
+      source: 'live',
+      conversationId: id,
+    })
+    await db
+      .insert(chatMessage)
+      .values([
+        msg('d1', 'specialist', 'sara_v1', 'Дарья, добрый день! Заказ по-прежнему актуален?', 30),
+        msg('d2', 'specialist', 'system', 'Вернули на баланс 137 руб.', 20),
+      ])
+    const row = ConvList.parse((await get('/api/conversations')).body).rows.find((r) => r.id === id)
+    expect(row).toMatchObject({ name: 'Дарья', lastSide: 'profi' })
+    const v = ConvView.parse((await get(`/api/conversations/${id}`)).body)
+    expect(v.messages.map((m) => m.side)).toEqual(['us', 'profi'])
+    expect(v.chatUrl).toBe('https://profi.ru/backoffice/r.php?id=88690561')
+  })
+
+  it('FR-SET-5: Claude is well when the roles answered in the last hours, even with no probe today', async () => {
+    await db.insert(modelCall).values({
+      id: newEventId(),
+      role: 'scorer',
+      roleVersion: 1,
+      model: 'haiku',
+      priority: 'P1',
+      startedAt: minutesAgo(5),
+      durationMs: 900,
+      ok: true,
+    })
+    const v = SystemView.parse((await get('/api/system')).body)
+    expect(v.parts.find((p) => p.id === 'claude')).toMatchObject({ tone: 'ok', fix: null })
+  })
+
+  it('FR-LEAD-7: the bid text is edited from the pult only while the decision is open', async () => {
+    expect((await post(`/api/leads/${LEAD}/text`, {})).status).toBe(400)
+    const r = await post(`/api/leads/${LEAD}/text`, { text: 'Новый текст', priceRub: 50000 })
+    expect(r).toEqual({ status: 200, body: { message: 'Записала.' } })
+    expect(edits).toEqual([{ taskId: LEAD_TASK, text: 'Новый текст', priceRub: 50000 }])
+    await db.update(task).set({ state: 'resolved', resolution: 'skip' })
+    expect((await post(`/api/leads/${LEAD}/text`, { text: 'Ещё' })).status).toBe(409)
+    expect(edits).toHaveLength(1)
   })
 })

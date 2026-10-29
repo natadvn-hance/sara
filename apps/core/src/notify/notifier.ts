@@ -22,6 +22,11 @@ export type Notifier = {
   ): Promise<{ messageId: number }>
   /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
   typing?(): Promise<void>
+  /**
+   * A card decided in the pult (M7 design 2): its buttons give way to one line saying so, so no live button is left
+   * on a decided task. It never throws: a message Telegram will not edit is only logged.
+   */
+  markDone?(messageId: number, note: string): Promise<void>
   /** Changes a sent message without a sound (M4: the shadow card gets the real reply); rows keep its buttons. */
   editText?(
     messageId: number,

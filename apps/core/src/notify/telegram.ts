@@ -321,6 +321,16 @@ export function createTelegramRuntime(d: {
       async typing() {
         await bot.api.sendChatAction(await chat(), 'typing')
       },
+      async markDone(messageId, note) {
+        // One button that decides nothing: its press gets an empty answer (no task in its data).
+        await bot.api
+          .editMessageReplyMarkup(await chat(), messageId, {
+            reply_markup: { inline_keyboard: [[{ text: note, callback_data: 'done' }]] },
+          })
+          .catch((e: unknown) =>
+            console.error('card not marked', String((e as Error).message).slice(0, 200)),
+          )
+      },
       async editText(messageId, text, rows) {
         await bot.api
           .editMessageText(await chat(), messageId, text, {
