@@ -278,7 +278,9 @@ Code, и единственное, что их связывает, это кон
   `accepted`, «ждёт записи»). Состояние отдаёт `deploy {version, startedAt}`.
   Порог: `GET /api/settings/threshold/{accountId}?value=` (подсказка
   по оценкам 7 дней), `POST /api/settings/threshold/{accountId} {value,
-  expectedVersion}` создаёт новую версию правил.
+  expectedVersion}` создаёт новую версию правил. `GET /api/prefs` отдаёт
+  вкладки пульта (`pult.tabs`); при выключенном `pult.switch_on` паузы и
+  исходящие из пульта только выключаются.
 - Схема: `GET /api/openapi.json`, строится из схем zod пульта
   (`packages/shared/src/contracts/pult.ts`, `z.toJSONSchema`).
 
