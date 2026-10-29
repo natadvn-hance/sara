@@ -10,6 +10,7 @@ import {
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { account, directionVersion, lead, leadScore, task } from '../db/schema'
+import { FOLLOW_UP_EDIT_MAX } from '../leads/draft'
 import { dayOf } from '../leads/money'
 import { getSetting } from '../settings/store'
 
@@ -221,6 +222,8 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
       priceFromRub: l.draftPriceRub,
       priceToRub: l.draftPriceRub === null ? null : priceUpTo(l.draftPriceRub),
       limit: BID_LIMIT,
+      followUps: l.draftFollowUps ?? [],
+      followUpLimit: FOLLOW_UP_EDIT_MAX,
     },
     task: t ? { id: t.id, open: t.state === 'open', resolution: t.resolution } : null,
     obstacles: t?.state === 'open' ? await bidObstacles(db, l) : [],

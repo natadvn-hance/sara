@@ -128,7 +128,7 @@ describe('telegram bot', () => {
     expect(tg.sent[1]?.text).toContain(
       '<blockquote expandable>Нужно &lt;script&gt;alert(1)&lt;/script&gt; &amp; "всё" &gt; 5</blockquote>',
     )
-    expect(tg.sent[1]?.text).toContain('<b>Клиент:</b> Ира &lt;i&gt;')
+    expect(tg.sent[1]?.text).toContain('👤 <b>Ира &lt;i&gt;</b>')
   })
 
   it('FR-LEAD-7: a very long order text still goes in one message of at most 4096 characters', async () => {
@@ -263,20 +263,22 @@ describe('telegram bot', () => {
     expect(tg.sent[2]?.text).toBe('Бюджет 10-20 тысяч, а не - 5')
     expect(tg.sent[3]?.text.split('\n')).toEqual([
       '<b>🔔 Сайт-лендинг</b>',
-      'Краснодар · бюджет не указан · отклик 210\u00a0₽',
+      '📍 Краснодар',
+      '🎯 <b>балл 70</b>  ·  💰 бюджет не указан  ·  🧾 отклик 210\u00a0₽',
       '',
-      '<b>Клиент:</b> Ирина',
+      '👤 <b>Ирина</b>',
       '',
-      '<b>Заявка</b>',
-      '<blockquote expandable>Нужен сайт</blockquote>',
+      '<b>Почему подходит</b>',
+      '➕ Зрелый бизнес - понятная задача',
       '',
-      '<b>Балл 70</b> (правила v2). Зрелый бизнес - понятная задача',
-      '',
-      '<b>Черновик отклика</b>',
+      '<b>✍️ Отклик</b>',
       '<blockquote>Добрый день!',
       '',
       'Сайт - это просто</blockquote>',
       'Стоимость услуги: не указана. Без неё Профи.ру отклик не примет: пришли её через «Изменить» отдельной строкой, например «цена 5000».',
+      '',
+      '<b>📄 Текст заявки</b>',
+      '<blockquote expandable>Нужен сайт</blockquote>',
       '',
       '<a href="https://profi.ru/backoffice/n.php?o=90001">Открыть заявку на Профи.ру</a>',
     ])

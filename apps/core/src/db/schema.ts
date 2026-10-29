@@ -69,6 +69,11 @@ export const lead = core.table('lead', {
   draftAnalysis: jsonb('draft_analysis'),
   /** What the order page says about the client (contract ClientInfo), read when the order page is opened. */
   clientInfo: jsonb('client_info'),
+  /**
+   * The series after the bid (Boris, 29.10.2026): the texts of the one or two short messages that follow it into the
+   * order's chat, a case's link already in; null: none written (a lead from before the series, or none fitted).
+   */
+  draftFollowUps: jsonb('draft_follow_ups').$type<string[]>(),
 })
 
 export const account = core.table('account', {

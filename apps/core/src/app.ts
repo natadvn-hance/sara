@@ -34,6 +34,7 @@ import { createGateway, withoutLimitWait } from './gateway/gateway'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
+import { SERIES_DELAYS, type SeriesDeps, setSeriesDeps } from './leads/series'
 import { answerQuestion, handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
 import { titleOf } from './learning/questions'
@@ -79,6 +80,8 @@ export type StartOptions = {
   busyRetry?: { delayMs: number; tries: number }
   /** When an unsure bid is looked for on its order (default after 5 minutes, 30 minutes and 2 hours). */
   reconcileDelaysMs?: number[]
+  /** The waits of the series after a bid: before its first message and between the next ones (SERIES_DELAYS). */
+  seriesDelayMs?: SeriesDeps['delayMs']
   remindAfterMs?: () => Promise<number>
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** How often the learning jobs run (default a minute); tests call them directly instead. */
@@ -177,6 +180,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
   })
+  setSeriesDeps({ db, profi, delayMs: o.seriesDelayMs ?? SERIES_DELAYS })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   secretaryTools = {
     db,

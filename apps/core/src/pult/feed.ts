@@ -80,6 +80,11 @@ const SAYS: Record<string, (e: Row, n: Names) => Said | null> = {
     tone: 'bad',
     text: `Отклик на ${q(n.lead.get(e.entityId))} не ушёл`,
   }),
+  'bid.series_sent': (e, n) => ({
+    area: 'bid',
+    tone: 'ok',
+    text: `Написала вдогонку к отклику на ${q(n.lead.get(e.entityId))}`,
+  }),
   'conv.message_heard': (e, n) => ({
     area: 'conv',
     tone: 'wait',

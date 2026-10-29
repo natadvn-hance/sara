@@ -21,7 +21,12 @@ export type AppDeps = {
   /** The press of a Telegram button, for the pult's buttons: the same function, the same events (M7 design 2). */
   onPress?: (p: { taskId: string; action: TaskAction }) => Promise<string>
   /** The pult's edit of a bid text or its service price, as the answer after «Изменить» without a new card. */
-  saveBidText?: (p: { taskId: string; text: string | null; priceRub: number | null }) => Promise<{
+  saveBidText?: (p: {
+    taskId: string
+    text: string | null
+    priceRub: number | null
+    followUps?: string[] | null
+  }) => Promise<{
     saved: boolean
     message: string
   }>

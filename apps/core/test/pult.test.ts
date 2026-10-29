@@ -524,9 +524,21 @@ describe('the pult on the live data (28.10.2026)', () => {
     expect((await post(`/api/leads/${LEAD}/text`, {})).status).toBe(400)
     const r = await post(`/api/leads/${LEAD}/text`, { text: 'Новый текст', priceRub: 50000 })
     expect(r).toEqual({ status: 200, body: { message: 'Записала.' } })
-    expect(edits).toEqual([{ taskId: LEAD_TASK, text: 'Новый текст', priceRub: 50000 }])
+    expect(edits).toEqual([
+      { taskId: LEAD_TASK, text: 'Новый текст', priceRub: 50000, followUps: null },
+    ])
+    // The series after the bid alone is an edit too (Boris, 29.10.2026).
+    expect((await post(`/api/leads/${LEAD}/text`, { followUps: ['Из недавнего)'] })).status).toBe(
+      200,
+    )
+    expect(edits.at(-1)).toEqual({
+      taskId: LEAD_TASK,
+      text: null,
+      priceRub: null,
+      followUps: ['Из недавнего)'],
+    })
     await db.update(task).set({ state: 'resolved', resolution: 'skip' })
     expect((await post(`/api/leads/${LEAD}/text`, { text: 'Ещё' })).status).toBe(409)
-    expect(edits).toHaveLength(1)
+    expect(edits).toHaveLength(2)
   })
 })

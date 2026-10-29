@@ -1,3 +1,4 @@
+import { publicLink } from '../conversation/caseLink'
 import { caseIssues } from '../conversation/check/caseChecks'
 import { numberKeys } from '../conversation/check/codeChecks'
 import { caseQuery } from '../conversation/engine'
@@ -38,12 +39,18 @@ export async function casesForBid(
   }
 }
 
-/** The cases as the Analyst reads them, with the rules of showing each one; nothing when there are none. */
+/**
+ * The cases as the Analyst reads them, with the rules of showing each one and whether it has a public link for the
+ * series (the program puts the link in, the model never sees it); nothing when there are none.
+ */
 export function bidCasesText(cases: CaseHit[]): string {
   if (cases.length === 0) return ''
   return [
-    'Кейсы Hance, которые могут подойти к заказу (раздел «Кейс в отклике» твоих правил):',
-    ...cases.map(formatCase),
+    'Кейсы Hance, которые могут подойти к заказу (разделы «Кейс в отклике» и «Серия» твоих правил):',
+    ...cases.map(
+      (c) =>
+        `${formatCase(c)}\nПубличная ссылка: ${publicLink(c) ? 'есть, её можно показать в серии' : 'нет'}`,
+    ),
   ].join('\n\n')
 }
 

@@ -37,6 +37,7 @@ type Lead = {
   risk: string
   condition: string
   bid: string
+  followUps?: string[]
 }
 
 const LEADS: Lead[] = [
@@ -56,6 +57,10 @@ const LEADS: Lead[] = [
     risk: 'бюджет на сами каналы может оказаться меньше, чем на стратегию',
     condition: 'брать, если готова к созвону и к тому, что часть работы делает сама',
     bid: 'Вероника, добрый день! Если я правильно понял, то главное для студии сейчас не «стратегия на бумаге», а чтобы мастер-классы заполнялись без опоры на знакомых.\n\nМы в Hance начинаем с разбора, откуда уже приходят люди и почему они возвращаются, и только потом выбираем каналы. Предлагаю короткий созвон на 20 минут: покажу, как это выглядело у похожей студии, и скажу честно, какой бюджет на каналы нужен.',
+    followUps: [
+      'Из недавнего, студия, где тоже всё держалось на знакомых)\nhttps://example.com/keramika',
+      'Сделаем спокойно и без лишних трат, начнём с того, что уже работает)',
+    ],
   },
   {
     id: '95209981',
@@ -360,7 +365,14 @@ export function lead(id: string): LeadView | null {
         { label: 'Зачем нанимает', text: 'чтобы перестать зависеть от сарафана' },
       ],
     },
-    bid: { text: l.bid, priceFromRub: l.price, priceToRub: priceUpTo(l.price), limit: 500 },
+    bid: {
+      text: l.bid,
+      priceFromRub: l.price,
+      priceToRub: priceUpTo(l.price),
+      limit: 500,
+      followUps: l.followUps ?? [],
+      followUpLimit: 500,
+    },
     task: { id: `t-${l.id}`, open: true, resolution: null },
     obstacles: [],
   }

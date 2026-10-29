@@ -286,7 +286,7 @@ describe('held orders in the summary', () => {
     const card = tg.sent.at(-1)
     expect(card?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
     expect(card?.text).toContain(
-      '<b>Черновик отклика</b>\n<blockquote>Ирина, добрый день!\n\nПонимаю задачу\n\nКогда запуск?',
+      '<blockquote>Ирина, добрый день!\n\nПонимаю задачу\n\nКогда запуск?',
     )
     const [l] = await db.select().from(lead).where(eq(lead.id, held))
     expect(l?.status).toBe('queued')

@@ -96,6 +96,8 @@ export type ProfiSite = {
   logout(): void
   ban(): void
   offline(on: boolean): void
+  /** Pages hold a request that never ends, so «load» never fires (Profi.ru since 29.10.2026). */
+  hangLoad(on: boolean): void
   muteRtp(on: boolean): void
   changeLayout(): void
   close(): Promise<void>
@@ -206,6 +208,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   const sockets = new Set<Socket>()
   let banned = false
   let isOffline = false
+  let hang = false
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
@@ -245,7 +248,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       .end(
         (bidSettings.showWallet ? body : body.replace(/<span class="balance"[\s\S]*?<\/span>/, ''))
           .replaceAll('__BALANCE__', String(state.balance))
-          .replaceAll('__PRESENCE__', 'on'),
+          .replaceAll('__PRESENCE__', 'on') + (hang ? '<img src="/hang" alt="">' : ''),
       )
   const json = (res: ServerResponse, body: unknown, status = 200) =>
     res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
@@ -266,6 +269,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
 
   const site = createServer(async (req, res) => {
     if (isOffline) return req.socket.destroy()
+    // Never answered: the page that asked for it never fires «load».
+    if (new URL(req.url ?? '/', 'http://x').pathname === '/hang') return
     const url = new URL(req.url ?? '/', 'http://x')
     const p = url.pathname
     // Echo of the caller's IP, standing in for an outside service like ipify (no login needed).
@@ -489,6 +494,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     },
     ban() {
       banned = true
+    },
+    hangLoad(on) {
+      hang = on
     },
     offline(on) {
       isOffline = on
