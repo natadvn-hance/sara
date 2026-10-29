@@ -77,7 +77,7 @@ async function borisPressed(
 }
 
 /** The key of a message of the series after a bid: `series:<order>:<place>`, `:2` on its one try after the chat moved. */
-const SERIES_KEY = /^series:([^:]+):([01])(?::2)?$/
+const SERIES_KEY = /^series:([^:]+):([0-2])(?::2)?$/
 
 /**
  * Whether the message is one of the series Boris approved with his press on «Откликнуться» (Boris, 29.10.2026): the bid

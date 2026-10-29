@@ -344,12 +344,14 @@ export function priceOf(
   return { text: answer.trim(), priceRub: null }
 }
 
-/** A message of the series is short: Boris's own were a line or two (growth-points, 29.10.2026). */
-export const FOLLOW_UP_MAX = 200
+/** A message of the series is short: Boris's own were a line or three (growth-points, 29.10.2026). */
+export const FOLLOW_UP_MAX = 300
 /** Boris's own message of the series, edited on the pult: as long as he likes, within reason. */
 export const FOLLOW_UP_EDIT_MAX = 500
-/** At most this many messages follow a bid. */
+/** The Analyst writes at most this many messages after a bid. */
 export const FOLLOW_UPS_MAX = 2
+/** With the message of links in front of them, at most this many messages follow a bid. */
+export const SERIES_MAX = FOLLOW_UPS_MAX + 1
 
 /** Why a message of the series was left out. */
 export type FollowUpMiss = 'not_plain' | 'greeting' | 'link' | 'too_long' | 'bad_case' | 'no_link'
@@ -357,8 +359,9 @@ export type FollowUpMiss = 'not_plain' | 'greeting' | 'link' | 'too_long' | 'bad
 /**
  * The series the model wrote, checked as a bid is (Boris, 29.10.2026): plain text, the voice rules, short, no greeting
  * (the bid greeted), no link of its own (the program puts a case's public link in), and a case only from the list, by
- * its rules of showing. A message that fails is left out with its reason; the bid stays whatever the series does. A
- * case is shown by its public link on a line of its own, and each case once.
+ * its rules of showing. A message that fails is left out with its reason; the bid stays whatever the series does.
+ * The links of the cases shown go first, one message of their own, a link a line and each case once, and the words
+ * follow it («Из недавнего)»): so Boris sent them (growth-points, 29.10.2026).
  */
 export function followUpsOf(
   answer: AnalystOutput['follow_ups'],
@@ -366,6 +369,7 @@ export function followUpsOf(
 ): { texts: string[]; caseIds: string[]; dropped: FollowUpMiss[] } {
   const texts: string[] = []
   const caseIds: string[] = []
+  const links: string[] = []
   const dropped: FollowUpMiss[] = []
   for (const f of (answer ?? []).slice(0, FOLLOW_UPS_MAX)) {
     const text = plain(f.text).trim()
@@ -389,19 +393,22 @@ export function followUpsOf(
       dropped.push(miss)
       continue
     }
-    texts.push(link ? `${text}\n${link}` : text)
-    if (chosen && link) caseIds.push(chosen.id)
+    texts.push(text)
+    if (chosen && link) {
+      caseIds.push(chosen.id)
+      links.push(link)
+    }
   }
-  return { texts, caseIds, dropped }
+  return { texts: links.length > 0 ? [links.join('\n'), ...texts] : texts, caseIds, dropped }
 }
 
 /**
- * Boris's own series from the pult: the voice rules on each message, empty ones gone, at most two. Null when a message
- * is longer than a message of the series may be.
+ * Boris's own series from the pult: the voice rules on each message, empty ones gone, at most three. Null when a
+ * message is longer than a message of the series may be.
  */
 export function followUpsEdit(texts: readonly string[]): string[] | null {
   const kept = texts.map((t) => plain(t).trim()).filter((t) => t !== '')
-  if (kept.length > FOLLOW_UPS_MAX || kept.some((t) => t.length > FOLLOW_UP_EDIT_MAX)) return null
+  if (kept.length > SERIES_MAX || kept.some((t) => t.length > FOLLOW_UP_EDIT_MAX)) return null
   return kept
 }
 

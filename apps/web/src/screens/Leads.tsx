@@ -159,8 +159,8 @@ function Decide({ v }: { v: LeadView }) {
   )
 }
 
-/** The two places of the series after the bid (Boris, 29.10.2026): an empty one is not sent. */
-const FOLLOW_UP_SLOTS = ['first', 'second'] as const
+/** The places of the series after the bid (Boris, 29.10.2026): the links, then two lines; an empty one is not sent. */
+const FOLLOW_UP_SLOTS = ['first', 'second', 'third'] as const
 
 /** The bid text with its price range; while the decision is open it is edited here, the card in Telegram stays. */
 function BidCard({ v }: { v: LeadView }) {
@@ -297,8 +297,8 @@ function BidCard({ v }: { v: LeadView }) {
                   setDraft({
                     text: v.bid.text ?? '',
                     price: v.bid.priceFromRub === null ? '' : String(v.bid.priceFromRub),
-                    // Two places always: a series Sara did not write can be written here.
-                    followUps: [0, 1].map((k) => v.bid.followUps[k] ?? ''),
+                    // Every place always: a series Sara did not write can be written here.
+                    followUps: FOLLOW_UP_SLOTS.map((_slot, k) => v.bid.followUps[k] ?? ''),
                   })
                 }
               >

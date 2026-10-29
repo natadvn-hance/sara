@@ -12,7 +12,7 @@ import {
   recentOpenersText,
   writeDraft,
 } from '../src/leads/draft'
-import { seriesDelay } from '../src/leads/series'
+import { SERIES_DELAYS, seriesDelay } from '../src/leads/series'
 import { type LeadCard, leadCardText } from '../src/notify/cards'
 import { caseOf } from './helpers/conversation'
 
@@ -95,7 +95,7 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
     expect(text.match(/Публичная ссылка: нет/g)).toHaveLength(2)
   })
 
-  it('FR-LEAD-6: the program puts the link of the chosen case on its own line; the second message is a human line', () => {
+  it('FR-LEAD-6: the link of the chosen case goes first as its own message, the words follow it, as Boris sent them', () => {
     const r = followUpsOf(
       [
         { text: 'Из недавнего, похожая задача)', case_id: 'k-case-01' },
@@ -105,7 +105,8 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
     )
     expect(r).toEqual({
       texts: [
-        'Из недавнего, похожая задача)\nhttps://lisa-clinic.example/',
+        'https://lisa-clinic.example/',
+        'Из недавнего, похожая задача)',
         'Сделаем быстро, качественно и без лишних трат)',
       ],
       caseIds: ['k-case-01'],
@@ -133,7 +134,7 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
     expect(
       followUpsOf([{ text: 'Добрый день! Из недавнего)', case_id: null }], []).dropped,
     ).toEqual(['greeting'])
-    expect(followUpsOf([{ text: 'а'.repeat(201), case_id: null }], []).dropped).toEqual([
+    expect(followUpsOf([{ text: 'а'.repeat(301), case_id: null }], []).dropped).toEqual([
       'too_long',
     ])
     expect(
@@ -156,7 +157,7 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
       ],
       CASES,
     )
-    expect(twice.texts).toHaveLength(1)
+    expect(twice.texts).toEqual(['https://lisa-clinic.example/', 'Из недавнего)'])
     expect(twice.dropped).toEqual(['no_link'])
     // The contract allows two; anything more the code never sends.
     const three = followUpsOf(
@@ -179,7 +180,11 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
     ])
     const r = await writeDraft(gw, await order(), { now: NOON, mindCases: CASES })
     expect(r).toMatchObject({
-      followUps: ['Из недавнего, похожая задача)\nhttps://lisa-clinic.example/', 'Сделаем быстро)'],
+      followUps: [
+        'https://lisa-clinic.example/',
+        'Из недавнего, похожая задача)',
+        'Сделаем быстро)',
+      ],
       followUpCases: ['k-case-01'],
       followUpsDropped: [],
     })
@@ -190,9 +195,15 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
     })
   })
 
-  it('FR-LEAD-6: Boris edits the series on the pult: the voice rules, empty messages gone, two at most', () => {
+  it('FR-LEAD-6: Boris edits the series on the pult: the voice rules, empty messages gone, three at most', () => {
     expect(followUpsEdit([`Сделаем ${DASH} быстро.`, '  '])).toEqual(['Сделаем быстро'])
-    expect(followUpsEdit(['Раз', 'Два', 'Три'])).toBeNull()
+    // A link stays as it is.
+    expect(followUpsEdit(['https://lisa-clinic.ru/some-page', 'Из недавнего)'])).toEqual([
+      'https://lisa-clinic.ru/some-page',
+      'Из недавнего)',
+    ])
+    expect(followUpsEdit(['Раз', 'Два', 'Три'])).toEqual(['Раз', 'Два', 'Три'])
+    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре'])).toBeNull()
     expect(followUpsEdit(['а'.repeat(501)])).toBeNull()
     expect(followUpsEdit([])).toEqual([])
   })
@@ -239,7 +250,7 @@ describe('the series on the card and in time', () => {
     draft: {
       text: `Анна, добрый день!\n\n${BID}`,
       priceRub: 30000,
-      followUps: ['Из недавнего)\nhttps://lisa-clinic.example/', 'Сделаем быстро)'],
+      followUps: ['https://lisa-clinic.example/', 'Из недавнего)', 'Сделаем быстро)'],
     },
   }
 
@@ -249,7 +260,8 @@ describe('the series on the card and in time', () => {
     const series = html.indexOf('Вдогонку</b>  ·  через 1-2 минуты после отклика')
     expect(bid).toBeGreaterThan(-1)
     expect(series).toBeGreaterThan(bid)
-    expect(html).toContain('<blockquote>Из недавнего)\nhttps://lisa-clinic.example/</blockquote>')
+    expect(html).toContain('<blockquote>https://lisa-clinic.example/</blockquote>')
+    expect(html).toContain('<blockquote>Из недавнего)</blockquote>')
     expect(html).toContain('<blockquote>Сделаем быстро)</blockquote>')
     expect(html).toContain('Уйдёт тем же нажатием, если клиент ещё не ответил')
     // A bid without a series: no such block at all.
@@ -257,13 +269,17 @@ describe('the series on the card and in time', () => {
     expect(none).not.toContain('Вдогонку')
   })
 
-  it('FR-LEAD-6: each message waits a minute or two, the same moment for the same order on a resume', () => {
-    const range = [60_000, 120_000] as const
-    for (const n of [0, 1]) {
-      const ms = seriesDelay('95377001', n, range)
-      expect(ms).toBeGreaterThanOrEqual(60_000)
-      expect(ms).toBeLessThanOrEqual(120_000)
-      expect(seriesDelay('95377001', n, range)).toBe(ms)
+  it('FR-LEAD-6: the first message waits a minute or two, the next half a minute, the same moment on a resume', () => {
+    // Boris's own (growth-points, 29.10.2026): about 1.6 minutes after the bid, then 0.3-0.6 minutes apart.
+    expect(SERIES_DELAYS).toEqual({ first: [60_000, 120_000], next: [20_000, 40_000] })
+    for (const [n, [from, to]] of [
+      [0, SERIES_DELAYS.first],
+      [1, SERIES_DELAYS.next],
+    ] as const) {
+      const ms = seriesDelay('95377001', n, [from, to])
+      expect(ms).toBeGreaterThanOrEqual(from)
+      expect(ms).toBeLessThanOrEqual(to)
+      expect(seriesDelay('95377001', n, [from, to])).toBe(ms)
     }
   })
 })

@@ -11,8 +11,8 @@ import type { ProfiClient } from '../profi/client'
  * The series after a bid (Boris, 29.10.2026): «одного сообщения при отклике мало». Before Sara he wrote one to three
  * short messages within four minutes of his bid (a case or a link «из недавнего)», a promise, a smile), and every such
  * series got an answer. The Analyst writes the series with the bid, Boris approves both with one press, and this
- * durable process sends it into the order's chat once the bid is confirmed: a message a minute or two after the
- * other. Before each one the chat is read again: once the client has answered, or Boris wrote himself, the series
+ * durable process sends it into the order's chat once the bid is confirmed: the first message a minute or two after
+ * the bid, the next ones half a minute apart. Before each one the chat is read again: once the client has answered, or Boris wrote himself, the series
  * stops and the conversation goes on as usual. It goes through the message outbox, so the pause of messages to clients,
  * shadow and the line of drafts mode hold for it as for any message of Sara's, and each message goes once.
  */
@@ -20,9 +20,18 @@ import type { ProfiClient } from '../profi/client'
 export type SeriesDeps = {
   db: Db
   profi: ProfiClient
-  /** The wait before each message, from and to in ms; the moment within follows the order, the same on a resume. */
-  delayMs: readonly [number, number]
+  /**
+   * The waits, from and to in ms: before the first message (after the bid) and before each next one (after the one
+   * before). Boris's own: the second message 0.7-3.5 minutes after the bid, about 1.6, the third half a minute after
+   * it (growth-points, 29.10.2026). The moment within follows the order, the same on a resume.
+   */
+  delayMs: { first: SeriesWait; next: SeriesWait }
 }
+
+export type SeriesWait = readonly [number, number]
+
+/** The waits of the live series: a minute or two after the bid, then 20-40 seconds between the messages. */
+export const SERIES_DELAYS = { first: [60_000, 120_000], next: [20_000, 40_000] } as const
 
 let deps: SeriesDeps | null = null
 
@@ -54,11 +63,7 @@ export const seriesKey = (leadId: string, n: number, again = false) =>
  * The wait before message `n`, within [from, to]: drawn from the order number and the place, so a process that
  * resumes after a restart waits the moment it recorded and the series of two orders do not tick in step.
  */
-export function seriesDelay(
-  leadId: string,
-  n: number,
-  [from, to]: readonly [number, number],
-): number {
+export function seriesDelay(leadId: string, n: number, [from, to]: SeriesWait): number {
   let h = 2166136261
   for (const ch of `${leadId}:${n}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
   return from + (h % (Math.max(0, to - from) + 1))
@@ -165,7 +170,8 @@ async function sendOne(job: SeriesJob, n: number, sent: string[]): Promise<Serie
 async function runSeries(job: SeriesJob): Promise<void> {
   const sent: string[] = []
   for (let n = 0; n < job.followUps.length; n++) {
-    await DBOS.sleep(seriesDelay(job.leadId, n, d().delayMs))
+    const waits = d().delayMs
+    await DBOS.sleep(seriesDelay(job.leadId, n, n === 0 ? waits.first : waits.next))
     const stop = await sendOne(job, n, sent)
     if (stop) {
       await DBOS.runStep(() => journal(job, 'bid.series_stopped', { n, why: stop }), {

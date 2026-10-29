@@ -98,7 +98,7 @@ beforeAll(async () => {
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
-      seriesDelayMs: [400, 500],
+      seriesDelayMs: { first: [400, 500], next: [300, 400] },
       now: () => NOON,
     },
   )
