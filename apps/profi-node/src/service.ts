@@ -10,6 +10,7 @@ import type { NodeConfig } from './config'
 import { createNodeDb } from './db/client'
 import { migrateNode } from './db/migrate'
 import { createEyes } from './eyes/eyes'
+import { historyStore, startHistoryRead } from './eyes/history'
 import { type Insurance, startInsurance } from './eyes/insurance'
 import type { Parsers } from './eyes/parsers'
 import { activeParsers } from './eyes/profiParsers'
@@ -180,6 +181,15 @@ export async function startProfiService(
       inTab,
     })
     sendRuntimes.set(acc.id, { watch: a.watch, eyes, page: () => ab.page, inTab })
+    // The archive reader, once on the operator's flag `history_read` = «go» (src/eyes/history.ts).
+    const history = startHistoryRead({
+      ...historyStore(db, acc.id),
+      inTab,
+      page: () => ab.page,
+      chatsPath: parsers.paths.chats,
+      chatPath: (id, filter) =>
+        `${parsers.paths.chat(id)}${filter === 'archive' ? '&filter=archive' : ''}`,
+    })
 
     // The site is opened only from the account's own IP; until then the tab stays away from it.
     const start = async () => {
@@ -228,6 +238,7 @@ export async function startProfiService(
       clearInterval(egressTimer)
       watchedMaps.stop()
       calibration.stop()
+      history.stop()
       a.insurance?.stop()
       await ab.close()
     }
