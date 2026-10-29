@@ -11,6 +11,7 @@ import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { bidTextDetail } from './draft'
+import { startSeries } from './series'
 
 export type OutboxDeps = {
   db: Db
@@ -51,6 +52,11 @@ export type BidPayload = {
   priceRub: number
   /** The «Стоимость услуги» typed into the form; null or absent (rows from before M2) leaves it empty. */
   servicePriceRub?: number | null
+  /**
+   * The series after the bid as it was when Boris pressed (Boris, 29.10.2026): his one press approves it with the bid.
+   * Absent in rows from before the series; empty when the lead had none.
+   */
+  followUps?: string[]
   taskId?: string
 }
 
@@ -526,6 +532,16 @@ async function deliver(outboxId: string): Promise<void> {
     // What was spent, not the fee on the card.
     if (first)
       await DBOS.runStep(() => tell(TEXTS.bidSent(p.title, final.spent), p), { name: 'tellSent' })
+    // The series Boris approved with the bid follows it in a process of its own (Boris, 29.10.2026); only a bid this
+    // run confirmed has one. Behind a patch, so a run recorded before the series ends as it began.
+    const series = p.followUps ?? []
+    if (first && series.length > 0 && (await DBOS.patch('bid-series')))
+      await startSeries({
+        leadId: p.leadId,
+        accountId: p.accountId,
+        correlationId: p.correlationId,
+        followUps: series,
+      })
   } else if (final.kind === 'uncertain') {
     // The bid may be on the site: never say it failed, or Boris bids again by hand.
     await DBOS.runStep(() => markNotSent(outboxId, p, 'uncertain', 'UNCERTAIN'), {

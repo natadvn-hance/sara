@@ -62,8 +62,10 @@ const TextBody = z
   .object({
     text: z.string().trim().min(1).max(2000).nullable().default(null),
     priceRub: z.number().int().positive().max(100_000_000).nullable().default(null),
+    /** The whole series after the bid as Boris left it; absent, it stays as it is. */
+    followUps: z.array(z.string().max(2000)).max(5).nullable().default(null),
   })
-  .refine((b) => b.text !== null || b.priceRub !== null)
+  .refine((b) => b.text !== null || b.priceRub !== null || b.followUps !== null)
 const Period = z.object({ period: z.enum(['7', '30']).default('7') })
 const Year = z.object({ year: z.coerce.number().int().min(2020).max(2100).optional() })
 

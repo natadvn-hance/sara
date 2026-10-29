@@ -170,7 +170,7 @@ describe('the Analyst', () => {
     const props = Object.keys(
       (roleJsonSchema(AnalystOutput) as { properties: Record<string, unknown> }).properties,
     )
-    // The reading comes first, the text and the price last, and the optional case ids after them.
+    // The reading comes first, the text and the price last, and the optional case ids and the series after them.
     expect(props).toEqual([
       'reading',
       'hidden_need',
@@ -179,6 +179,7 @@ describe('the Analyst', () => {
       'text',
       'price_rub',
       'case_ids',
+      'follow_ups',
     ])
     const reading = (
       roleJsonSchema(AnalystOutput) as {
@@ -519,12 +520,14 @@ describe('the Analyst reads the direction (FR-LEAD-6)', () => {
     expect(d).toMatchObject({ cases: [], text: `Ирина, добрый день!\n\n${CLEAN}` })
   })
 
-  it('FR-LEAD-6: the Analyst case_ids come last in its schema and are not required', () => {
+  it('FR-LEAD-6: the Analyst case_ids and the series come last in its schema and are not required', () => {
     const schema = roleJsonSchema(AnalystOutput) as {
       properties: Record<string, unknown>
       required: string[]
     }
-    expect(Object.keys(schema.properties).at(-1)).toBe('case_ids')
+    // The series is written after the bid it follows (Boris, 29.10.2026).
+    expect(Object.keys(schema.properties).slice(-2)).toEqual(['case_ids', 'follow_ups'])
     expect(schema.required).not.toContain('case_ids')
+    expect(schema.required).not.toContain('follow_ups')
   })
 })

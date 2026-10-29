@@ -1,4 +1,6 @@
 import { AnalystOutput, type ClientInfo, type ProfiOrder, plural } from '@sara/shared'
+import { publicLink } from '../conversation/caseLink'
+import { CASE_LINK } from '../conversation/check/phrases'
 import type { CaseHit } from '../conversation/types'
 import {
   analystProfileText,
@@ -37,6 +39,12 @@ export type Draft = {
   analysis: Analysis
   /** The ids of the cases that went into the text: the direction's (their links are the library's) and the mind's. */
   cases?: string[]
+  /** The series after the bid (Boris, 29.10.2026): one or two short messages, a case's link already put in. */
+  followUps?: string[]
+  /** The ids of the cases the series shows by their links. */
+  followUpCases?: string[]
+  /** Why a message of the series the model wrote was left out; the bid itself stays. */
+  followUpsDropped?: FollowUpMiss[]
 }
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
@@ -336,6 +344,103 @@ export function priceOf(
   return { text: answer.trim(), priceRub: null }
 }
 
+/** A message of the series is short: Boris's own were a line or three (growth-points, 29.10.2026). */
+export const FOLLOW_UP_MAX = 300
+/** Boris's own message of the series, edited on the pult: as long as he likes, within reason. */
+export const FOLLOW_UP_EDIT_MAX = 500
+/** The Analyst writes at most this many messages after a bid. */
+export const FOLLOW_UPS_MAX = 2
+/** With the message of links in front of them, at most this many messages follow a bid. */
+export const SERIES_MAX = FOLLOW_UPS_MAX + 1
+
+/** Why a message of the series was left out. */
+export type FollowUpMiss = 'not_plain' | 'greeting' | 'link' | 'too_long' | 'bad_case' | 'no_link'
+
+/**
+ * The series the model wrote, checked as a bid is (Boris, 29.10.2026): plain text, the voice rules, short, no greeting
+ * (the bid greeted), no link of its own (the program puts a case's public link in), and a case only from the list, by
+ * its rules of showing. A message that fails is left out with its reason; the bid stays whatever the series does.
+ * The links of the cases shown go first, one message of their own, a link a line and each case once, and the words
+ * follow it («Из недавнего)»): so Boris sent them (growth-points, 29.10.2026).
+ */
+export function followUpsOf(
+  answer: AnalystOutput['follow_ups'],
+  cases: CaseHit[],
+): { texts: string[]; caseIds: string[]; dropped: FollowUpMiss[] } {
+  const texts: string[] = []
+  const caseIds: string[] = []
+  const links: string[] = []
+  const dropped: FollowUpMiss[] = []
+  for (const f of (answer ?? []).slice(0, FOLLOW_UPS_MAX)) {
+    const text = plain(f.text).trim()
+    const chosen = f.case_id ? (cases.find((c) => c.id === f.case_id) ?? null) : null
+    const link = chosen ? publicLink(chosen) : null
+    const miss: FollowUpMiss | null =
+      !text || NOT_PLAIN.test(text) || BRACKETED.test(text)
+        ? 'not_plain'
+        : greets(text)
+          ? 'greeting'
+          : CASE_LINK.test(text)
+            ? 'link'
+            : text.length > FOLLOW_UP_MAX
+              ? 'too_long'
+              : bidCaseProblems(text, cases, chosen ? [chosen.id] : undefined).length > 0
+                ? 'bad_case'
+                : f.case_id && (!link || caseIds.includes(f.case_id))
+                  ? 'no_link'
+                  : null
+    if (miss) {
+      dropped.push(miss)
+      continue
+    }
+    texts.push(text)
+    if (chosen && link) {
+      caseIds.push(chosen.id)
+      links.push(link)
+    }
+  }
+  return { texts: links.length > 0 ? [links.join('\n'), ...texts] : texts, caseIds, dropped }
+}
+
+/**
+ * Boris's own series from the pult: the voice rules on each message, empty ones gone, at most three. Null when a
+ * message is longer than a message of the series may be.
+ */
+export function followUpsEdit(texts: readonly string[]): string[] | null {
+  const kept = texts.map((t) => plain(t).trim()).filter((t) => t !== '')
+  if (kept.length > SERIES_MAX || kept.some((t) => t.length > FOLLOW_UP_EDIT_MAX)) return null
+  return kept
+}
+
+/** How many words of a bid's first sentence make its opening (Boris, 29.10: five bids opened alike on 28.10). */
+const OPENER_WORDS = 4
+
+/** The opening of a bid body: its first words, lower case, no punctuation; «» for a body without words. */
+export function openerOf(body: string): string {
+  const words = bodyOf(body)
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .match(/[\p{L}\p{N}]+/gu)
+  return (words ?? []).slice(0, OPENER_WORDS).join(' ')
+}
+
+/** The first sentence of each bid, for the Analyst to see what it opened with lately; at most five, no repeats. */
+export function recentOpenersText(bodies: readonly string[]): string {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const b of bodies) {
+    const first = (/^[^.!?\n]*/u.exec(bodyOf(b))?.[0] ?? '').trim()
+    const key = openerOf(first)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    lines.push(`«${first.length > 80 ? `${first.slice(0, 80)}…` : first}»`)
+    if (lines.length === 5) break
+  }
+  return lines.length > 0
+    ? `Последние отклики начинались так, начни этот по другому:\n${lines.join('\n')}`
+    : ''
+}
+
 /** The client as the order page shows them, in one line without the name (ADR-016); null when it shows nothing. */
 function clientLine(info: DraftSource['client_info']): string | null {
   if (!info) return null
@@ -390,6 +495,8 @@ export async function writeDraft(
     profile?: ReplyProfile
     /** Cases of the mind that fit the order (Boris, 28.10.2026); the text may tell one of them. */
     mindCases?: CaseHit[]
+    /** The texts of the latest bids, newest first: this one opens differently (Boris, 29.10.2026). */
+    recentBids?: string[]
     now?: Date
   } = {},
 ): Promise<Draft | DraftMiss> {
@@ -403,14 +510,44 @@ export async function writeDraft(
   const bodyCeiling = ceiling - longest.length - 2
   const maxBody = Math.max(Math.min(MIN_BODY, bodyCeiling), bodyCeiling - caseReserve(profile))
   const mindCases = opts.mindCases ?? []
-  const extra = [analystProfileText(profile), bidCasesText(mindCases)].filter((t) => t !== '')
+  const recent = opts.recentBids ?? []
+  const extra = [
+    analystProfileText(profile),
+    bidCasesText(mindCases),
+    recentOpenersText(recent),
+  ].filter((t) => t !== '')
   const base = analystInput(o, maxBody, extra.join('\n\n'))
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
   let analysis: Analysis | null = null
   const redact = { names: namesToHide(o.client_name, o.client_info?.name) }
+  // The program puts the links in: the model only named the ids, and only the library's count. They are fitted
+  // behind the longest greeting of the day, so the bid fits whenever it is sent.
+  const accept = (out: AnalystOutput, text: string, attempts: number): Draft => {
+    const hello = greetingOf(o.client_name, now)
+    // A case of the mind is told in the text itself, with no link: only its id is kept.
+    const told = chosenCase(mindCases, out.case_ids)
+    const placed = placeCases(`${longest}${text.slice(hello.length)}`, profile, out.case_ids ?? [])
+    const series = followUpsOf(out.follow_ups, mindCases)
+    return {
+      text: `${hello}${placed.text.slice(longest.length)}`,
+      priceRub: priceWithin(out.price_rub, o.budget_text),
+      attempts,
+      analysis: analysisOf(out),
+      cases: told ? [...placed.shown, told.id] : placed.shown,
+      followUps: series.texts,
+      followUpCases: series.caseIds,
+      followUpsDropped: series.dropped,
+    }
+  }
   for (let attempts = 1; attempts <= 2; attempts++) {
-    const { profile: _profile, now: _now, mindCases: _cases, ...callOpts } = opts
+    const {
+      profile: _profile,
+      now: _now,
+      mindCases: _cases,
+      recentBids: _recent,
+      ...callOpts
+    } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
@@ -434,25 +571,7 @@ export async function writeDraft(
     } else if (longestLength > ceiling) {
       reason = 'too_long'
       input = `${base}\n\nПрошлый вариант вышел ${chars(longestLength)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
-    } else {
-      // The program puts the links in: the model only named the ids, and only the library's count. They are fitted
-      // behind the longest greeting of the day, so the bid fits whenever it is sent.
-      const hello = greetingOf(o.client_name, now)
-      // A case of the mind is told in the text itself, with no link: only its id is kept.
-      const told = chosenCase(mindCases, r.output.case_ids)
-      const placed = placeCases(
-        `${longest}${text.slice(hello.length)}`,
-        profile,
-        r.output.case_ids ?? [],
-      )
-      return {
-        text: `${hello}${placed.text.slice(longest.length)}`,
-        priceRub: priceWithin(r.output.price_rub, o.budget_text),
-        attempts,
-        analysis,
-        cases: told ? [...placed.shown, told.id] : placed.shown,
-      }
-    }
+    } else return accept(r.output, text, attempts)
   }
   return { text: null, reason, attempts: 2, analysis }
 }

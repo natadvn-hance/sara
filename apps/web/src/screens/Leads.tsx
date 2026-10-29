@@ -159,13 +159,19 @@ function Decide({ v }: { v: LeadView }) {
   )
 }
 
+/** The places of the series after the bid (Boris, 29.10.2026): the links, then two lines; an empty one is not sent. */
+const FOLLOW_UP_SLOTS = ['first', 'second', 'third'] as const
+
 /** The bid text with its price range; while the decision is open it is edited here, the card in Telegram stays. */
 function BidCard({ v }: { v: LeadView }) {
   const { press, busy } = usePress()
-  const [draft, setDraft] = useState<{ text: string; price: string } | null>(null)
+  const [draft, setDraft] = useState<{ text: string; price: string; followUps: string[] } | null>(
+    null,
+  )
   const open = v.task?.open === true
   const text = draft ? draft.text : (v.bid.text ?? '')
   const over = text.length > v.bid.limit
+  const seriesOver = (draft?.followUps ?? []).some((f) => f.trim().length > v.bid.followUpLimit)
   const price = draft
     ? draft.price.trim() === ''
       ? null
@@ -211,15 +217,37 @@ function BidCard({ v }: { v: LeadView }) {
               style={{ padding: '10px 14px' }}
             />
           </label>
+          {FOLLOW_UP_SLOTS.map((slot, k) => (
+            <label key={slot} className="kv" htmlFor={`bid-follow-${slot}`}>
+              <span className="muted" style={{ fontSize: 13 }}>
+                Вдогонку {k + 1}: через 1-2 минуты после отклика, если клиент ещё не ответил. Пусто:
+                не отправлять
+              </span>
+              <textarea
+                id={`bid-follow-${slot}`}
+                className="quote"
+                rows={3}
+                value={draft.followUps[k] ?? ''}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    followUps: draft.followUps.map((x, j) => (j === k ? e.target.value : x)),
+                  })
+                }
+                style={{ font: 'inherit', color: 'inherit', resize: 'vertical' }}
+              />
+            </label>
+          ))}
           <div className="actions">
             <Btn
               look="primary"
               icon="check"
-              disabled={busy !== null || over || !priceOk || text.trim() === ''}
+              disabled={busy !== null || over || seriesOver || !priceOk || text.trim() === ''}
               onClick={async () => {
                 const ok = await press('text', `/api/leads/${encodeURIComponent(v.lead.id)}/text`, {
                   text: draft.text,
                   priceRub: price,
+                  followUps: draft.followUps.map((f) => f.trim()).filter((f) => f !== ''),
                 })
                 if (ok) setDraft(null)
               }}
@@ -230,7 +258,22 @@ function BidCard({ v }: { v: LeadView }) {
           </div>
         </div>
       ) : v.bid.text ? (
-        <div className="quote">{v.bid.text}</div>
+        <>
+          <div className="quote">{v.bid.text}</div>
+          {v.bid.followUps.length > 0 ? (
+            <div className="grid" style={{ gap: 8 }}>
+              <span className="muted" style={{ fontSize: 13 }}>
+                Вдогонку, через 1-2 минуты после отклика. Уйдёт тем же нажатием, если клиент ещё не
+                ответил
+              </span>
+              {v.bid.followUps.map((f) => (
+                <div key={f} className="quote" style={{ whiteSpace: 'pre-line' }}>
+                  {f}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </>
       ) : (
         <Empty title="Текста отклика ещё нет">Сара напишет его после разбора заявки.</Empty>
       )}
@@ -254,6 +297,8 @@ function BidCard({ v }: { v: LeadView }) {
                   setDraft({
                     text: v.bid.text ?? '',
                     price: v.bid.priceFromRub === null ? '' : String(v.bid.priceFromRub),
+                    // Every place always: a series Sara did not write can be written here.
+                    followUps: FOLLOW_UP_SLOTS.map((_slot, k) => v.bid.followUps[k] ?? ''),
                   })
                 }
               >

@@ -8,7 +8,7 @@ import {
   ProfiOrder,
   type TaskAction,
 } from '@sara/shared'
-import { and, desc, eq, isNull, ne } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm'
 import type { MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
@@ -43,6 +43,8 @@ import {
   type DraftMiss,
   type DraftSource,
   editOf,
+  FOLLOW_UP_EDIT_MAX,
+  followUpsEdit,
   priceOf,
   writeDraft,
 } from './draft'
@@ -85,9 +87,15 @@ export type LeadPipeline = {
   onDraftText(a: DraftAnswer): Promise<string>
   /**
    * The pult's edit of the bid text and or the «Стоимость услуги» (M7 design 6.2): the rules and events of
-   * `onDraftText`, without a question and without a new card (a press reads the lead as it is now).
+   * `onDraftText`, without a question and without a new card (a press reads the lead as it is now). `followUps` is
+   * the whole series after the bid as Boris left it (an empty list: no series); absent, the series stays.
    */
-  saveBidText(p: { taskId: string; text: string | null; priceRub: number | null }): Promise<{
+  saveBidText(p: {
+    taskId: string
+    text: string | null
+    priceRub: number | null
+    followUps?: string[] | null
+  }): Promise<{
     saved: boolean
     message: string
   }>
@@ -273,12 +281,24 @@ async function draftFor(
       ...rest,
       ...(profile ? { profile } : {}),
       mindCases,
+      recentBids: await recentBids(opts.accountId),
       now: greetingMoment(),
     })
   } catch (err) {
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
     return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
   }
+}
+
+/** The texts of the account's latest drafts, newest first: the Analyst opens the next bid differently. */
+async function recentBids(accountId: string): Promise<string[]> {
+  const rows = await d()
+    .db.select({ text: lead.draftText })
+    .from(lead)
+    .where(and(eq(lead.accountId, accountId), isNotNull(lead.draftText)))
+    .orderBy(desc(lead.createdAt))
+    .limit(5)
+  return rows.map((r) => r.text).filter((t): t is string => t !== null)
 }
 
 /** The day's card cap is spent: a shown order is held for the summary (the decision itself is taken under a lock). */
@@ -295,7 +315,11 @@ function storeDraft(
     if (dr.text !== null) {
       await tx
         .update(lead)
-        .set({ draftText: dr.text, draftPriceRub: dr.priceRub })
+        .set({
+          draftText: dr.text,
+          draftPriceRub: dr.priceRub,
+          draftFollowUps: dr.followUps && dr.followUps.length > 0 ? dr.followUps : null,
+        })
         .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
     }
     // The reading stays even when its text did not fit: it is about the client, not the wording.
@@ -323,6 +347,12 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
         attempts: dr.attempts,
         reason: null,
         cases: dr.cases ?? [],
+        // The series is counted, never its text (ADR-016); a bid the Analyst wrote none for journals as before.
+        ...((dr.followUps?.length ?? 0) + (dr.followUpsDropped?.length ?? 0) > 0 && {
+          follow_ups: dr.followUps?.length ?? 0,
+          follow_up_cases: dr.followUpCases ?? [],
+          follow_ups_dropped: dr.followUpsDropped ?? [],
+        }),
       }
     : {
         drafted: false,
@@ -608,6 +638,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       ? {
           text: bidTextAt(draft.text, withPage.client_name, greetingMoment()),
           priceRub: draft.priceRub,
+          followUps: draft.followUps ?? [],
         }
       : null,
     analysis: cardAnalysis(draft?.analysis),
@@ -701,7 +732,12 @@ async function cardOfFound(
     reminder,
     // The card shows the bid as it would go out now: the greeting of this hour, the voice rules applied. Nothing says
     // that the greeting may change; it is built again when the bid is sent.
-    draft: l.draftText ? draftOnCard(l.draftText, l.clientName, l.draftPriceRub) : null,
+    draft: l.draftText
+      ? {
+          ...draftOnCard(l.draftText, l.clientName, l.draftPriceRub),
+          followUps: l.draftFollowUps ?? [],
+        }
+      : null,
     analysis: cardAnalysis(l.draftAnalysis),
   }
 }
@@ -999,6 +1035,7 @@ async function saveBidText(p: {
   taskId: string
   text: string | null
   priceRub: number | null
+  followUps?: string[] | null
 }): Promise<{ saved: boolean; message: string }> {
   const found = await leadOfTask(p.taskId)
   if (found?.task.kind !== 'lead_decision' || found.task.state !== 'open')
@@ -1011,6 +1048,11 @@ async function saveBidText(p: {
     if (longest > BID_TEXT_MAX)
       return { saved: false, message: TEXTS.draftTooLong(longest, longest !== shown) }
   }
+  const series = p.followUps == null ? null : followUpsEdit(p.followUps)
+  if (p.followUps != null && series === null)
+    return { saved: false, message: TEXTS.followUpsTooLong(FOLLOW_UP_EDIT_MAX) }
+  const before = l.draftFollowUps ?? []
+  const seriesChanged = series !== null && series.join('\n\n') !== before.join('\n\n')
   const at = new Date()
   await d().db.transaction(async (tx) => {
     // A question still open after «Изменить» in Telegram is answered by this edit.
@@ -1023,6 +1065,22 @@ async function saveBidText(p: {
           before: l.draftText === null ? null : bodyOf(l.draftText),
           after: bodyOf(next),
           voice: false,
+        }),
+      )
+    }
+    if (series !== null && seriesChanged) {
+      await tx
+        .update(lead)
+        .set({ draftFollowUps: series.length > 0 ? series : null })
+        .where(eq(lead.id, l.id))
+      // Like the bid text: what Sara wrote and what Boris made of it, for the lessons (never the client's words).
+      await appendEvent(
+        tx,
+        ev('draft.edited', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
+          before: before.join('\n\n'),
+          after: series.join('\n\n'),
+          voice: false,
+          part: 'follow_ups',
         }),
       )
     }
@@ -1043,7 +1101,9 @@ async function saveBidText(p: {
       ? TEXTS.draftAndPriceSaved(l.title)
       : next !== null
         ? TEXTS.draftSaved(l.title)
-        : TEXTS.priceSaved(l.title)
+        : p.priceRub !== null
+          ? TEXTS.priceSaved(l.title)
+          : TEXTS.followUpsSaved(l.title)
   return { saved: true, message }
 }
 
@@ -1247,6 +1307,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
               title: l.title,
               priceRub: now.bidPriceRub,
               servicePriceRub: now.draftPriceRub,
+              // The same press approves the series as it stands now (Boris, 29.10.2026).
+              followUps: now.draftFollowUps ?? [],
               taskId,
             })
             // The order went to another direction after all: rolled back like a refused spend, the task stays open.

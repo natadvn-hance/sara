@@ -165,6 +165,10 @@ export const LeadView = z.object({
     priceFromRub: rub.nullable(),
     priceToRub: rub.nullable(),
     limit: z.number().int(),
+    /** The series after the bid (Boris, 29.10.2026): the one or two messages the same press sends after it. */
+    followUps: z.array(z.string()).default([]),
+    /** The most characters a message of the series may have when Boris edits it. */
+    followUpLimit: z.number().int().default(500),
   }),
   task: z
     .object({ id: z.string(), open: z.boolean(), resolution: z.string().nullable() })

@@ -65,6 +65,16 @@ export const AnalystOutput = z.object({
    * ids against the library. Last in the schema and not required: a direction without cases never sees the field.
    */
   case_ids: z.array(z.string()).max(3).optional(),
+  /**
+   * The series after the bid (Boris, 29.10.2026): one or two short messages that go into the order's chat a minute or
+   * two after the bid, as he wrote himself. The first may show one case of the list by its public link (the program
+   * puts the link in under `case_id`), the second is a short human line. Not required: a bid without a series is
+   * a bid as before.
+   */
+  follow_ups: z
+    .array(z.object({ text: z.string().min(1).max(300), case_id: z.string().nullable() }))
+    .max(2)
+    .optional(),
 })
 export type AnalystOutput = z.infer<typeof AnalystOutput>
 
