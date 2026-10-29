@@ -3,55 +3,64 @@ import { api, go, type SetupState } from './api'
 import { sectionOf, usePath } from './app/router'
 import { MoreScreen, Shell } from './app/Shell'
 import { AccountsPage } from './pages/Accounts'
-import { CalibrationPage } from './pages/Calibration'
-import { DirectionPage } from './pages/Direction'
 import { LiveScreenPage } from './pages/LiveScreen'
 import { LoginPage } from './pages/Login'
-import { OnboardingPage } from './pages/Onboarding'
-import { RecomputePage } from './pages/Recompute'
 import { SetupPage } from './pages/Setup'
 import { AnalyticsScreen } from './screens/Analytics'
-import { ConversationsScreen } from './screens/Conversations'
+import { ClientsScreen } from './screens/Clients'
 import { HealthScreen } from './screens/Health'
+import { InboxScreen } from './screens/Inbox'
+import { JournalScreen } from './screens/Journal'
 import { LeadsScreen } from './screens/Leads'
+import { MeetingsScreen } from './screens/Meetings'
 import { MindScreen } from './screens/Mind'
+import { NoticesScreen } from './screens/Notices'
+import { SearchScreen } from './screens/Search'
 import { SettingsScreen } from './screens/Settings'
 import { TodayScreen } from './screens/Today'
 
-/** The first page: the wizard until the setup is done, then «Сегодня». */
+/** The first page: the wizard until the setup is done, then the Inbox (pult v2 design 2). */
 function Home() {
   useEffect(() => {
     api<SetupState>('/api/setup')
-      .then((s) => go(s.next === 'done' ? '/today' : '/setup'))
+      .then((s) => go(s.next === 'done' ? '/inbox' : '/setup'))
       .catch(() => go('/setup'))
   }, [])
   return <p className="p-4">Загружаю…</p>
 }
 
+/** The accounts' own pages: the live login screen keeps its address (links already sent in Telegram). */
 function Accounts({ path }: { path: string }) {
   const login = /^\/accounts\/([^/]+)\/login/.exec(path)
   if (login?.[1]) return <LiveScreenPage accountId={decodeURIComponent(login[1])} />
-  const calibration = /^\/accounts\/([^/]+)\/direction\/calibration\/?$/.exec(path)
-  if (calibration?.[1]) return <CalibrationPage accountId={decodeURIComponent(calibration[1])} />
-  const recompute = /^\/accounts\/([^/]+)\/direction\/recompute\/?$/.exec(path)
-  if (recompute?.[1]) return <RecomputePage accountId={decodeURIComponent(recompute[1])} />
-  const onboarding = /^\/accounts\/([^/]+)\/direction\/onboarding\/?$/.exec(path)
-  if (onboarding?.[1]) return <OnboardingPage accountId={decodeURIComponent(onboarding[1])} />
-  const direction = /^\/accounts\/([^/]+)\/direction\/?$/.exec(path)
-  if (direction?.[1]) return <DirectionPage accountId={decodeURIComponent(direction[1])} />
+  const direction = /^\/accounts\/([^/]+)\/direction/.exec(path)
+  if (direction?.[1]) {
+    go(`/settings/rules/${direction[1]}${path.replace(/^\/accounts\/[^/]+\/direction/, '')}`)
+    return null
+  }
   return <AccountsPage />
 }
 
 const SCREENS: Record<string, (path: string) => ReactNode> = {
-  today: () => <TodayScreen />,
+  inbox: () => <InboxScreen />,
   leads: () => <LeadsScreen />,
-  conversations: () => <ConversationsScreen />,
-  analytics: () => <AnalyticsScreen />,
+  clients: () => <ClientsScreen />,
+  today: () => <TodayScreen />,
+  meetings: () => <MeetingsScreen />,
   mind: () => <MindScreen />,
-  settings: () => <SettingsScreen />,
+  settings: (path) =>
+    path.startsWith('/accounts') ? <Accounts path={path} /> : <SettingsScreen />,
   health: () => <HealthScreen />,
-  accounts: (path) => <Accounts path={path} />,
+  journal: () => <JournalScreen />,
+  notices: () => <NoticesScreen />,
+  search: () => <SearchScreen />,
+  analytics: () => <AnalyticsScreen />,
   more: () => <MoreScreen />,
+  // The old address of the chats keeps opening the clients.
+  conversations: (path) => {
+    go(path.replace('/conversations', '/clients'))
+    return null
+  },
 }
 
 export function App() {
