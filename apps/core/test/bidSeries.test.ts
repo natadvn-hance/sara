@@ -246,7 +246,7 @@ describe('the series on the card and in time', () => {
   it('FR-LEAD-6: the card shows the series under the bid, each message on its own, approved by the same press', () => {
     const html = leadCardText(card)
     const bid = html.indexOf('Анна, добрый день!')
-    const series = html.indexOf('Вдогонку, через 1-2 минуты после отклика')
+    const series = html.indexOf('Вдогонку</b>  ·  через 1-2 минуты после отклика')
     expect(bid).toBeGreaterThan(-1)
     expect(series).toBeGreaterThan(bid)
     expect(html).toContain('<blockquote>Из недавнего)\nhttps://lisa-clinic.example/</blockquote>')
