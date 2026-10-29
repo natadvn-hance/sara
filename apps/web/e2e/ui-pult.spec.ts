@@ -281,3 +281,22 @@ test('FR-ANL-5, FR-MEET-4: a contract with its sum is written on the client and 
   await expect(page.getByText('Созвон с Вероникой')).toBeVisible()
   await sql(`delete from core.meeting where title = 'Созвон с Вероникой'`)
 })
+
+test('FR-OPS-1: «Тратит деньги» turns on only with the second press and off the same way', async ({
+  page,
+}) => {
+  await page.goto('/settings')
+  const sw = page.getByRole('button', { name: 'Тратит деньги на отклики: выключено' })
+  await sw.click()
+  await page.getByRole('button', { name: 'Нет' }).click()
+  await expect(sw).toBeVisible()
+  await sw.click()
+  await page.getByRole('button', { name: 'Да, включить' }).click()
+  await expect(page.getByRole('status')).toHaveText('Сохранила.')
+  // Back to the pause the other specs expect.
+  await page.getByRole('button', { name: 'Тратит деньги на отклики: включено' }).click()
+  await page.getByRole('button', { name: 'Да, выключить' }).click()
+  await expect(
+    page.getByRole('button', { name: 'Тратит деньги на отклики: выключено' }),
+  ).toBeVisible()
+})
