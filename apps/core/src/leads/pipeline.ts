@@ -347,10 +347,12 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
         attempts: dr.attempts,
         reason: null,
         cases: dr.cases ?? [],
-        // The series is counted, never its text (ADR-016).
-        follow_ups: dr.followUps?.length ?? 0,
-        follow_up_cases: dr.followUpCases ?? [],
-        follow_ups_dropped: dr.followUpsDropped ?? [],
+        // The series is counted, never its text (ADR-016); a bid the Analyst wrote none for journals as before.
+        ...((dr.followUps?.length ?? 0) + (dr.followUpsDropped?.length ?? 0) > 0 && {
+          follow_ups: dr.followUps?.length ?? 0,
+          follow_up_cases: dr.followUpCases ?? [],
+          follow_ups_dropped: dr.followUpsDropped ?? [],
+        }),
       }
     : {
         drafted: false,

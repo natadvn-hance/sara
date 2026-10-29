@@ -214,25 +214,13 @@ describe('the bid opens differently from the latest ones (Boris, 29.10.2026)', (
     expect(recentOpenersText([])).toBe('')
   })
 
-  it('FR-LEAD-6: a bid that opens like a recent one is asked for once more, and the new opening is taken', async () => {
-    const { gw, inputs } = stubGateway([
-      answer('Если я правильно понял, то клинике важно начать запись.\n\nКогда хотите начать?'),
-      answer(BID),
-    ])
+  it('FR-LEAD-6: the openings of the latest bids go into the Analyst input, without a second call', async () => {
+    const { gw, inputs } = stubGateway([answer(BID)])
     const r = await writeDraft(gw, await order(), { now: NOON, recentBids: [SAME] })
+    expect(inputs).toHaveLength(1)
     expect(inputs[0]).toContain('Последние отклики начинались так')
-    expect(inputs[1]).toContain('начинался так же, как один из последних откликов')
+    expect(inputs[0]).toContain('«Если я правильно понял, то студии важно заполнить мастер классы»')
     expect(r.text).toContain('Прочитал описание')
-    expect(r.attempts).toBe(2)
-  })
-
-  it('FR-LEAD-6: the repeat never costs the bid: a second answer that misses leaves the first one', async () => {
-    const { gw } = stubGateway([
-      answer('Если я правильно понял, то клинике важно начать запись.\n\nКогда хотите начать?'),
-      null,
-    ])
-    const r = await writeDraft(gw, await order(), { now: NOON, recentBids: [SAME] })
-    expect(r.text).toContain('Если я правильно понял, то клинике')
   })
 })
 

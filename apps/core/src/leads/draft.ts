@@ -49,7 +49,7 @@ export type Draft = {
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
   text: null
-  reason: 'no_answer' | 'too_long' | 'not_plain' | 'has_tag' | 'bad_case' | 'same_opener'
+  reason: 'no_answer' | 'too_long' | 'not_plain' | 'has_tag' | 'bad_case'
   attempts: number
   analysis: Analysis | null
 }
@@ -509,7 +509,6 @@ export async function writeDraft(
     bidCasesText(mindCases),
     recentOpenersText(recent),
   ].filter((t) => t !== '')
-  const used = new Set(recent.map(openerOf).filter((o) => o !== ''))
   const base = analystInput(o, maxBody, extra.join('\n\n'))
   let input = base
   let reason: DraftMiss['reason'] = 'no_answer'
@@ -534,8 +533,6 @@ export async function writeDraft(
       followUpsDropped: series.dropped,
     }
   }
-  // A good bid that only opened like a recent one: kept, should the answer asked for instead miss.
-  let sameOpener: Draft | null = null
   for (let attempts = 1; attempts <= 2; attempts++) {
     const {
       profile: _profile,
@@ -545,10 +542,7 @@ export async function writeDraft(
       ...callOpts
     } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })
-    if (!r.ok)
-      return sameOpener
-        ? { ...sameOpener, attempts }
-        : { text: null, reason: 'no_answer', attempts, analysis }
+    if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
     const text = draftOf(r.output.text, o.client_name, now)
@@ -570,12 +564,7 @@ export async function writeDraft(
     } else if (longestLength > ceiling) {
       reason = 'too_long'
       input = `${base}\n\nПрошлый вариант вышел ${chars(longestLength)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
-    } else if (attempts === 1 && used.has(openerOf(body))) {
-      // Asked again once (Boris, 29.10.2026: five bids of 28.10 opened alike); the second answer is taken as it opens.
-      sameOpener = accept(r.output, text, attempts)
-      reason = 'same_opener'
-      input = `${base}\n\nПрошлый вариант начинался так же, как один из последних откликов. Начни по другому, под этот заказ.`
     } else return accept(r.output, text, attempts)
   }
-  return sameOpener ? { ...sameOpener, attempts: 2 } : { text: null, reason, attempts: 2, analysis }
+  return { text: null, reason, attempts: 2, analysis }
 }

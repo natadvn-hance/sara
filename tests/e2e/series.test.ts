@@ -156,6 +156,12 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
       FIRST,
       SECOND,
     ])
+    // The journal counts the series and the case it shows, never its text (ADR-016).
+    expect((await events('lead.drafted', id))[0]).toMatchObject({
+      follow_ups: 2,
+      follow_up_cases: [],
+      follow_ups_dropped: [],
+    })
     press()
     await until(() => sentTo(id).length === 2)
     expect(fake.bids).toHaveLength(1)
