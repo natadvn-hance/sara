@@ -1,32 +1,100 @@
 @import "tailwindcss";
 
-/* Hance tokens (docs/ux/design-system.md, section 2) */
+/*
+ * Design tokens of the pult, taken from the Sara landing (apps/site, 28.10.2026): a warm-black field lit by a coral
+ * glow, frosted cards with hairline borders, light large numbers in the coral gradient, pill buttons, Onest for text,
+ * Cormorant Garamond italic for one accent word, Martian Mono for times and figures. Dark is the landing's own look;
+ * light uses the landing's paper mockup colors. The old names (--accent, --surface, --text, --muted...) stay, so the
+ * screens built before M7 take the same look.
+ */
 :root {
-  --accent: #ec4b25;
-  --bg: #faf9f7;
+  --coral: #ff6a3d;
+  --amber: #ffb35c;
+  --rose: #ff4d7d;
+  --mint: #5ee6a8;
+  --grad: linear-gradient(100deg, #ffc27a 0%, #ff6a3d 48%, #ff4d7d 100%);
+  --grad-btn: linear-gradient(180deg, #ff8d5c 0%, #f2471f 100%);
+  --grad-glyph: linear-gradient(145deg, #ffbd73 0%, #ff5f37 46%, #c8264f 100%);
+  --font-sans: "Onest", "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --ease: cubic-bezier(0.22, 0.75, 0.2, 1);
+  --radius: 22px;
+  --radius-sm: 14px;
+  --gutter: 16px;
+  --sidebar: 248px;
+
+  /* dark, the landing */
+  --bg: #0c0806;
+  --bg-raised: #150d0a;
+  --surface: rgba(255, 238, 228, 0.035);
+  --surface-2: rgba(255, 238, 228, 0.065);
+  --text: #f8f2ed;
+  --text-2: rgba(248, 242, 237, 0.72);
+  --muted: rgba(248, 242, 237, 0.58);
+  --border: rgba(255, 214, 196, 0.1);
+  --border-2: rgba(255, 214, 196, 0.18);
+  --accent: #ff6a3d;
+  --accent-ink: #ff8a62;
+  --ok: #5ee6a8;
+  --warn: #ffb35c;
+  --danger: #ff5f6d;
+  --info: #8fb8ff;
+  --glow: rgba(255, 106, 61, 0.16);
+  --shadow: 0 24px 50px -28px rgba(0, 0, 0, 0.9);
+  --bubble-us: rgba(255, 106, 61, 0.12);
+  color-scheme: dark;
+}
+
+/* light, the landing's paper mockups */
+:root[data-theme="light"] {
+  --bg: #f1ece7;
+  --bg-raised: #e9e2db;
   --surface: #ffffff;
-  --text: #1a1a1a;
-  --muted: #6b6b6b;
-  --border: #e6e3df;
-  --ok: #1f8a4c;
-  --warn: #b7791f;
-  --danger: #c53030;
+  --surface-2: #faf7f4;
+  --text: #1e1a17;
+  --text-2: #4a433e;
+  --muted: #6c645e;
+  --border: #e3dbd3;
+  --border-2: #d6ccc2;
+  --accent: #f2471f;
+  --accent-ink: #c2391a;
+  --ok: #1f8a57;
+  --warn: #a8640f;
+  --danger: #c8264f;
   --info: #2b6cb0;
+  --glow: rgba(255, 106, 61, 0.1);
+  --shadow: 0 18px 40px -28px rgba(60, 30, 10, 0.35);
+  --bubble-us: #fff1ea;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f1ece7;
+    --bg-raised: #e9e2db;
+    --surface: #ffffff;
+    --surface-2: #faf7f4;
+    --text: #1e1a17;
+    --text-2: #4a433e;
+    --muted: #6c645e;
+    --border: #e3dbd3;
+    --border-2: #d6ccc2;
+    --accent: #f2471f;
+    --accent-ink: #c2391a;
+    --ok: #1f8a57;
+    --warn: #a8640f;
+    --danger: #c8264f;
+    --info: #2b6cb0;
+    --glow: rgba(255, 106, 61, 0.1);
+    --shadow: 0 18px 40px -28px rgba(60, 30, 10, 0.35);
+    --bubble-us: #fff1ea;
+    color-scheme: light;
+  }
+}
+
+@media (min-width: 768px) {
   :root {
-    --accent: #ff6a45;
-    --bg: #121212;
-    --surface: #1c1c1c;
-    --text: #f2f2f2;
-    --muted: #a0a0a0;
-    --border: #2c2c2c;
-    --ok: #3fbf73;
-    --warn: #e0a43a;
-    --danger: #f06060;
-    --info: #5a9be0;
-    color-scheme: dark;
+    --gutter: 28px;
   }
 }
 
@@ -40,19 +108,36 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
-  --font-sans: "Golos Text", system-ui, -apple-system, sans-serif;
-  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-sans: "Onest", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Onest", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Martian Mono", ui-monospace, Menlo, monospace;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  background: var(--bg);
+  min-height: 100dvh;
+  background: radial-gradient(900px 420px at 50% -160px, var(--glow), transparent 70%), var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
+  font-size: 15.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+::selection {
+  background: rgba(255, 106, 61, 0.38);
 }

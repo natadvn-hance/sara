@@ -5,6 +5,7 @@ import type {
   ReplyFormat,
   StepState,
 } from '@sara/shared'
+import { navigate } from './app/router'
 
 export class ApiError extends Error {
   constructor(
@@ -65,8 +66,7 @@ export function go(path: string): void {
       window.sessionStorage.setItem(AFTER_LOGIN, window.location.pathname)
     } catch {}
   }
-  window.history.pushState(null, '', path)
-  window.dispatchEvent(new PopStateEvent('popstate'))
+  navigate(path)
 }
 
 export type DirectionVersionRow = {

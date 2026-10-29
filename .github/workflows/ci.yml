@@ -4,6 +4,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The whole suite once a night (03:00 MSK) and by hand; pushes and PRs run only the tests their changes touch
+  # (Boris, 28.10.2026: the Mac could not keep up with two full runs at once).
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,6 +26,8 @@ jobs:
     runs-on: [self-hosted, sara-mac]
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      web: ${{ steps.diff.outputs.web }}
+      base: ${{ steps.diff.outputs.base }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,13 +36,16 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          # No base (the nightly run, a first push): everything, the whole suite.
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BASE" HEAD | grep -qvE '^docs/|\.md$'; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
+            { echo "code=true"; echo "web=true"; echo "base="; } >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          files=$(git diff --name-only "$BASE" HEAD)
+          if echo "$files" | grep -qvE '^docs/|\.md$'; then echo "code=true"; else echo "code=false"; fi >> "$GITHUB_OUTPUT"
+          # The pult e2e only when the pult or what it shares changed.
+          if echo "$files" | grep -qE '^apps/web/|^packages/shared/|^pnpm-lock'; then echo "web=true"; else echo "web=false"; fi >> "$GITHUB_OUTPUT"
 
   # Lint, types, ports, commit messages and traceability in one checkout: on one runner, fewer jobs finish sooner.
   check:
@@ -86,9 +96,11 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, sara-mac]
     # A full run takes about 10 minutes; a job stuck past this (the Mac asleep) frees the runner for the rest.
-    timeout-minutes: 40
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # Each runner keeps its own pnpm and package store: two jobs at once in one store break each other's writes.
       - uses: pnpm/action-setup@v4
         with:
@@ -115,10 +127,12 @@ jobs:
       # Chromium first: the Profi-MCP tests drive a real browser too.
       - run: pnpm --filter @sara/web exec playwright install chromium
       # caffeinate keeps the Mac from idle sleep while the tests run (a closed lid still stops it).
-      - run: caffeinate -i pnpm test
+      # A PR or a push runs the tests its changed files reach (vitest --changed); the nightly run, all of them.
+      - run: caffeinate -i pnpm test ${{ needs.changes.outputs.base && format('--changed {0}', needs.changes.outputs.base) || '' }}
       # The pult e2e uses fixed ports: the two runners take turns through a lock, and a dev session holding the ports
       # gets one more try after a minute.
-      - run: |
+      - if: needs.changes.outputs.web == 'true'
+        run: |
           e2e='caffeinate -i pnpm --filter @sara/web e2e'
           lockf -t 1800 /tmp/sara-ci-web-e2e.lock sh -c "$e2e || (sleep 60 && $e2e)"
       - run: pnpm --filter @sara/web build

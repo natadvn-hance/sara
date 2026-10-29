@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { createFakeTelegram, type FakeTelegram } from '../../../../tests/fakes/telegramApi'
+import type { AppDeps } from '../../src/api/deps'
 import { buildServer } from '../../src/api/server'
 import type { Db } from '../../src/db/client'
 import { createGateway } from '../../src/gateway/gateway'
@@ -38,6 +39,8 @@ export async function buildTestApp(
   health: { current: TestHealth } = {
     current: { alive: true, balance_rub: 5000, presence: true, egress_ip: '127.0.0.1' },
   },
+  /** The pult's press and backup log (M7); unset, the pult's buttons answer that Sara is starting. */
+  extra: Pick<AppDeps, 'onPress' | 'saveBidText' | 'backupLog'> = {},
 ): Promise<TestApp> {
   const dir = await mkdtemp(join(tmpdir(), 'app-'))
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
@@ -73,6 +76,7 @@ export async function buildTestApp(
     production: false,
     telegramApiRoot: tg.apiRoot,
     accounts: [{ id: 'hance-marketing', title: 'Hance маркетинг', egressIp: '127.0.0.1' }],
+    ...extra,
   })
   let sessionCookie = ''
   app.addHook('onSend', async (_req, reply, payload) => {

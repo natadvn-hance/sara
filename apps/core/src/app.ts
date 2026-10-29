@@ -151,6 +151,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       (async () => (await getSetting(db, 'reminder.decision_after_min')) * 60_000),
     notifyRetry: o.notifyRetry,
     now: o.now,
+    mind: createMindSearch(db),
   })
   const lp = pipeline
   setOutboxDeps({
@@ -220,6 +221,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     production: config.production,
     telegramApiRoot: config.telegramApiRoot,
     accounts: config.accounts,
+    onPress,
+    saveBidText: (p) =>
+      pipeline
+        ? pipeline.saveBidText(p)
+        : Promise.resolve({ saved: false, message: 'Сара ещё запускается' }),
+    backupLog: config.backupLog,
   }
   await seedAccounts(db, config.accounts)
   for (const a of config.accounts) {

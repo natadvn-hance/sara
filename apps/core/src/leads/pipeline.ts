@@ -9,6 +9,7 @@ import {
   type TaskAction,
 } from '@sara/shared'
 import { and, desc, eq, isNull, ne } from 'drizzle-orm'
+import type { MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
 import { getProfile } from '../direction/profile'
@@ -30,6 +31,7 @@ import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
+import { casesForBid } from './bidCases'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import {
   BID_TEXT_MAX,
@@ -60,6 +62,8 @@ export type LeadPipelineDeps = {
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** The clock of the greeting a bid text carries (Moscow time of day); tests fix it. */
   now?: () => Date
+  /** The case search of the mind: a bid may tell a case that fits the order (Boris, 28.10.2026). */
+  mind?: Pick<MindSearch, 'cases'>
 }
 
 export type LeadPipeline = {
@@ -79,6 +83,14 @@ export type LeadPipeline = {
   closeOnSite(taskId: string, via: 'recheck' | 'press'): Promise<void>
   /** Boris's answer to the request after «Изменить»: the new bid text; the reply goes back to him. */
   onDraftText(a: DraftAnswer): Promise<string>
+  /**
+   * The pult's edit of the bid text and or the «Стоимость услуги» (M7 design 6.2): the rules and events of
+   * `onDraftText`, without a question and without a new card (a press reads the lead as it is now).
+   */
+  saveBidText(p: { taskId: string; text: string | null; priceRub: number | null }): Promise<{
+    saved: boolean
+    message: string
+  }>
 }
 
 /** Database steps may hit a passing database error; they are safe to repeat. */
@@ -253,10 +265,14 @@ async function draftFor(
   try {
     // The direction's format and cases for the Analyst; a profile that cannot be read leaves the draft as it was.
     const profile = await getProfile(d().db, opts.accountId).catch(() => null)
+    // A direction with its own case library keeps it; otherwise the cases of the mind that fit the order.
+    const mindCases =
+      profile && profile.cases.length > 0 ? [] : await casesForBid(d().mind, o, opts.accountId)
     const { accountId: _account, ...rest } = opts
     return await writeDraft(d().gateway, o, {
       ...rest,
       ...(profile ? { profile } : {}),
+      mindCases,
       now: greetingMoment(),
     })
   } catch (err) {
@@ -979,6 +995,58 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
   return said.priceRub === null ? TEXTS.draftSaved(l.title) : TEXTS.draftAndPriceSaved(l.title)
 }
 
+async function saveBidText(p: {
+  taskId: string
+  text: string | null
+  priceRub: number | null
+}): Promise<{ saved: boolean; message: string }> {
+  const found = await leadOfTask(p.taskId)
+  if (found?.task.kind !== 'lead_decision' || found.task.state !== 'open')
+    return { saved: false, message: TEXTS.alreadyDone }
+  const { lead: l, task: t } = found
+  const next = p.text === null ? null : editOf(p.text, l.clientName, greetingMoment())
+  if (next !== null) {
+    const longest = bidLengthMax(next, l.clientName)
+    const shown = bidTextAt(next, l.clientName, greetingMoment()).length
+    if (longest > BID_TEXT_MAX)
+      return { saved: false, message: TEXTS.draftTooLong(longest, longest !== shown) }
+  }
+  const at = new Date()
+  await d().db.transaction(async (tx) => {
+    // A question still open after «Изменить» in Telegram is answered by this edit.
+    await closeDraftRequests(tx, t.id, at)
+    if (next !== null && next !== l.draftText) {
+      await tx.update(lead).set({ draftText: next }).where(eq(lead.id, l.id))
+      await appendEvent(
+        tx,
+        ev('draft.edited', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
+          before: l.draftText === null ? null : bodyOf(l.draftText),
+          after: bodyOf(next),
+          voice: false,
+        }),
+      )
+    }
+    if (p.priceRub !== null && p.priceRub !== l.draftPriceRub) {
+      await tx.update(lead).set({ draftPriceRub: p.priceRub }).where(eq(lead.id, l.id))
+      await appendEvent(
+        tx,
+        ev('draft.priced', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
+          before: l.draftPriceRub,
+          after: p.priceRub,
+          voice: false,
+        }),
+      )
+    }
+  })
+  const message =
+    next !== null && p.priceRub !== null
+      ? TEXTS.draftAndPriceSaved(l.title)
+      : next !== null
+        ? TEXTS.draftSaved(l.title)
+        : TEXTS.priceSaved(l.title)
+  return { saved: true, message }
+}
+
 /**
  * A button of the daily summary brings its order back as a normal card with a decision task, once: «Взял бы»
  * on a dropped order (lead_review, want) or «Показать» on one held over the card cap (lead_held, open).
@@ -1262,5 +1330,6 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     onDraftText,
+    saveBidText,
   }
 }
