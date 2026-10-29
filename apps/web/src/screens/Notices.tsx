@@ -2,7 +2,7 @@ import { NOTICE_KIND_RU, type NoticeList, type NoticeRow } from '@sara/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import { usePress, useScreen } from '../app/data'
+import { screenKey, usePress, useScreen } from '../app/data'
 import { ago } from '../app/format'
 import { Icon } from '../ui/icons'
 import { A, Btn, Card, Empty, Head, Pill, Screen, Seg } from '../ui/kit'
@@ -78,7 +78,7 @@ function Body({ v }: { v: NoticeList }) {
     if (ids.length === 0) return
     const t = setTimeout(() => {
       void api('/api/notices/seen', { ids })
-        .then(() => client.invalidateQueries({ queryKey: ['/api/notices?state=new'] }))
+        .then(() => client.invalidateQueries({ queryKey: screenKey('/api/notices?state=new') }))
         .catch(() => {})
     }, 1500)
     return () => clearTimeout(t)

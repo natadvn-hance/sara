@@ -6,12 +6,19 @@ import { ApiError, api, authHeaders, go } from '../api'
 let streamOn = false
 
 /**
+ * The key of every pult screen's data: the live stream reads these again and nothing else. The pages of the rules
+ * (M3) keep their own data and their own moment to read it; a refresh from outside could overwrite a step just
+ * saved with an answer that was already on its way.
+ */
+export const screenKey = (path: string | null) => ['screen', path] as const
+
+/**
  * One screen's data: read at once, again every 20 seconds while the page is seen (60 with the live stream) and
  * right after any action (pult v2 design 6). A lost session goes to the login page.
  */
 export function useScreen<T>(path: string | null, pollMs = 20_000) {
   const q = useQuery({
-    queryKey: [path],
+    queryKey: screenKey(path),
     queryFn: () => api<T>(path as string),
     enabled: path !== null,
     refetchInterval: streamOn ? Math.max(pollMs, 60_000) : pollMs,
@@ -101,7 +108,7 @@ export function useLive(): void {
           buf = parts.pop() ?? ''
           if (parts.some((p) => p.startsWith('data:')) && Date.now() - last > 1500) {
             last = Date.now()
-            void client.invalidateQueries()
+            void client.invalidateQueries({ queryKey: ['screen'] })
           }
         }
       } catch {
