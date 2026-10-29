@@ -472,6 +472,37 @@ describe('insurance and the account tab', () => {
     expect((dom[0]?.body as { links: string[] } | undefined)?.links).toContain('/chats/c-busy')
   }, 90000)
 
+  it('FR-LEAD-1: a page that never fires «load» is open once its document answered, and the guard stays online', async () => {
+    await loginStandIn(ab.page, site)
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const g = createConnectionGuard({ db, accountId: 'hance-marketing', onBack: async () => {} })
+    const reports: boolean[] = []
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+      canNavigate: () => g.mayNavigate(),
+      onNavigate: async (ok) => {
+        reports.push(ok)
+        await g.report(ok)
+      },
+    })
+    site.hangLoad(true)
+    try {
+      await ins.feedOnce()
+    } finally {
+      site.hangLoad(false)
+      ins.stop()
+    }
+    expect(reports.length).toBeGreaterThan(0)
+    expect(reports.every(Boolean)).toBe(true)
+    expect(g.online()).toBe(true)
+  }, 90000)
+
   it('FR-CONV-1: a chat named by the event stream is opened on the next minute check', async () => {
     await loginStandIn(ab.page, site)
     site.addMessage('c-touched', 'client', 'Здравствуйте')

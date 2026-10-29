@@ -99,11 +99,16 @@ export function startInsurance(o: {
   async function go(path: string): Promise<boolean> {
     let ok = false
     try {
-      // A page that answered is open. Profi.ru's messenger keeps polling, so its network never goes quiet:
-      // waiting for that as well would count a working page as a lost connection (5 minutes of nothing).
-      const res = await o.ab.page.goto(`${o.baseUrl}${path}`, { waitUntil: 'load', timeout: 30000 })
+      // A page whose document answered is open. Profi.ru's messenger keeps polling, so its network never goes quiet,
+      // and since 29.10.2026 07:14 UTC its pages keep a request open and never fire «load» in 30 s either: waiting
+      // for either one counted every working page as a lost connection (the feed went to one page in 5 minutes and
+      // no order page was read). The rest of the page gets a short while to settle, whatever it does.
+      const res = await o.ab.page.goto(`${o.baseUrl}${path}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      })
       ok = (res?.status() ?? 0) > 0 && (res?.status() ?? 0) < 500
-      await o.ab.page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
+      await o.ab.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
     } catch {
       ok = false
     }

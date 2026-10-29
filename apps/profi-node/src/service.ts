@@ -186,6 +186,7 @@ export async function startProfiService(
       ...historyStore(db, acc.id),
       inTab,
       page: () => ab.page,
+      baseUrl: c.profiBaseUrl,
       chatsPath: parsers.paths.chats,
       chatPath: (id, filter) =>
         `${parsers.paths.chat(id)}${filter === 'archive' ? '&filter=archive' : ''}`,

@@ -103,18 +103,25 @@ function stand(o: {
   const flags = new Map<string, string>([[HISTORY_FLAG, 'go']])
   let current = ''
   let flagReads = 0
+  const guard = { goes: 0 }
+  // A page that fails answers nothing, the way a chat page that never loads leaves no answer of the site behind.
   const page = {
     url: () => `https://profi.ru${current}`,
+    goto: async (url: string) => {
+      current = url.replace('https://profi.ru', '')
+      visited.push(current)
+      if (o.pageFails?.(current)) throw new Error('Timeout 30000ms exceeded')
+      return null
+    },
     locator: () => ({ innerText: async () => o.body ?? 'Чаты' }),
     evaluate: async () => {},
   } as unknown as Page
   const d: HistoryDeps = {
     inTab: (f) =>
       f({
-        go: async (p) => {
-          visited.push(p)
-          current = p
-          return !o.pageFails?.(p)
+        go: async () => {
+          guard.goes++
+          return true
         },
         can: () => true,
         later: () => {},
@@ -127,6 +134,7 @@ function stand(o: {
     },
     setFlag: async (name, reason) => void flags.set(name, reason),
     answers: async (kind) => {
+      if (o.pageFails?.(current)) return []
       if (kind === 'list') return o.lists
       const id = /id=(\d+)/.exec(current)?.[1] ?? ''
       return o.chats[id] ?? []
@@ -136,6 +144,7 @@ function stand(o: {
       kept.push(...m)
       return m.length
     },
+    baseUrl: 'https://profi.ru',
     chatsPath: '/backoffice/r.php',
     chatPath: (id, filter) =>
       `/backoffice/r.php?id=${id}${filter === 'archive' ? '&filter=archive' : ''}`,
@@ -143,7 +152,7 @@ function stand(o: {
     now: () => NOW,
     log: () => {},
   }
-  return { d, visited, kept, flags }
+  return { d, visited, kept, flags, guard }
 }
 
 describe('the archive reader: one pass', () => {
@@ -177,17 +186,26 @@ describe('the archive reader: one pass', () => {
     expect(s.flags.get(HISTORY_STATUS)).toBe(line)
   })
 
-  it('FR-TRAIN-1: stops for good at the first page that does not open', async () => {
+  it('FR-TRAIN-1: stops for good when the chat list gives no answer', async () => {
+    const s = stand({
+      lists: [list(1, edge('1', 'open', 0, OLD))],
+      chats: {},
+      pageFails: (p) => p === '/backoffice/r.php',
+    })
+    expect(await readHistory(s.d)).toBe('остановлено: список чатов не ответил')
+    expect(s.visited).toEqual(['/backoffice/r.php'])
+    expect(s.flags.get(HISTORY_FLAG)).toBe('stopped')
+  })
+
+  it('FR-TRAIN-1: a page whose «load» never comes but whose answer does is read; misses never reach the connection guard', async () => {
     const s = stand({
       lists: [list(2, edge('1', 'open', 0, OLD), edge('2', 'open', 0, OLD))],
-      chats: { '1': [chat(false, msg('11', OLD, ['CLIENT']))] },
+      chats: { '2': [chat(false, msg('21', OLD, ['CLIENT']))] },
       pageFails: (p) => p.includes('id=1'),
     })
-    const line = await readHistory(s.d)
-    expect(line).toBe('остановлено: страница чата не открылась, прочитано 0 из 2')
-    expect(s.visited.filter((p) => p.includes('id='))).toEqual(['/backoffice/r.php?id=1'])
-    expect(s.flags.get(HISTORY_FLAG)).toBe('stopped')
-    expect(s.kept).toEqual([])
+    expect(await readHistory(s.d)).toBe('готово: прочитано 1 чатов из 2, сообщений 1, неполных 0')
+    expect(s.kept.map((m) => m.platform_message_id)).toEqual(['21'])
+    expect(s.guard.goes).toBe(0)
   })
 
   it('FR-TRAIN-1: a page that looks like a block stops the pass before any chat', async () => {
