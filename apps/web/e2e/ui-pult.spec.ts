@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
@@ -299,4 +300,43 @@ test('FR-OPS-1: «Тратит деньги» turns on only with the second pres
   await expect(
     page.getByRole('button', { name: 'Тратит деньги на отклики: выключено' }),
   ).toBeVisible()
+})
+
+/** initData as Telegram signs it for the bot setup.spec bound (the fake's token, Boris is chat 111). */
+function initDataFor(userId: number): string {
+  const token = '123456789:AAFakeTokenForTestsOnly_abcdefghijklmnop'
+  const fields: [string, string][] = [
+    ['auth_date', String(Math.floor(Date.now() / 1000))],
+    ['query_id', 'AAH-e2e'],
+    ['user', JSON.stringify({ id: userId, first_name: 'Борис' })],
+  ]
+  const check = [...fields]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+  const secret = createHmac('sha256', 'WebAppData').update(token).digest()
+  const p = new URLSearchParams(fields)
+  p.set('hash', createHmac('sha256', secret).update(check).digest('hex'))
+  return p.toString()
+}
+
+test('FR-UI-4, ST-M7-02: the Mini App opens the pult without a password by Telegram\u2019s signature; a stranger does not', async ({
+  browser,
+}) => {
+  const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  const page = await ctx.newPage()
+  // Telegram's own script is not needed here: the pult signs in by the address alone.
+  await page.route('https://telegram.org/**', (r) => r.abort())
+  await page.goto(`/inbox#tgWebAppData=${encodeURIComponent(initDataFor(111))}&tgWebAppVersion=7.0`)
+  await expect(page.getByRole('heading', { name: 'Входящие', exact: true })).toBeVisible()
+  // Within the tab the signature is kept: the next page needs no address from Telegram.
+  await page.goto('/leads')
+  await expect(page.getByRole('heading', { name: 'Заявки', exact: true })).toBeVisible()
+  const other = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  const p2 = await other.newPage()
+  await p2.route('https://telegram.org/**', (r) => r.abort())
+  await p2.goto(`/inbox#tgWebAppData=${encodeURIComponent(initDataFor(999))}&tgWebAppVersion=7.0`)
+  await expect(p2).toHaveURL(/\/login/)
+  await other.close()
+  await ctx.close()
 })

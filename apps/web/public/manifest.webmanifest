@@ -1,0 +1,13 @@
+{
+  "name": "Сара · пульт",
+  "short_name": "Сара",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c0806",
+  "theme_color": "#0c0806",
+  "lang": "ru",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -850,3 +850,14 @@ export const meeting = core.table(
   },
   (t) => [index('meeting_starts').on(t.startsAt)],
 )
+
+/** A browser that asked to ring (pult v2 design 6): one row per Web Push endpoint. */
+export const pushSubscription = core.table('push_subscription', {
+  endpoint: text('endpoint').primaryKey(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  label: text('label'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  /** The last push the service refused for a reason other than the subscription being gone. */
+  failedAt: ts('failed_at'),
+})

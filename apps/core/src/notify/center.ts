@@ -131,42 +131,60 @@ export async function noticeOfMessage(
 }
 
 /** Every send of the bot leaves a notice; the Telegram message itself is not touched. */
-export function withNoticeLog(n: Notifier, db: Db): Notifier {
-  const log = (p: Promise<string | null>) =>
-    p.catch((e: unknown) =>
-      console.error('notice not recorded', e instanceof Error ? e.message.slice(0, 200) : e),
-    )
+export function withNoticeLog(
+  n: Notifier,
+  db: Db,
+  /** A new notice (not a repeat within the hour): the phone and the computer ring (Web Push). */
+  onNotice?: (kind: NoticeKind) => void,
+): Notifier {
+  const log = (p: Promise<string | null>, kind: () => Promise<NoticeKind | null>) =>
+    p
+      .then(async (id) => {
+        if (!id || !onNotice) return
+        const k = await kind()
+        if (k) onNotice(k)
+      })
+      .catch((e: unknown) =>
+        console.error('notice not recorded', e instanceof Error ? e.message.slice(0, 200) : e),
+      )
+  const kindOf = async (recorded: Promise<string | null>): Promise<NoticeKind | null> => {
+    const id = await recorded
+    if (!id) return null
+    const [row] = await db.select({ kind: notice.kind }).from(notice).where(eq(notice.id, id))
+    return (row?.kind as NoticeKind | undefined) ?? null
+  }
   return {
     ...n,
     async sendLeadCard(c, o) {
       const m = await n.sendLeadCard(c, o)
-      await log(
-        recordNotice(db, {
-          kind: 'lead',
-          title: `Заявка: ${c.title}`,
-          body: [
-            c.city,
-            c.score ? `балл ${c.score.value}` : null,
-            c.bidPriceRub > 0 ? `отклик ${c.bidPriceRub} ₽` : null,
-            c.budgetText ? `бюджет ${c.budgetText}` : null,
-          ]
-            .filter(Boolean)
-            .join(' · '),
-          link: `/leads/${encodeURIComponent(c.orderId)}`,
-          taskId: c.taskId,
-          telegramMessageId: m.messageId,
-        }),
-      )
+      const recorded = recordNotice(db, {
+        kind: 'lead',
+        title: `Заявка: ${c.title}`,
+        body: [
+          c.city,
+          c.score ? `балл ${c.score.value}` : null,
+          c.bidPriceRub > 0 ? `отклик ${c.bidPriceRub} ₽` : null,
+          c.budgetText ? `бюджет ${c.budgetText}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        link: `/leads/${encodeURIComponent(c.orderId)}`,
+        taskId: c.taskId,
+        telegramMessageId: m.messageId,
+      })
+      await log(recorded, () => kindOf(recorded))
       return m
     },
     async sendText(text, o) {
       const m = await n.sendText(text, o)
-      await log(noticeOfMessage(db, text, { hint: o?.notice, messageId: m.messageId }))
+      const recorded = noticeOfMessage(db, text, { hint: o?.notice, messageId: m.messageId })
+      await log(recorded, () => kindOf(recorded))
       return m
     },
     async sendButtons(text, rows, o) {
       const m = await n.sendButtons(text, rows, o)
-      await log(noticeOfMessage(db, text, { rows, hint: o?.notice, messageId: m.messageId }))
+      const recorded = noticeOfMessage(db, text, { rows, hint: o?.notice, messageId: m.messageId })
+      await log(recorded, () => kindOf(recorded))
       return m
     },
   }
