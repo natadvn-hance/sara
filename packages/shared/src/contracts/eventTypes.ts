@@ -35,6 +35,11 @@ export const EVENT_TYPES = [
   /** Pult v2: a bid from the pult waits ten seconds to be cancelled (task_id, request_id, fee_rub, execute_at). */
   'bid.held',
   'bid.hold_cancelled',
+  /** Pult v2: Boris wrote how a deal ended (outcome, amount_rub; no client text), or a note, or a meeting. */
+  'client.outcome',
+  'client.noted',
+  'meeting.created',
+  'meeting.outcome',
   'bid.sent',
   'bid.failed',
   /** A message of the series after the bid went into the order's chat (n: its place in the series). */

@@ -384,7 +384,8 @@ export function client(id: string): ClientView | null {
     orderId: base?.orderId ?? null,
     orderTitle: row.title,
     chatUrl: 'https://profi.ru/backoffice/',
-    note: id === 'c-arina' ? 'хочет созвон, предложить четверг' : null,
+    note: id === 'c-olga' ? 'сеть из 4 кофеен, решает владелица' : null,
+    instruction: id === 'c-arina' ? 'хочет созвон, предложи четверг' : null,
     service: id === 'c-olga' ? 'стратегия и ведение' : null,
     outcome:
       id === 'c-olga'

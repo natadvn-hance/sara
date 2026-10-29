@@ -254,6 +254,13 @@ Code, и единственное, что их связывает, это кон
   `combinedScore`); `POST /api/leads/{id}/bid {expectedFeeRub}` ставит
   отклик с отсрочкой 10 секунд, `/bid/cancel` отменяет, `/skip {reason?}`,
   `/recheck` перечитывает заказ.
+- Клиенты (пульт v2): `GET /api/clients` (`ClientList`), `GET /api/clients/{id}`
+  (`ClientView`: этап, переписка, открытые задачи клиента, встречи, итог),
+  `POST /api/clients/{id}/note {text}`, `POST /api/clients/{id}/outcome
+  {outcome: won|lost|null, amountRub, reason, service}`; встречи
+  `GET|POST /api/meetings`, `POST /api/meetings/{id}/outcome {outcome,
+  amountRub}`. Прежние `GET /api/conversations` убраны, команды M4
+  `POST /api/conversations/{id}/take|return|say|close` остаются.
 - Вход: пароль владельца (сессия в cookie) или подпись Telegram Mini App
   в заголовке `Authorization: tma <initData>` на каждом запросе (проверка
   подписи токеном бота, возраста до 24 часов и номера пользователя);

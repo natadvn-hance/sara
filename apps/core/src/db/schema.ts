@@ -338,6 +338,15 @@ export const conversation = core.table(
     lastClientHeardAt: ts('last_client_heard_at'),
     typingAt: ts('typing_at'),
     unclearCount: integer('unclear_count').notNull().default(0),
+    /** Pult v2: Boris's own note on the client for the client log, never told to Sara (that is `boris_note`). */
+    note: text('note'),
+    /** Pult v2: the service of the deal, as Boris names it («стратегия», «сайт»). */
+    service: text('service'),
+    /** Pult v2: how the deal ended, by Boris: `won` (a contract) or `lost`; null while it goes on. */
+    outcome: text('outcome'),
+    outcomeReason: text('outcome_reason'),
+    amountRub: integer('amount_rub'),
+    outcomeAt: ts('outcome_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -818,3 +827,26 @@ export const bidHold = core.table('bid_hold', {
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 })
+
+/**
+ * A call with a client (pult v2 design 9): set by Boris in the pult, with its outcome. Calls the chats only speak
+ * of (a deal at «созвон предложен») are shown beside these, not stored here.
+ */
+export const meeting = core.table(
+  'meeting',
+  {
+    id: uuid('id').primaryKey(),
+    conversationId: uuid('conversation_id'),
+    title: text('title').notNull(),
+    startsAt: ts('starts_at'),
+    channel: text('channel'),
+    note: text('note'),
+    /** `held`, `missed`, `moved`; null before. */
+    outcome: text('outcome'),
+    amountRub: integer('amount_rub'),
+    createdBy: text('created_by').notNull().default('boris'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [index('meeting_starts').on(t.startsAt)],
+)
