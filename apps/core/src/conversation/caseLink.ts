@@ -36,7 +36,15 @@ function linkAllowed(rules: string[]): boolean {
 
 /** The public link of a case to put into a reply told at this moment, or null. */
 export function caseLink(c: CaseHit, moment: CaseMoment | null): string | null {
-  if (!ASKED.includes(moment) || !c.nameOpen || !linkAllowed(c.showRules)) return null
+  return ASKED.includes(moment) ? publicLink(c) : null
+}
+
+/**
+ * The public link of a case whatever the moment, or null: the record has one, its show rules allow it and the company
+ * is not closed. The series after a bid (Boris, 29.10.2026) shows a case by it with no question from the client.
+ */
+export function publicLink(c: CaseHit): string | null {
+  if (!c.nameOpen || !linkAllowed(c.showRules)) return null
   for (const url of c.body.match(URL_IN_BODY) ?? []) {
     const clean = url.replace(/[.,;:!?]+$/u, '')
     try {

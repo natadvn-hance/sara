@@ -37,8 +37,16 @@ export type LeadCard = {
    * length check of the «Разбор» message still builds it.
    */
   reminder?: boolean
-  /** The bid text with its greeting and the «Стоимость услуги» (FR-LEAD-6); none: the Analyst did not answer. */
-  draft?: { text: string; priceRub: number | null; note?: string | null } | null
+  /**
+   * The bid text with its greeting and the «Стоимость услуги» (FR-LEAD-6); none: the Analyst did not answer.
+   * `followUps`: the series that follows the bid into the chat (Boris, 29.10.2026), approved by the same press.
+   */
+  draft?: {
+    text: string
+    priceRub: number | null
+    note?: string | null
+    followUps?: string[]
+  } | null
   /**
    * The Analyst's short разбор for the card (what the client really needs, the main risk, the condition) and its
    * full reading for «Разбор» (null: a lead whose reading was stored without it).
@@ -173,6 +181,9 @@ export const TEXTS = {
   greetingKept:
     'Приветствие по времени суток не поместилось в 500 знаков, отклик уйдёт с прежним приветствием',
   draftSaved: (title: string) => `Записала новый текст отклика для «${title}»`,
+  followUpsSaved: (title: string) => `Записала сообщения вдогонку для «${title}»`,
+  followUpsTooLong: (max: number) =>
+    `Сообщений вдогонку может быть не больше двух, каждое до ${max} знаков. Не сохранила.`,
   draftLate: 'Заявка уже решена, текст не поменяла',
   /** The last line of a card whose order closed on Profi.ru: the buttons are gone. */
   closedOnSite: 'Заявка закрыта на Профи.ру, откликнуться уже нельзя',
@@ -201,6 +212,7 @@ const CAP = {
   reason: 400,
   tag: 80,
   draft: 1000,
+  followUp: 600,
   reading: 1500,
   line: 200,
   who: 90,
@@ -369,6 +381,20 @@ function whyBlocks(c: LeadCard): string[][] {
   return analysis.length > 0 ? [why, analysis] : [why]
 }
 
+/**
+ * The series under the bid (Boris, 29.10.2026): what goes into the chat a minute or two after it, each message as its
+ * own quote. Nothing when the bid has none.
+ */
+function followUpLines(c: LeadCard): string[] {
+  const series = c.draft?.followUps ?? []
+  if (series.length === 0) return []
+  return [
+    '<b>✍️ Вдогонку</b>  ·  через 1-2 минуты после отклика',
+    ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
+    '<i>Уйдёт тем же нажатием, если клиент ещё не ответил</i>',
+  ]
+}
+
 function draftLines(c: LeadCard): string[] {
   if (!c.draft) return [NO_DRAFT]
   const price = c.draft.priceRub ? `  ·  услуга ${formatRub(c.draft.priceRub)}` : ''
@@ -390,6 +416,7 @@ function cardHtml(c: LeadCard, shown: string, last: string | null = null): strin
     clientLines(c),
     ...whyBlocks(c),
     draftLines(c),
+    ...(c.draft?.followUps?.length ? [followUpLines(c)] : []),
     orderLines(shown),
     [linkLine(c.orderId)],
     ...(last ? [[last]] : []),

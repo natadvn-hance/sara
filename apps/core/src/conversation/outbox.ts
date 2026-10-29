@@ -1,8 +1,9 @@
 import { newEventId, normalizeText } from '@sara/shared'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { chatMessage, convTurn, outbox, task } from '../db/schema'
+import { chatMessage, conversation, convTurn, outbox, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import type { BidPayload } from '../leads/outbox'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { getConversation } from './store'
@@ -75,11 +76,61 @@ async function borisPressed(
   return conv?.accountId === m.accountId && conv.chatId === m.chatId
 }
 
+/** The key of a message of the series after a bid: `series:<order>:<place>`, `:2` on its one try after the chat moved. */
+const SERIES_KEY = /^series:([^:]+):([01])(?::2)?$/
+
+/**
+ * Whether the message is one of the series Boris approved with his press on «Откликнуться» (Boris, 29.10.2026): the bid
+ * of that order went (its outbox row confirmed) from the press on its card, the text is the one at this place of the
+ * series as it was when he pressed, and the chat is the order's. The series is approved with the bid and by nothing
+ * else, so the line of drafts mode cannot be crossed by naming such a key.
+ */
+async function seriesApproved(
+  tx: DbOrTx,
+  key: string,
+  m: { accountId: string; chatId: string; text: string },
+): Promise<boolean> {
+  const [, leadId, place] = SERIES_KEY.exec(key) ?? []
+  if (!leadId || !place) return false
+  const [bid] = await tx
+    .select({ payload: outbox.payload })
+    .from(outbox)
+    .where(
+      and(
+        eq(outbox.kind, 'bid'),
+        eq(outbox.state, 'confirmed'),
+        sql`${outbox.payload}->>'leadId' = ${leadId}`,
+      ),
+    )
+  const p = bid?.payload as BidPayload | undefined
+  if (!p?.taskId || p.accountId !== m.accountId || p.followUps?.[Number(place)] !== m.text)
+    return false
+  const [t] = await tx
+    .select({ id: task.id })
+    .from(task)
+    .where(
+      and(
+        eq(task.id, p.taskId),
+        eq(task.kind, 'lead_decision'),
+        eq(task.state, 'resolved'),
+        eq(task.resolution, 'bid'),
+      ),
+    )
+  if (!t) return false
+  // The chat of a bid is the order's own number, unless a conversation of the order names another.
+  const [c] = await tx
+    .select({ orderId: conversation.orderId })
+    .from(conversation)
+    .where(and(eq(conversation.accountId, m.accountId), eq(conversation.chatId, m.chatId)))
+  return c?.orderId ? c.orderId === leadId : m.chatId === leadId
+}
+
 /**
  * A message to a client enters the outbox once per key (FR-CONV-9). Nothing is queued in shadow, not even Boris's
  * own text (ADR-024); Sara's own text also waits out the «Пишет клиентам» pause, Boris's text passes it (as v1).
  * In drafts mode (`conv.autopilot` off) the one line nothing crosses: a message of author sara goes only with Boris's
- * press on «Отправить»; his own text is his press already (FR-CONV-5, FR-CONV-11). Null when it may not go now.
+ * press on «Отправить», or for the series after a bid with his press on «Откликнуться»; his own text is his press
+ * already (FR-CONV-5, FR-CONV-11). Null when it may not go now.
  */
 export async function queueMessage(
   tx: DbOrTx,
@@ -90,7 +141,8 @@ export async function queueMessage(
   if (
     i.author === 'sara' &&
     !(await getSetting(tx, 'conv.autopilot')) &&
-    !(await borisPressed(tx, i.key, i))
+    !(await borisPressed(tx, i.key, i)) &&
+    !(await seriesApproved(tx, i.key, i))
   )
     return null
   const { key, ...p } = i
