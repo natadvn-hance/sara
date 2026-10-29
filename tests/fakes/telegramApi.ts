@@ -29,6 +29,8 @@ export type FakeTelegram = {
   sent: SentMessage[]
   /** Edits Telegram accepted, in order (refused ones are not here): closed cards, the M4 shadow card. */
   edited: EditedMessage[]
+  /** Buttons replaced on a sent message (editMessageReplyMarkup): a card decided in the pult. */
+  markups: { message_id: number; reply_markup: EditedMessage['reply_markup'] }[]
   answers: { callback_query_id: string; text?: string }[]
   pushStart(chatId: number): void
   pushPress(chatId: number, data: string): string
@@ -108,6 +110,7 @@ export const FAKE_TOKEN = '123456789:AAFakeTokenForTestsOnly_abcdefghijklmnop'
 export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   const sent: SentMessage[] = []
   const edited: EditedMessage[] = []
+  const markups: FakeTelegram['markups'] = []
   /** What each message shows now (text and buttons), so an edit that changes nothing is refused like Telegram does. */
   const shown = new Map<number, string>()
   const editErrors = new Map<number, string>()
@@ -246,6 +249,9 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
             file_size: 15,
             file_path: `voice/${params.file_id}.oga`,
           })
+        case 'editMessageReplyMarkup':
+          markups.push({ message_id: Number(params.message_id), reply_markup: params.reply_markup })
+          return reply(true)
         case 'answerCallbackQuery':
           answers.push(params)
           return reply(true)
@@ -263,6 +269,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     username: 'sara_dev_bot',
     sent,
     edited,
+    markups,
     answers,
     pushStart(chatId) {
       updates.push({

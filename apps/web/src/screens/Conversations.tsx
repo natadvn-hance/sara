@@ -48,7 +48,7 @@ function List({ l, current }: { l: ConvList; current: string | null }) {
                 <span className="row-main">
                   <span className="row-title">{r.name}</span>
                   <span className="row-sub">
-                    {r.lastSide === 'us' ? 'вы: ' : ''}
+                    {r.lastSide === 'us' ? 'вы: ' : r.lastSide === 'profi' ? 'Профи.ру: ' : ''}
                     {r.last ?? r.title ?? 'без сообщений'}
                   </span>
                 </span>
@@ -77,6 +77,81 @@ function List({ l, current }: { l: ConvList; current: string | null }) {
           </Card>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * «Свой текст»: Boris's own words to the client (the say command, FR-CONV-11). It goes only by his «Отправить» and a
+ * second press, and the core rereads the chat first; a key makes a double tap one message.
+ */
+function OwnText({ v }: { v: ConvView }) {
+  const { press, busy } = usePress()
+  const [text, setText] = useState<string | null>(null)
+  const [sure, setSure] = useState(false)
+  if (text === null)
+    return (
+      <div className="actions">
+        <Btn size="sm" icon="chat" onClick={() => setText('')}>
+          Написать своим текстом
+        </Btn>
+      </div>
+    )
+  return (
+    <div className="grid" style={{ gap: 10 }}>
+      <label className="kv" htmlFor="own-text">
+        <span className="muted" style={{ fontSize: 13 }}>
+          Твой текст клиенту: уйдёт как есть, от твоего имени
+        </span>
+        <textarea
+          id="own-text"
+          className="quote"
+          rows={5}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value)
+            setSure(false)
+          }}
+          style={{ font: 'inherit', color: 'inherit', resize: 'vertical' }}
+        />
+      </label>
+      <div className="actions">
+        {sure ? (
+          <>
+            <span className="text-2">Отправить {v.name} этот текст?</span>
+            <Btn
+              look="primary"
+              icon="send"
+              disabled={busy !== null}
+              onClick={async () => {
+                const ok = await press('say', `/api/conversations/${v.id}/say`, {
+                  text,
+                  key: `${v.id}:${text.length}:${Date.now()}`,
+                })
+                if (ok) {
+                  setText(null)
+                  setSure(false)
+                }
+              }}
+            >
+              Да, отправить
+            </Btn>
+            <Btn onClick={() => setSure(false)}>Нет</Btn>
+          </>
+        ) : (
+          <>
+            <Btn
+              look="primary"
+              icon="send"
+              disabled={text.trim() === ''}
+              onClick={() => setSure(true)}
+            >
+              Отправить
+            </Btn>
+            <Btn onClick={() => setText(null)}>Отмена</Btn>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -152,6 +227,7 @@ function Draft({ v }: { v: ConvView }) {
       ) : (
         <p className="muted">Черновика нет: Сара ждёт, что ответит клиент.</p>
       )}
+      {!v.closed ? <OwnText v={v} /> : null}
       {!v.closed ? (
         <div className="actions">
           {v.owner === 'boris' ? (
@@ -220,7 +296,10 @@ function Conversation({ v }: { v: ConvView }) {
         ) : (
           <div className="chat">
             {v.messages.map((m) => (
-              <div key={m.id} className={`bubble${m.side === 'us' ? ' is-us' : ''}`}>
+              <div
+                key={m.id}
+                className={`bubble${m.side === 'us' ? ' is-us' : m.side === 'profi' ? ' is-profi' : ''}`}
+              >
                 <span className="bubble-meta">
                   {m.author} ·{' '}
                   <span className="mono">{m.approx ? `около ${hhmm(m.at)}` : hhmm(m.at)}</span>
