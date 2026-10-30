@@ -211,6 +211,79 @@ export function negativeReviews(info: ClientInfo | null): Check {
   }
 }
 
+/** The points a text that looks like a vacancy loses in the score (Boris, 30.10.2026). */
+export const VACANCY_PENALTY = 15
+
+/** The signs of a vacancy, by group (docs/product/lead-analysis.md, criterion 7). Each group counts once. */
+const VACANCY_GROUPS: { id: string; re: RegExp }[] = [
+  {
+    id: 'разделы',
+    re: /(?:^|\n|·\s*|[.!?]\s+)(обязанности|требования|кого ищем|будет плюсом|условия|мы предлагаем)(?![\p{L}\p{N}])/iu,
+  },
+  {
+    id: 'оплата',
+    re: /(?<![\p{L}\p{N}])(оклад[\p{L}\p{N}]*|зарплат[\p{L}\p{N}]*|зп|испытательн[\p{L}\p{N}]+ срок[\p{L}\p{N}]*|от\s+\d[\d\s.]*(?:тыс[\p{L}\p{N}]*|т\.?\s?р|000)\.?\s*(?:руб[\p{L}\p{N}]*|₽|р)?\s+в\s+месяц)/iu,
+  },
+  {
+    id: 'график',
+    re: /(график\s+работы|(?<![\p{L}\p{N}])график(?![\p{L}\p{N}])|полн[\p{L}\p{N}]+\s+(?:рабоч[\p{L}\p{N}]+\s+)?день|(?<![\p{L}\p{N}])[1-7]\/[1-7](?![\p{L}\p{N}])|на\s+постоянной\s+основе|\d+\s+час[\p{L}\p{N}]*\s+в\s+(?:день|неделю))/iu,
+  },
+  { id: 'в команду', re: /(в\s+команду|в\s+штат[\p{L}\p{N}]*|ищем\s+в\s+команду)/iu },
+  {
+    id: 'сотрудник',
+    re: /(сотрудник[\p{L}\p{N}]*|кандидат[\p{L}\p{N}]*|резюме|собеседован[\p{L}\p{N}]+|оформлени[\p{L}\p{N}]+\s+по\s+тк|по\s+тк(?![\p{L}\p{N}]))/iu,
+  },
+  { id: 'опыт', re: /(опыт[\p{L}\p{N}]*(?:\s+работы)?\s+от\s+\d+|от\s+\d+\s+(?:лет|года))/iu },
+  { id: 'на «ты»', re: /(?<![\p{L}\p{N}])(?:ты|тебя|тебе|твой|твоя|твои)(?![\p{L}\p{N}])/iu },
+]
+/** Signs of a project for an outside team: the text is not a vacancy though it borrows its words. */
+const PROJECT_SIGNS =
+  /(разов[\p{L}\p{N}]+\s+(?:задач|консультац)[\p{L}\p{N}]*|временн[\p{L}\p{N}]+\s+проект|агентств[\p{L}\p{N}]+|подрядчик[\p{L}\p{N}]*|студи[\p{L}\p{N}]+|под\s+ключ)/iu
+const PERMANENT_ROLE = /постоянная работа/iu
+const ROLE_TITLE = /(маркетолог|менеджер)/iu
+
+type VacancySigns = { groups: { id: string; quote: string }[]; project: boolean; strong: boolean }
+
+function vacancySigns(o: { title: string; text: string }): VacancySigns {
+  const whole = `${o.title}\n${o.text}`
+  const groups = VACANCY_GROUPS.flatMap((g) => {
+    const m = g.re.exec(whole)
+    return m ? [{ id: g.id, quote: space(m[1] ?? m[0]) }] : []
+  })
+  // «Постоянная работа» in a role's category is a sign too, though a weak one: it needs the title to name the role.
+  if (PERMANENT_ROLE.test(whole) && ROLE_TITLE.test(o.title))
+    groups.push({ id: 'постоянная работа', quote: 'Постоянная работа' })
+  const has = (id: string) => groups.some((g) => g.id === id)
+  const strong = has('разделы') && (has('оплата') || has('график')) && groups.length >= 3
+  return { groups, project: PROJECT_SIGNS.test(whole), strong }
+}
+
+const signsBasis = (g: VacancySigns['groups']) =>
+  g.map((x) => `${x.id}: «${clip(x.quote, 60)}»`).join('; ')
+
+/** Criterion 7: a clear vacancy (sections with pay or schedule, no sign of a project) stops; no text is no data. */
+export function vacancy(o: { title: string; text: string }): Check {
+  if (!o.text.trim()) return { noData: 'vacancy' }
+  const s = vacancySigns(o)
+  if (!s.strong || s.project) return { pass: 'vacancy' }
+  return { hit: { criterion: 'vacancy', basis: signsBasis(s.groups) } }
+}
+
+/** A text that looks like a vacancy but not for sure: it goes on and loses points. Null: no such doubt. */
+export function vacancySoft(o: { title: string; text: string }): ScreenMark | null {
+  if (!o.text.trim()) return null
+  const s = vacancySigns(o)
+  if (s.strong && !s.project) return null
+  if (s.groups.length === 0) return null
+  // One sign alone is a word, not a vacancy: «команда» in a project text. Two, or a hiring word with the role, is.
+  const hiring = s.groups.some(
+    (g) => g.id === 'в команду' || g.id === 'сотрудник' || g.id === 'постоянная работа',
+  )
+  if (s.groups.length < 2 && !(hiring && s.groups[0]?.id === 'постоянная работа')) return null
+  if (s.project && s.groups.length < 3) return null
+  return { criterion: 'vacancy', basis: signsBasis(s.groups) }
+}
+
 const QUOTE_MAX = 160
 const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max - 1)}…`)
 
@@ -264,7 +337,7 @@ const byOrder = <T extends { criterion: ScreenCriterion }>(xs: T[]) =>
 /** One screen from its checks, the criteria in Boris's order. */
 export function screenOf(
   checks: Check[],
-  extra: { hits?: ScreenMark[]; clarify?: ScreenMark[] },
+  extra: { hits?: ScreenMark[]; clarify?: ScreenMark[]; soft?: ScreenMark[] },
   p: { stops: boolean; ownWords: number | null; at: Date },
 ): LeadScreen {
   const hits = [...checks.flatMap((c) => ('hit' in c ? [c.hit] : [])), ...(extra.hits ?? [])]
@@ -274,6 +347,8 @@ export function screenOf(
     hits: byOrder(hits),
     clarify: byOrder(extra.clarify ?? []),
     no_data: [...new Set(noData)].sort((a, b) => order(a) - order(b)),
+    soft: extra.soft ?? [],
+    penalty: (extra.soft ?? []).length > 0 ? VACANCY_PENALTY : 0,
     own_words: p.ownWords,
     at: p.at.toISOString(),
   }
@@ -301,6 +376,8 @@ export function mergeScreens(
     stops: after.stops,
     hits: byOrder([...keep(before.hits), ...after.hits]),
     clarify: byOrder([...keep(before.clarify), ...after.clarify]),
+    soft: byOrder([...keep(before.soft), ...after.soft]),
+    penalty: [...keep(before.soft), ...after.soft].length > 0 ? VACANCY_PENALTY : 0,
     no_data: [...new Set([...before.no_data.filter((c) => !again.has(c)), ...after.no_data])].sort(
       (a, b) => order(a) - order(b),
     ),
@@ -314,11 +391,19 @@ export function screenLines(s: Pick<LeadScreen, 'hits'>): string[] {
   return s.hits.map((h) => `⛔ ОТСЕЯН - ${SCREEN_RU[h.criterion]} - ${h.basis}`)
 }
 
-/** «уточнить в отклике» lines for the card. */
-export function clarifyLines(s: Pick<LeadScreen, 'clarify'>): string[] {
-  return s.clarify.map(
-    (c) => `Уточнить в отклике: ${SCREEN_RU[c.criterion]}${c.basis ? `, ${c.basis}` : ''}`,
-  )
+/** «уточнить в отклике» lines for the card, and the doubt about a vacancy with the points it cost. */
+export function clarifyLines(
+  s: Pick<LeadScreen, 'clarify'> & Partial<Pick<LeadScreen, 'soft' | 'penalty'>>,
+): string[] {
+  return [
+    ...s.clarify.map(
+      (c) => `Уточнить в отклике: ${SCREEN_RU[c.criterion]}${c.basis ? `, ${c.basis}` : ''}`,
+    ),
+    ...(s.soft ?? []).map(
+      (c) =>
+        `Похоже на вакансию (минус ${s.penalty ?? VACANCY_PENALTY} баллов): ${c.basis}. В отклике спросить, нужен ли только человек в штат или и внешняя команда`,
+    ),
+  ]
 }
 
 /** The journal's payload: the criteria without the client's words (they stay on the lead, ADR-016). */
@@ -328,6 +413,8 @@ export function screenEvent(s: LeadScreen): Record<string, unknown> {
     out: s.hits.length > 0,
     criteria: s.hits.map((h) => h.criterion),
     clarify: s.clarify.map((c) => c.criterion),
+    soft: s.soft.map((c) => c.criterion),
+    penalty: s.penalty,
     no_data: s.no_data,
     own_words: s.own_words,
   }

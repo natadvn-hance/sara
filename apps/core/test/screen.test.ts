@@ -4,6 +4,7 @@ import { lead } from '../src/db/schema'
 import {
   type Check,
   checkedOf,
+  clarifyLines,
   type FormParts,
   forgetFormParts,
   formPartsOf,
@@ -20,6 +21,9 @@ import {
   shortText,
   sinceDay,
   splitParts,
+  VACANCY_PENALTY,
+  vacancy,
+  vacancySoft,
 } from '../src/leads/screen'
 import { dryReport, dryScreen } from '../src/leads/screenDry'
 import { openTestDb, resetDb } from './helpers/db'
@@ -287,6 +291,8 @@ describe('the rules of application', () => {
       hits: [{ criterion: 'direct', basis: '«настроить рекламу в Директе»' }],
       clarify: [{ criterion: 'small_fix', basis: '«поправить кнопку»' }],
       no_data: ['new_account'],
+      soft: [],
+      penalty: 0,
       own_words: 20,
       at: when.toISOString(),
     }
@@ -296,6 +302,8 @@ describe('the rules of application', () => {
       out: true,
       criteria: ['direct'],
       clarify: ['small_fix'],
+      soft: [],
+      penalty: 0,
       no_data: ['new_account'],
       own_words: 20,
     })
@@ -392,5 +400,69 @@ describe('the dry run counts what the screen would stop, without the client word
     const report = dryReport(r, 15)
     expect(report).toContain('остановил бы 2 (50%), из них показанных 2, с откликом 1')
     expect(report).not.toContain('Нужен сайт')
+  })
+})
+
+describe('criterion 7: a text that is a vacancy', () => {
+  const JOB = {
+    title: 'Маркетолог',
+    text: 'Ищем маркетолога в команду. Обязанности: ведение рекламы, отчёты. Требования: опыт от 2 лет. Оклад от 80 тыс. в месяц, график 5/2, полный день.',
+  }
+
+  it('a clear vacancy (sections with pay or schedule, several signs) stops, with its quotes as the basis', () => {
+    const c = vacancy(JOB)
+    expect(c).toMatchObject({ hit: { criterion: 'vacancy' } })
+    const basis = c && 'hit' in c ? c.hit.basis : ''
+    expect(basis).toContain('разделы: «Обязанности»')
+    expect(basis).toContain('график')
+    expect(vacancySoft(JOB)).toBeNull()
+  })
+
+  it('a text that only looks like one is not stopped, it is marked to lose points', () => {
+    const like = {
+      title: 'Маркетолог',
+      text: 'Нужен маркетолог в команду, ищем сотрудника на постоянку, подробности обсудим.',
+    }
+    expect(vacancy(like)).toEqual({ pass: 'vacancy' })
+    expect(vacancySoft(like)).toMatchObject({ criterion: 'vacancy' })
+    const lines = clarifyLines({
+      clarify: [],
+      soft: [vacancySoft(like) as NonNullable<ReturnType<typeof vacancySoft>>],
+      penalty: VACANCY_PENALTY,
+    })
+    expect(lines[0]).toContain('Похоже на вакансию (минус 15 баллов)')
+    expect(lines[0]).toContain('только человек в штат или и внешняя команда')
+  })
+
+  it('«Постоянная работа» under a role in the category is a sign, alone with the title it is not enough', () => {
+    expect(
+      vacancySoft({
+        title: 'Маркетолог',
+        text: 'Продвижение. Постоянная работа. Ищем ещё сотрудника.',
+      }),
+    ).not.toBeNull()
+    expect(vacancySoft({ title: 'Дизайн', text: 'Постоянная работа. Логотип.' })).toBeNull()
+  })
+
+  it('a project where «команда» is just a word, or one sign alone, passes clean', () => {
+    const project = {
+      title: 'Стратегия',
+      text: 'У нас команда из пяти человек, хотим понять, как расти. Нужен агентство-партнёр под ключ.',
+    }
+    expect(vacancy(project)).toEqual({ pass: 'vacancy' })
+    expect(vacancySoft(project)).toBeNull()
+    expect(vacancySoft({ title: '', text: 'Наша команда делает мебель, нужен сайт.' })).toBeNull()
+  })
+
+  it('sections and pay from an agency project are not a vacancy: the project sign wins', () => {
+    const t = {
+      title: 'Агентство',
+      text: 'Ищем агентство. Требования: кейсы. Условия: оплата 80 тыс. в месяц, график встреч раз в неделю.',
+    }
+    expect(vacancy(t)).toEqual({ pass: 'vacancy' })
+  })
+
+  it('no text is no data', () => {
+    expect(vacancy({ title: 'Маркетолог', text: ' ' })).toEqual({ noData: 'vacancy' })
   })
 })

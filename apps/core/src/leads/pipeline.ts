@@ -66,6 +66,8 @@ import {
   screenOf,
   senseMarks,
   shortText,
+  vacancy,
+  vacancySoft,
 } from './screen'
 import { sortOrder } from './sorter'
 
@@ -437,8 +439,13 @@ async function screenByText(o: Pick<ProfiOrder, 'title' | 'text'>): Promise<Lead
     getSetting(db, 'screen.min_own_words'),
   ])
   return screenOf(
-    [{ noData: 'new_account' }, { noData: 'negative_reviews' }, shortText(o, form, min)],
-    {},
+    [
+      { noData: 'new_account' },
+      { noData: 'negative_reviews' },
+      shortText(o, form, min),
+      vacancy(o),
+    ],
+    { soft: [vacancySoft(o)].filter((x): x is NonNullable<typeof x> => x !== null) },
     {
       stops,
       ownWords: o.text.trim() ? ownWords(o, form).length : null,
@@ -465,6 +472,7 @@ async function screenByPage(
   if (before.no_data.includes('short_text') && o.text.trim()) {
     const form = await loadFormParts(db)
     checks.push(shortText(o, form, await getSetting(db, 'screen.min_own_words')))
+    checks.push(vacancy(o))
     words = ownWords(o, form).length
   }
   return mergeScreens(
@@ -626,7 +634,21 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       try {
         const { version, rules } = await activeRules(d().db, accountId)
         const s = await scoreOrder(d().gateway, order, rules, { correlationId, causationId: e.id })
-        return s ? { ...s, version } : null
+        if (!s) return null
+        // A text that looks like a vacancy loses points; the stop `vacancy` of the rules stays the Scorer's own
+        // insurance, the screen stops the clear ones earlier and with a quote.
+        const cut = screen?.penalty ?? 0
+        if (cut > 0 && screen) {
+          const score = Math.max(0, s.score - cut)
+          return {
+            ...s,
+            score,
+            decision: !s.stopFactor && score >= rules.threshold ? 'show' : 'drop',
+            reason: `${s.reason} (минус ${cut}: похоже на вакансию)`.slice(0, 300),
+            version,
+          }
+        }
+        return { ...s, version }
       } catch (err) {
         console.error('scoring failed', err instanceof Error ? err.message.slice(0, 200) : err)
         return null

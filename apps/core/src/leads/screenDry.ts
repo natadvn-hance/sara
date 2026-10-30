@@ -1,5 +1,13 @@
 import { ClientInfo, SCREEN_CRITERIA, SCREEN_RU, type ScreenCriterion } from '@sara/shared'
-import { type Check, type FormParts, negativeReviews, newAccount, shortText } from './screen'
+import {
+  type Check,
+  type FormParts,
+  negativeReviews,
+  newAccount,
+  shortText,
+  vacancy,
+  vacancySoft,
+} from './screen'
 
 /**
  * The screen's criteria 1-3 over orders already seen, to check it on real data before it stops anything
@@ -27,6 +35,8 @@ export type DryResult = {
   out: Count
   by: Record<ScreenCriterion, Count>
   noData: Record<ScreenCriterion, number>
+  /** Orders that look like a vacancy but are not stopped: they lose points. */
+  soft: { n: number; shown: number; bid: number }
   /** The shown or bid orders the screen would stop: Boris checks these by hand. */
   lost: { id: string; criteria: ScreenCriterion[]; shown: boolean; bid: boolean }[]
 }
@@ -46,6 +56,7 @@ export function dryScreen(rows: DryRow[], form: FormParts, minWords: number): Dr
     out: zero(),
     by: Object.fromEntries(SCREEN_CRITERIA.map((c) => [c, zero()])) as DryResult['by'],
     noData: Object.fromEntries(SCREEN_CRITERIA.map((c) => [c, 0])) as DryResult['noData'],
+    soft: zero(),
     lost: [],
   }
   for (const r of rows) {
@@ -54,10 +65,12 @@ export function dryScreen(rows: DryRow[], form: FormParts, minWords: number): Dr
       newAccount(info, new Date(r.seenAt)),
       negativeReviews(info),
       shortText(r, form, minWords),
+      vacancy(r),
     ]
     const hits = checks.flatMap((c) => ('hit' in c ? [c.hit.criterion] : []))
     for (const c of checks) if ('noData' in c) res.noData[c.noData]++
     for (const h of hits) add(res.by[h], r)
+    if (hits.length === 0 && vacancySoft(r)) add(res.soft, r)
     if (hits.length === 0) continue
     add(res.out, r)
     if (r.shown || r.bid) res.lost.push({ id: r.id, criteria: hits, shown: r.shown, bid: r.bid })
@@ -74,13 +87,14 @@ export function dryReport(r: DryResult, minWords: number): string {
     '',
     'По критериям (заказ может попасть в несколько):',
   ]
-  for (const c of SCREEN_CRITERIA.slice(0, 3)) {
+  for (const c of ['new_account', 'negative_reviews', 'short_text', 'vacancy'] as const) {
     const b = r.by[c]
     lines.push(
       `- ${SCREEN_RU[c]}: ${b.n}, показанных ${b.shown}, с откликом ${b.bid}; нет данных у ${r.noData[c]}`,
     )
   }
   lines.push(
+    `- Похоже на вакансию, теряют баллы: ${r.soft.n}, показанных ${r.soft.shown}, с откликом ${r.soft.bid}`,
     '',
     'Критерии 4-6 (Директ, WordPress, точечные правки) решает Сортировщик, здесь их нет.',
   )

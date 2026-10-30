@@ -12,6 +12,7 @@ export const SCREEN_CRITERIA = [
   'direct',
   'wordpress',
   'small_fix',
+  'vacancy',
 ] as const
 export const ScreenCriterion = z.enum(SCREEN_CRITERIA)
 export type ScreenCriterion = z.infer<typeof ScreenCriterion>
@@ -28,6 +29,7 @@ export const SCREEN_RU: Record<ScreenCriterion, string> = {
   direct: 'Яндекс Директ',
   wordpress: 'WordPress',
   small_fix: 'Точечные правки',
+  vacancy: 'Вакансия',
 }
 
 /** One criterion with its basis: a quote of the order or a field of the client's profile. */
@@ -45,6 +47,13 @@ export const LeadScreen = z.object({
   hits: z.array(ScreenMark),
   clarify: z.array(ScreenMark),
   no_data: z.array(ScreenCriterion),
+  /**
+   * Boris, 30.10.2026 evening: a text that only looks like a vacancy (one or two signs) is not stopped, it loses
+   * points in the score; each sign with its quote. Empty: no such doubt.
+   */
+  soft: z.array(ScreenMark).default([]),
+  /** The points taken off the Scorer's total because of `soft`. */
+  penalty: z.number().int().nonnegative().default(0),
   /** The client's own words in the order text, form answers left out; null: no text to count. */
   own_words: z.number().int().nonnegative().nullable(),
   at: z.iso.datetime(),

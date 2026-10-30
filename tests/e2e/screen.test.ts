@@ -8,7 +8,7 @@ import { and, asc, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { event, lead } from '../../apps/core/src/db/schema'
+import { event, lead, leadScore } from '../../apps/core/src/db/schema'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { readFeed } from '../../apps/core/src/pult/feed'
@@ -300,5 +300,51 @@ describe('the shadow (the default): the screen only marks', () => {
     expect(tg.sent.map((m) => m.text).join('\n')).toContain(
       'Отсеяла бы 1 (отсев пока только отмечает): Короткий текст 1',
     )
+  })
+})
+
+describe('criterion 7: vacancy', () => {
+  const JOB = {
+    title: 'Маркетолог',
+    text: 'Ищем маркетолога в команду для развития нашего салона. Обязанности: ведение соцсетей, реклама, отчёты по заявкам. Требования: опыт от 2 лет. Оклад от 80 тыс. в месяц, график 5/2.',
+  }
+  const LIKE = {
+    title: 'Маркетолог',
+    text: 'Нужен маркетолог в команду для развития нашего салона красоты, ищем сотрудника, который сможет вести рекламу, соцсети и считать заявки каждый месяц.',
+  }
+
+  it('a clear vacancy stops with the screen on, before the Sorter, quotes as the basis', async () => {
+    await setSetting(db, 'screen.stops', true, 'boris')
+    const id = orderId()
+    await fake.emitOrder({ order_id: id, ...JOB })
+    await until(async () => (await leadOf(id))?.status === 'screened_out')
+    await settle()
+    expect(inputsOf('sorter')).toEqual([])
+    const s = await screenOf(id)
+    expect(s.hits.map((h) => h.criterion)).toEqual(['vacancy'])
+    expect(s.hits[0]?.basis).toContain('разделы: «Обязанности»')
+  })
+
+  it('one that only looks like a vacancy goes on, loses 15 points and says so on the card', async () => {
+    byRole = { ...byRole, scorer: scorerAnswer(75) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id, ...LIKE })
+    await until(() => leadCards().length === 1)
+    const s = await screenOf(id)
+    expect(s).toMatchObject({ penalty: 15, hits: [] })
+    expect(s.soft[0]?.criterion).toBe('vacancy')
+    const [score] = await db.select().from(leadScore).where(eq(leadScore.leadId, id))
+    expect(score?.score).toBe(60)
+    expect(leadCards()[0]?.text).toContain('Похоже на вакансию (минус 15 баллов)')
+  })
+
+  it('and when the lost points take it under the threshold, it is dropped like any low score', async () => {
+    byRole = { ...byRole, scorer: scorerAnswer(65) }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id, ...LIKE })
+    await until(async () => (await leadOf(id))?.status === 'scored_out')
+    const [score] = await db.select().from(leadScore).where(eq(leadScore.leadId, id))
+    expect(score?.score).toBe(50)
+    expect(score?.reason).toContain('минус 15: похоже на вакансию')
   })
 })
