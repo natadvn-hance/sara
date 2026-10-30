@@ -9,6 +9,7 @@ const LEAD = '990101'
 const CONV = '0b6f6c1e-5a4b-4c1d-9e2f-0a1b2c3d4e5f'
 const LEAD_TASK = '1d2c3b4a-0000-4000-8000-000000000101'
 const DRAFT_TASK = '1d2c3b4a-0000-4000-8000-000000000102'
+const NOTICE = '1d2c3b4a-0000-4000-8000-000000000103'
 
 /**
  * The M7 screens against the real core: made-up rows go straight into the e2e database, the pult reads them through
@@ -29,6 +30,11 @@ async function sql(text: string, values: unknown[] = []) {
 }
 
 async function clean() {
+  await sql('delete from core.notice where id = $1 or task_id = any($2::uuid[])', [
+    NOTICE,
+    [LEAD_TASK, DRAFT_TASK],
+  ])
+  await sql('delete from core.lead_label where lead_id = $1', [LEAD])
   await sql('delete from core.task where id = any($1::uuid[])', [[LEAD_TASK, DRAFT_TASK]])
   await sql('delete from core.conv_turn where conversation_id = $1', [CONV])
   await sql('delete from core.chat_message where conversation_id = $1', [CONV])
@@ -66,9 +72,14 @@ test.beforeAll(async ({ playwright }) => {
      values (gen_random_uuid(), $1, 1, 88, 'show', null, '[]', '[]', 'стратегия для малого бизнеса', 0.9, 'haiku', false)`,
     [LEAD],
   )
+  // The card's number in Telegram, so a decision in the pult has a card to mark.
   await sql(
-    `insert into core.task (id, kind, entity_kind, entity_id) values ($1, 'lead_decision', 'lead', $2)`,
+    `insert into core.task (id, kind, entity_kind, entity_id, telegram_message_id) values ($1, 'lead_decision', 'lead', $2, 4242)`,
     [LEAD_TASK, LEAD],
+  )
+  await sql(
+    `insert into core.notice (id, kind, title, body, link, task_id) values ($1, 'lead', 'Заявка: Стратегия для студии керамики', 'Краснодар · отклик 240 ₽', $2, $3)`,
+    [NOTICE, `/leads/${LEAD}`, LEAD_TASK],
   )
   await sql(
     `insert into core.conversation (id, account_id, chat_id, order_id, origin) values ($1, 'hance-marketing', 'e2e-chat', $2, 'sara')`,
@@ -127,7 +138,7 @@ test('FR-UI-5, FR-UI-6: a lead shows its score, разбор and price range; «
 test('FR-CONV-11: a draft goes only by «Отправить», the card press; in the shadow it says so', async ({
   page,
 }) => {
-  await page.goto('/conversations')
+  await page.goto('/clients')
   await page
     .getByRole('link', { name: /Вероника/ })
     .first()
@@ -166,9 +177,13 @@ test('FR-UI-3: the pult fits a 360 px phone without horizontal scroll and has th
 }) => {
   await page.setViewportSize({ width: 360, height: 740 })
   for (const path of [
+    '/inbox',
     '/today',
     `/leads/${LEAD}`,
-    `/conversations/${CONV}`,
+    `/clients/${CONV}`,
+    '/notices',
+    '/journal',
+    '/search?q=керамик',
     '/analytics',
     '/settings',
     '/health',
@@ -178,4 +193,63 @@ test('FR-UI-3: the pult fits a 360 px phone without horizontal scroll and has th
     await page.waitForTimeout(300)
     expect(await overflowOf(page), path).toBeLessThanOrEqual(0)
   }
+})
+
+test('FR-NOTIF-1: the bell counts the new notices and opening them marks them seen', async ({
+  page,
+}) => {
+  await page.goto('/today')
+  // On a computer the bell is the menu's «Уведомления» with the count of the new ones.
+  await expect(
+    page.getByRole('navigation', { name: 'Сара' }).getByRole('link', { name: /^Уведомления \d+$/ }),
+  ).toBeVisible()
+  await page.goto('/notices')
+  await expect(page.getByText('Заявка: Стратегия для студии керамики')).toBeVisible()
+  await expect
+    .poll(async () => {
+      const client = new pg.Client({ connectionString: dbUrl('sara_web') })
+      await client.connect()
+      try {
+        const r = await client.query('select seen_at from core.notice where id = $1', [NOTICE])
+        return r.rows[0]?.seen_at ?? null
+      } finally {
+        await client.end()
+      }
+    })
+    .not.toBeNull()
+})
+
+test('FR-UI-2: the search finds the order by its number and the section by its name', async ({
+  page,
+}) => {
+  await page.goto(`/search?q=${LEAD}`)
+  await expect(page.getByRole('link', { name: /Стратегия для студии керамики/ })).toBeVisible()
+  await page.goto('/search?q=настройки')
+  await expect(page.getByRole('link', { name: /Настройки/ }).first()).toBeVisible()
+})
+
+test('FR-UI-6, ST-M7-03: a lead is skipped from the Inbox in two presses with a reason; the Telegram card says «Решено в приложении»', async ({
+  page,
+  request,
+}) => {
+  await page.goto('/inbox')
+  await expect(page.getByRole('heading', { name: /Входящие/ })).toBeVisible()
+  const row = page.locator('.task', { hasText: 'Заявка ждёт решения' })
+  await expect(row.getByRole('link', { name: /Стратегия для студии керамики/ })).toBeVisible()
+  await expect(page.locator('.task', { hasText: 'Черновик ответа клиенту' })).toBeVisible()
+  await row.getByRole('button', { name: 'Пропустить' }).click()
+  await row.getByRole('button', { name: 'не наш профиль' }).click()
+  await expect(page.getByRole('status')).toHaveText('Пропущено')
+  await expect(row).toHaveCount(0)
+  // The bell's notice of this lead is done now, from the task's state.
+  await page.goto('/notices')
+  await expect(page.getByText('Заявка: Стратегия для студии керамики')).toHaveCount(0)
+  // The bot is the one setup.spec bound to the fake Telegram earlier in the same run (the specs share the core).
+  const markups = (await (await request.get('http://127.0.0.1:18082/_control/markups')).json()) as {
+    message_id: number
+    reply_markup: { inline_keyboard: { text: string }[][] }
+  }[]
+  expect(
+    markups.find((m) => m.message_id === 4242)?.reply_markup.inline_keyboard[0]?.[0]?.text,
+  ).toBe('Решено в приложении: пропущено')
 })

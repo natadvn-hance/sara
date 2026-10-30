@@ -177,10 +177,21 @@ export type HistoryDeps = {
   quietMs?: number
   sleep?(ms: number): Promise<void>
   now?(): number
+  /** When the reader may take the tab; by default the night, 23:00-08:00 by Moscow. */
+  night?(now: number): boolean
   log?(line: string): void
 }
 
 const DAY = 24 * 3600_000
+
+/**
+ * The tab is for live work by day (Boris, 30.10.2026): the reader works from 23:00 to 08:00 by Moscow (UTC+3, no
+ * summer time), stops for the day where it is, and the next night goes on from there, skipping the chats it kept.
+ */
+export function moscowNight(now: number): boolean {
+  const h = (new Date(now).getUTCHours() + 3) % 24
+  return h >= 23 || h < 8
+}
 const BUSY = 'вкладка занята'
 type Tab = Parameters<Parameters<Insurance['inTab']>[0]>[0]
 
@@ -188,6 +199,7 @@ type Tab = Parameters<Parameters<Insurance['inTab']>[0]>[0]
 export async function readHistory(d: HistoryDeps): Promise<string> {
   const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const now = d.now ?? Date.now
+  const night = () => (d.night ?? moscowNight)(now())
   const [lo, hi] = d.pauseMs ?? [45_000, 90_000]
   const pause = () => sleep(lo + Math.random() * (hi - lo))
   const log = d.log ?? ((l: string) => console.log(`История чатов: ${l}`))
@@ -195,6 +207,12 @@ export async function readHistory(d: HistoryDeps): Promise<string> {
   const status = async (line: string) => {
     log(line)
     await d.setFlag(HISTORY_STATUS, line).catch(() => {})
+  }
+  // Morning: the flag stays «go», the next night the reader starts again and skips what it kept.
+  const dayPause = async (where: string) => {
+    const line = `пауза до 23:00 по Москве: ${where}`
+    await status(line)
+    return line
   }
   const stop = async (why: string) => {
     const line = `остановлено: ${why}`
@@ -240,6 +258,7 @@ export async function readHistory(d: HistoryDeps): Promise<string> {
 
   // 1. The lists: both tabs, scrolled down until they hold all their chats or stop growing.
   for (const filter of ['open', 'archive']) {
+    if (!night()) return dayPause('до чтения списков')
     if ((await d.flag()) !== 'go') return stop('флаг снят')
     const since = at()
     const r = await whenFree(async () => {
@@ -290,6 +309,7 @@ export async function readHistory(d: HistoryDeps): Promise<string> {
   let empty = 0
   for (const c of todo) {
     await pause()
+    if (!night()) return dayPause(`прочитано ${done} из ${todo.length}, сообщений ${kept}`)
     if ((await d.flag()) !== 'go') return stop(`флаг снят, прочитано ${done} из ${todo.length}`)
     const since = at()
     const got = await whenFree<
@@ -372,7 +392,8 @@ export function startHistoryRead(d: HistoryDeps, everyMs = 5 * 60_000): { stop()
     if (running) return
     running = true
     void (async () => {
-      if ((await d.flag()) === 'go') await readHistory(d)
+      if ((await d.flag()) === 'go' && (d.night ?? moscowNight)((d.now ?? Date.now)()))
+        await readHistory(d)
     })()
       .catch((e) => console.error('История чатов:', e instanceof Error ? e.message : e))
       .finally(() => {

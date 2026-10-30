@@ -367,31 +367,36 @@ export function createBidTools(o: {
       if (known?.result) return known.result as SubmitBidOutput
       if (known) {
         const due = known.dueRub
-        return r.inTab((t) => confirm(r, i, due, t)).catch(() => Promise.reject(uncertain()))
+        return r
+          .inTab((t) => confirm(r, i, due, t), { urgent: true })
+          .catch(() => Promise.reject(uncertain()))
       }
       if (late()) throw tooLate()
       requireAlive(r.watch)
-      return r.inTab(async (t) => {
-        // A twin of this call may have pressed while this one waited for the tab.
-        const twin = await findBidAttempt(o.db, i.idempotency_key)
-        if (twin?.result) return twin.result as SubmitBidOutput
-        if (twin) return confirm(r, i, twin.dueRub, t)
-        if (late()) throw tooLate()
-        requireAlive(r.watch)
-        if (!t.can())
-          throw fail(
-            'RATE_LIMITED',
-            'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
-          )
-        try {
-          return await bid(r, i, t, late)
-        } catch (e) {
-          if (e instanceof ProfiToolError) throw e
-          // A failure of our own before the press (the database, the browser): nothing was pressed.
-          const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
-          throw fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`)
-        }
-      })
+      return r.inTab(
+        async (t) => {
+          // A twin of this call may have pressed while this one waited for the tab.
+          const twin = await findBidAttempt(o.db, i.idempotency_key)
+          if (twin?.result) return twin.result as SubmitBidOutput
+          if (twin) return confirm(r, i, twin.dueRub, t)
+          if (late()) throw tooLate()
+          requireAlive(r.watch)
+          if (!t.can())
+            throw fail(
+              'RATE_LIMITED',
+              'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
+            )
+          try {
+            return await bid(r, i, t, late)
+          } catch (e) {
+            if (e instanceof ProfiToolError) throw e
+            // A failure of our own before the press (the database, the browser): nothing was pressed.
+            const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
+            throw fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`)
+          }
+        },
+        { urgent: true },
+      )
     },
   }
 }

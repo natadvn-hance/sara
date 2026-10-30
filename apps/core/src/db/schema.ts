@@ -780,3 +780,26 @@ export const autonomyCounter = core.table(
   },
   (t) => [primaryKey({ columns: [t.topic, t.scope] })],
 )
+
+/**
+ * The bell of the pult (pult v2 design 6): every message Sara sends Boris on her own, with its state. `done` is not
+ * stored: a notice is done when its task is resolved or its question answered, wherever that happened.
+ */
+export const notice = core.table(
+  'notice',
+  {
+    id: uuid('id').primaryKey(),
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    link: text('link'),
+    taskId: uuid('task_id'),
+    questionId: uuid('question_id'),
+    telegramMessageId: bigint('telegram_message_id', { mode: 'number' }),
+    seenAt: ts('seen_at'),
+    /** A notice without a task or question Boris put away himself. */
+    doneAt: ts('done_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('notice_created').on(t.createdAt), index('notice_task').on(t.taskId)],
+)

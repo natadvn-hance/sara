@@ -257,6 +257,13 @@ async function cardsOf(db: DbOrTx, taskIds: string[]): Promise<Map<string, Card>
   return out
 }
 
+/** The rows the feed knows how to say, in Boris's words, by the event's id (the journal uses it too). */
+export async function describeEvents(db: DbOrTx, rows: Row[]): Promise<Map<string, FeedItem>> {
+  const out = new Map<string, FeedItem>()
+  for (const f of await sayRows(db, rows)) out.set(f.id, f)
+  return out
+}
+
 /** The last `limit` shown steps, newest first. */
 export async function readFeed(db: DbOrTx, limit = 40): Promise<FeedItem[]> {
   const rows = await db
@@ -265,6 +272,10 @@ export async function readFeed(db: DbOrTx, limit = 40): Promise<FeedItem[]> {
     .where(inArray(event.type, FEED_TYPES))
     .orderBy(desc(event.occurredAt))
     .limit(limit)
+  return sayRows(db, rows)
+}
+
+async function sayRows(db: DbOrTx, rows: Row[]): Promise<FeedItem[]> {
   const leadIds = [...new Set(rows.filter((r) => r.entityKind === 'lead').map((r) => r.entityId))]
   const titles = leadIds.length
     ? await db
