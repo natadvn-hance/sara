@@ -29,6 +29,9 @@ services:
       SARA_NODE_TOKEN: ${SARA_NODE_TOKEN}
       SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET}
       SARA_ACCOUNTS: ${SARA_ACCOUNTS}
+      # Boris's Google Sheet (docs/ops/google-sheet.md): unset in /opt/sara/.env, nothing goes to the sheet.
+      SARA_SHEET_URL: ${SARA_SHEET_URL:-}
+      SARA_SHEET_SECRET: ${SARA_SHEET_SECRET:-}
     # The mind: a clone of natadvn-hance/sara-mind on the host, read only for the core (RB-17).
     volumes: [sara-data:/data, /opt/sara-mind:/data/mind:ro]
     depends_on: [postgres]
