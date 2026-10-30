@@ -61,12 +61,16 @@ describe('the call offer: three times by Boris’s working hours', () => {
   it('FR-CONV-5: the offer Boris approved goes with its times put in, and only those may differ', () => {
     const template = callOfferTemplate('Сайт для клиники')
     expect(isCallOffer(template)).toBe(true)
-    expect(template).toContain('полчас')
+    // Short, plain and ending with a question; the times sit inside it.
+    expect(template.endsWith('?')).toBe(true)
+    expect(template.length).toBeLessThan(160)
+    expect(callOfferTemplate('Другой заказ ' + 'x'.repeat(7))).toMatch(/\?$/)
     expect(callOfferTemplate('Сайт для клиники')).toBe(template)
     const now = msk('2026-10-29T09:00')
     const sent = fillCallOffer(template, workHoursSlots(now, WORK), now)
     expect(sent).toContain('сегодня в 11:00, 15:00 или 18:30')
     expect(sent).not.toContain(SLOTS_MARK)
+    expect(sent.endsWith('?')).toBe(true)
     expect(isApprovedText(template, sent)).toBe(true)
     expect(isApprovedText(template, `${sent} И ещё приписка`)).toBe(false)
     expect(isApprovedText(template, 'Совсем другой текст')).toBe(false)
