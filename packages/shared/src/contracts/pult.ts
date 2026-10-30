@@ -142,6 +142,7 @@ export const LeadView = z.object({
       reason: z.string(),
       stopFactor: z.string().nullable(),
       redFlags: z.array(z.string()),
+      confidence: z.number().nullable().optional(),
       axes: z.array(
         z.object({
           title: z.string(),
@@ -175,6 +176,10 @@ export const LeadView = z.object({
     .nullable(),
   /** What would refuse a bid now, in Boris's words; empty: nothing seen in the way. */
   obstacles: z.array(z.string()),
+  /** A bid put off for ten seconds (pult v2 design 4): when it fires; null: none is held. */
+  hold: z.object({ requestId: z.string(), executeAt: at }).nullable().optional(),
+  /** Boris's label after a skip from the pult, with his reason. */
+  label: z.object({ label: z.string(), reason: z.string().nullable() }).nullable().optional(),
 })
 export type LeadView = z.infer<typeof LeadView>
 
@@ -365,6 +370,8 @@ export type SystemPart = z.infer<typeof SystemPart>
 
 export const SystemView = z.object({
   parts: z.array(SystemPart),
+  /** The core's version and its last start (the last deploy or restart). */
+  deploy: z.object({ version: z.string(), startedAt: at.nullable() }).optional(),
   claude: z.object({
     limited: z.boolean(),
     until: at.nullable(),

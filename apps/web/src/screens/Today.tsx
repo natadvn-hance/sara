@@ -189,12 +189,12 @@ function TodayBody({
       <div className="grid grid-21">
         <Card
           title="Ждёт тебя"
-          icon="bell"
+          icon="inbox"
           i={4}
           end={
-            <span className="mono muted">
-              {count(t.waiting.items.length, ['дело', 'дела', 'дел'])}
-            </span>
+            <A to="/inbox" className="link">
+              {count(t.waiting.items.length, ['дело', 'дела', 'дел'])} <Icon name="right" />
+            </A>
           }
         >
           <Waiting t={t} />

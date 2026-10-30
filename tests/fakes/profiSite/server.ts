@@ -98,6 +98,10 @@ export type ProfiSite = {
   offline(on: boolean): void
   /** Pages hold a request that never ends, so «load» never fires (Profi.ru since 29.10.2026). */
   hangLoad(on: boolean): void
+  /** Pages ask before they are left, as a page with a filled form does once the user has clicked in it. */
+  askBeforeLeave(on: boolean): void
+  /** The next `n` page requests are cut off before any answer, as one lost request is. */
+  dropNext(n: number): void
   muteRtp(on: boolean): void
   changeLayout(): void
   close(): Promise<void>
@@ -201,6 +205,10 @@ function orderScreen(o: SiteOrder, s: BidSettings) {
   }
 }
 
+// A page that asks before it is left; the browser asks only after the user has clicked in the page.
+const LEAVE_ASK =
+  '<script>addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>'
+
 export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSite> {
   const sessions = new Set<string>()
   const orders: SiteOrder[] = []
@@ -209,6 +217,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let banned = false
   let isOffline = false
   let hang = false
+  let askLeave = false
+  let drops = 0
   let rtpMuted = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
@@ -248,7 +258,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       .end(
         (bidSettings.showWallet ? body : body.replace(/<span class="balance"[\s\S]*?<\/span>/, ''))
           .replaceAll('__BALANCE__', String(state.balance))
-          .replaceAll('__PRESENCE__', 'on') + (hang ? '<img src="/hang" alt="">' : ''),
+          .replaceAll('__PRESENCE__', 'on') +
+          (hang ? '<img src="/hang" alt="">' : '') +
+          (askLeave ? LEAVE_ASK : ''),
       )
   const json = (res: ServerResponse, body: unknown, status = 200) =>
     res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
@@ -271,6 +283,10 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     if (isOffline) return req.socket.destroy()
     // Never answered: the page that asked for it never fires «load».
     if (new URL(req.url ?? '/', 'http://x').pathname === '/hang') return
+    if (drops > 0 && req.method === 'GET' && (req.headers.accept ?? '').includes('text/html')) {
+      drops--
+      return req.socket.destroy()
+    }
     const url = new URL(req.url ?? '/', 'http://x')
     const p = url.pathname
     // Echo of the caller's IP, standing in for an outside service like ipify (no login needed).
@@ -497,6 +513,12 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     },
     hangLoad(on) {
       hang = on
+    },
+    askBeforeLeave(on) {
+      askLeave = on
+    },
+    dropNext(n) {
+      drops = n
     },
     offline(on) {
       isOffline = on

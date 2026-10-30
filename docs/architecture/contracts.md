@@ -239,9 +239,16 @@ Code, и единственное, что их связывает, это кон
 `/cutover`, `/search`, `/health`, `/journal` (события C1; заменяет
 `/events`), `/journal/trace/{correlationId}`, `/setup`, `/screen/ticket`.
 
-- Живые обновления: `GET /api/stream` (SSE), кадры `{type, entity_kind,
-  entity_id}` из C1 без данных клиентов, пульт перечитывает нужный ресурс;
-  без потока пульт опрашивает открытый экран раз в 20 секунд.
+- Живые обновления: `GET /api/stream` (SSE), кадры `{type, kind, id, at}`
+  из C1 без данных клиентов, пульт перечитывает открытые экраны; при потоке
+  опрос раз в 60 секунд, без потока раз в 20 секунд (пульт v2,
+  `docs/superpowers/specs/2026-10-29-pult-v2.md`).
+- Колокольчик: `GET /api/notices?state=new|open|all`, `POST /api/notices/seen
+  {ids}`, `POST /api/notices/{id}/done`; схема `NoticeList` в
+  `packages/shared/src/contracts/inbox.ts`. Входящие: `GET /api/inbox`
+  (`InboxView`), вопрос Сары `POST /api/questions/{id}/answer {text}` и
+  `/skip`. Журнал `JournalView`, трасса `TraceView`, поиск `SearchView`
+  в `packages/shared/src/contracts/journal.ts`.
 - Вход: пароль владельца (сессия в cookie) или подпись Telegram Mini App
   в заголовке `Authorization: tma <initData>` на каждом запросе (проверка
   подписи токеном бота, возраста до 24 часов и номера пользователя);

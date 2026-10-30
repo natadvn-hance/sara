@@ -2,6 +2,7 @@ import { EventEnvelope, type NewEvent, newEventId } from '@sara/shared'
 import { and, asc, eq, type SQL } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { event } from '../db/schema'
+import { publish } from './bus'
 
 const iso = (v: string) => new Date(v).toISOString()
 
@@ -49,6 +50,7 @@ export async function appendEvent(db: DbOrTx, e: NewEvent): Promise<EventEnvelop
     recorded_at: new Date().toISOString(),
   })
   await db.insert(event).values(toRow(full))
+  publish({ type: full.type, kind: full.entity.kind, id: full.entity.id, at: full.occurred_at })
   return full
 }
 

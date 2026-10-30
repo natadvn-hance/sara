@@ -18,10 +18,43 @@ export class ApiError extends Error {
   }
 }
 
+const TMA_KEY = 'sara.tma'
+
+/**
+ * The Mini App's entry (pult v2 design 7): Telegram puts its signed `initData` into the address; the pult keeps it
+ * for the tab and sends it with every request, so the core lets Boris in without a password.
+ */
+export function initDataFromAddress(): string | null {
+  try {
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
+    const fromHash = new URLSearchParams(hash).get('tgWebAppData')
+    if (fromHash) {
+      window.sessionStorage.setItem(TMA_KEY, fromHash)
+      return fromHash
+    }
+    return window.sessionStorage.getItem(TMA_KEY)
+  } catch {
+    return null
+  }
+}
+
+/** Opened inside Telegram: the address carried `tgWebAppData` once in this tab. */
+export function inTelegram(): boolean {
+  return initDataFromAddress() !== null
+}
+
+export function authHeaders(): Record<string, string> {
+  const tma = initDataFromAddress()
+  return tma ? { authorization: `tma ${tma}` } : {}
+}
+
 export async function api<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
+    headers: {
+      ...authHeaders(),
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
   })

@@ -1,4 +1,5 @@
 import type { LeadCard } from './cards'
+import type { NoticeHint } from './center'
 
 /**
  * Every message goes without sound at the quiet hours (FR-NOTIF-2); `loud` is for an urgent one, which keeps its
@@ -13,12 +14,15 @@ export type Notifier = {
    */
   closeLeadCard(messageId: number, c: LeadCard): Promise<void>
   /** `html`: the text is Telegram HTML (every value in it already escaped); the default is plain text. */
-  sendText(text: string, o?: { html?: boolean; loud?: boolean }): Promise<{ messageId: number }>
+  sendText(
+    text: string,
+    o?: { html?: boolean; loud?: boolean; notice?: NoticeHint },
+  ): Promise<{ messageId: number }>
   /** A message with inline buttons, row by row (the daily summary, rule proposals). */
   sendButtons(
     text: string,
     rows: { text: string; callbackData: string }[][],
-    o?: { loud?: boolean },
+    o?: { loud?: boolean; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
   typing?(): Promise<void>
