@@ -30,6 +30,7 @@ import { analysisMessages, type LeadCard, TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { seriesWithoutBlocked } from '../text/blockedLinks'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { casesForBid } from './bidCases'
 import { callOfferTemplate } from './callSlots'
@@ -282,12 +283,14 @@ async function draftFor(
     const mindCases =
       profile && profile.cases.length > 0 ? [] : await casesForBid(d().mind, o, opts.accountId)
     const { accountId: _account, ...rest } = opts
+    const blocked = await getSetting(d().db, 'links.blocked')
     const dr = await writeDraft(d().gateway, o, {
       ...rest,
       ...(profile ? { profile } : {}),
       mindCases,
       recentBids: await recentBids(opts.accountId),
-      sites: await sitesForBid(d().mind, o),
+      sites: await sitesForBid(d().mind, o, blocked),
+      blockedLinks: blocked,
       now: greetingMoment(),
     })
     // The series ends with an offer to talk for half an hour (Boris, 30.10.2026); its times go in when it is sent.
@@ -752,7 +755,10 @@ async function cardOfFound(
     draft: l.draftText
       ? {
           ...draftOnCard(l.draftText, l.clientName, l.draftPriceRub),
-          followUps: l.draftFollowUps ?? [],
+          followUps: seriesWithoutBlocked(
+            l.draftFollowUps ?? [],
+            await getSetting(d().db, 'links.blocked'),
+          ),
         }
       : null,
     analysis: cardAnalysis(l.draftAnalysis),
@@ -1324,8 +1330,12 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
               title: l.title,
               priceRub: now.bidPriceRub,
               servicePriceRub: now.draftPriceRub,
-              // The same press approves the series as it stands now (Boris, 29.10.2026).
-              followUps: now.draftFollowUps ?? [],
+              // The same press approves the series as it stands now (Boris, 29.10.2026), without the links a client
+              // is never given (30.10.2026: a draft made before a site was put on the list may still hold one).
+              followUps: seriesWithoutBlocked(
+                now.draftFollowUps ?? [],
+                await getSetting(tx, 'links.blocked'),
+              ),
               taskId,
             })
             // The order went to another direction after all: rolled back like a refused spend, the task stays open.

@@ -373,6 +373,8 @@ export function followUpsOf(
   cases: CaseHit[],
   /** For an order of a site: the sites offered and the ids the answer chose; their links lead the message of links. */
   sites: { offered: HanceSite[]; ids: readonly string[] | undefined } = { offered: [], ids: [] },
+  /** Links a client is never given (links.blocked): a case of the list is shown by no link. */
+  blocked: readonly string[] = [],
 ): { texts: string[]; caseIds: string[]; siteIds: string[]; dropped: FollowUpMiss[] } {
   const texts: string[] = []
   const caseIds: string[] = []
@@ -381,7 +383,7 @@ export function followUpsOf(
   for (const f of (answer ?? []).slice(0, FOLLOW_UPS_MAX)) {
     const text = plain(f.text).trim()
     const chosen = f.case_id ? (cases.find((c) => c.id === f.case_id) ?? null) : null
-    const link = chosen ? publicLink(chosen) : null
+    const link = chosen ? publicLink(chosen, blocked) : null
     const miss: FollowUpMiss | null =
       !text || NOT_PLAIN.test(text) || BRACKETED.test(text)
         ? 'not_plain'
@@ -518,6 +520,8 @@ export async function writeDraft(
     recentBids?: string[]
     /** For an order of a site, the sites of Hance it may show (Boris, 30.10.2026); none for any other order. */
     sites?: HanceSite[]
+    /** Links a client is never given (links.blocked, Boris 30.10.2026). */
+    blockedLinks?: string[]
     now?: Date
   } = {},
 ): Promise<Draft | DraftMiss> {
@@ -534,7 +538,7 @@ export async function writeDraft(
   const recent = opts.recentBids ?? []
   const extra = [
     analystProfileText(profile),
-    bidCasesText(mindCases),
+    bidCasesText(mindCases, opts.blockedLinks),
     sitesText(opts.sites ?? []),
     recentOpenersText(recent),
   ].filter((t) => t !== '')
@@ -550,10 +554,12 @@ export async function writeDraft(
     // A case of the mind is told in the text itself, with no link: only its id is kept.
     const told = chosenCase(mindCases, out.case_ids)
     const placed = placeCases(`${longest}${text.slice(hello.length)}`, profile, out.case_ids ?? [])
-    const series = followUpsOf(out.follow_ups, mindCases, {
-      offered: opts.sites ?? [],
-      ids: out.site_ids,
-    })
+    const series = followUpsOf(
+      out.follow_ups,
+      mindCases,
+      { offered: opts.sites ?? [], ids: out.site_ids },
+      opts.blockedLinks ?? [],
+    )
     return {
       text: `${hello}${placed.text.slice(longest.length)}`,
       priceRub: priceWithin(out.price_rub, o.budget_text),
@@ -573,6 +579,7 @@ export async function writeDraft(
       mindCases: _cases,
       recentBids: _recent,
       sites: _sites,
+      blockedLinks: _blocked,
       ...callOpts
     } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })

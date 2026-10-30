@@ -13,6 +13,7 @@ import { account, directionVersion, lead, leadScore, task } from '../db/schema'
 import { FOLLOW_UP_EDIT_MAX } from '../leads/draft'
 import { dayOf } from '../leads/money'
 import { getSetting } from '../settings/store'
+import { seriesWithoutBlocked } from '../text/blockedLinks'
 
 /** «Заявки» (M7 design 5.3): the queue by value and one lead with its score, разбор, bid text and obstacles. */
 
@@ -222,7 +223,10 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
       priceFromRub: l.draftPriceRub,
       priceToRub: l.draftPriceRub === null ? null : priceUpTo(l.draftPriceRub),
       limit: BID_LIMIT,
-      followUps: l.draftFollowUps ?? [],
+      followUps: seriesWithoutBlocked(
+        l.draftFollowUps ?? [],
+        await getSetting(db, 'links.blocked'),
+      ),
       followUpLimit: FOLLOW_UP_EDIT_MAX,
     },
     task: t ? { id: t.id, open: t.state === 'open', resolution: t.resolution } : null,

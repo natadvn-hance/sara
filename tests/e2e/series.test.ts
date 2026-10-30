@@ -318,6 +318,45 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     expect(sentTo(id)[2]?.idempotency_key).toBe(`msg:series:${id}:2`)
   })
 
+  it('FR-LEAD-6: a link of the list in the stored series is left out at the press, nothing of it is sent (30.10.2026)', async () => {
+    const id = await cardFor()
+    // A draft made before the site was put on the list still holds its link.
+    await db
+      .update(lead)
+      .set({ draftFollowUps: ['https://nexum.su/ - сайт', FIRST, `${SECOND}\nhttps://nexum.su/`] })
+      .where(eq(lead.id, id))
+    press()
+    await until(() => fake.bids.length === 1)
+    const [row] = await db.select().from(outbox).where(eq(outbox.kind, 'bid'))
+    // The link-only message goes; a line with the link goes from the message that has words too.
+    expect((row?.payload as { followUps?: string[] } | undefined)?.followUps).toEqual([
+      FIRST,
+      SECOND,
+    ])
+    await until(() => sentTo(id).length === 2)
+    await settle()
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    expect(JSON.stringify(sentTo(id))).not.toContain('nexum')
+  })
+
+  it('FR-LEAD-6: a message of Sara’s that holds a link of the list is not queued, Boris’s own words are his', async () => {
+    await setSetting(db, 'conv.autopilot', true, 'boris')
+    const queued = (author: 'sara' | 'boris', text: string, key: string) =>
+      db.transaction((tx) =>
+        queueMessage(tx, {
+          key,
+          accountId: 'hance-marketing',
+          chatId: 'chat-links',
+          text,
+          author,
+          expectLast: null,
+        }),
+      )
+    expect(await queued('sara', 'Вот наш сайт https://nexum.su/', 'k1')).toBeNull()
+    expect(await queued('sara', 'Вот наш сайт https://zmksk.ru/', 'k2')).not.toBeNull()
+    expect(await queued('boris', 'Вот https://nexum.su/ старый сайт', 'k3')).not.toBeNull()
+  })
+
   it('FR-CONV-5: in drafts mode only the series Boris pressed passes: another text under its key is refused', async () => {
     const id = await cardFor()
     press()
