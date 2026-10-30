@@ -473,6 +473,14 @@ function Lead({ v }: { v: LeadView }) {
           {l.client?.phone ? ' · номер подтверждён' : ''}
           {l.client?.reviews ? ` · ${l.client.reviews}` : ''}
         </p>
+        {l.site?.own ? (
+          <p className="muted">
+            🌐 Сайт клиента: {l.site.own.domain} · {l.site.own.text}
+          </p>
+        ) : null}
+        {l.site && l.site.examples.length > 0 ? (
+          <p className="muted">🔗 Пример, который нравится клиенту: {l.site.examples.join(', ')}</p>
+        ) : null}
       </header>
 
       <Card title="Заказ" icon="book" i={1}>

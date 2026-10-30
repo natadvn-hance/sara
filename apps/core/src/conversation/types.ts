@@ -6,6 +6,7 @@ import type {
   ClientInfo,
   ConvStage,
   InterlocutorOutput,
+  LeadSite,
   MessageSide,
   MindType,
   Move,
@@ -132,6 +133,8 @@ export type Dossier = {
   } | null
   clientName: string | null
   clientInfo: ClientInfo | null
+  /** The client's own site as Sara read it (Boris, 30.10.2026); none: the order and the chat name no site. */
+  site?: LeadSite | null
   bid: { text: string; author: ChatAuthor } | null
   messages: DossierMessage[]
   /** The client messages this turn answers. */

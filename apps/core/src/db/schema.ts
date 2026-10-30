@@ -74,6 +74,29 @@ export const lead = core.table('lead', {
    * order's chat, a case's link already in; null: none written (a lead from before the series, or none fitted).
    */
   draftFollowUps: jsonb('draft_follow_ups').$type<string[]>(),
+  /**
+   * The client's own site as Sara read it (contract LeadSite): the read with its short summary against the order, and the
+   * domains of example sites the client named. Null: the order and the chat name no site.
+   */
+  clientSite: jsonb('client_site'),
+})
+
+/**
+ * The pages of a client's site, read once a day per domain (Boris, 30.10.2026): the text and facts the code took out of
+ * them, never the HTML. A day's cache keeps the site from being asked twice for two orders or two turns of one chat.
+ */
+export const siteCache = core.table('site_cache', {
+  domain: text('domain').primaryKey(),
+  url: text('url').notNull(),
+  /** 'ok' the home page opened; 'failed' it did not (`error` says why, kept a shorter time). */
+  status: text('status').notNull(),
+  error: text('error'),
+  /** Whether the pages beyond the home page were read too. */
+  deep: boolean('deep').notNull().default(false),
+  cms: text('cms'),
+  signals: jsonb('signals'),
+  pages: jsonb('pages').notNull(),
+  fetchedAt: ts('fetched_at').notNull().defaultNow(),
 })
 
 export const account = core.table('account', {
