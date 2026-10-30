@@ -53,6 +53,18 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     kind: 'rub',
   },
   'cards.max_per_day': { title: 'Карточек заявок в день', edit: 'free', kind: 'count' },
+  'screen.stops': {
+    title: 'Отсев останавливает заявки',
+    hint: 'Выключен: отсев только отмечает заявки, карточки идут как раньше.',
+    edit: 'free',
+    kind: 'flag',
+  },
+  'screen.min_own_words': {
+    title: 'Отсев: меньше скольких своих слов',
+    hint: 'Ответы формы Профи.ру не считаются.',
+    edit: 'free',
+    kind: 'count',
+  },
   'conv.cards_per_day': { title: 'Карточек разговоров в день', edit: 'free', kind: 'count' },
   'cards.quiet_hours': {
     title: 'Тихие часы карточек',
@@ -93,6 +105,11 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
     id: 'money',
     title: 'Деньги',
     keys: ['money.daily_bids', 'money.daily_budget_rub', 'money.max_fee_rub'],
+  },
+  {
+    id: 'screen',
+    title: 'Отсев',
+    keys: ['screen.stops', 'screen.min_own_words'],
   },
   {
     id: 'cards',

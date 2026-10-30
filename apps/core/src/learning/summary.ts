@@ -1,8 +1,9 @@
-import { formatCallback, newEventId, plural } from '@sara/shared'
+import { formatCallback, LeadScreen, newEventId, plural } from '@sara/shared'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { screenSummary } from '../leads/screen'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 
@@ -70,6 +71,16 @@ export async function dailySummary(
     sql`select count(*)::int as n from core.lead l where l.status = 'scored_out' and ${today}`,
   )
   const dropped = counted.rows[0]?.n ?? 0
+  // The screen's line (docs/product/lead-analysis.md): what it stopped in the day's window, or in the shadow would have.
+  const screens = await d.db.execute<{ screen: unknown }>(
+    sql`select l.screen from core.lead l where l.screen is not null and ${today}`,
+  )
+  const screened = screenSummary(
+    screens.rows.flatMap((r) => {
+      const s = LeadScreen.safeParse(r.screen)
+      return s.success ? [s.data] : []
+    }),
+  )
   // Held orders do not wait for their own window: whichever summary comes next offers them, as long as they are
   // fresh. Those that outlived that without being offered leave the held orders for good.
   const at = sql`${now.toISOString()}::timestamptz`
@@ -110,7 +121,7 @@ export async function dailySummary(
     where l.status = 'held' and l.seen_at > ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
     order by s.score desc nulls last, l.bid_price_rub, l.seen_at`)
   const held = heldRows.rows
-  if (dropped === 0 && held.length === 0) return 'none'
+  if (dropped === 0 && held.length === 0 && screened === null) return 'none'
 
   const rows = await d.db.execute<Borderline>(sql`
     select l.id as "leadId", l.title, s.score, s.reason
@@ -142,6 +153,11 @@ export async function dailySummary(
     if (lines.length > 0) lines.push('')
     lines.push(HELD_TEXTS.head, ...shown.map((h, i) => HELD_TEXTS.line(picks.length + i + 1, h)))
     if (held.length > shown.length) lines.push(HELD_TEXTS.more(held.length - shown.length))
+  }
+  // The screen's count comes last: the summary keeps its head, and the buttons their numbers.
+  if (screened) {
+    if (lines.length > 0) lines.push('')
+    lines.push(screened)
   }
   try {
     if (picks.length === 0 && shown.length === 0) {

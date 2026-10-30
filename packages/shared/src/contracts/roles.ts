@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { DirectionRulesShape } from './direction'
+import { SenseCriterion } from './screen'
 
 export const MODELS = ['haiku', 'sonnet', 'opus'] as const
 export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const
@@ -19,6 +20,20 @@ export const SorterOutput = z.object({
   reason: z.string().max(200),
   tags: z.array(z.string()).max(8),
   confidence: z.number().min(0).max(1),
+  /**
+   * The screen's criteria 4-6 (docs/product/lead-analysis.md): only those the task touches, each with a quote of the
+   * order. `core`: the task itself is that; `unclear`: core or background cannot be told. Absent in an older answer.
+   */
+  screen: z
+    .array(
+      z.object({
+        criterion: SenseCriterion,
+        verdict: z.enum(['core', 'unclear']),
+        quote: z.string().max(300),
+      }),
+    )
+    .max(3)
+    .default([]),
 })
 export type SorterOutput = z.infer<typeof SorterOutput>
 

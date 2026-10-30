@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { LeadScreen } from './screen'
 
 /**
  * C4, the pult's screens (M7): what the core answers for each screen. The pult reads, and acts only through the
@@ -172,6 +173,8 @@ export const LeadView = z.object({
     feeRub: rub,
     url: z.string(),
   }),
+  /** Stage 1 «Отсев» (docs/product/lead-analysis.md): why the order was stopped or marked; null, not screened. */
+  screen: LeadScreen.nullable().optional(),
   score: z
     .object({
       value: z.number().int(),
