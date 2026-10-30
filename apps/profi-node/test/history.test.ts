@@ -7,6 +7,7 @@ import {
   HISTORY_STATUS,
   type HistoryDeps,
   listedChats,
+  moscowNight,
   readHistory,
 } from '../src/eyes/history'
 import type { StoredMessage } from '../src/store/raw'
@@ -104,6 +105,7 @@ function stand(o: {
   pageFails?: (path: string) => boolean
   body?: string
   flagAfter?: number
+  day?: boolean
 }) {
   const visited: string[] = []
   const kept: StoredMessage[] = []
@@ -157,12 +159,24 @@ function stand(o: {
       `/backoffice/r.php?id=${id}${filter === 'archive' ? '&filter=archive' : ''}`,
     sleep: async () => {},
     now: () => NOW,
+    night: () => o.day !== true,
     log: () => {},
   }
   return { d, visited, kept, flags, guard }
 }
 
 describe('the archive reader: one pass', () => {
+  it('FR-TRAIN-1: the reader works only at night by Moscow; by day it pauses and keeps the flag', async () => {
+    expect(moscowNight(Date.parse('2026-10-30T20:00:00Z'))).toBe(true)
+    expect(moscowNight(Date.parse('2026-10-31T04:59:00Z'))).toBe(true)
+    expect(moscowNight(Date.parse('2026-10-31T05:00:00Z'))).toBe(false)
+    expect(moscowNight(Date.parse('2026-10-30T14:00:00Z'))).toBe(false)
+    const s = stand({ lists: [list(1, edge('1', 'open', 0, OLD))], chats: {}, day: true })
+    expect(await readHistory(s.d)).toBe('пауза до 23:00 по Москве: до чтения списков')
+    expect(s.visited).toEqual([])
+    expect(s.flags.get(HISTORY_FLAG)).toBe('go')
+  })
+
   it('FR-TRAIN-1: reads both lists, then each quiet chat once; unread, fresh and known chats are left to the live check', async () => {
     const s = stand({
       lists: [

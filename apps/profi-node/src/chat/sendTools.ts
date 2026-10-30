@@ -567,11 +567,15 @@ export function createSendTools(o: {
   ): Promise<T> {
     let started = false
     let gaveUp = false
-    const job = r.inTab(async (t) => {
-      if (gaveUp || aborted()) throw skipped()
-      started = true
-      return work(t)
-    })
+    // Every message here is one Boris approved or wrote: it goes before the checks waiting for the tab.
+    const job = r.inTab(
+      async (t) => {
+        if (gaveUp || aborted()) throw skipped()
+        started = true
+        return work(t)
+      },
+      { urgent: true },
+    )
     // The call may stop listening before the job ends; its failure is then nobody's.
     job.catch(() => {})
     let timer: NodeJS.Timeout | undefined

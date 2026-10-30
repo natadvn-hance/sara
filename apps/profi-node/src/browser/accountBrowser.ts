@@ -32,6 +32,16 @@ export async function openAccountBrowser(o: {
   // On the server the node runs under tsx, which wraps every inner function in __name(...): a page has no such
   // helper, so any page read with an inner function would fail there. Every document of the tab gets one.
   await context.addInitScript(NAME_HELPER)
+  // A page that asks before it is left (a form or a message box with text in it) would keep the tab where it is:
+  // Playwright dismisses that question by default, so the next page of the node hung and counted as a lost connection
+  // (29.10.2026, 5 minutes without a page right after a bid). The node always means to leave.
+  const leave = (p: Page) =>
+    p.on(
+      'dialog',
+      (d) => void (d.type() === 'beforeunload' ? d.accept() : d.dismiss()).catch(() => {}),
+    )
+  context.on('page', leave)
+  for (const p of context.pages()) leave(p)
   const page = context.pages()[0] ?? (await context.newPage())
   // The tab that is already open got its document before the init script.
   await Promise.all(context.pages().map((p) => p.evaluate(NAME_HELPER).catch(() => {})))

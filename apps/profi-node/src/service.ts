@@ -168,9 +168,9 @@ export async function startProfiService(
     })
 
     // Until the tab is on the site from its own IP there is no tab to work in: can() is false.
-    const inTab: Insurance['inTab'] = (f) =>
+    const inTab: Insurance['inTab'] = (f, opt) =>
       a.insurance
-        ? a.insurance.inTab(f)
+        ? a.insurance.inTab(f, opt)
         : f({ go: async () => false, can: () => false, later: () => {} })
     bidRuntimes.set(acc.id, {
       watch: a.watch,
