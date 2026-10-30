@@ -50,7 +50,18 @@ export type SeriesJob = {
   correlationId: string
   /** The texts as Boris approved them with the bid. */
   followUps: string[]
+  /**
+   * The bid was found on its order later, minutes after the press: the moment for a first wait of a minute or two has
+   * passed, so the first message waits only as long as the next ones do.
+   */
+  late?: boolean
 }
+
+/**
+ * A bid found on its order later than this after the press gets no series (Boris's own went within four minutes of
+ * his bid): «Из недавнего)» a quarter of an hour on reads as a reminder, not as the same breath as the bid.
+ */
+export const SERIES_LATE_MS = 15 * 60_000
 
 /** One series per order, whatever presses or restarts there are. */
 export const seriesWorkflowId = (leadId: string) => `bid-series:${leadId}`
@@ -171,7 +182,7 @@ async function runSeries(job: SeriesJob): Promise<void> {
   const sent: string[] = []
   for (let n = 0; n < job.followUps.length; n++) {
     const waits = d().delayMs
-    await DBOS.sleep(seriesDelay(job.leadId, n, n === 0 ? waits.first : waits.next))
+    await DBOS.sleep(seriesDelay(job.leadId, n, n === 0 && !job.late ? waits.first : waits.next))
     const stop = await sendOne(job, n, sent)
     if (stop) {
       await DBOS.runStep(() => journal(job, 'bid.series_stopped', { n, why: stop }), {
