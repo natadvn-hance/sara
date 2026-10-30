@@ -23,6 +23,7 @@ export type RoleName =
   | 'teacher'
   | 'persona-builder'
   | 'dialog-generator'
+  | 'secretary'
 
 export async function loadRole(
   rolesDir: string,

@@ -18,6 +18,7 @@ export function buildClaudeArgs(meta: RoleMeta, promptPath: string, jsonSchema: 
     '--model',
     meta.model,
     ...(meta.fallbackModel ? ['--fallback-model', meta.fallbackModel] : []),
+    ...(meta.effort ? ['--effort', meta.effort] : []),
     '--system-prompt-file',
     promptPath,
     '--output-format',
@@ -34,6 +35,43 @@ export function buildClaudeArgs(meta: RoleMeta, promptPath: string, jsonSchema: 
     '--permission-prompts',
     'none',
     '--no-session-persistence',
+  ]
+}
+
+/**
+ * The CLI contract for a conversation turn (ADR-027): a text answer, no built-in tool (no files, commands or web),
+ * and only the MCP server `server` of the config file, each of its `tools` allowed by name without a prompt.
+ */
+export function buildConverseArgs(
+  meta: RoleMeta,
+  promptPath: string,
+  mcp: { configPath: string; server: string; tools: string[] },
+  maxBudgetUsd?: number,
+): string[] {
+  return [
+    '-p',
+    '--model',
+    meta.model,
+    ...(meta.effort ? ['--effort', meta.effort] : []),
+    '--system-prompt-file',
+    promptPath,
+    '--output-format',
+    'json',
+    '--tools',
+    '',
+    '--mcp-config',
+    mcp.configPath,
+    '--strict-mcp-config',
+    '--allowedTools',
+    ...mcp.tools.map((t) => `mcp__${mcp.server}__${t}`),
+    '--setting-sources',
+    'project',
+    '--permission-mode',
+    'dontAsk',
+    '--permission-prompts',
+    'none',
+    '--no-session-persistence',
+    ...(maxBudgetUsd ? ['--max-budget-usd', String(maxBudgetUsd)] : []),
   ]
 }
 

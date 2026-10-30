@@ -103,6 +103,11 @@ export const SETTINGS = {
    * is skipped, not sent later; the processes that wait go on when it is turned on again.
    */
   'conv.reminders': { schema: z.boolean(), default: true },
+  /**
+   * FR-NOTIF-4: turns of the Secretary (Opus) a Moscow day; past them Sara says so and keeps quiet till morning. 0
+   * turns the chat off.
+   */
+  'secretary.turns_per_day': { schema: z.number().int().nonnegative(), default: 60 },
   /** FR-MIND-2: local vectors beside the full-text search, when they proved cheap. */
   'mind.vectors': { schema: z.boolean(), default: false },
   /** M5: the school's jobs and lesson batches; off until the deploy turns it on, as pipeline.*. */

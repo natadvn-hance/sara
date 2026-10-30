@@ -24,6 +24,8 @@ export type Notifier = {
     rows: { text: string; callbackData: string }[][],
     o?: { loud?: boolean; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
+  /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
+  typing?(): Promise<void>
   /**
    * A card decided in the pult (M7 design 2): its buttons give way to one line saying so, so no live button is left
    * on a decided task. It never throws: a message Telegram will not edit is only logged.

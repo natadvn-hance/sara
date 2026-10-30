@@ -72,6 +72,12 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     kind: 'hours',
   },
   'conv.reminder_quiet': { title: 'Без напоминаний клиентам', edit: 'locked', kind: 'hours' },
+  'secretary.turns_per_day': {
+    title: 'Ответов Сары в чате в день',
+    hint: 'Разговор с Сарой идёт на Opus и тратит общую подписку Claude.',
+    edit: 'free',
+    kind: 'count',
+  },
 }
 
 const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
@@ -104,6 +110,7 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'cards.quiet_hours',
       'conv.night',
       'conv.reminder_quiet',
+      'secretary.turns_per_day',
     ],
   },
 ]

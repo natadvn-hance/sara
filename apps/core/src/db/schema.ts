@@ -782,6 +782,23 @@ export const autonomyCounter = core.table(
 )
 
 /**
+ * The Secretary's chat with Boris (ADR-027): his words and Sara's answers, the memory of the conversation. Kept a
+ * week: the words may name clients, and the answers to old questions are of no use.
+ */
+export const secretaryMessage = core.table(
+  'secretary_message',
+  {
+    id: uuid('id').primaryKey(),
+    /** 'boris' or 'sara'. */
+    author: text('author').notNull(),
+    text: text('text').notNull(),
+    at: ts('at').notNull().defaultNow(),
+    telegramMessageId: bigint('telegram_message_id', { mode: 'number' }),
+  },
+  (t) => [index('secretary_message_at').on(t.at)],
+)
+
+/**
  * The bell of the pult (pult v2 design 6): every message Sara sends Boris on her own, with its state. `done` is not
  * stored: a notice is done when its task is resolved or its question answered, wherever that happened.
  */
