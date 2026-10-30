@@ -86,6 +86,8 @@ export async function studyLinks(
     targets: LinkTarget[]
     order: SiteOrder
     ownSummary: string | null
+    /** The text taken out of the order's documents (the technical task and the like). */
+    files?: { name: string; text: string }[]
     before: string | null
     names?: string[]
     correlationId?: string
@@ -95,7 +97,8 @@ export async function studyLinks(
   const read = await Promise.all(i.targets.map((t) => readTarget(d, t)))
   const links = read.map((m) => m.link)
   const material = read.filter((m) => m.text !== '')
-  if (material.length === 0) return { links, digest: null }
+  const files = i.files ?? []
+  if (material.length === 0 && files.length === 0) return { links, digest: null }
   try {
     if ((await digestsToday(d)) >= BRIEFS_PER_DAY) return { links, digest: null }
     const input = [
@@ -115,6 +118,12 @@ export async function studyLinks(
             ...(m.text ? [framed(`${m.link.title ? `${m.link.title}\n` : ''}${m.text}`)] : []),
           ].join('\n'),
         ),
+      ].join('\n\n'),
+      [
+        '## Файлы заказа',
+        ...(files.length > 0
+          ? files.map((f) => [`Файл: ${f.name}`, framed(f.text)].join('\n'))
+          : ['Нет.']),
       ].join('\n\n'),
       ['## Раньше изучено', i.before ?? 'Нет.'].join('\n'),
     ].join('\n\n')

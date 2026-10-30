@@ -41,7 +41,7 @@ export type FetchError =
   | `http_${number}`
 
 export type Fetched =
-  | { ok: true; url: string; html: string; truncated: boolean }
+  | { ok: true; url: string; html: string; truncated: boolean; bytes?: Buffer }
   | { ok: false; error: FetchError; url: string }
 
 /** Private, local, shared, reserved and documentation ranges: never a client's public site (SSRF). */
@@ -149,7 +149,13 @@ function urlProblem(u: URL, policy: FetchPolicy): FetchError | null {
 }
 
 /** One request, no redirect followed: the answer, where it points, or why it failed. */
-function hop(u: URL, policy: FetchPolicy, signal: AbortSignal, asText: boolean): Promise<Hop> {
+function hop(
+  u: URL,
+  policy: FetchPolicy,
+  signal: AbortSignal,
+  asText: boolean,
+  anyType = false,
+): Promise<Hop> {
   return new Promise((resolve) => {
     let blocked = false
     let dnsFailed = false
@@ -216,7 +222,7 @@ function hop(u: URL, policy: FetchPolicy, signal: AbortSignal, asText: boolean):
           return
         }
         const type = res.headers['content-type']
-        if (type && !HTML_TYPE.test(type) && !(asText && TEXT_TYPE.test(type))) {
+        if (!anyType && type && !HTML_TYPE.test(type) && !(asText && TEXT_TYPE.test(type))) {
           res.resume()
           resolve({ kind: 'error', error: 'not_html' })
           return
@@ -305,7 +311,15 @@ function decode(bytes: Buffer, contentType: string | undefined): string {
 /** One page by its address, following at most `maxRedirects` redirects, each checked as the first address was. */
 export async function fetchPage(
   url: string,
-  o: { policy?: FetchPolicy; limits?: Partial<FetchLimits>; asText?: boolean } = {},
+  o: {
+    policy?: FetchPolicy
+    limits?: Partial<FetchLimits>
+    asText?: boolean
+    /** A file, not a page: any content type, the bytes returned as they came (a PDF, a DOCX). */
+    raw?: boolean
+    /** Only these hosts, the first and every redirect; any other is refused (the files of the order page). */
+    hostOk?: (host: string) => boolean
+  } = {},
 ): Promise<Fetched> {
   const policy = o.policy ?? PUBLIC_ONLY
   const limits = { ...PAGE_LIMITS, ...o.limits }
@@ -319,7 +333,9 @@ export async function fetchPage(
   for (let hops = 0; hops <= limits.maxRedirects; hops++) {
     const problem = urlProblem(current, policy)
     if (problem) return { ok: false, error: problem, url: current.toString() }
-    const h = await hop(current, policy, signal, o.asText === true)
+    if (o.hostOk && !o.hostOk(current.hostname.toLowerCase()))
+      return { ok: false, error: 'blocked', url: current.toString() }
+    const h = await hop(current, policy, signal, o.asText === true, o.raw === true)
     if (h.kind === 'error') return { ok: false, error: h.error, url: current.toString() }
     if (h.kind === 'redirect') {
       current = new URL(h.to)
@@ -328,6 +344,14 @@ export async function fetchPage(
     const body = await readBody(h.res, limits.maxBytes, signal)
     if (!body)
       return { ok: false, error: signal.aborted ? 'timeout' : 'network', url: current.toString() }
+    if (o.raw)
+      return {
+        ok: true,
+        url: current.toString(),
+        html: '',
+        truncated: body.truncated,
+        bytes: body.bytes,
+      }
     const html = decode(body.bytes, h.res.headers['content-type'])
     // A page without a type is taken only when it looks like HTML.
     if (

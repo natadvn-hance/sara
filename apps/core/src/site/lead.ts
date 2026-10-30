@@ -1,7 +1,8 @@
-import { LeadSite } from '@sara/shared'
+import { type FileRead, LeadSite, type OrderAttachment } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { lead } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { studyFiles } from './files'
 import { linkTargets, studyLinks } from './links'
 import { type SiteOrder, type StudyDeps, studyClientSite } from './study'
 
@@ -21,6 +22,8 @@ function siteEventPayload(site: LeadSite, source: 'order' | 'chat', limited: boo
     signals: own?.signals ?? null,
     links: site.links?.length ?? 0,
     links_opened: site.links?.filter((l) => l.opened).length ?? 0,
+    files: site.files?.length ?? 0,
+    files_opened: site.files?.filter((f) => f.opened).length ?? 0,
     digest: site.digest != null,
   }
 }
@@ -37,6 +40,7 @@ async function withLinks(
     names?: string[]
     correlationId: string
     causationId?: string
+    attachments?: OrderAttachment[]
   },
   before: LeadSite | null,
   site: LeadSite | null,
@@ -44,10 +48,19 @@ async function withLinks(
   const base: LeadSite = site ?? { own: null, examples: [] }
   const have = new Set((before?.links ?? []).map((l) => l.domain))
   const fresh = linkTargets(i.text, base.examples).filter((t) => !have.has(t.domain))
-  if (fresh.length === 0)
-    return site ? { ...base, links: before?.links, digest: before?.digest } : before
+  const seenFiles = new Set((before?.files ?? []).map((f) => f.name))
+  const newFiles = (i.attachments ?? []).filter((a) => !seenFiles.has(a.name || 'файл'))
+  if (fresh.length === 0 && newFiles.length === 0)
+    return site
+      ? { ...base, links: before?.links, files: before?.files, digest: before?.digest }
+      : before
+  const read =
+    newFiles.length > 0
+      ? await studyFiles(newFiles, { fetchPage: d.fileFetch })
+      : { files: [] as FileRead[], texts: [] }
   const got = await studyLinks(d, {
     targets: fresh,
+    files: read.texts,
     order: i.order,
     ownSummary: base.own?.brief?.summary ?? null,
     before: before?.digest?.summary ?? null,
@@ -58,6 +71,7 @@ async function withLinks(
   return {
     ...base,
     links: [...(before?.links ?? []), ...got.links].slice(0, 6),
+    files: [...(before?.files ?? []), ...read.files].slice(0, 12),
     digest: got.digest ?? before?.digest ?? null,
   }
 }
@@ -77,6 +91,8 @@ export async function studyLeadSite(
     order: SiteOrder
     names?: string[]
     causationId?: string
+    /** The files the order page carries (Boris, 30.10.2026 evening). */
+    attachments?: OrderAttachment[]
   },
 ): Promise<LeadSite | null> {
   try {

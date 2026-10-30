@@ -1,6 +1,7 @@
 import { LeadSite, SITE_CMS_RU, SiteBrief, type SiteCms, type SiteRead } from '@sara/shared'
 import type { Db } from '../db/client'
 import type { Gateway } from '../gateway/gateway'
+import type { Fetched } from './fetch'
 import { findSites, hostOf } from './find'
 import { briefsToday, type Digest, type ReadDeps, siteDigest } from './read'
 
@@ -96,7 +97,12 @@ export function siteReaderInput(order: SiteOrder, d: Digest): string {
   ].join('\n\n')
 }
 
-export type StudyDeps = ReadDeps & { db: Db; gateway: Gateway }
+export type StudyDeps = ReadDeps & {
+  db: Db
+  gateway: Gateway
+  /** How an attached file is downloaded; tests give bytes, the default is the safe fetch from Profi.ru's hosts. */
+  fileFetch?: (url: string) => Promise<Fetched>
+}
 
 export type Studied = {
   /** What is kept on the lead; null when the text names no site at all. */
