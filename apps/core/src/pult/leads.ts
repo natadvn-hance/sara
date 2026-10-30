@@ -17,7 +17,7 @@ import { FOLLOW_UP_EDIT_MAX } from '../leads/draft'
 import { dayOf } from '../leads/money'
 import { getSetting } from '../settings/store'
 import { leadSiteOf } from '../site'
-import { siteCardView } from '../site/view'
+import { siteCardView, studiedLine } from '../site/view'
 
 /** «Заявки» (M7 design 5.3): the queue by value and one lead with its score, разбор, bid text and obstacles. */
 
@@ -31,7 +31,7 @@ export const orderUrl = (id: string) =>
 /** The client's own site for the lead screen: its summary or the note that it did not open; none when none is named. */
 function siteView(stored: unknown): LeadView['lead']['site'] {
   const site = leadSiteOf(stored)
-  return site ? siteCardView(site) : null
+  return site ? { ...siteCardView(site), studied: studiedLine(site) } : null
 }
 
 const READING_RU: Record<keyof AnalystOutput['reading'], string> = {

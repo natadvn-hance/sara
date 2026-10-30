@@ -1,5 +1,5 @@
 import { type ClientInfo, formatCallback, formatRub, type LeadSite, plural } from '@sara/shared'
-import { siteCardView } from '../site/view'
+import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
 export type Reading = {
@@ -369,6 +369,7 @@ function clientLines(c: LeadCard): string[] {
  */
 function siteLines(c: LeadCard): string[] {
   const view = siteCardView(c.site)
+  const studied = studiedLine(c.site)
   return [
     ...(view.own
       ? [
@@ -378,6 +379,7 @@ function siteLines(c: LeadCard): string[] {
     ...(view.examples.length > 0
       ? [`🔗 Пример, который нравится клиенту: ${clean(view.examples.join(', '), CAP.short)}`]
       : []),
+    ...(studied ? [`📎 <b>Изучила:</b> ${clean(studied, CAP.site)}`] : []),
   ]
 }
 
@@ -622,6 +624,19 @@ export function analysisMessages(c: LeadCard): string[] {
     }
   } else {
     room.add(NO_READING)
+  }
+  const g = c.site?.digest
+  if (g) {
+    const part = (label: string, items: string[]) =>
+      items.length > 0
+        ? `<b>${label}</b>\n${items.map((x) => `• ${clean(x, CAP.line)}`).join('\n')}`
+        : null
+    const block = [
+      part('Ценное из ссылок и файлов', g.valuable),
+      part('Что клиент считает важным', g.cares),
+      part('Чего не хватает', g.missing),
+    ].filter((x): x is string => x !== null)
+    if (block.length > 0) room.add(block.join('\n\n'))
   }
   if (!reading || text.length > FULL_TEXT_ABOVE || renderLeadCard(c).textCut)
     addOrderText(text.length > FULL_TEXT_MAX ? cutText(text, FULL_TEXT_MAX) : text, room)

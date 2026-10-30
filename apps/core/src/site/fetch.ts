@@ -123,6 +123,8 @@ export const PUBLIC_ONLY: FetchPolicy = {
 }
 
 const HTML_TYPE = /^(?:text\/html|application\/xhtml\+xml)\b/i
+/** What a document export answers with (a Google Doc as txt, a Sheet as csv). */
+const TEXT_TYPE = /^text\/(?:plain|csv)\b/i
 const USER_AGENT = 'Mozilla/5.0 (compatible; HanceSiteReader/1.0; +https://hance.pro)'
 
 type Hop =
@@ -147,7 +149,7 @@ function urlProblem(u: URL, policy: FetchPolicy): FetchError | null {
 }
 
 /** One request, no redirect followed: the answer, where it points, or why it failed. */
-function hop(u: URL, policy: FetchPolicy, signal: AbortSignal): Promise<Hop> {
+function hop(u: URL, policy: FetchPolicy, signal: AbortSignal, asText: boolean): Promise<Hop> {
   return new Promise((resolve) => {
     let blocked = false
     let dnsFailed = false
@@ -214,7 +216,7 @@ function hop(u: URL, policy: FetchPolicy, signal: AbortSignal): Promise<Hop> {
           return
         }
         const type = res.headers['content-type']
-        if (type && !HTML_TYPE.test(type)) {
+        if (type && !HTML_TYPE.test(type) && !(asText && TEXT_TYPE.test(type))) {
           res.resume()
           resolve({ kind: 'error', error: 'not_html' })
           return
@@ -303,7 +305,7 @@ function decode(bytes: Buffer, contentType: string | undefined): string {
 /** One page by its address, following at most `maxRedirects` redirects, each checked as the first address was. */
 export async function fetchPage(
   url: string,
-  o: { policy?: FetchPolicy; limits?: Partial<FetchLimits> } = {},
+  o: { policy?: FetchPolicy; limits?: Partial<FetchLimits>; asText?: boolean } = {},
 ): Promise<Fetched> {
   const policy = o.policy ?? PUBLIC_ONLY
   const limits = { ...PAGE_LIMITS, ...o.limits }
@@ -317,7 +319,7 @@ export async function fetchPage(
   for (let hops = 0; hops <= limits.maxRedirects; hops++) {
     const problem = urlProblem(current, policy)
     if (problem) return { ok: false, error: problem, url: current.toString() }
-    const h = await hop(current, policy, signal)
+    const h = await hop(current, policy, signal, o.asText === true)
     if (h.kind === 'error') return { ok: false, error: h.error, url: current.toString() }
     if (h.kind === 'redirect') {
       current = new URL(h.to)
@@ -328,7 +330,11 @@ export async function fetchPage(
       return { ok: false, error: signal.aborted ? 'timeout' : 'network', url: current.toString() }
     const html = decode(body.bytes, h.res.headers['content-type'])
     // A page without a type is taken only when it looks like HTML.
-    if (!h.res.headers['content-type'] && !/<(?:!doctype\s+html|html|head|body)\b/i.test(html))
+    if (
+      !o.asText &&
+      !h.res.headers['content-type'] &&
+      !/<(?:!doctype\s+html|html|head|body)\b/i.test(html)
+    )
       return { ok: false, error: 'not_html', url: current.toString() }
     return { ok: true, url: current.toString(), html, truncated: body.truncated }
   }

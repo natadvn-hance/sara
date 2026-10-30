@@ -249,7 +249,7 @@ describe("Sara studies the client's site", () => {
     expect(siteCardView(kept)).toEqual({ own: null, examples: [] })
   })
 
-  it('FR-SITE-2: a site named as an example is noted apart and never read', async () => {
+  it("FR-SITE-2: a site named as an example is noted apart as the client's example, never as his own", async () => {
     const text = 'Хочу сайт как у apple.com и ещё tesla.com нравится'
     const correlationId = await seedLead('1', text)
     const site = fakeSiteFetch({})
@@ -260,10 +260,15 @@ describe("Sara studies the client's site", () => {
       source: 'order',
       order: ORDER,
     })
-    expect(kept).toEqual({ own: null, examples: ['apple.com', 'tesla.com'] })
-    expect(site.calls).toHaveLength(0)
+    expect(kept?.own).toBeNull()
+    expect(kept?.examples).toEqual(['apple.com', 'tesla.com'])
+    // Their first pages are looked at (Boris, 30.10.2026 evening); here they do not open.
+    expect(kept?.links?.map((l) => [l.kind, l.opened])).toEqual([
+      ['example', false],
+      ['example', false],
+    ])
     expect(siteSection(kept)).toContain('apple.com, tesla.com')
-    expect(siteSection(kept)).toContain('не его сайты, мы их не читали')
+    expect(siteSection(kept)).toContain('не его сайты')
     expect(siteCardView(kept).examples).toEqual(['apple.com', 'tesla.com'])
   })
 

@@ -175,6 +175,8 @@ export const LeadView = z.object({
       .object({
         own: z.object({ domain: z.string(), text: z.string() }).nullable(),
         examples: z.array(z.string()),
+        /** «Изучила: сайт, 2 ссылки · …» (Boris, 30.10.2026 evening); null: no links beyond the site. */
+        studied: z.string().nullable().optional(),
       })
       .nullable()
       .optional(),

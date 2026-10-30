@@ -478,6 +478,7 @@ function Lead({ v }: { v: LeadView }) {
             🌐 Сайт клиента: {l.site.own.domain} · {l.site.own.text}
           </p>
         ) : null}
+        {l.site?.studied ? <p className="muted">📎 Изучила: {l.site.studied}</p> : null}
         {l.site && l.site.examples.length > 0 ? (
           <p className="muted">🔗 Пример, который нравится клиенту: {l.site.examples.join(', ')}</p>
         ) : null}

@@ -254,3 +254,78 @@ export function findSites(text: string): FoundSites {
   }
   return { own, examples }
 }
+
+/** A link of the order that is no site of the client's: a document, a page in a social network, a design file. */
+export type LinkTarget = {
+  kind: 'doc' | 'social' | 'example'
+  domain: string
+  /** The address to read; null: it cannot be read without a login or scripts (Drive, Figma, Notion, Miro). */
+  readUrl: string | null
+}
+
+const GOOGLE_DOC =
+  /^https?:\/\/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([\w-]{10,})/i
+const SOCIAL = [
+  'vk.com',
+  'vk.ru',
+  'm.vk.com',
+  't.me',
+  'telegram.me',
+  'instagram.com',
+  'facebook.com',
+  'youtube.com',
+  'youtu.be',
+  'rutube.ru',
+  'dzen.ru',
+  'ok.ru',
+]
+const UNREADABLE_DOC = [
+  'drive.google.com',
+  'disk.yandex.ru',
+  'disk.yandex.com',
+  'figma.com',
+  'notion.so',
+  'miro.com',
+  'dropbox.com',
+  'cloud.mail.ru',
+]
+
+/**
+ * The other links of a text (Boris, 30.10.2026 evening): open Google Docs, Sheets and Slides (read by their text
+ * export), documents and design files that need a login or scripts (noted, not read), and pages in social networks
+ * (only the first page, if it opens). The sites of `findSites` are not here; its examples are added by the caller.
+ */
+export function findLinks(text: string, max = 4): LinkTarget[] {
+  const out: LinkTarget[] = []
+  const seen = new Set<string>()
+  for (const m of text.matchAll(ADDRESS)) {
+    const raw = m[0]
+    if (text[(m.index ?? 0) - 1] === '@') continue
+    const link = linkOf(raw)
+    const host = hostOf(link)
+    if (!host) continue
+    const g = GOOGLE_DOC.exec(link)
+    let t: LinkTarget | null = null
+    if (g?.[1] && g[2]) {
+      const fmt = g[1].toLowerCase() === 'spreadsheets' ? 'csv' : 'txt'
+      t = {
+        kind: 'doc',
+        domain: 'docs.google.com',
+        readUrl: `https://docs.google.com/${g[1].toLowerCase()}/d/${g[2]}/export?format=${fmt}`,
+      }
+      if (seen.has(g[2])) continue
+      seen.add(g[2])
+    } else if (UNREADABLE_DOC.some((h) => host === h || host.endsWith(`.${h}`))) {
+      if (seen.has(host)) continue
+      seen.add(host)
+      t = { kind: 'doc', domain: host, readUrl: null }
+    } else if (SOCIAL.some((h) => host === h || host.endsWith(`.${h}`))) {
+      if (seen.has(link)) continue
+      seen.add(link)
+      t = { kind: 'social', domain: host, readUrl: link }
+    }
+    if (t) out.push(t)
+    if (out.length >= max) break
+  }
+  return out
+}
