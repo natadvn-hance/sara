@@ -7,6 +7,7 @@ import {
   LeadScreen,
   type LeadSite,
   newEventId,
+  type OrderAttachment,
   ProfiOrder,
   type SorterOutput,
   type TaskAction,
@@ -90,6 +91,8 @@ export type LeadPipelineDeps = {
   mind?: Pick<MindSearch, 'cases'>
   /** How a page of the client's site is fetched; tests give a made-up site, the default is the safe fetch from the server. */
   siteFetch?: (url: string) => Promise<Fetched>
+  /** How a file attached to the order is downloaded; tests give bytes, the default is the safe fetch from Profi.ru's hosts. */
+  fileFetch?: (url: string) => Promise<Fetched>
 }
 
 export type LeadPipeline = {
@@ -230,8 +233,8 @@ async function readPage(accountId: string, orderId: string): Promise<PageRead> {
 function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'>>(
   o: T,
   r: PageRead,
-): T & { client_info: ClientInfo | null } {
-  if (!r.ok) return { ...o, client_info: null }
+): T & { client_info: ClientInfo | null; attachments: OrderAttachment[] } {
+  if (!r.ok) return { ...o, client_info: null, attachments: [] }
   const p = r.page
   return {
     ...o,
@@ -239,6 +242,7 @@ function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'te
     client_name: o.client_name || p.client_name,
     text: o.text || p.text,
     client_info: p.client_info ?? null,
+    attachments: p.attachments ?? [],
   }
 }
 
@@ -363,11 +367,13 @@ async function recentBids(accountId: string): Promise<string[]> {
  */
 async function readClientSite(
   l: { id: string; correlationId: string },
-  o: Pick<DraftSource, 'title' | 'category' | 'text' | 'client_name' | 'client_info'>,
+  o: Pick<DraftSource, 'title' | 'category' | 'text' | 'client_name' | 'client_info'> & {
+    attachments?: OrderAttachment[]
+  },
   causationId?: string,
 ): Promise<LeadSite | null> {
   return studyLeadSite(
-    { db: d().db, gateway: d().gateway, fetchPage: d().siteFetch },
+    { db: d().db, gateway: d().gateway, fetchPage: d().siteFetch, fileFetch: d().fileFetch },
     {
       leadId: l.id,
       correlationId: l.correlationId,
@@ -376,6 +382,7 @@ async function readClientSite(
       source: 'order',
       order: { title: o.title, category: o.category, text: o.text },
       names: namesToHide(o.client_name, o.client_info?.name),
+      attachments: o.attachments,
     },
   )
 }
@@ -757,7 +764,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   // recorded before this step existed resumes along its old steps and keeps the board's data.
   let withPage: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
     client_info: ClientInfo | null
-  } = { ...order, client_info: null }
+    attachments: OrderAttachment[]
+  } = { ...order, client_info: null, attachments: [] }
   if (await DBOS.patch('order-page')) {
     // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
     // (with its draft, draftThenCard).

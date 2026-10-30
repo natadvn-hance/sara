@@ -385,6 +385,7 @@ export function createBidTools(o: {
         has_bid: screen?.hasBid ?? stored.has_bid,
         client_info: client,
         from_page: read.read,
+        attachments: screen?.attachments ?? [],
       }
     },
 

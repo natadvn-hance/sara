@@ -157,6 +157,18 @@ export const LinkDigest = z.object({
 })
 export type LinkDigest = z.infer<typeof LinkDigest>
 
+/** A file of the order read (Boris, 30.10.2026 evening): a technical task as PDF, DOCX, XLSX or text. Pictures are only counted. */
+export const FileRead = z.object({
+  kind: z.enum(['document', 'image']),
+  name: z.string(),
+  opened: z.boolean(),
+  /** Why it was not read (`blocked`, `too_big`, `unsupported`, `not_read`, `empty`...); null when it was. */
+  error: z.string().nullable(),
+  /** How many characters of text were taken from it. */
+  chars: z.number().int().nonnegative(),
+})
+export type FileRead = z.infer<typeof FileRead>
+
 /**
  * The sites of a lead (`lead.client_site`): the client's own, read; and the sites he named as examples he likes
  * («хочу как у …»), only their domains, never read.
@@ -166,6 +178,8 @@ export const LeadSite = z.object({
   examples: z.array(z.string()),
   /** The other links of the order, read (Boris, 30.10.2026 evening); absent on a lead from before. */
   links: z.array(LinkRead).optional(),
+  /** The files attached to the order, read where they could be (Boris, 30.10.2026 evening). */
+  files: z.array(FileRead).optional(),
   /** What is valuable in the links, for the Analyst; null: nothing to sum up. */
   digest: LinkDigest.nullable().optional(),
 })

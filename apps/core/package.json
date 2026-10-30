@@ -28,8 +28,10 @@
     "@sara/shared": "workspace:*",
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.7",
+    "fflate": "0.8.2",
     "grammy": "1.46.0",
     "pg": "8.23.1",
+    "unpdf": "1.8.1",
     "ws": "8.18.3",
     "yaml": "2.9.1",
     "zod": "4.6.7"

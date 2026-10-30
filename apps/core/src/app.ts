@@ -103,6 +103,8 @@ export type StartOptions = {
   now?: () => Date
   /** How a page of a client's site is fetched; the tests give a made-up site. */
   siteFetch?: (url: string) => Promise<Fetched>
+  /** How a file attached to an order is downloaded; the tests give bytes. */
+  fileFetch?: (url: string) => Promise<Fetched>
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -203,6 +205,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     now: o.now,
     mind: createMindSearch(db),
     siteFetch: o.siteFetch,
+    fileFetch: o.fileFetch,
   })
   const lp = pipeline
   setOutboxDeps({
