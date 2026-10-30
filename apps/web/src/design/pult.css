@@ -1372,3 +1372,231 @@ table.t tr.total td {
     display: none;
   }
 }
+
+/* Pult v2: the search, the bell, the task rows of the Inbox, the hold bar, fields */
+
+.topbar-end {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.icon-btn .badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  min-height: 40px;
+  border-radius: 13px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.search.is-page {
+  min-height: 48px;
+  border-radius: 16px;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.search input:focus {
+  outline: none;
+}
+
+.field {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14.5px;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+textarea.field {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+select.field {
+  appearance: auto;
+}
+
+.tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.task {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.task + .task {
+  border-top: 1px solid var(--border);
+}
+
+.task.is-urgent {
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  padding-inline: 12px;
+  margin-inline: -12px;
+}
+
+.task-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.task-text {
+  margin: 0;
+  font-size: 14.5px;
+  white-space: pre-wrap;
+}
+
+.task-text .link {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 13px;
+}
+
+.hold {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border-2));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.hold-text {
+  font-weight: 500;
+}
+
+.pill.is-btn {
+  cursor: pointer;
+  border-style: solid;
+  font: inherit;
+  font-size: 13px;
+}
+
+.pill.is-btn:hover,
+.pill.is-btn.is-on {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.pill.is-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.switch-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.row.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: default;
+}
+
+.row.notice .row-link {
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.row.notice.is-done {
+  opacity: 0.6;
+}
+
+.row-end .pill {
+  margin-bottom: 2px;
+}
+
+.only-narrow {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .only-narrow {
+    display: block;
+  }
+}
+
+.dot.is-live + .dot,
+.row-title .dot {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* The top bar on a phone: the state pill shrinks, the brand and the buttons keep their size */
+
+.topbar .brand,
+.topbar-end {
+  flex: none;
+}
+
+.topbar > .pill {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.topbar > .pill .row-title {
+  max-width: none;
+}

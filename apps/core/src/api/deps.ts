@@ -1,9 +1,10 @@
-import type { TaskAction } from '@sara/shared'
 import type { Db } from '../db/client'
 import type { Gateway } from '../gateway/gateway'
+import type { QuestionRow } from '../learning/questions'
 import type { BotControl } from '../notify/botControl'
 import type { ProfiClient } from '../profi/client'
 import type { SecretStore } from '../secrets/store'
+import type { Press } from '../tasks/resolve'
 
 export type AppDeps = {
   db: Db
@@ -19,7 +20,9 @@ export type AppDeps = {
   /** Accounts of this server with the IP each must go out from (FR-ACC-1). */
   accounts?: AccountConfig[]
   /** The press of a Telegram button, for the pult's buttons: the same function, the same events (M7 design 2). */
-  onPress?: (p: { taskId: string; action: TaskAction }) => Promise<string>
+  onPress?: (p: Press) => Promise<string>
+  /** Boris's answer to a question of Sara from the pult: the same path as his reply in Telegram (pult v2 design 3). */
+  answerQuestion?: (q: QuestionRow, text: string) => Promise<string>
   /** The pult's edit of a bid text or its service price, as the answer after «Изменить» without a new card. */
   saveBidText?: (p: {
     taskId: string

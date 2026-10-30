@@ -1,19 +1,76 @@
 import type { MindRecordView, MindView } from '@sara/shared'
 import { useState } from 'react'
-import { useScreen } from '../app/data'
+import { usePress, useScreen } from '../app/data'
 import { ago, count } from '../app/format'
 import { idOf, usePath } from '../app/router'
 import { Icon } from '../ui/icons'
-import { A, Card, Empty, Head, Pill, Screen, Seg } from '../ui/kit'
+import { A, Btn, Card, Empty, Head, Pill, Screen, Seg } from '../ui/kit'
 
 /** «Разум Сары» (M7 design 5.5), read only: records by part, proposals waiting for Boris's «да», what she lacked. */
 
 const STATE_RU: Record<string, string> = {
   new: 'ждёт «да»',
-  accepted: 'принято',
+  accepted: 'ждёт записи',
   rejected: 'отклонено',
   exported: 'у разработчика',
   written: 'записано',
+}
+
+/** «Да» and «Нет» on a proposal (FR-MIND-3): the mind changes only through the writer after Boris's «да». */
+function Decide({ p }: { p: MindView['proposals'][number] }) {
+  const { press, busy } = usePress()
+  const [no, setNo] = useState(false)
+  const [reason, setReason] = useState('')
+  if (p.state !== 'new')
+    return (
+      <Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'written' ? 'ok' : 'wait'}>
+        {STATE_RU[p.state] ?? p.state}
+      </Pill>
+    )
+  if (no)
+    return (
+      <span className="actions">
+        <input
+          className="field"
+          aria-label="Почему нет"
+          placeholder="почему (по желанию)"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <Btn
+          size="sm"
+          look="danger"
+          disabled={busy !== null}
+          onClick={() =>
+            press(p.id, `/api/mind/proposals/${p.id}/decide`, {
+              decision: 'no',
+              reason: reason || null,
+            })
+          }
+        >
+          Нет
+        </Btn>
+        <Btn size="sm" onClick={() => setNo(false)}>
+          Отмена
+        </Btn>
+      </span>
+    )
+  return (
+    <span className="actions">
+      <Btn
+        size="sm"
+        look="primary"
+        icon="check"
+        disabled={busy !== null}
+        onClick={() => press(p.id, `/api/mind/proposals/${p.id}/decide`, { decision: 'yes' })}
+      >
+        Да
+      </Btn>
+      <Btn size="sm" onClick={() => setNo(true)}>
+        Нет
+      </Btn>
+    </span>
+  )
 }
 
 function Overview({ v, current }: { v: MindView; current: string | null }) {
@@ -91,16 +148,15 @@ function Overview({ v, current }: { v: MindView; current: string | null }) {
                   </span>
                 </span>
                 <span className="row-end">
-                  <Pill tone={p.state === 'new' ? 'wait' : 'ok'}>
-                    {STATE_RU[p.state] ?? p.state}
-                  </Pill>
+                  <Decide p={p} />
                 </span>
               </div>
             ))}
           </div>
         )}
         <p className="muted" style={{ fontSize: 13 }}>
-          Разум меняется только после твоего «да»: здесь только посмотреть.
+          Разум меняется только после твоего «да». Запись делает писатель Сары; пока его нет,
+          решение ждёт записи.
         </p>
       </Card>
       {v.gaps.length ? (

@@ -44,7 +44,7 @@ const { db, close } = openTestDb()
 afterAll(close)
 
 let t: TestApp
-let presses: { taskId: string; action: TaskAction }[] = []
+let presses: { taskId: string; action: TaskAction; source?: string; reason?: string | null }[] = []
 let edits: { taskId: string; text: string | null; priceRub: number | null }[] = []
 const LEAD = '95000001'
 const LEAD_TASK = '11111111-1111-4111-8111-111111111111'
@@ -246,6 +246,10 @@ describe('the pult screens read the core', () => {
   it('FR-UI-1: without the owner session every screen answers 401', async () => {
     for (const url of [
       '/api/today',
+      '/api/inbox',
+      '/api/notices',
+      '/api/journal',
+      '/api/search?q=ab',
       '/api/leads',
       '/api/conversations',
       '/api/analytics',
@@ -394,12 +398,12 @@ describe('the pult acts only through the Telegram buttons', () => {
     expect(presses).toEqual([])
     const ok = await post(`/api/tasks/${LEAD_TASK}/bid`, { expectedFeeRub: 240 })
     expect(ok).toEqual({ status: 200, body: { message: 'Принято.' } })
-    expect(presses).toEqual([{ taskId: LEAD_TASK, action: 'bid' }])
+    expect(presses).toEqual([{ taskId: LEAD_TASK, action: 'bid', source: 'pult', reason: null }])
   })
 
   it('FR-CONV-11: «Отправить» on a draft is the card press; actions of another kind are refused', async () => {
     expect((await post(`/api/tasks/${DRAFT_TASK}/send`)).status).toBe(200)
-    expect(presses).toEqual([{ taskId: DRAFT_TASK, action: 'send' }])
+    expect(presses).toEqual([{ taskId: DRAFT_TASK, action: 'send', source: 'pult', reason: null }])
     expect((await post(`/api/tasks/${DRAFT_TASK}/bid`, { expectedFeeRub: 240 })).status).toBe(400)
     expect((await post(`/api/tasks/${LEAD_TASK}/send`)).status).toBe(400)
     expect((await post(`/api/tasks/${LEAD_TASK}/nonsense`)).status).toBe(400)

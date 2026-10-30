@@ -7,17 +7,24 @@ import {
   HISTORY_STATUS,
   type HistoryDeps,
   listedChats,
+  moscowNight,
   readHistory,
 } from '../src/eyes/history'
 import type { StoredMessage } from '../src/store/raw'
 
 // Shapes of the live answers of 28.10.2026, without names or texts of clients.
-const edge = (id: string, filter: string, unread: number, last: string) => ({
+const edge = (
+  id: string,
+  filter: string,
+  unread: number,
+  last: string,
+  messagesCount?: number,
+) => ({
   node: {
     messengerType: 'ORDER',
     messengerExtId: id,
     order: { rboFilterId: filter },
-    chats: [{ unreadMessageCount: unread, lastMessage: { dateCreated: last } }],
+    chats: [{ unreadMessageCount: unread, messagesCount, lastMessage: { dateCreated: last } }],
   },
 })
 const list = (total: number, ...edges: unknown[]) => ({
@@ -50,6 +57,7 @@ describe('the archive reader: the site answers', () => {
       filter: 'open',
       unread: 0,
       lastAt: '2026-09-16T09:51:00.000Z',
+      messages: null,
     })
     expect(r.chats.find((c) => c.orderId === '3')?.filter).toBe('archive')
   })
@@ -97,6 +105,7 @@ function stand(o: {
   pageFails?: (path: string) => boolean
   body?: string
   flagAfter?: number
+  day?: boolean
 }) {
   const visited: string[] = []
   const kept: StoredMessage[] = []
@@ -150,12 +159,24 @@ function stand(o: {
       `/backoffice/r.php?id=${id}${filter === 'archive' ? '&filter=archive' : ''}`,
     sleep: async () => {},
     now: () => NOW,
+    night: () => o.day !== true,
     log: () => {},
   }
   return { d, visited, kept, flags, guard }
 }
 
 describe('the archive reader: one pass', () => {
+  it('FR-TRAIN-1: the reader works only at night by Moscow; by day it pauses and keeps the flag', async () => {
+    expect(moscowNight(Date.parse('2026-10-30T20:00:00Z'))).toBe(true)
+    expect(moscowNight(Date.parse('2026-10-31T04:59:00Z'))).toBe(true)
+    expect(moscowNight(Date.parse('2026-10-31T05:00:00Z'))).toBe(false)
+    expect(moscowNight(Date.parse('2026-10-30T14:00:00Z'))).toBe(false)
+    const s = stand({ lists: [list(1, edge('1', 'open', 0, OLD))], chats: {}, day: true })
+    expect(await readHistory(s.d)).toBe('пауза до 23:00 по Москве: до чтения списков')
+    expect(s.visited).toEqual([])
+    expect(s.flags.get(HISTORY_FLAG)).toBe('go')
+  })
+
   it('FR-TRAIN-1: reads both lists, then each quiet chat once; unread, fresh and known chats are left to the live check', async () => {
     const s = stand({
       lists: [
@@ -214,6 +235,26 @@ describe('the archive reader: one pass', () => {
     expect(s.visited).toEqual(['/backoffice/r.php'])
   })
 
+  it('FR-TRAIN-1: a chat the list counts no message in is not opened; a chat the site says is empty is read and the pass goes on', async () => {
+    const s = stand({
+      lists: [
+        list(
+          4,
+          edge('1', 'open', 0, OLD, 0),
+          edge('2', 'open', 0, OLD, 0),
+          edge('3', 'open', 0, OLD),
+          edge('4', 'open', 0, OLD, 3),
+        ),
+      ],
+      chats: { '3': [chat(false)], '4': [chat(false, msg('41', OLD, ['CLIENT']))] },
+    })
+    expect(await readHistory(s.d)).toBe('готово: прочитано 2 чатов из 2, сообщений 1, неполных 0')
+    expect(s.visited.filter((p) => p.includes('id='))).toEqual([
+      '/backoffice/r.php?id=3',
+      '/backoffice/r.php?id=4',
+    ])
+  })
+
   it('FR-TRAIN-1: two chats in a row without messages stop the pass', async () => {
     const s = stand({
       lists: [
@@ -222,7 +263,7 @@ describe('the archive reader: one pass', () => {
       chats: {},
     })
     expect(await readHistory(s.d)).toBe(
-      'остановлено: два чата подряд без сообщений, прочитано 0 из 3',
+      'остановлено: два чата подряд без ответа сайта, прочитано 0 из 3',
     )
     expect(s.visited.filter((p) => p.includes('id='))).toHaveLength(2)
   })

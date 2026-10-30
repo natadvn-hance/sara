@@ -117,8 +117,15 @@
     {
       "idx": 16,
       "version": "7",
-      "when": 1793293921059,
-      "tag": "0016_telegram_forum",
+      "when": 1793291581991,
+      "tag": "0016_notice",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793387123656,
+      "tag": "0017_telegram_forum",
       "breakpoints": true
     }
   ]

@@ -36,12 +36,7 @@ function List({ l, current }: { l: ConvList; current: string | null }) {
         const body = (
           <div className="list">
             {rows.map((r) => (
-              <A
-                key={r.id}
-                to={`/conversations/${r.id}`}
-                className="row"
-                current={r.id === current}
-              >
+              <A key={r.id} to={`/clients/${r.id}`} className="row" current={r.id === current}>
                 <span className="avatar" aria-hidden="true">
                   {initial(r.name)}
                 </span>
@@ -268,8 +263,8 @@ function Draft({ v }: { v: ConvView }) {
 function Conversation({ v }: { v: ConvView }) {
   return (
     <div className="grid">
-      <A to="/conversations" className="back">
-        <Icon name="left" /> Переписки
+      <A to="/clients" className="back">
+        <Icon name="left" /> Клиенты
       </A>
       <header className="grid reveal" style={{ gap: 10 }}>
         <div className="chips">
@@ -318,15 +313,15 @@ function Conversation({ v }: { v: ConvView }) {
 
 export function ConversationsScreen() {
   const path = usePath()
-  const id = idOf(path, 'conversations')
+  const id = idOf(path, 'clients')
   const list = useScreen<ConvList>('/api/conversations')
   const one = useScreen<ConvView>(id ? `/api/conversations/${id}` : null)
   return (
     <div className={`page${id ? ' has-detail' : ''}`}>
       <Head
         eyebrow="Режим черновиков"
-        title="Переписки"
-        accent="с клиентами"
+        title="Клиенты"
+        accent="Hance"
         lead="Сара готовит ответ и объясняет, почему так. Клиенту уходит только то, что ты отправил сам."
       />
       <div className={`split${id ? ' has-detail' : ''}`}>
