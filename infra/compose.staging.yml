@@ -1,0 +1,94 @@
+# The test stand of Sara on the same server (docs/ops/staging.md): its own project, database, bot and address, the
+# code of any branch, Profi.ru made up. Nothing here publishes a port: the live Caddy reaches `web` through the network
+# sara-stage-link and serves it as https://${STAGING_DOMAIN}. scripts/staging/server.sh sets the variables below.
+name: sara-staging
+
+services:
+  web:
+    build: { context: "${STAGING_APP_DIR:?}", dockerfile: infra/docker/web.Dockerfile }
+    image: sara-staging-web
+    restart: unless-stopped
+    # Plain http inside Docker; the stand's page /stand/ only for whoever is logged into the stand's pult.
+    volumes: [./caddy/Caddyfile.staging:/etc/caddy/Caddyfile:ro]
+    depends_on: [core]
+    mem_limit: 64m
+    networks:
+      edge: {}
+      stage-link: { aliases: [sara-staging-web] }
+
+  core:
+    build: { context: "${STAGING_APP_DIR:?}", dockerfile: infra/docker/core.Dockerfile }
+    image: sara-staging-core
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://sara:${POSTGRES_PASSWORD:?}@postgres:5432/sara
+      SARA_DATA_DIR: /data
+      SARA_PORT: "3300"
+      SARA_HOST: 0.0.0.0
+      SARA_PUBLIC_URL: https://${STAGING_DOMAIN:?}
+      SARA_PROFI_MCP_URL: http://stand:7070/mcp
+      SARA_NODE_TOKEN: ${SARA_NODE_TOKEN:?}
+      SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET:?}
+      # The same account id as the live one: the copied rules, profile and settings are keyed by it.
+      SARA_ACCOUNTS: '[{"id":"hance-marketing","title":"Hance маркетинг (стенд)","egressIp":"127.0.0.1"}]'
+    # The stand's own copy of the mind, read only: nothing the stand does reaches the live mind.
+    volumes: [core-data:/data, "${STAGING_DIR:?}/mind:/data/mind:ro"]
+    depends_on: [postgres]
+    # A ceiling on memory and processors: the stand never takes them from the live Sara.
+    mem_limit: 1g
+    cpus: 1.5
+    networks: [edge, internal]
+
+  # Profi.ru made up (apps/profi-node/src/stand): the image of the stand's core, another command.
+  stand:
+    image: sara-staging-core
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    command: ["node", "--import", "tsx", "apps/profi-node/src/stand/main.ts"]
+    environment:
+      SARA_CORE_EVENTS_URL: http://core:3300/internal/profi/events
+      SARA_NODE_TOKEN: ${SARA_NODE_TOKEN:?}
+      SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET:?}
+      STAND_DATA_DIR: /stand-data
+      # The client model uses the token Boris typed into the stand's setup wizard.
+      STAND_CORE_SECRETS: /core-data/secrets.json
+      STAND_CLIENT_DAILY_LIMIT: ${STAND_CLIENT_DAILY_LIMIT:-40}
+      STAND_FAST: ${STAND_FAST:-}
+    volumes: [stand-data:/stand-data, "core-data:/core-data:ro"]
+    mem_limit: 512m
+    cpus: 0.5
+    networks: [edge, internal]
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=60"]
+    environment:
+      POSTGRES_USER: sara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: sara
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sara"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+    networks: [internal]
+
+networks:
+  edge: {}
+  internal:
+    internal: true
+  # Made by infra/compose.prod.yml: the live Caddy and the stand's web meet only here.
+  stage-link:
+    external: true
+    name: sara-stage-link
+
+volumes:
+  core-data: {}
+  stand-data: {}
+  pgdata: {}

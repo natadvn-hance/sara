@@ -1,3 +1,6 @@
+# Extra addresses from the host folder /opt/sara-sites (the test stand, docs/ops/staging.md); none: only a warning.
+import /etc/caddy/sites/*.caddy
+
 # The pult's own address, plus older addresses that keep answering (links already sent in Telegram).
 {$SARA_DOMAIN} {$SARA_DOMAIN_ALIASES} {
 	encode zstd gzip

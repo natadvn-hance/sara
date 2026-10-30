@@ -12,6 +12,15 @@ describe('production ports', () => {
     expect(portViolations(text)).toEqual([])
   })
 
+  it('T4: the test stand publishes no port at all, not even its web', async () => {
+    const text = await readFile(
+      resolve(import.meta.dirname, '../../infra/compose.staging.yml'),
+      'utf8',
+    )
+    expect(portViolations(text, [])).toEqual([])
+    expect(portViolations('services:\n  web:\n    ports: ["80:80"]\n', [])).toEqual(['web'])
+  })
+
   it('T4: a service that publishes a port is reported', () => {
     const text =
       'services:\n  caddy:\n    ports: ["443:443"]\n  profi-node:\n    ports: ["7070:7070"]\n'

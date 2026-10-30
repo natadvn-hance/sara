@@ -10,9 +10,10 @@ services:
     environment:
       SARA_DOMAIN: ${SARA_DOMAIN}
       SARA_DOMAIN_ALIASES: ${SARA_DOMAIN_ALIASES:-}
-    volumes: [caddy-data:/data]
+    # Extra addresses (the test stand's, docs/ops/staging.md) come from this host folder, read only.
+    volumes: [caddy-data:/data, /opt/sara-sites:/etc/caddy/sites:ro]
     depends_on: [core]
-    networks: [edge]
+    networks: [edge, stage-link]
 
   core:
     build: { context: .., dockerfile: infra/docker/core.Dockerfile }
@@ -79,6 +80,9 @@ networks:
   edge: {}
   internal:
     internal: true
+  # The test stand's web joins it (infra/compose.staging.yml); nothing of the live Sara but Caddy is on it.
+  stage-link:
+    name: sara-stage-link
   # Bound to the account's IPv4 on the host (docs/ops/server-setup.md, step 5).
   egress-ip1:
     driver: bridge

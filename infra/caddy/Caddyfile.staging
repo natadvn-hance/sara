@@ -1,0 +1,47 @@
+# The test stand's pult inside Docker (docs/ops/staging.md): plain http, the live Caddy in front does HTTPS.
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	encode zstd gzip
+	# /internal is only for the stand's Profi.ru inside Docker; never from outside (T4).
+	@internal path /internal/*
+	respond @internal 404
+	handle /api/* {
+		reverse_proxy core:3300
+	}
+	# Profi.ru made up: only for whoever is logged into the stand's pult (the same password).
+	handle /stand* {
+		forward_auth core:3300 {
+			uri /api/setup/claude
+			@out status 401
+			handle_response @out {
+				header Content-Type "text/html; charset=utf-8"
+				respond <<HTML
+					<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+					<title>Вход на стенд</title>
+					<body style="font: 16px system-ui; max-width: 420px; margin: 40px auto; padding: 0 16px">
+					<h1 style="font-size: 20px">Профи.ру понарошку</h1>
+					<p>Пароль тот же, что у пульта стенда.</p>
+					<form id="f"><input id="p" type="password" autocomplete="current-password" style="font: inherit; padding: 6px; width: 100%">
+					<button style="font: inherit; margin-top: 8px; padding: 6px 12px">Войти</button></form><p id="e" style="color: #a3471f"></p>
+					<script>
+					document.getElementById('f').onsubmit = async (ev) => {
+						ev.preventDefault()
+						const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: document.getElementById('p').value }) })
+						if (r.ok) location.reload(); else document.getElementById('e').textContent = 'Пароль не подошёл'
+					}
+					</script>
+					HTML 401
+			}
+		}
+		reverse_proxy stand:7070
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
