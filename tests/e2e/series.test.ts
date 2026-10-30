@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
@@ -94,7 +94,7 @@ beforeAll(async () => {
       }),
       retryDelaysMs: [50, 50],
       busyRetry: { delayMs: 50, tries: 2 },
-      reconcileDelaysMs: [200, 200],
+      reconcileDelaysMs: [800, 800],
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
@@ -127,8 +127,12 @@ beforeEach(async () => {
   fake.bids.length = 0
   fake.messages.length = 0
   fake.refuseNext('INTERNAL', 0)
-  // The site puts the bid into the order's chat, as Profi.ru does; the chat's number is the order's.
+  fake.failAcks(0)
+  const inChat = new Set<string>()
+  // The site puts the bid into the order's chat once, as Profi.ru does; the chat's number is the order's.
   fake.onSubmit(async (i) => {
+    if (inChat.has(i.order_id)) return
+    inChat.add(i.order_id)
     await fake.addChatMessage({
       chatId: i.order_id,
       orderId: i.order_id,
@@ -257,6 +261,36 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await until(() => sentTo(id).length === 1)
     await settle()
     expect(sentTo(id).map((m) => m.text)).toEqual(['Свой вариант)'])
+  })
+
+  it('FR-CONV-9: a bid unsure at first and found on its order soon after gets its series all the same', async () => {
+    // Every answer of the site is lost: the bid is on the order, the core is unsure and looks for it later.
+    fake.failAcks(3)
+    const id = await cardFor()
+    press()
+    await until(async () => (await events('bid.sent', id)).length === 1)
+    expect(await events('bid.sent', id)).toEqual([expect.objectContaining({ found_later: true })])
+    await until(() => sentTo(id).length === 2)
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    expect(tg.sent.some((m) => m.text.includes('Сообщения вдогонку не отправляла'))).toBe(false)
+  })
+
+  it('FR-CONV-9: a bid found later than a quarter of an hour after the press has no series, and Boris is told so', async () => {
+    fake.failAcks(3)
+    const id = await cardFor()
+    press()
+    await until(async () =>
+      (await db.select().from(outbox).where(eq(outbox.kind, 'bid'))).some(
+        (r) => r.state === 'uncertain',
+      ),
+    )
+    // The press was twenty minutes ago by the time the bid shows on its order.
+    await db.execute(
+      sql`update core.outbox set created_at = now() - interval '20 minutes' where kind = 'bid'`,
+    )
+    await until(() => tg.sent.some((m) => m.text.includes('Сообщения вдогонку не отправляла')))
+    await settle()
+    expect(sentTo(id)).toEqual([])
   })
 
   it('FR-CONV-5: in drafts mode only the series Boris pressed passes: another text under its key is refused', async () => {

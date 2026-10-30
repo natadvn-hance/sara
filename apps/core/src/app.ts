@@ -163,7 +163,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifier: bot.notifier,
     retryDelaysMs: o.retryDelaysMs ?? [1000, 2000, 4000, 8000, 16000],
     busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
-    reconcileDelaysMs: o.reconcileDelaysMs ?? [5 * 60_000, 30 * 60_000, 2 * 3600_000],
+    // The first look a minute after: a bid the node could not see at once is usually on its page by then, and its
+    // series still goes in time (30.10.2026).
+    reconcileDelaysMs: o.reconcileDelaysMs ?? [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
