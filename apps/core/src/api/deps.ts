@@ -21,6 +21,21 @@ export type AppDeps = {
   accounts?: AccountConfig[]
   /** The press of a Telegram button, for the pult's buttons: the same function, the same events (M7 design 2). */
   onPress?: (p: Press) => Promise<string>
+  /**
+   * Bids from the pult (pult v2 design 4): a press waits ten seconds in the core and can be cancelled from anywhere;
+   * «Перепроверить» reads the order page now.
+   */
+  bids?: {
+    hold(
+      leadId: string,
+      expectedFeeRub: number,
+    ): Promise<
+      | { ok: true; message: string; executeAt: string }
+      | { ok: false; status: number; message: string; code?: string }
+    >
+    cancel(leadId: string): Promise<{ ok: boolean; message: string }>
+    recheck(leadId: string): Promise<{ message: string; closed: boolean }>
+  }
   /** Boris's answer to a question of Sara from the pult: the same path as his reply in Telegram (pult v2 design 3). */
   answerQuestion?: (q: QuestionRow, text: string) => Promise<string>
   /** The pult's edit of a bid text or its service price, as the answer after «Изменить» without a new card. */

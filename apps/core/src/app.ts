@@ -30,10 +30,13 @@ import { seedProfile } from './direction/profile'
 import { resumeRuns } from './direction/runs'
 import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
+import { cancelHold, holdBid, setHoldDeps } from './leads/hold'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
+import { createRecheckOne } from './leads/recheckOne'
 import { SERIES_DELAYS, type SeriesDeps, setSeriesDeps } from './leads/series'
+import { type StaleSweep, startStaleSweep } from './leads/staleCards'
 import { answerQuestion as answerBorisQuestion, handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
 import { DRAFT_KINDS, markAnswered, type QuestionRow, titleOf } from './learning/questions'
@@ -71,6 +74,8 @@ export type RunningApp = {
   pipeline: LeadPipeline
   /** The look at waiting cards (FR-LEAD-5); tests drive it with tick(at). */
   recheck: CardRecheck
+  /** The sweep of cards that waited more than a day (FR-LEAD-10); tests call stale.tick instead. */
+  stale: StaleSweep
   close(): Promise<void>
 }
 
@@ -89,8 +94,10 @@ export type StartOptions = {
   learningTickMs?: number
   /** How often the school's jobs run (default a minute). */
   schoolTickMs?: number
-  /** How often waiting cards are looked at again (default 10 minutes); tests call recheck.tick instead. */
+  /** How often waiting cards are looked at again (default 5 minutes); tests call recheck.tick instead. */
   recheckTickMs?: number
+  /** How often cards that waited more than a day are ended (default 5 minutes); tests call stale.tick instead. */
+  staleTickMs?: number
   /** The clock of the greeting of a bid (default the real one); tests fix the hour. */
   now?: () => Date
 }
@@ -199,7 +206,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifier: bot.notifier,
     retryDelaysMs: o.retryDelaysMs ?? [1000, 2000, 4000, 8000, 16000],
     busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
-    reconcileDelaysMs: o.reconcileDelaysMs ?? [5 * 60_000, 30 * 60_000, 2 * 3600_000],
+    // The first look a minute after: a bid the node could not see at once is usually on its page by then, and its
+    // series still goes in time (30.10.2026).
+    reconcileDelaysMs: o.reconcileDelaysMs ?? [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
@@ -267,6 +276,13 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifier: bot.notifier,
     publicUrl: config.publicUrl,
   })
+  // A bid from the pult waits ten seconds in the core before the same press fires (pult v2 design 4).
+  setHoldDeps({ db, press: (p) => onPress(p), notifier: bot.notifier })
+  const recheckLead = createRecheckOne({
+    db,
+    profi,
+    close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
+  })
   await launchDbos(config.databaseUrl)
 
   const deps: AppDeps = {
@@ -281,6 +297,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     accounts: config.accounts,
     onPress,
     answerQuestion,
+    bids: { hold: holdBid, cancel: cancelHold, recheck: recheckLead },
     saveBidText: (p) =>
       pipeline
         ? pipeline.saveBidText(p)
@@ -301,6 +318,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profiScreenUrl: config.profiScreenUrl,
     nodeToken: config.nodeToken,
   })
+  // The recheck starts below, once the core listens: an order gone from the feed before that waits for its tick.
+  let kickRecheck = () => {}
   registerProfiEventsRoute(app, {
     db,
     nodeToken: config.nodeToken,
@@ -309,6 +328,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         {
           db,
           onOrderSeen: (x) => lp.onOrderSeen(x),
+          onOrderGone: () => kickRecheck(),
           onAccountEvent: accountEvents,
           onConversationEvent: conversationEvents,
         },
@@ -380,6 +400,15 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifier: bot.notifier,
     close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
     tickMs: o.recheckTickMs,
+    now: o.now,
+  })
+  kickRecheck = () => recheck.kick()
+  // Cards that waited more than a day are no longer offered: ended and turned short, a few at a time (FR-LEAD-10).
+  const stale = startStaleSweep({
+    db,
+    close: (taskId, at) => lp.closeStale(taskId, at),
+    tickMs: o.staleTickMs,
+    now: o.now,
   })
 
   return {
@@ -390,8 +419,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     pipeline: lp,
     recheck,
+    stale,
     async close() {
       recheck.stop()
+      stale.stop()
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()

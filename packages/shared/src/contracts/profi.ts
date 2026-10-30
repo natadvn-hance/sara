@@ -209,6 +209,8 @@ const MessageRef = z
 /** C2 notifications, Profi-MCP → core over C8. Payloads never carry a client's text (ADR-022). */
 export const PROFI_EVENT_PAYLOADS = {
   'profi.order_seen': ProfiOrder,
+  /** `page`: the page of the board (from 0) where the last pass saw the order. */
+  'profi.order_gone': z.object({ page: z.number().int().nonnegative() }).strict(),
   'profi.client_message': MessageRef,
   'profi.author_unclear': MessageRef,
   /** A new message from our side of the chat: Boris's, old Sara's or new Sara's (ADR-024). */

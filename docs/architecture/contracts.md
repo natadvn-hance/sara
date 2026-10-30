@@ -101,6 +101,10 @@ Code, и единственное, что их связывает, это кон
 `connection_lost` и `connection_back` (площадка недоступна дольше 30
 минут и снова доступна). В событиях о сообщениях нет текста клиента:
 только номера, время и автор (ADR-022); текст лежит в схеме `node`.
+С 30.10.2026 `order_gone` (`{ page }`): заказ, который прошлый проход по
+ленте видел на странице, загруженной и в этот раз, пропал из ленты. Чаще
+всего клиент его закрыл; ядро сразу перечитывает его страницу, если по
+заказу ждёт карточка (FR-LEAD-5).
 
 **Классы ошибок:** `SESSION_DEAD`, `BANNED`, `LAYOUT_CHANGED`,
 `NOT_FOUND`, `ORDER_CLOSED`, `NO_MONEY`, `UNSAFE_PAYMENT` (площадка просит
@@ -249,6 +253,11 @@ Code, и единственное, что их связывает, это кон
   (`InboxView`), вопрос Сары `POST /api/questions/{id}/answer {text}` и
   `/skip`. Журнал `JournalView`, трасса `TraceView`, поиск `SearchView`
   в `packages/shared/src/contracts/journal.ts`.
+- Заявки (пульт v2): `GET /api/leads?order=combined|fit|chance`, балл двумя
+  числами `LeadScores` («Насколько наше», «Шанс дойти до денег», сочетание,
+  `combinedScore`); `POST /api/leads/{id}/bid {expectedFeeRub}` ставит
+  отклик с отсрочкой 10 секунд, `/bid/cancel` отменяет, `/skip {reason?}`,
+  `/recheck` перечитывает заказ.
 - Вход: пароль владельца (сессия в cookie) или подпись Telegram Mini App
   в заголовке `Authorization: tma <initData>` на каждом запросе (проверка
   подписи токеном бота, возраста до 24 часов и номера пользователя);

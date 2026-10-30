@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { event, lead, leadScore, task } from '../src/db/schema'
 import { seedDirection } from '../src/direction/store'
 import type { Gateway } from '../src/gateway/gateway'
+import { appendEvent } from '../src/journal/journal'
 import { createLeadPipeline, type LeadPipeline } from '../src/leads/pipeline'
 import { type LeadCard, leadCardText, TEXTS, telegramTextLength } from '../src/notify/cards'
 import type { Notifier } from '../src/notify/notifier'
@@ -477,6 +478,181 @@ describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
   it('FR-LEAD-5: a task that does not exist is no error', async () => {
     await expect(pipeline.closeOnSite(newEventId(), 'recheck')).resolves.toBeUndefined()
     expect(closedCards).toEqual([])
+  })
+  describe('a card that waited more than a day (FR-LEAD-10)', () => {
+    const H = 3600_000
+    const NOW = new Date('2026-10-30T12:00:00Z')
+    const old = (h: number) => new Date(NOW.getTime() - h * H).toISOString()
+    /**
+     * A waiting card: its order seen and its task made `hours` ago, its first message (number 11) sent then, and
+     * `copies` more sent again an hour apart. The journal is append-only, so the old moments are written as such.
+     */
+    async function waiting(id: string, hours: number, taskHours = hours, copies = 0) {
+      const taskId = await openLead(id, { seenAt: old(hours) })
+      const [l] = await db.select().from(lead).where(eq(lead.id, id))
+      await db
+        .update(task)
+        .set({ createdAt: old(taskHours), telegramMessageId: 11 + copies })
+        .where(eq(task.id, taskId))
+      for (let i = 0; i <= copies; i++)
+        await appendEvent(db, {
+          type: 'card.sent',
+          v: 1,
+          entity: { kind: 'task', id: taskId },
+          account_id: 'hance-marketing',
+          actor: 'sara',
+          occurred_at: old(taskHours - i),
+          causation_id: null,
+          correlation_id: l?.correlationId ?? newEventId(),
+          reason: null,
+          payload: { via: i === 0 ? 'order' : 'resend', message_id: 11 + i },
+        })
+      return taskId
+    }
+    const taskRow = async (id: string) => (await db.select().from(task).where(eq(task.id, id)))[0]
+    const leadRow = async (id: string) => (await db.select().from(lead).where(eq(lead.id, id)))[0]
+
+    it('FR-LEAD-10: an order and a card older than a day end as skipped (stale), the card turns into the short stale card', async () => {
+      const taskId = await waiting('93201', 27)
+      expect(await pipeline.closeStale(taskId, NOW)).toBe(true)
+      expect(await taskRow(taskId)).toMatchObject({ state: 'resolved', resolution: 'skip' })
+      expect((await leadRow('93201'))?.status).toBe('stale')
+      const resolved = await db
+        .select({ payload: event.payload })
+        .from(event)
+        .where(and(eq(event.type, 'task.resolved'), eq(event.entityId, taskId)))
+      expect(resolved.map((e) => e.payload)).toEqual([{ action: 'skip', reason: 'stale' }])
+      const stale = await db
+        .select({ payload: event.payload })
+        .from(event)
+        .where(eq(event.type, 'lead.stale'))
+      expect(stale.map((e) => e.payload)).toEqual([
+        expect.objectContaining({ via: 'card', seen_at: old(27) }),
+      ])
+      expect(delivered).toEqual([{ taskId, action: 'skip' }])
+      expect(closedCards).toHaveLength(1)
+      expect(closedCards[0]?.card.stale).toEqual({ since: old(27), at: NOW.toISOString() })
+      expect(closedCards[0]?.card.closed).toBeUndefined()
+    })
+
+    it('FR-LEAD-10: every message of the card is turned, the wait counted from the first one', async () => {
+      const taskId = await waiting('93202', 50, 50, 1)
+      await pipeline.closeStale(taskId, NOW)
+      expect(closedCards.map((c) => c.messageId).sort()).toEqual([11, 12])
+      for (const c of closedCards) expect(c.card.stale?.since).toBe(old(50))
+    })
+
+    it('FR-LEAD-10: an order or a card younger than a day is not stale, nothing changes', async () => {
+      const young = await waiting('93203', 23)
+      const reseen = await waiting('93204', 40, 3)
+      expect(await pipeline.closeStale(young, NOW)).toBe(false)
+      expect(await pipeline.closeStale(reseen, NOW)).toBe(false)
+      expect(await taskRow(young)).toMatchObject({ state: 'open' })
+      expect(await taskRow(reseen)).toMatchObject({ state: 'open' })
+      expect(closedCards).toEqual([])
+      expect(delivered).toEqual([])
+    })
+
+    it('FR-LEAD-10: a task Boris decided meanwhile, another kind of task, or no task is left alone', async () => {
+      const decided = await waiting('93205', 30)
+      await db
+        .update(task)
+        .set({ state: 'resolved', resolution: 'bid' })
+        .where(eq(task.id, decided))
+      const held = await waiting('93206', 30)
+      await db.update(task).set({ kind: 'lead_held' }).where(eq(task.id, held))
+      expect(await pipeline.closeStale(decided, NOW)).toBe(false)
+      expect(await pipeline.closeStale(held, NOW)).toBe(false)
+      expect(await pipeline.closeStale(newEventId(), NOW)).toBe(false)
+      expect(await taskRow(decided)).toMatchObject({ state: 'resolved', resolution: 'bid' })
+      expect((await leadRow('93205'))?.status).not.toBe('stale')
+      expect(closedCards).toEqual([])
+    })
+
+    it('FR-LEAD-10: ending a card twice changes nothing the second time; a lead already closed on Profi.ru stays closed', async () => {
+      const taskId = await waiting('93207', 30)
+      await db.update(lead).set({ status: 'closed' }).where(eq(lead.id, '93207'))
+      expect(await pipeline.closeStale(taskId, NOW)).toBe(true)
+      expect(await pipeline.closeStale(taskId, NOW)).toBe(false)
+      expect((await leadRow('93207'))?.status).toBe('closed')
+      expect(closedCards).toHaveLength(1)
+    })
+
+    it('FR-LEAD-10: a message Telegram will not edit does not undo the ending', async () => {
+      const taskId = await waiting('93208', 30)
+      brokenEdits = new Set([11])
+      await expect(pipeline.closeStale(taskId, NOW)).resolves.toBe(true)
+      expect(await taskRow(taskId)).toMatchObject({ state: 'resolved' })
+    })
+  })
+
+  describe('when it closed, from the journal', () => {
+    const MIN = 60_000
+    const ago = (min: number) => new Date(Date.now() - min * MIN).toISOString()
+    const journal = (
+      type: 'profi.order_seen' | 'profi.order_gone' | 'lead.page_read',
+      id: string,
+      min: number,
+      payload: Record<string, unknown>,
+    ) =>
+      appendEvent(db, {
+        type,
+        v: 1,
+        entity: { kind: type === 'lead.page_read' ? 'lead' : 'order', id },
+        account_id: 'hance-marketing',
+        actor: type === 'lead.page_read' ? 'sara' : 'profi',
+        occurred_at: ago(min),
+        causation_id: null,
+        correlation_id: newEventId(),
+        reason: null,
+        payload,
+      })
+    const closedOf = async (id: string) => {
+      const taskId = await openLead(id, { seenAt: ago(150) })
+      await db.update(task).set({ telegramMessageId: 9 }).where(eq(task.id, taskId))
+      await pipeline.closeOnSite(taskId, 'recheck')
+      return closedCards[0]?.card.closed
+    }
+    const near = (iso: string | undefined, min: number) =>
+      expect(Math.abs(Date.parse(iso ?? '') - Date.parse(ago(min)))).toBeLessThan(5_000)
+
+    it('FR-LEAD-5: gone from the feed after it was last seen open: closed exactly then, counted from its publication', async () => {
+      await journal('profi.order_seen', '93101', 140, { published_at: ago(160) })
+      await journal('lead.page_read', '93101', 60, { ok: true, open: true })
+      await journal('profi.order_gone', '93101', 25, { page: 1 })
+      const w = await closedOf('93101')
+      expect(w).toMatchObject({ published: true, exact: true })
+      near(w?.since, 160)
+      near(w?.at, 25)
+      near(w?.openUntil ?? '', 60)
+    })
+
+    it('FR-LEAD-5: no feed signal, but seen open 10 minutes before: closed exactly, in the middle of the two', async () => {
+      await journal('profi.order_seen', '93102', 140, { published_at: ago(150) })
+      await journal('lead.page_read', '93102', 10, { ok: true, open: true })
+      // An older word of the feed, before that look, does not date the closing.
+      await journal('profi.order_gone', '93102', 30, { page: 0 })
+      const w = await closedOf('93102')
+      expect(w).toMatchObject({ published: true, exact: true })
+      near(w?.at, 5)
+    })
+
+    it('FR-LEAD-5: last seen open hours ago: closed only «by» now', async () => {
+      await journal('profi.order_seen', '93103', 140, { published_at: ago(150) })
+      await journal('lead.page_read', '93103', 130, { ok: false, open: null })
+      const w = await closedOf('93103')
+      expect(w).toMatchObject({ published: true, exact: false })
+      near(w?.at, 0)
+      // The board's word is the last sign it was open.
+      near(w?.openUntil ?? '', 140)
+    })
+
+    it('FR-LEAD-5: no time from the board: counted from when Sara saw it, and said so', async () => {
+      await journal('profi.order_seen', '93104', 140, { published_at: null })
+      const w = await closedOf('93104')
+      expect(w).toMatchObject({ published: false, exact: false })
+      near(w?.since, 150)
+    })
   })
 })
 

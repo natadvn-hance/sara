@@ -50,15 +50,26 @@ export function createBidTools(o: {
   accounts: Map<string, BidRuntime>
   answerMs?: number
   closeMs?: number
+  /** The pause before the order page is looked at once more after a press it did not show yet. */
+  lookAgainMs?: number
   /** How long get_order waits for the client answer once the page has loaded. */
   clientMs?: number
 }): Pick<ProfiToolsImpl, 'getOrder' | 'submitBid'> {
   // As long as a page load may take (30 s to load, 10 s to settle): a slow page is not a changed site.
   const answerMs = o.answerMs ?? 45000
   const closeMs = o.closeMs ?? 15000
+  const lookAgainMs = o.lookAgainMs ?? 10000
   const clientMs = o.clientMs ?? 3000
   const orderPath = o.parsers.paths.order ?? profiParsers.paths.order ?? ((id) => id)
   const uncertain = () => fail('UNCERTAIN', 'Отклик нажат, но страница его не показала')
+  /**
+   * An unsure press, with why in the node's log (30.10.2026: three bids of five on 28.10 were unsure, and the log could
+   * not tell a form that stayed open from an order page that did not show the bid yet).
+   */
+  const unsure = (orderId: string, why: string) => {
+    console.error(`UNCERTAIN ${orderId}: ${why}`)
+    return uncertain()
+  }
   const tooLate = () =>
     fail('RATE_LIMITED', 'Срок нажатия прошёл или ядро перестало ждать, отклик не нажат')
   const dearer = (due: number, max: number) =>
@@ -151,19 +162,34 @@ export function createBidTools(o: {
         .catch(() => {})
   }
 
-  /** After a press only a look: the bid on the page is that press and its money; anything else is UNCERTAIN. */
+  /**
+   * After a press only a look: the bid on the page is that press and its money; anything else is UNCERTAIN. The order
+   * answer may not show a bid the site has just taken, so a page without it is looked at once more after a pause.
+   * `closed` says whether the form closed after this press, for the log; null for a retry that only looks.
+   */
   async function confirm(
     r: BidRuntime,
     i: SubmitBidInput,
     dueRub: number,
     t: { go: Go; can(): boolean },
+    closed: boolean | null = null,
   ): Promise<SubmitBidOutput> {
+    const form =
+      closed === null ? 'повтор после нажатия' : closed ? 'форма закрылась' : 'форма не закрылась'
     try {
-      const s = r.watch.state()
-      if (s === 'dead' || s === 'banned' || !t.can()) throw uncertain()
       const page = r.page()
-      const again = await openOrder(page, t.go, i.order_id)
-      if (again.screen?.hasBid !== true) throw uncertain()
+      let seen = false
+      for (const pause of [0, lookAgainMs]) {
+        if (pause > 0) await new Promise((res) => setTimeout(res, pause))
+        const s = r.watch.state()
+        if (s === 'dead' || s === 'banned' || !t.can()) break
+        const again = await openOrder(page, t.go, i.order_id)
+        if (again.screen?.hasBid === true) {
+          seen = true
+          break
+        }
+      }
+      if (!seen) throw unsure(i.order_id, `${form}, на странице заказа отклика нет`)
       await markOrderBid(o.db, i.account_id, i.order_id)
       const out = {
         found_on_page: true,
@@ -172,8 +198,9 @@ export function createBidTools(o: {
       }
       await saveBidResult(o.db, i.idempotency_key, out)
       return out
-    } catch {
-      throw uncertain()
+    } catch (e) {
+      if (e instanceof ProfiToolError) throw e
+      throw unsure(i.order_id, `${form}, страница заказа не прочиталась`)
     }
   }
 
@@ -288,17 +315,21 @@ export function createBidTools(o: {
     }
 
     // From here the bid may be on the site: anything not confirmed is UNCERTAIN, never a failure.
+    let closed: boolean
     try {
       const clicked = await clickSubmit(page, s.submitText)
       // Nothing was pressed after all.
       if (clicked === 'no_button')
         return await refuse(fail('LAYOUT_CHANGED', 'Кнопки отправки отклика нет'))
-      if (clicked === 'unsure' || !(await waitFormClosed(page, closeMs))) throw uncertain()
+      if (clicked === 'unsure') throw unsure(id, 'нажатие на кнопку не подтвердилось')
+      // A slow send keeps the form open longer than its wait: it is given the wait once more, and then the order page
+      // is looked at whatever the form did (a bid there is this press; the page before the press had none).
+      closed = (await waitFormClosed(page, closeMs)) || (await waitFormClosed(page, closeMs))
     } catch (e) {
       if (e instanceof ProfiToolError) throw e
-      throw uncertain()
+      throw unsure(id, 'сбой после нажатия')
     }
-    return confirm(r, i, due, t)
+    return confirm(r, i, due, t, closed)
   }
 
   return {

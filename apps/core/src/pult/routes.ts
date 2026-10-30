@@ -1,4 +1,4 @@
-import { SETTINGS, TASK_ACTIONS, type TaskAction } from '@sara/shared'
+import { QUEUE_ORDERS, SETTINGS, TASK_ACTIONS, type TaskAction } from '@sara/shared'
 import { and, eq, isNull } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -28,7 +28,7 @@ export const PULT_TEXTS = {
   locked: 'Это меняется не здесь: включает разработчик после проверок, выключить можно паузой.',
   badValue: 'Такое значение не подходит.',
   noText: 'Нужен текст отклика или стоимость услуги.',
-  decided: 'Заявка уже решена, текст больше не правится.',
+  decided: 'Заявка уже решена.',
   answered: 'Вопрос уже закрыт.',
   noAnswer: 'Нужен текст ответа.',
   skippedQuestion: 'Хорошо, не важно.',
@@ -75,6 +75,9 @@ const JournalQuery = z.object({
   before: z.string().max(40).optional(),
 })
 const SearchQuery = z.object({ q: z.string().max(200).default('') })
+const LeadsQuery = z.object({ order: z.enum(QUEUE_ORDERS).default('combined') })
+const BidBody = z.object({ expectedFeeRub: z.number().int() })
+const SkipBody = z.object({ reason: z.string().trim().min(1).max(500).optional() })
 
 /** The pult's screens (contract C4 in `@sara/shared`): read only, plus presses, answers and limits. */
 export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
@@ -94,7 +97,10 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       const { state } = NoticeQuery.parse(req.query ?? {})
       return noticeList(d.db, { state })
     })
-    scoped.get('/api/leads', async () => leadQueue(d.db))
+    scoped.get('/api/leads', async (req) => {
+      const { order } = LeadsQuery.parse(req.query ?? {})
+      return leadQueue(d.db, new Date(), order)
+    })
     scoped.get('/api/leads/:id', async (req, reply) => {
       const v = await leadView(d.db, (req.params as { id: string }).id)
       return v ?? reply.code(404).send({ error: PULT_TEXTS.notFound })
@@ -135,11 +141,17 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
         return reply.code(400).send({ error: PULT_TEXTS.noAction })
       const body = PressBody.parse(req.body ?? {})
       if (a === 'bid') {
-        // Money goes only at the price Boris saw on the screen (M7 design 5.3).
+        // Money goes only at the price Boris saw on the screen (M7 design 5.3), and from the pult always after the
+        // ten seconds to cancel (pult v2 design 4).
         if (body.expectedFeeRub === undefined)
           return reply.code(400).send({ error: PULT_TEXTS.noFee })
         const changed = await feeChanged(d.db, id, body.expectedFeeRub)
         if (changed) return reply.code(409).send({ error: changed, code: 'fee_changed' })
+        if (!d.bids) return reply.code(503).send({ error: PULT_TEXTS.starting })
+        const r = await d.bids.hold(t.entityId, body.expectedFeeRub)
+        return r.ok
+          ? { message: r.message, executeAt: r.executeAt }
+          : reply.code(r.status).send({ error: r.message, code: r.code })
       }
       if (!d.onPress) return reply.code(503).send({ error: PULT_TEXTS.starting })
       const message = await d.onPress({
@@ -200,6 +212,49 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       if (!z.uuid().safeParse(id).success || !(await putAway(d.db, id)))
         return reply.code(404).send({ error: PULT_TEXTS.notFound })
       return { message: PULT_TEXTS.putAway }
+    })
+
+    scoped.post('/api/leads/:id/bid', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const body = BidBody.safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.noFee })
+      if (!d.bids) return reply.code(503).send({ error: PULT_TEXTS.starting })
+      const r = await d.bids.hold(id, body.data.expectedFeeRub)
+      return r.ok
+        ? { message: r.message, executeAt: r.executeAt }
+        : reply.code(r.status).send({ error: r.message, code: r.code })
+    })
+
+    scoped.post('/api/leads/:id/bid/cancel', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      if (!d.bids) return reply.code(503).send({ error: PULT_TEXTS.starting })
+      const r = await d.bids.cancel(id)
+      return r.ok ? { message: r.message } : reply.code(409).send({ error: r.message })
+    })
+
+    scoped.post('/api/leads/:id/skip', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const body = SkipBody.safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      const [t] = await d.db
+        .select({ id: task.id })
+        .from(task)
+        .where(and(eq(task.entityId, id), eq(task.kind, 'lead_decision'), eq(task.state, 'open')))
+      if (!t) return reply.code(409).send({ error: PULT_TEXTS.decided })
+      if (!d.onPress) return reply.code(503).send({ error: PULT_TEXTS.starting })
+      const message = await d.onPress({
+        taskId: t.id,
+        action: 'skip',
+        source: 'pult',
+        reason: body.data.reason ?? null,
+      })
+      return { message }
+    })
+
+    scoped.post('/api/leads/:id/recheck', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      if (!d.bids) return reply.code(503).send({ error: PULT_TEXTS.starting })
+      return d.bids.recheck(id)
     })
 
     scoped.post('/api/leads/:id/text', async (req, reply) => {

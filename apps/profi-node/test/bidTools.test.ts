@@ -93,6 +93,7 @@ const tools = (
     parsers: o.parsers ?? parsers,
     answerMs: 5000,
     closeMs: 3000,
+    lookAgainMs: 300,
     clientMs: o.clientMs ?? 1500,
     accounts: new Map([
       [
@@ -485,6 +486,23 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     site.bidSettings.mode = 'silent'
     const id = site.addOrder({ price: 71 })
     expect(await failure(tools().submitBid(bid(id)))).toBe('UNCERTAIN')
+  }, 60000)
+
+  it('FR-LEAD-8: a bid the order page shows only on the second look is confirmed, not unsure (30.10.2026)', async () => {
+    // The site took the bid, but its order answer right after still says there is none.
+    site.bidSettings.hasBidLag = 1
+    const id = site.addOrder({ price: 71 })
+    const out = await tools().submitBid(bid(id))
+    expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(site.bids).toHaveLength(1)
+  }, 60000)
+
+  it('FR-LEAD-8: a slow send whose form closes after its first wait is confirmed, not unsure (30.10.2026)', async () => {
+    site.bidSettings.postDelayMs = 4000
+    const id = site.addOrder({ price: 71 })
+    const out = await tools().submitBid(bid(id))
+    expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(site.bids).toHaveLength(1)
   }, 60000)
 
   it('FR-LEAD-8: a closed form without the bid on the page is UNCERTAIN', async () => {

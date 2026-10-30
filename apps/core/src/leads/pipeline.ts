@@ -8,7 +8,7 @@ import {
   ProfiOrder,
   type TaskAction,
 } from '@sara/shared'
-import { and, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import type { MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
@@ -26,7 +26,7 @@ import {
   type DraftAnswer,
   markAnswered,
 } from '../learning/questions'
-import { analysisMessages, type LeadCard, TEXTS } from '../notify/cards'
+import { analysisMessages, type ClosedWhen, type LeadCard, TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
@@ -92,6 +92,12 @@ export type LeadPipeline = {
    * `press`: Boris's bid ended ORDER_CLOSED; his task stays as he decided it, only the card is closed.
    */
   closeOnSite(taskId: string, via: 'recheck' | 'press'): Promise<void>
+  /**
+   * FR-LEAD-10: a waiting card whose order and card are both older than a day at `at` is no longer offered: its task
+   * ends as skipped (stale), the lead is stale, every message of its card becomes the short stale card. True when it
+   * ended here; a task decided meanwhile, or not that old, is left alone.
+   */
+  closeStale(taskId: string, at?: Date): Promise<boolean>
   /** Boris's answer to the request after «Изменить»: the new bid text; the reply goes back to him. */
   onDraftText(a: DraftAnswer): Promise<string>
   /**
@@ -800,14 +806,61 @@ function cardSent(
   })
 }
 
+/** A look this close before the order was found closed dates its closing (to the middle of the two). */
+const CLOSED_EXACT_MS = 30 * 60_000
+
 /**
- * Every message the card of this task went out as (its first card and the cards sent again), edited as closed.
- * The numbers come from the journal (card.sent) and from the task, which also holds those sent before the journal
- * kept them. One message Telegram will not edit never stops the others.
+ * When the order of this lead closed, from the journal (FR-LEAD-5): its publication on the board (or when Sara saw it),
+ * the last sign it was open (the board, a read of its page), and its leaving the feed after that sign. The closing is
+ * exact when the order left the feed, or a look within half an hour before `at` found it open; otherwise only «by» `at`.
  */
-async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>) {
+async function closedWhenOf(l: LeadRow, at: Date): Promise<ClosedWhen> {
+  const rows = await d().db.execute<{
+    published: string | null
+    open_at: string | Date | null
+    gone_at: string | Date | null
+  }>(sql`
+    select
+      (select e.payload->>'published_at' from core.event e
+        where e.type = 'profi.order_seen' and e.entity_kind = 'order' and e.entity_id = ${l.id}
+        order by e.id limit 1) as published,
+      (select max(e.occurred_at) from core.event e
+        where e.entity_id = ${l.id}
+          and ((e.type = 'profi.order_seen' and e.entity_kind = 'order')
+            or (e.type = 'lead.page_read' and e.entity_kind = 'lead'
+              and e.payload->>'ok' = 'true' and e.payload->>'open' = 'true'))) as open_at,
+      (select max(e.occurred_at) from core.event e
+        where e.type = 'profi.order_gone' and e.entity_kind = 'order' and e.entity_id = ${l.id}) as gone_at`)
+  const r = rows.rows[0]
+  const time = (v: string | Date | null | undefined) => (v == null ? null : new Date(v).getTime())
+  const published = time(r?.published)
+  const since = published !== null && Number.isFinite(published) ? published : Date.parse(l.seenAt)
+  const open = time(r?.open_at)
+  const gone = time(r?.gone_at)
+  const iso = (t: number) => new Date(t).toISOString()
+  const base = {
+    since: iso(since),
+    published: published !== null && Number.isFinite(published),
+    openUntil: open === null ? null : iso(open),
+  }
+  if (gone !== null && (open === null || gone > open))
+    return { ...base, at: iso(gone), exact: true }
+  if (open !== null && at.getTime() - open <= CLOSED_EXACT_MS)
+    return { ...base, at: iso((open + at.getTime()) / 2), exact: true }
+  return { ...base, at: at.toISOString(), exact: false }
+}
+
+/**
+ * Every message the card of this task went out as (its first card and the cards sent again), edited into the short
+ * closed card, or the short stale card (`stale`). The numbers come from the journal (card.sent) and from the task,
+ * which also holds those sent before the journal kept them. One message Telegram will not edit never stops the others.
+ */
+async function closeCardMessages(
+  found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>,
+  o: { stale?: Date } = {},
+) {
   const sent = await d()
-    .db.select({ payload: event.payload })
+    .db.select({ payload: event.payload, at: event.occurredAt })
     .from(event)
     .where(
       and(
@@ -827,7 +880,16 @@ async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof le
   }
   if (now?.messageId != null) ids.add(now.messageId)
   if (ids.size === 0) return
-  const card = await cardOfFound(found, false)
+  // The wait counts from the first message of the card (the task's birth when the journal has none).
+  const first = Math.min(
+    ...[found.task.createdAt, ...sent.map((e) => e.at)].map((t) => new Date(t).getTime()),
+  )
+  const card = {
+    ...(await cardOfFound(found, false)),
+    ...(o.stale
+      ? { stale: { since: new Date(first).toISOString(), at: o.stale.toISOString() } }
+      : { closed: await closedWhenOf(found.lead, new Date()) }),
+  }
   for (const id of [...ids].sort((a, b) => a - b)) {
     try {
       await d().notifier.closeLeadCard(id, card)
@@ -934,6 +996,9 @@ async function draftThenCard(
       await d().notifier.sendText(
         verdict === 'closed' ? CARD_FLOW_TEXTS.pageClosed : CARD_FLOW_TEXTS.pageBidAlready,
       )
+      // A card Boris already has (he pressed on it) becomes the short closed card at once.
+      const found = verdict === 'closed' ? await leadOfTask(taskId) : null
+      if (found) await closeCardMessages(found)
     }
     return
   }
@@ -1407,6 +1472,50 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         )
       }
       await closeCardMessages(found)
+    },
+
+    async closeStale(taskId, at = new Date()) {
+      const found = await leadOfTask(taskId)
+      if (!found || found.task.kind !== 'lead_decision') return false
+      const { lead: l } = found
+      if (!isStale(l.seenAt, at) || !isStale(found.task.createdAt, at)) return false
+      const ended = await d().db.transaction(async (tx) => {
+        const rows = await tx
+          .update(task)
+          .set({ state: 'resolved', resolution: 'skip', resolvedAt: at.toISOString() })
+          .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+          .returning({ id: task.id })
+        if (rows.length === 0) return false
+        await appendEvent(
+          tx,
+          ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'sara', {
+            action: 'skip',
+            reason: 'stale',
+          }),
+        )
+        await tx
+          .update(lead)
+          .set({ status: 'stale' })
+          .where(and(eq(lead.id, l.id), ne(lead.status, 'bid_sent'), ne(lead.status, 'closed')))
+        await appendEvent(
+          tx,
+          ev('lead.stale', { kind: 'lead', id: l.id }, l.correlationId, 'sara', {
+            seen_at: new Date(l.seenAt).toISOString(),
+            via: 'card',
+          }),
+        )
+        return true
+      })
+      if (!ended) return false
+      await deliverDecision(taskId, 'skip').catch((err) =>
+        console.error(
+          'decision wait not released',
+          taskId,
+          err instanceof Error ? err.message.slice(0, 200) : err,
+        ),
+      )
+      await closeCardMessages(found, { stale: at })
+      return true
     },
 
     onDraftText,

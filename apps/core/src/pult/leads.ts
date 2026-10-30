@@ -1,15 +1,18 @@
 import {
   AnalystOutput,
   ClientInfo,
+  combinedScore,
   formatRub,
   type LeadQueue,
   type LeadRow,
+  type LeadScores,
   type LeadView,
   priceUpTo,
+  type QueueOrder,
 } from '@sara/shared'
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
-import { account, directionVersion, lead, leadScore, task } from '../db/schema'
+import { account, bidHold, directionVersion, lead, leadLabel, leadScore, task } from '../db/schema'
 import { FOLLOW_UP_EDIT_MAX } from '../leads/draft'
 import { dayOf } from '../leads/money'
 import { getSetting } from '../settings/store'
@@ -45,6 +48,49 @@ async function lastScores(db: DbOrTx, ids: string[]) {
   return out
 }
 
+/** How many days of decided leads the «Решённые» list shows. */
+const DECIDED_DAYS = 30
+
+/**
+ * The two numbers of a lead (Boris, 29.10.2026: «Два числа»). The scoring of today gives one number, the fit to
+ * Hance; the chance of a deal comes with the scoring v2 and is «считается» until then. This is the one place that
+ * reads a score row into the two numbers.
+ */
+export function scoresOf(s: typeof leadScore.$inferSelect | undefined): LeadScores {
+  if (!s)
+    return {
+      fit: { value: null, reasons: [] },
+      chance: { value: null, reasons: [] },
+      combined: null,
+    }
+  const axes = ((s.axes ?? []) as { why?: string }[])
+    .map((a) => a.why)
+    .filter((w): w is string => !!w)
+  const fit = { value: s.score, reasons: [s.reason, ...axes].filter(Boolean) }
+  const chance = { value: null, reasons: [] }
+  return { fit, chance, combined: combinedScore(fit.value, chance.value) }
+}
+
+const orderValue = (r: LeadRow, order: QueueOrder): number => {
+  const v =
+    order === 'fit'
+      ? r.scores?.fit.value
+      : order === 'chance'
+        ? r.scores?.chance.value
+        : r.scores?.combined
+  return v ?? -1
+}
+
+/** The holds still waiting, by task. */
+async function heldBy(db: DbOrTx, taskIds: string[]): Promise<Map<string, string>> {
+  if (taskIds.length === 0) return new Map()
+  const rows = await db
+    .select({ taskId: bidHold.taskId, at: bidHold.executeAt })
+    .from(bidHold)
+    .where(and(inArray(bidHold.taskId, taskIds), eq(bidHold.state, 'held')))
+  return new Map(rows.map((r) => [r.taskId, new Date(r.at).toISOString()]))
+}
+
 /** Why no press would spend now, alike for every lead: the pause of bids. */
 async function pausedText(db: DbOrTx): Promise<string | null> {
   return (await getSetting(db, 'outbound.bids'))
@@ -52,7 +98,11 @@ async function pausedText(db: DbOrTx): Promise<string | null> {
     : 'Отклики на паузе: «Откликнуться» сейчас ничего не потратит и ответит, что пауза.'
 }
 
-export async function leadQueue(db: DbOrTx, now = new Date()): Promise<LeadQueue> {
+export async function leadQueue(
+  db: DbOrTx,
+  now = new Date(),
+  order: QueueOrder = 'combined',
+): Promise<LeadQueue> {
   const open = await db
     .select({ t: task, l: lead })
     .from(task)
@@ -64,6 +114,10 @@ export async function leadQueue(db: DbOrTx, now = new Date()): Promise<LeadQueue
     db,
     fresh.map((r) => r.l.id),
   )
+  const held = await heldBy(
+    db,
+    fresh.map((r) => r.t.id),
+  )
   const queue: LeadRow[] = fresh
     .map(({ t, l }) => ({
       id: l.id,
@@ -72,34 +126,38 @@ export async function leadQueue(db: DbOrTx, now = new Date()): Promise<LeadQueue
       city: l.city,
       category: l.category,
       score: scores.get(l.id)?.score ?? null,
+      scores: scoresOf(scores.get(l.id)),
       feeRub: l.bidPriceRub,
       priceFromRub: l.draftPriceRub,
       seenAt: l.seenAt,
       hasDraft: l.draftText !== null,
+      heldUntil: held.get(t.id) ?? null,
     }))
-    // The most valuable first (FR-LEAD-10): the score, then the cheaper bid.
-    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.feeRub - b.feeRub)
-  const since = new Date(now.getTime() - DAY_MS).toISOString()
+    // The most valuable first (FR-LEAD-10): the two numbers together (or the one Boris chose), then the cheaper bid.
+    .sort((a, b) => orderValue(b, order) - orderValue(a, order) || a.feeRub - b.feeRub)
+  const since = new Date(now.getTime() - DECIDED_DAYS * DAY_MS).toISOString()
   const decidedRows = await db
-    .select({ t: task, l: lead })
+    .select({ t: task, l: lead, reason: leadLabel.reason })
     .from(task)
     .innerJoin(lead, eq(lead.id, task.entityId))
+    .leftJoin(leadLabel, eq(leadLabel.leadId, lead.id))
     .where(
       and(eq(task.kind, 'lead_decision'), eq(task.state, 'resolved'), gt(task.resolvedAt, since)),
     )
     .orderBy(desc(task.resolvedAt))
-    .limit(30)
+    .limit(100)
   const decision = (r: string | null): LeadQueue['decided'][number]['decision'] =>
     r === 'bid' || r === 'skip' ? r : r === 'closed' || r === 'closed_on_site' ? 'closed' : 'other'
   return {
     queue,
     older: open.length - fresh.length,
-    decided: decidedRows.map(({ t, l }) => ({
+    decided: decidedRows.map(({ t, l, reason }) => ({
       id: l.id,
       title: l.title,
       decision: decision(t.resolution),
       at: t.resolvedAt ?? t.createdAt,
       feeRub: l.bidPriceRub,
+      reason: reason ?? null,
     })),
     paused: await pausedText(db),
   }
@@ -196,6 +254,8 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
     score: s
       ? {
           value: s.score,
+          scores: scoresOf(s),
+          confidence: s.confidence,
           threshold: r?.threshold ?? null,
           rulesVersion: s.version,
           reason: s.reason,
@@ -227,7 +287,24 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
     },
     task: t ? { id: t.id, open: t.state === 'open', resolution: t.resolution } : null,
     obstacles: t?.state === 'open' ? await bidObstacles(db, l) : [],
+    hold: t?.state === 'open' ? await holdOf(db, t.id) : null,
+    label: await labelOf(db, l.id),
   }
+}
+
+async function holdOf(db: DbOrTx, taskId: string) {
+  const [h] = await db.select().from(bidHold).where(eq(bidHold.taskId, taskId))
+  return h?.state === 'held'
+    ? { requestId: h.requestId, executeAt: new Date(h.executeAt).toISOString() }
+    : null
+}
+
+async function labelOf(db: DbOrTx, leadId: string) {
+  const [x] = await db
+    .select({ label: leadLabel.label, reason: leadLabel.reason })
+    .from(leadLabel)
+    .where(eq(leadLabel.leadId, leadId))
+  return x ? { label: x.label, reason: x.reason } : null
 }
 
 /** The fee the pult showed must still be the lead's: a changed price asks for a new press (M7 design 5.3). */

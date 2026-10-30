@@ -99,6 +99,8 @@ export async function routeProfiEvent(
   r: {
     db: Db
     onOrderSeen(e: EventEnvelope): Promise<void>
+    /** An order left the feed: the waiting cards are looked at now (FR-LEAD-5); the journal already holds the event. */
+    onOrderGone?(e: EventEnvelope): void
     onAccountEvent(e: EventEnvelope): Promise<void>
     /** M4: chat events (FR-CONV-1); without it they are only journaled. */
     onConversationEvent?(e: EventEnvelope): Promise<void>
@@ -109,6 +111,7 @@ export async function routeProfiEvent(
     if (await getSetting(r.db, 'pipeline.leads')) await r.onOrderSeen(e)
     return
   }
+  if (e.type === 'profi.order_gone') return r.onOrderGone?.(e)
   if (ACCOUNT_EVENTS.has(e.type)) await r.onAccountEvent(e)
   if (CHAT_EVENTS.has(e.type)) await r.onConversationEvent?.(e)
 }

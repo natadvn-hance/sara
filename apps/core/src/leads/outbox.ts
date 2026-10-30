@@ -11,7 +11,7 @@ import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { bidTextDetail } from './draft'
-import { startSeries } from './series'
+import { SERIES_LATE_MS, startSeries } from './series'
 
 export type OutboxDeps = {
   db: Db
@@ -463,12 +463,39 @@ async function lookForUnsure(outboxId: string, p: BidPayload): Promise<void> {
         confirmBid(d().db, outboxId, { spent: p.priceRub, balanceAfter: null, foundLater: true }),
       { name: 'confirmFound', ...DB_STEP },
     )
-    if (first)
-      await DBOS.runStep(() => tell(TEXTS.bidFoundLater(p.title, p.priceRub), p), {
-        name: 'tellFound',
+    if (!first) return
+    // The series Boris approved with the bid follows a bid found later too (30.10.2026: three bids of five on 28.10
+    // were unsure first). Found within a quarter of an hour of the press it goes at once; later it is left out, and
+    // the same message tells Boris so. Behind a patch, so a run recorded before it ends as it began.
+    const series = p.followUps ?? []
+    const age =
+      series.length > 0 && (await DBOS.patch('bid-series-found-later'))
+        ? await DBOS.runStep(() => sincePress(outboxId), { name: 'sincePress', ...DB_STEP })
+        : null
+    const late = age !== null && age > SERIES_LATE_MS
+    await DBOS.runStep(() => tell(TEXTS.bidFoundLater(p.title, p.priceRub, late), p), {
+      name: 'tellFound',
+    })
+    if (age !== null && !late)
+      await startSeries({
+        leadId: p.leadId,
+        accountId: p.accountId,
+        correlationId: p.correlationId,
+        followUps: series,
+        late: true,
       })
     return
   }
+}
+
+/** How long ago Boris pressed: the outbox row of the bid is written with his press. */
+async function sincePress(outboxId: string): Promise<number> {
+  // Counted by the database's own clock, which wrote the row.
+  const [row] = await d()
+    .db.select({ ms: sql<number>`extract(epoch from now() - ${outbox.createdAt}) * 1000` })
+    .from(outbox)
+    .where(eq(outbox.id, outboxId))
+  return row ? Number(row.ms) : Number.POSITIVE_INFINITY
 }
 
 /** Only a queued bid goes down the bid path; a message row (M4) has its own delivery. */
