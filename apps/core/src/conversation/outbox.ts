@@ -7,6 +7,7 @@ import { isApprovedText } from '../leads/callSlots'
 import type { BidPayload } from '../leads/outbox'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { hasBlockedLink } from '../text/blockedLinks'
 import { getConversation } from './store'
 
 export { SEND_TEXTS, type SendOptions } from './sendTexts'
@@ -141,6 +142,9 @@ export async function queueMessage(
 ): Promise<string | null> {
   if (await getSetting(tx, 'conv.v1_writes')) return null
   if (i.author === 'sara' && !(await getSetting(tx, 'outbound.messages'))) return null
+  // Boris's own words are his; Sara's never carry a link a client is not to be given (links.blocked, 30.10.2026).
+  if (i.author === 'sara' && hasBlockedLink(i.text, await getSetting(tx, 'links.blocked')))
+    return null
   if (
     i.author === 'sara' &&
     !(await getSetting(tx, 'conv.autopilot')) &&

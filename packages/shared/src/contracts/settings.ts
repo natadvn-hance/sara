@@ -88,6 +88,15 @@ export const SETTINGS = {
     schema: hours.refine((h) => h.from < h.to, 'from before to'),
     default: { from: 11, to: 19 },
   },
+  /**
+   * Sites and addresses a client is never given (Boris, 30.10.2026: «сайт нексум не рабочий, его отправлять не нужно»),
+   * as «nexum.su» or «hance.pro/old»: they are taken out of the cases and sites Sara may show, out of the series Boris
+   * presses, and a message of Sara's that still holds one is not sent.
+   */
+  'links.blocked': {
+    schema: z.array(z.string().trim().min(3).max(200)).max(50),
+    default: ['nexum.su'] as string[],
+  },
   /** Boris's working days for calls, 1 Monday to 7 Sunday. */
   'calls.work_days': {
     schema: z.array(z.number().int().min(1).max(7)).min(1),

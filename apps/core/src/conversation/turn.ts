@@ -227,6 +227,7 @@ async function policySettings(db: Db, accountId: string): Promise<PolicySettings
     accountPaused: a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false,
     night: await getSetting(db, 'conv.night'),
     autonomy: (await getSetting(db, 'conv.autonomy')) as Record<Topic, 'self' | 'draft' | 'call'>,
+    blockedLinks: await getSetting(db, 'links.blocked'),
   }
 }
 

@@ -1,6 +1,7 @@
 import type { MindSearch } from '../conversation/types'
 import { listItems } from '../mind/cases'
 import { markdownSections } from '../mind/loader'
+import { hasBlockedLink } from '../text/blockedLinks'
 import type { DraftSource } from './draft'
 
 /**
@@ -79,11 +80,13 @@ export function sitesOf(body: string): HanceSite[] {
 export async function sitesForBid(
   mind: Pick<MindSearch, 'byIds'> | undefined,
   o: Pick<DraftSource, 'title' | 'category' | 'text'>,
+  /** Links a client is never given: a site of the list is not offered (links.blocked). */
+  blocked: readonly string[] = [],
 ): Promise<HanceSite[]> {
   if (!mind || !isSiteOrder(o)) return []
   try {
     const [record] = await mind.byIds([SITES_RECORD])
-    return record ? sitesOf(record.body) : []
+    return record ? sitesOf(record.body).filter((s) => !hasBlockedLink(s.url, blocked)) : []
   } catch (e) {
     console.error('sites of the mind failed', e instanceof Error ? e.message : e)
     return []
