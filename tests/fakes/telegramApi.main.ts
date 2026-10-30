@@ -16,6 +16,11 @@ createServer((req, res) => {
       return res.writeHead(200).end('ok')
     }
     if (req.url === '/_control/health') return res.writeHead(200).end('ok')
+    // The buttons replaced on sent messages (a card decided in the pult), for the pult's browser tests.
+    if (req.url === '/_control/markups')
+      return res
+        .writeHead(200, { 'content-type': 'application/json' })
+        .end(JSON.stringify(tg.markups))
     res.writeHead(404).end()
   })
 }).listen(controlPort, '127.0.0.1')

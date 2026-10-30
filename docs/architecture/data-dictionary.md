@@ -110,6 +110,7 @@
 | `model_call` | `id`, `role`, `role_version`, `model`, `priority`, `started_at`, `duration_ms`, `ok`, `error_class`, `est_tokens_in`, `est_tokens_out`, `pseudonymized` (bool; false, если вызов нёс слова клиента, а имени клиента не знал, и имя в тексте могло уйти) | Н | вызовы Claude, без текста |
 | `setting`, `setting_history` | `key`, `value` (jsonb), `changed_by`, `changed_at` | Н | настройки C7 |
 | `owner_auth` | `password_hash`, `telegram_user_id`, `telegram_chat_id`, `updated_at` | С | вход владельца |
+| `notice` (пульт v2) | `id`, `kind` (`lead`, `draft`, `client`, `meeting`, `urgent`, `summary`, `system`), `title`, `body` (до 400 знаков), `link` (путь в пульте), `task_id`, `question_id`, `telegram_message_id`, `seen_at`, `done_at` (только «Убрать» у уведомления без задачи), `created_at` | П (заголовок заявки, имя клиента, как в Telegram) | колокольчик пульта: каждое сообщение Сары Борису; «решено» не хранится, а читается по задаче или вопросу |
 
 ### 3.4 Разум и учёба
 

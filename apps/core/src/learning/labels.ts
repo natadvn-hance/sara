@@ -5,7 +5,7 @@ import { directionVersion, lead, leadLabel, leadScore, task } from '../db/schema
 import { appendEvent } from '../journal/journal'
 
 export type Label = 'yes' | 'no' | 'weak_no'
-export type LabelSource = 'card' | 'summary' | 'ignored'
+export type LabelSource = 'card' | 'summary' | 'ignored' | 'pult'
 
 /** A skip this far above the threshold surprises Sara enough to ask why. */
 export const SURPRISE_ABOVE = 15
@@ -17,7 +17,7 @@ const IGNORED_AFTER_MS = 24 * 3600_000
  */
 export async function recordLabel(
   db: Db,
-  l: { leadId: string; label: Label; source: LabelSource },
+  l: { leadId: string; label: Label; source: LabelSource; reason?: string | null },
 ): Promise<{ created: boolean; surprise: boolean }> {
   return db.transaction(async (tx) => {
     const [sc] = await tx
@@ -28,7 +28,7 @@ export async function recordLabel(
       .orderBy(desc(leadScore.createdAt))
       .limit(1)
     let surprise = l.label === 'yes' && l.source === 'summary'
-    if (sc && l.label === 'no' && l.source === 'card') {
+    if (sc && l.label === 'no' && (l.source === 'card' || l.source === 'pult')) {
       const [v] = await tx
         .select({ rules: directionVersion.rules })
         .from(directionVersion)
@@ -46,6 +46,7 @@ export async function recordLabel(
         leadId: l.leadId,
         label: l.label,
         source: l.source,
+        reason: l.reason ?? null,
         score: sc?.score ?? null,
         scoreVersion: sc?.version ?? null,
         surprise,

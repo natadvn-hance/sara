@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ago, count, pct, toCsv, waited, waitTone } from '../src/app/format'
-import { idOf, sectionOf } from '../src/app/router'
+import { idOf, queryOf, sectionOf } from '../src/app/router'
 
 const NOW = Date.parse('2026-10-28T12:00:00Z')
 const before = (min: number) => new Date(NOW - min * 60_000).toISOString()
@@ -48,13 +48,16 @@ describe('the words of the pult', () => {
 
 describe('the paths of the pult', () => {
   it('FR-UI-2: every path has its section and a thing has one home', () => {
-    expect(sectionOf('/')).toBe('today')
+    expect(sectionOf('/')).toBe('inbox')
     expect(sectionOf('/today')).toBe('today')
     expect(sectionOf('/leads/95210417')).toBe('leads')
-    expect(sectionOf('/accounts/hance-marketing/direction')).toBe('accounts')
+    expect(sectionOf('/accounts/hance-marketing/direction')).toBe('settings')
+    expect(sectionOf('/search?q=анна')).toBe('search')
     expect(idOf('/leads/95210417', 'leads')).toBe('95210417')
     expect(idOf('/leads', 'leads')).toBeNull()
     expect(idOf('/mind/K-014', 'mind')).toBe('K-014')
-    expect(idOf('/conversations/c%201', 'conversations')).toBe('c 1')
+    expect(idOf('/clients/c%201', 'clients')).toBe('c 1')
+    expect(queryOf('/search?q=%D0%B0%D0%BD%D0%BD%D0%B0')).toBe('анна')
+    expect(queryOf('/search')).toBe('')
   })
 })

@@ -70,7 +70,16 @@ export type LeadPipelineDeps = {
 
 export type LeadPipeline = {
   onOrderSeen(e: EventEnvelope): Promise<void>
-  onPress(p: { taskId: string; action: TaskAction }): Promise<string>
+  /**
+   * A press on the card: from Telegram, or from the pult with `source` and, for a skip, Boris's `reason` (then no
+   * «почему?» is asked in Telegram, pult v2 design 4).
+   */
+  onPress(p: {
+    taskId: string
+    action: TaskAction
+    source?: string
+    reason?: string | null
+  }): Promise<string>
   /**
    * The wait for Boris's decision ran out. A card comes once and never again on Sara's own (Boris, 26.10.2026): a
    * delivered card gets nothing here. A first card that never went out is delivered now, once, plain.
@@ -1200,10 +1209,12 @@ function learnFrom(
   label: Parameters<typeof recordLabel>[1],
   why: 'why_skip' | 'why_want',
   title: string,
+  /** The reason came with the press (the pult): nothing to ask. */
+  ask = true,
 ): void {
   void (async () => {
     const labeled = await recordLabel(d().db, label)
-    if (labeled.surprise)
+    if (labeled.surprise && ask)
       await askWhy(d(), { kind: why, entityId: label.leadId, title }, new Date())
   })().catch((e) => console.error('learning skipped', e instanceof Error ? e.message : e))
 }
@@ -1220,7 +1231,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       )
     },
 
-    async onPress({ taskId, action }) {
+    async onPress({ taskId, action, source, reason }) {
       if (action === 'want') return onWant(taskId)
       if (action === 'open') return onOpen(taskId)
       if (action === 'edit') return onEdit(taskId)
@@ -1330,10 +1341,17 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (!resolved) return TEXTS.alreadyDone
       await deliverDecision(taskId, action)
       if (outboxId) await startOutboxDelivery(outboxId)
+      const fromPult = source === 'pult' || source === 'hold'
       learnFrom(
-        { leadId: l.id, label: action === 'bid' ? 'yes' : 'no', source: 'card' },
+        {
+          leadId: l.id,
+          label: action === 'bid' ? 'yes' : 'no',
+          source: fromPult ? 'pult' : 'card',
+          reason: action === 'skip' ? (reason ?? null) : null,
+        },
         'why_skip',
         l.title,
+        !fromPult,
       )
       return action === 'skip' ? TEXTS.skipped : TEXTS.bidQueued
     },

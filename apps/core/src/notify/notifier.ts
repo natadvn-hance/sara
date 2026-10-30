@@ -1,4 +1,5 @@
 import type { LeadCard } from './cards'
+import type { NoticeHint } from './center'
 
 /**
  * Where a message belongs once Boris has a forum (docs/product/telegram-forum.md): the topic of one client's order
@@ -22,13 +23,13 @@ export type Notifier = {
   /** `html`: the text is Telegram HTML (every value in it already escaped); the default is plain text. */
   sendText(
     text: string,
-    o?: { html?: boolean; loud?: boolean; place?: Place },
+    o?: { html?: boolean; loud?: boolean; place?: Place; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /** A message with inline buttons, row by row (the daily summary, rule proposals). */
   sendButtons(
     text: string,
     rows: { text: string; callbackData: string }[][],
-    o?: { loud?: boolean; place?: Place },
+    o?: { loud?: boolean; place?: Place; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /**
    * A card decided in the pult (M7 design 2): its buttons give way to one line saying so, so no live button is left
