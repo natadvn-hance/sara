@@ -77,7 +77,7 @@ export function SearchScreen() {
   )
   return (
     <div className="page">
-      <Head eyebrow="Заявки, клиенты, разум, разделы" title="Поиск" accent="по всему" />
+      <Head title="Поиск" />
       <form
         className="search is-page"
         aria-label="Поиск"

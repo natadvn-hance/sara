@@ -246,12 +246,7 @@ export function MindScreen() {
   const one = useScreen<MindRecordView>(id ? `/api/mind/${encodeURIComponent(id)}` : null, 60_000)
   return (
     <div className={`page${id ? ' has-detail' : ''}`}>
-      <Head
-        eyebrow="Только чтение"
-        title="Разум"
-        accent="Сары"
-        lead="Что она знает о Hance и клиентах, как говорит и что предлагает выучить. Меняется только после твоего «да»."
-      />
+      <Head title="Разум" lead="Меняется только после твоего «да»." />
       <div className={`split${id ? ' has-detail' : ''}`}>
         <div className="split-list">
           <Screen q={all}>{(v) => <Overview v={v} current={id} />}</Screen>

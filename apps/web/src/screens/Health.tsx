@@ -159,13 +159,7 @@ export function HealthScreen() {
   const q = useScreen<SystemView>('/api/system')
   return (
     <div className="page">
-      <Head
-        eyebrow="Здоровье"
-        title="Состояние"
-        accent="системы"
-        end={<Recheck />}
-        lead="Узел Профи.ру, вход в аккаунт, связь, копии базы и лимит Claude. У каждой поломки написано, что сделать."
-      />
+      <Head title="Состояние" end={<Recheck />} />
       <Screen q={q}>{(v) => <Body v={v} />}</Screen>
     </div>
   )

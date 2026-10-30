@@ -29,9 +29,11 @@ import { seedProfile } from './direction/profile'
 import { resumeRuns } from './direction/runs'
 import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
+import { cancelHold, holdBid, setHoldDeps } from './leads/hold'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
+import { createRecheckOne } from './leads/recheckOne'
 import { SERIES_DELAYS, type SeriesDeps, setSeriesDeps } from './leads/series'
 import { type StaleSweep, startStaleSweep } from './leads/staleCards'
 import { handleBorisMessage } from './learning/inbox'
@@ -245,6 +247,13 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifier: bot.notifier,
     publicUrl: config.publicUrl,
   })
+  // A bid from the pult waits ten seconds in the core before the same press fires (pult v2 design 4).
+  setHoldDeps({ db, press: (p) => onPress(p), notifier: bot.notifier })
+  const recheckLead = createRecheckOne({
+    db,
+    profi,
+    close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
+  })
   await launchDbos(config.databaseUrl)
 
   const deps: AppDeps = {
@@ -259,6 +268,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     accounts: config.accounts,
     onPress,
     answerQuestion,
+    bids: { hold: holdBid, cancel: cancelHold, recheck: recheckLead },
     saveBidText: (p) =>
       pipeline
         ? pipeline.saveBidText(p)

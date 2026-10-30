@@ -77,6 +77,39 @@ export const TodayView = z.object({
 })
 export type TodayView = z.infer<typeof TodayView>
 
+/**
+ * One of the two numbers of a lead (Boris, 29.10.2026: «Два числа»): 0-100 with its own reasons; null while it is
+ * still being worked out («считается»).
+ */
+export const ScorePart = z.object({
+  value: z.number().int().nullable(),
+  reasons: z.array(z.string()),
+})
+export type ScorePart = z.infer<typeof ScorePart>
+
+/** «Насколько наше» (fit to Hance) and «Шанс дойти до денег» (the chance of a deal), and the two together. */
+export const LeadScores = z.object({
+  fit: ScorePart,
+  chance: ScorePart,
+  /** The order of the queue by default: both numbers together; the fit alone while the chance is not known. */
+  combined: z.number().int().nullable(),
+})
+export type LeadScores = z.infer<typeof LeadScores>
+
+/**
+ * The two numbers together: the geometric mean, so a lead strong in one and weak in the other does not rise above
+ * one good in both; with one number only, that number.
+ */
+export function combinedScore(fit: number | null, chance: number | null): number | null {
+  if (fit === null) return chance
+  if (chance === null) return fit
+  return Math.round(Math.sqrt(Math.max(0, fit) * Math.max(0, chance)))
+}
+
+/** The order the queue can be read in (pult v2 design 4). */
+export const QUEUE_ORDERS = ['combined', 'fit', 'chance'] as const
+export type QueueOrder = (typeof QUEUE_ORDERS)[number]
+
 export const LeadRow = z.object({
   id: z.string(),
   taskId: z.string(),
@@ -84,10 +117,13 @@ export const LeadRow = z.object({
   city: z.string(),
   category: z.string(),
   score: z.number().int().nullable(),
+  scores: LeadScores.optional(),
   feeRub: rub,
   priceFromRub: rub.nullable(),
   seenAt: at,
   hasDraft: z.boolean(),
+  /** A bid put off for ten seconds from the pult: when it fires. */
+  heldUntil: at.nullable().optional(),
 })
 export type LeadRow = z.infer<typeof LeadRow>
 
@@ -97,6 +133,8 @@ export const LeadDecided = z.object({
   decision: z.enum(['bid', 'skip', 'closed', 'other']),
   at,
   feeRub: rub,
+  /** Boris's reason of a skip, when he gave one. */
+  reason: z.string().nullable().optional(),
 })
 export type LeadDecided = z.infer<typeof LeadDecided>
 
@@ -137,6 +175,8 @@ export const LeadView = z.object({
   score: z
     .object({
       value: z.number().int(),
+      /** The two numbers (pult v2 design 4); the fit is the score above until the scoring v2 says more. */
+      scores: LeadScores.optional(),
       threshold: z.number().int().nullable(),
       rulesVersion: z.number().int(),
       reason: z.string(),
