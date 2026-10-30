@@ -112,6 +112,11 @@ export function createTelegramRuntime(d: {
     if (!d.onTest) return
     await ctx.reply(await d.onTest(ctx.match ?? ''))
   })
+  // The menu's own command for «стереть» (a menu command has no words after it).
+  bot.command('test_clear', async (ctx) => {
+    if (!d.onTest) return
+    await ctx.reply(await d.onTest('стереть'))
+  })
 
   /** An answer to Boris's message: a line, with its buttons when it has some. */
   const answer = (ctx: Context, r: BorisReply) =>

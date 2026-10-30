@@ -230,7 +230,7 @@ describe('test orders inside the live Sara', () => {
     expect(rows.every((r) => r.status === 'queued')).toBe(true)
   }, 30000)
 
-  it('FR-LEAD-9: /test in the bot puts a test order in and names the page; «стереть» erases only test orders', async () => {
+  it('FR-LEAD-9: /test in the bot puts a test order in and names the page; /test_clear erases only test orders', async () => {
     tg.pushText(BORIS, '/test выдуманный сам')
     await until(() => tg.sent.some((m) => m.text.includes('Подкинула тестовую заявку')))
     expect(tg.sent.find((m) => m.text.includes('Подкинула'))?.text).toContain('/api/test/')
@@ -238,7 +238,7 @@ describe('test orders inside the live Sara', () => {
     // A real order meanwhile: the erase leaves it and its journal alone.
     await node.emitOrder({ order_id: '95000123' })
     await until(() => leadCards().length === 2)
-    tg.pushText(BORIS, '/test стереть')
+    tg.pushText(BORIS, '/test_clear')
     await until(() => tg.sent.some((m) => m.text.includes('Стёрла тестовых заявок: 1')))
     const left = await db.select({ id: lead.id }).from(lead)
     expect(left.map((r) => r.id)).toEqual(['95000123'])

@@ -12,7 +12,7 @@ const BEHAVIOUR_WORDS: Record<string, Behaviour> = {
 }
 
 const HELP =
-  'Команды: /test (копия реального заказа), /test выдуманный, /test цена, /test созвон, /test молчит, /test уходит, /test сам, /test день (пять заказов), /test стереть.'
+  'Команды: /test (копия реального заказа), /test выдуманный, /test цена, /test созвон, /test молчит, /test уходит, /test сам, /test день (пять заказов), /test_clear (стереть все тестовые).'
 
 /**
  * Boris's /test in the bot (docs/ops/test-leads.md): a test order into the live Sara, a day of them, or all of them
