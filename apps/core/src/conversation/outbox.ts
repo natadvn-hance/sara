@@ -3,6 +3,7 @@ import { and, asc, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { chatMessage, conversation, convTurn, outbox, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { isApprovedText } from '../leads/callSlots'
 import type { BidPayload } from '../leads/outbox'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
@@ -77,7 +78,7 @@ async function borisPressed(
 }
 
 /** The key of a message of the series after a bid: `series:<order>:<place>`, `:2` on its one try after the chat moved. */
-const SERIES_KEY = /^series:([^:]+):([0-2])(?::2)?$/
+const SERIES_KEY = /^series:([^:]+):([0-3])(?::2)?$/
 
 /**
  * Whether the message is one of the series Boris approved with his press on «Откликнуться» (Boris, 29.10.2026): the bid
@@ -103,8 +104,10 @@ async function seriesApproved(
       ),
     )
   const p = bid?.payload as BidPayload | undefined
-  if (!p?.taskId || p.accountId !== m.accountId || p.followUps?.[Number(place)] !== m.text)
-    return false
+  const approved = p?.followUps?.[Number(place)]
+  if (!p?.taskId || p.accountId !== m.accountId || approved === undefined) return false
+  // The text pressed, or for the call offer that text with only its times put in by the code.
+  if (!isApprovedText(approved, m.text)) return false
   const [t] = await tx
     .select({ id: task.id })
     .from(task)

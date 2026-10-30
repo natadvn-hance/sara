@@ -30,6 +30,7 @@ import { seedProfile } from './direction/profile'
 import { resumeRuns } from './direction/runs'
 import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
+import { type SlotSource, workHoursSource } from './leads/callSlots'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
@@ -76,6 +77,8 @@ export type StartOptions = {
   reconcileDelaysMs?: number[]
   /** The waits of the series after a bid: before its first message and between the next ones (SERIES_DELAYS). */
   seriesDelayMs?: SeriesDeps['delayMs']
+  /** Where the times of the call offer come from (default Boris's working hours); tests fix them. */
+  callSlots?: SlotSource
   remindAfterMs?: () => Promise<number>
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** How often the learning jobs run (default a minute); tests call them directly instead. */
@@ -170,7 +173,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
   })
-  setSeriesDeps({ db, profi, delayMs: o.seriesDelayMs ?? SERIES_DELAYS })
+  setSeriesDeps({
+    db,
+    profi,
+    delayMs: o.seriesDelayMs ?? SERIES_DELAYS,
+    slots: o.callSlots ?? workHoursSource(db),
+  })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
   const mind = createMindSearch(db)

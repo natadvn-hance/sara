@@ -72,6 +72,20 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     kind: 'hours',
   },
   'conv.reminder_quiet': { title: 'Без напоминаний клиентам', edit: 'locked', kind: 'hours' },
+  'calls.offer': {
+    title: 'Предлагает созвон после отклика',
+    hint: 'Последнее сообщение серии: созвониться на полчаса, три времени на выбор.',
+    edit: 'free',
+    kind: 'flag',
+  },
+  'calls.work_hours': {
+    title: 'Рабочие часы для созвонов',
+    hint: 'По Москве. Выходные и время ближе двух часов не предлагаются.',
+    edit: 'locked',
+    kind: 'hours',
+  },
+  'calls.slot_min': { title: 'Длина созвона, мин', edit: 'free', kind: 'count' },
+  'calls.min_ahead_min': { title: 'Созвон не раньше чем через, мин', edit: 'free', kind: 'count' },
 }
 
 const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
@@ -105,6 +119,11 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'conv.night',
       'conv.reminder_quiet',
     ],
+  },
+  {
+    id: 'calls',
+    title: 'Созвоны',
+    keys: ['calls.offer', 'calls.work_hours', 'calls.slot_min', 'calls.min_ahead_min'],
   },
 ]
 

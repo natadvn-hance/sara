@@ -8,6 +8,7 @@ import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { queueMessage } from '../../apps/core/src/conversation/outbox'
 import { event, lead, outbox } from '../../apps/core/src/db/schema'
+import { isApprovedText, isCallOffer, SLOTS_MARK } from '../../apps/core/src/leads/callSlots'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
@@ -98,7 +99,11 @@ beforeAll(async () => {
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
-      seriesDelayMs: { first: [400, 500], next: [300, 400] },
+      seriesDelayMs: { first: [400, 500], next: [300, 400], call: [300, 400] },
+      // Three times ahead of the moment of sending, whatever the clock of the run says.
+      callSlots: {
+        slots: async (now) => [3, 5, 7].map((h) => new Date(now.getTime() + h * 3600_000)),
+      },
       now: () => NOON,
     },
   )
@@ -151,6 +156,8 @@ beforeEach(async () => {
   await setSetting(db, 'outbound.messages', true, 'boris')
   await setSetting(db, 'conv.v1_writes', false, 'boris')
   await setSetting(db, 'conv.autopilot', false, 'boris')
+  // The call offer has its own test below; the others are about the Analyst's messages.
+  await setSetting(db, 'calls.offer', false, 'boris')
 })
 
 describe('the series after a bid (Boris, 29.10.2026)', () => {
@@ -291,6 +298,24 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await until(() => tg.sent.some((m) => m.text.includes('Сообщения вдогонку не отправляла')))
     await settle()
     expect(sentTo(id)).toEqual([])
+  })
+
+  it('FR-CONV-9: the series ends with the call offer, its three times put in when it is sent (Boris, 30.10.2026)', async () => {
+    await setSetting(db, 'calls.offer', true, 'boris')
+    const id = await cardFor()
+    const series = (await db.select().from(lead).where(eq(lead.id, id)))[0]?.draftFollowUps ?? []
+    expect(series).toHaveLength(3)
+    const template = series[2] ?? ''
+    expect(isCallOffer(template)).toBe(true)
+    // The card shows the offer with its times in words.
+    expect(cards().at(-1)?.text).toContain('Созвон')
+    press()
+    await until(() => sentTo(id).length === 3)
+    const [, , call] = sentTo(id).map((m) => m.text)
+    expect(call).not.toContain(SLOTS_MARK)
+    expect(isApprovedText(template, call ?? '')).toBe(true)
+    expect(call).toMatch(/\d{1,2}:\d{2}/)
+    expect(sentTo(id)[2]?.idempotency_key).toBe(`msg:series:${id}:2`)
   })
 
   it('FR-CONV-5: in drafts mode only the series Boris pressed passes: another text under its key is refused', async () => {
