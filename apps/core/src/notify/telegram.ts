@@ -52,6 +52,8 @@ export function createTelegramRuntime(d: {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   /** Boris's text or voice (saved to a file first); the answer goes back to him. */
   onMessage?(m: BorisMessage): Promise<BorisReply>
+  /** /test with the words after it: test orders into the live Sara (docs/ops/test-leads.md). */
+  onTest?(args: string): Promise<string>
   /** Where voice messages are saved while they are recognized (default: the system temp folder). */
   voiceDir?: string
 }): TelegramRuntime {
@@ -104,6 +106,11 @@ export function createTelegramRuntime(d: {
       })
     }
     await ctx.reply(TEXTS.bound)
+  })
+
+  bot.command('test', async (ctx) => {
+    if (!d.onTest) return
+    await ctx.reply(await d.onTest(ctx.match ?? ''))
   })
 
   /** An answer to Boris's message: a line, with its buttons when it has some. */

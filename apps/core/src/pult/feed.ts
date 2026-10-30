@@ -1,4 +1,11 @@
-import { type FeedItem, formatRub, type LineTone, type SettingKey } from '@sara/shared'
+import {
+  type FeedItem,
+  formatRub,
+  isTestOrder,
+  type LineTone,
+  type SettingKey,
+  shownTitle,
+} from '@sara/shared'
 import { desc, eq, inArray, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { conversation, convTurn, event, lead, task } from '../db/schema'
@@ -229,7 +236,7 @@ async function cardsOf(db: DbOrTx, taskIds: string[]): Promise<Map<string, Card>
   for (const c of leadCards)
     out.set(c.id, {
       area: 'lead',
-      text: `Прислала тебе карточку «${c.title}»`,
+      text: `Прислала тебе карточку «${shownTitle(c.leadId, c.title)}»`,
       link: `/leads/${encodeURIComponent(c.leadId)}`,
     })
   const convCards = await db
@@ -270,7 +277,7 @@ export async function readFeed(db: DbOrTx, limit = 40): Promise<FeedItem[]> {
       db,
       rows.filter((r) => r.type === 'card.sent' && r.entityKind === 'task').map((r) => r.entityId),
     ),
-    lead: new Map(titles.map((t) => [t.id, t.title])),
+    lead: new Map(titles.map((t) => [t.id, shownTitle(t.id, t.title)])),
     client: await clientNames(
       db,
       rows.filter((r) => r.entityKind === 'conversation').map((r) => r.entityId),
@@ -278,6 +285,8 @@ export async function readFeed(db: DbOrTx, limit = 40): Promise<FeedItem[]> {
   }
   const out: FeedItem[] = []
   for (const r of rows) {
+    // An erased test order leaves its lines in the journal, never in the feed.
+    if (r.entityKind === 'lead' && isTestOrder(r.entityId) && !names.lead.has(r.entityId)) continue
     const said = SAYS[r.type]?.(r, names)
     if (said) out.push({ id: r.id, at: r.occurredAt, link: linkOf(r, names), ...said })
   }

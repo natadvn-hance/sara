@@ -18,6 +18,7 @@ import { attachRecorder } from './eyes/recorder'
 import { startWatchedMaps } from './eyes/watchedMaps'
 import { serveMcp } from './mcp/http'
 import { createProfiMcpServer } from './mcp/server'
+import { refuseTestOrders } from './mcp/testOrders'
 import { registerScreenRoute } from './screen/screenRoute'
 import { createShipper } from './ship/shipper'
 import { purgeOld } from './store/purge'
@@ -268,7 +269,12 @@ export async function startProfiService(
     }),
   }
   const host = c.production ? '0.0.0.0' : '127.0.0.1'
-  const svc = await serveMcp(() => createProfiMcpServer(tools), c.port, undefined, host)
+  const svc = await serveMcp(
+    () => createProfiMcpServer(refuseTestOrders(tools)),
+    c.port,
+    undefined,
+    host,
+  )
   registerScreenRoute(svc.http, {
     nodeToken: c.nodeToken,
     browsers,

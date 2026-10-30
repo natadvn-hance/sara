@@ -20,6 +20,8 @@ export function createBotControl(d: {
   apiRoot?: string
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onMessage?(m: BorisMessage): Promise<BorisReply>
+  /** Boris's /test with the words after it (test orders, docs/ops/test-leads.md). */
+  onTest?(args: string): Promise<string>
   voiceDir?: string
 }): BotControl {
   let runtime: TelegramRuntime | null = null
@@ -36,6 +38,7 @@ export function createBotControl(d: {
         db: d.db,
         onPress: d.onPress,
         onMessage: d.onMessage,
+        onTest: d.onTest,
         voiceDir: d.voiceDir,
       })
       await runtime.start()

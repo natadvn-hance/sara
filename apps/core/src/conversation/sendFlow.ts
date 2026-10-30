@@ -1,4 +1,5 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
+import { shownTitle } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { lead } from '../db/schema'
 import type { Notifier } from '../notify/notifier'
@@ -37,7 +38,7 @@ const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 async function whoOf(job: SendJob): Promise<{ name: string | null; title: string | null }> {
   const conv = await getConversation(d().db, job.conversationId)
   const [l] = conv?.orderId ? await d().db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
-  return { name: l?.clientName || null, title: l?.title ?? null }
+  return { name: l?.clientName || null, title: l ? shownTitle(l.id, l.title) : null }
 }
 
 async function tell(job: SendJob, text: string): Promise<void> {

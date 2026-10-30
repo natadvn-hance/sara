@@ -6,6 +6,7 @@ import {
   type LeadRow,
   type LeadView,
   priceUpTo,
+  shownTitle,
 } from '@sara/shared'
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
@@ -68,7 +69,7 @@ export async function leadQueue(db: DbOrTx, now = new Date()): Promise<LeadQueue
     .map(({ t, l }) => ({
       id: l.id,
       taskId: t.id,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       city: l.city,
       category: l.category,
       score: scores.get(l.id)?.score ?? null,
@@ -96,7 +97,7 @@ export async function leadQueue(db: DbOrTx, now = new Date()): Promise<LeadQueue
     older: open.length - fresh.length,
     decided: decidedRows.map(({ t, l }) => ({
       id: l.id,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       decision: decision(t.resolution),
       at: t.resolvedAt ?? t.createdAt,
       feeRub: l.bidPriceRub,
@@ -179,7 +180,7 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
     lead: {
       id: l.id,
       accountId: l.accountId,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       city: l.city,
       category: l.category,
       text: l.text,

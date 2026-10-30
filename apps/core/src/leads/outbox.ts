@@ -1,5 +1,5 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type EventType, newEventId, type ProfiErrorClass } from '@sara/shared'
+import { type EventType, isTestOrder, newEventId, type ProfiErrorClass } from '@sara/shared'
 import { and, eq, or, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { lead, outbox, task } from '../db/schema'
@@ -194,15 +194,17 @@ export async function confirmBid(db: Db, outboxId: string, r: Spent): Promise<bo
       tx,
       ev('bid.sent', p, { kind: 'lead', id: p.leadId }, { spent_rub: r.spent, ...later }),
     )
-    await appendEvent(
-      tx,
-      ev(
-        'spend.recorded',
-        p,
-        { kind: 'lead', id: p.leadId },
-        { amount_rub: r.spent, balance_after_rub: r.balanceAfter, ...later },
-      ),
-    )
+    // A test order's made-up wallet is no spending: the live wallet and the day's money never see it.
+    if (!isTestOrder(p.leadId))
+      await appendEvent(
+        tx,
+        ev(
+          'spend.recorded',
+          p,
+          { kind: 'lead', id: p.leadId },
+          { amount_rub: r.spent, balance_after_rub: r.balanceAfter, ...later },
+        ),
+      )
     await tx.update(lead).set({ status: 'bid_sent' }).where(eq(lead.id, p.leadId))
     await createDeal(tx, {
       leadId: p.leadId,
@@ -344,8 +346,9 @@ async function attempt(
     .db.update(outbox)
     .set({ attempts: n + 1 })
     .where(eq(outbox.id, row.id))
-  // The pause is read again right before the node is called: Boris may have set it while the bid waited.
-  if (!(await getSetting(d().db, 'outbound.bids')))
+  // The pause is read again right before the node is called: Boris may have set it while the bid waited. A test
+  // order spends nothing and reaches no client, so no pause holds it (docs/ops/test-leads.md).
+  if (!isTestOrder(p.leadId) && !(await getSetting(d().db, 'outbound.bids')))
     return mayBeOnSite || ranBefore ? { kind: 'uncertain' } : { kind: 'paused' }
   // Greeted and tidied at this very moment, not at the press: the hour may have changed since the card (rule 5).
   // The text is built before the node is called, outside the try below: an error of ours here pressed nothing, so the
@@ -484,10 +487,10 @@ async function deliver(outboxId: string): Promise<void> {
   if (!row || !isBidRow(row)) return
   const p = row.payload as BidPayload
 
-  const allowed = await DBOS.runStep(() => getSetting(d().db, 'outbound.bids'), {
-    name: 'checkPause',
-    ...DB_STEP,
-  })
+  const allowed = await DBOS.runStep(
+    async () => isTestOrder(p.leadId) || (await getSetting(d().db, 'outbound.bids')),
+    { name: 'checkPause', ...DB_STEP },
+  )
   if (!allowed) return backToBoris(outboxId, p, 'paused')
 
   // Steps keep their names and order: a run recorded before a change resumes along the steps it took.

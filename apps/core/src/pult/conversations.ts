@@ -1,4 +1,11 @@
-import type { ChatAuthor, Tone as ClientTone, ConvList, ConvRow, ConvView } from '@sara/shared'
+import {
+  type ChatAuthor,
+  type Tone as ClientTone,
+  type ConvList,
+  type ConvRow,
+  type ConvView,
+  shownTitle,
+} from '@sara/shared'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { sendHold } from '../conversation/sendHold'
 import { AUTHOR_RU, TONE_RU } from '../conversation/texts'
@@ -67,7 +74,7 @@ export async function conversationList(db: DbOrTx): Promise<ConvList> {
             .select({ id: lead.id, title: lead.title })
             .from(lead)
             .where(inArray(lead.id, orders))
-        ).map((l) => [l.id, l.title]),
+        ).map((l) => [l.id, shownTitle(l.id, l.title)]),
       )
     : new Map<string, string>()
   const rows: ConvRow[] = convs.map((c) => {
@@ -140,7 +147,7 @@ export async function conversationView(db: Db, id: string): Promise<ConvView | n
     owner: c.owner === 'boris' ? 'boris' : 'sara',
     closed: c.closedAt !== null,
     orderId: c.orderId,
-    orderTitle: l?.title ?? null,
+    orderTitle: l ? shownTitle(l.id, l.title) : null,
     chatUrl: chatUrl(c.chatId),
     note: c.borisNote,
     messages: msgs.map((m) => ({

@@ -1,4 +1,11 @@
-import { type ClientInfo, formatCallback, formatRub, plural } from '@sara/shared'
+import {
+  type ClientInfo,
+  formatCallback,
+  formatRub,
+  isTestOrder,
+  plural,
+  TEST_MARK,
+} from '@sara/shared'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
 export type Reading = {
@@ -52,6 +59,8 @@ export type LeadCard = {
    * full reading for «Разбор» (null: a lead whose reading was stored without it).
    */
   analysis?: { hiddenNeed: string; risk: string; condition: string; reading: Reading | null } | null
+  /** A test order only: where the live Sara would have stopped and sent no card (docs/ops/test-leads.md). */
+  liveSkip?: string | null
 }
 
 const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
@@ -274,7 +283,18 @@ const noPeriod = (s: string) => s.replace(/[.\s]+$/, '')
 const orderUrl = (orderId: string) =>
   `https://profi.ru/backoffice/n.php?o=${encodeURIComponent(orderId)}`
 const linkLine = (orderId: string) =>
-  `<a href="${orderUrl(orderId)}">Открыть заявку на Профи.ру</a>`
+  isTestOrder(orderId)
+    ? '<i>Заявка понарошку: на Профи.ру её нет, клиент на странице тестовых заявок</i>'
+    : `<a href="${orderUrl(orderId)}">Открыть заявку на Профи.ру</a>`
+
+/** The first lines of a test order's card: what it is, and where the live Sara would have stopped. */
+function testLines(c: LeadCard): string[] {
+  if (!isTestOrder(c.orderId)) return []
+  return [
+    `<b>${TEST_MARK}</b>: Профи.ру и деньги не трогаются`,
+    ...(c.liveSkip ? [`<i>В бою карточки бы не было: ${clean(c.liveSkip, CAP.reason)}</i>`] : []),
+  ]
+}
 
 function verdictLine(c: LeadCard): string {
   if (c.verdict === 'fit') return `Подходит: ${clean(c.reason, CAP.reason)}`
@@ -289,6 +309,7 @@ function headLines(c: LeadCard): string[] {
     c.bidPriceRub > 0 ? `отклик ${formatRub(c.bidPriceRub)}` : 'цена отклика пока неизвестна'
   const facts = [c.score ? `🎯 <b>балл ${c.score.value}</b>` : null, `💰 ${budget}`, `🧾 ${fee}`]
   return [
+    ...testLines(c),
     ...(c.reminder ? [`<b>⏰ ${title}</b>`, '<i>Заявка ждёт решения</i>'] : [`<b>🔔 ${title}</b>`]),
     ...(c.city.trim() ? [`📍 ${clean(c.city, CAP.short)}`] : []),
     facts.filter(Boolean).join('  ·  '),
