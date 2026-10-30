@@ -122,6 +122,41 @@ export const SiteRead = z.object({
 })
 export type SiteRead = z.infer<typeof SiteRead>
 
+/** What a link of an order is: by where it points. */
+export const LINK_KINDS = ['example', 'doc', 'social', 'other'] as const
+export const LinkKind = z.enum(LINK_KINDS)
+export type LinkKind = z.infer<typeof LinkKind>
+
+/**
+ * One more link of the order or the chat (Boris, 30.10.2026 evening: «если в откликах лежат какие-то ссылки … эту
+ * информацию нужно будет изучать перед откликом»): a site the client likes, a competitor, an open document, a page in a
+ * social network. Read without a login, only its first page; `opened` false: it did not open (or needs a login).
+ */
+export const LinkRead = z.object({
+  kind: LinkKind,
+  domain: z.string(),
+  opened: z.boolean(),
+  error: z.string().nullable(),
+  /** The title of the page or document; short. */
+  title: z.string().nullable(),
+})
+export type LinkRead = z.infer<typeof LinkRead>
+
+/** The model's sum-up of what the links (and files) hold that matters for the task; only what they show. */
+export const LinkDigest = z.object({
+  /** What is valuable for the task, at most four short facts. */
+  valuable: z.array(z.string()),
+  /** What the client himself treats as important. */
+  cares: z.array(z.string()),
+  /** What is missing for a good answer. */
+  missing: z.array(z.string()),
+  /** One or two details a bid may name, human, tied to the task. */
+  hooks: z.array(z.string()),
+  /** One line for the card. */
+  summary: z.string(),
+})
+export type LinkDigest = z.infer<typeof LinkDigest>
+
 /**
  * The sites of a lead (`lead.client_site`): the client's own, read; and the sites he named as examples he likes
  * («хочу как у …»), only their domains, never read.
@@ -129,5 +164,9 @@ export type SiteRead = z.infer<typeof SiteRead>
 export const LeadSite = z.object({
   own: SiteRead.nullable(),
   examples: z.array(z.string()),
+  /** The other links of the order, read (Boris, 30.10.2026 evening); absent on a lead from before. */
+  links: z.array(LinkRead).optional(),
+  /** What is valuable in the links, for the Analyst; null: nothing to sum up. */
+  digest: LinkDigest.nullable().optional(),
 })
 export type LeadSite = z.infer<typeof LeadSite>

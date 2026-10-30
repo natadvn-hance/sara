@@ -190,11 +190,12 @@ describe("an order that names the client's site", () => {
     expect((await claudeCalls('analyst'))[0]?.stdin).not.toContain('Сайт клиента')
   })
 
-  it('FR-SITE-2: an example the client likes is on the card as an example and is never read', async () => {
+  it('FR-SITE-2: an example the client likes is on the card as an example, its first page is looked at, never taken for his own site', async () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id, text: 'Нужен сайт для кафе, хочу как у apple.com.' })
     await until(() => cards().length === 1)
-    expect(site.calls).toHaveLength(0)
+    // Only its first page is asked for.
+    expect(site.calls).toEqual(['https://apple.com'])
     expect(cards()[0]?.text).toContain('🔗 Пример, который нравится клиенту: apple.com')
     expect(cards()[0]?.text).not.toContain('🌐')
   })
