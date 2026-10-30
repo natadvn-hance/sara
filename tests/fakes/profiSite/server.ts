@@ -64,6 +64,10 @@ export type BidSettings = BidLook & {
   klientDelayMs: number
   /** An open order shows its bid form; false is a changed layout: no form, and no «closed» mark either. */
   formShown: boolean
+  /** After a bid is taken, this many order answers still say there is none: the site's data catching up. */
+  hasBidLag: number
+  /** The send of a bid is answered this late, in ms: the form stays open meanwhile. */
+  postDelayMs: number
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -238,7 +242,11 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     showWallet: true,
     klientDelayMs: 0,
     formShown: true,
+    hasBidLag: 0,
+    postDelayMs: 0,
   })
+  /** Orders whose taken bid the order answer does not show yet, and for how many more answers. */
+  const bidLag = new Map<string, number>()
   const bidSettings = freshBidSettings()
 
   const sessOf = (req: IncomingMessage) => /sess=([^;]+)/.exec(req.headers.cookie ?? '')?.[1] ?? ''
@@ -322,8 +330,11 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       const body = JSON.parse((await readBody(req)) || '{}') as { variables?: { id?: string } }
       const found = orders.find((x) => x.id === body.variables?.id)
       if (!bidSettings.answer || !found) return json(res, { data: { orders: [] } })
+      const lag = bidLag.get(found.id) ?? 0
+      if (lag > 0) bidLag.set(found.id, lag - 1)
+      const shown = lag > 0 ? { ...found, hasBid: false } : found
       return json(res, {
-        data: { orders: [{ _id: found.id, boOrderScreen: orderScreen(found, bidSettings) }] },
+        data: { orders: [{ _id: found.id, boOrderScreen: orderScreen(shown, bidSettings) }] },
       })
     }
     // The backoffice API of the live site: every method at one address, the method named in the request.
@@ -356,6 +367,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       const price = String(b.price ?? '')
       const text = String(b.text ?? '')
       state.bidPosts++
+      if (bidSettings.postDelayMs > 0)
+        await new Promise((r) => setTimeout(r, bidSettings.postDelayMs))
       if (!found?.open || found.hasBid || bidSettings.mode === 'silent')
         return json(res, { ok: false })
       if (found.priceRequired && !price) return json(res, { ok: false, error: 'Укажите стоимость' })
@@ -365,6 +378,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       bids.push({ orderId: found.id, price, text, ...(priceTo && { priceTo }) })
       state.balance -= found.price
       found.hasBid = true
+      if (bidSettings.hasBidLag > 0) bidLag.set(found.id, bidSettings.hasBidLag)
       return json(res, { ok: true })
     }
     if (p === '/api/bid/open') {
@@ -450,6 +464,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.boardPageSize = 0
       state.boardLayout = 'window'
       Object.assign(bidSettings, freshBidSettings())
+      bidLag.clear()
     },
     orders,
     addOrder(partial = {}) {
