@@ -134,6 +134,13 @@
       "when": 1793400185816,
       "tag": "0018_secretary",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793400273709,
+      "tag": "0019_telegram_forum",
+      "breakpoints": true
     }
   ]
 }

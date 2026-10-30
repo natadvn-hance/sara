@@ -53,7 +53,7 @@ export function registerConversationRoutes(app: FastifyInstance, d: CommandDeps)
     scoped.post('/api/conversations/:id/close', async (req, reply) => {
       const { id } = req.params as { id: string }
       if (!(await known(id))) return reply.code(404).send({ error: ROUTE_ERRORS.noConversation })
-      await close(d.db, id)
+      await close(d.db, id, d.notifier)
       return { message: COMMAND_TEXTS.closed }
     })
   })

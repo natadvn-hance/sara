@@ -58,6 +58,7 @@ export function createBotControl(d: {
         editText: async (id, t, rows) => current().notifier.editText?.(id, t, rows),
         typing: async () => current().notifier.typing?.(),
         markDone: async (id, note) => current().notifier.markDone?.(id, note),
+        closeTopic: async (place, outcome) => current().notifier.closeTopic?.(place, outcome),
       },
       d.db,
     ),
