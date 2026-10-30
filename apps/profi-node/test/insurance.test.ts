@@ -494,6 +494,47 @@ describe('insurance and the account tab', () => {
     return { g, reports, ins }
   }
 
+  it('FR-CONV-9: a press goes before the work waiting for the tab, and a running chat check gives way at its next page', async () => {
+    await loginStandIn(ab.page, site)
+    for (const id of ['c-p1', 'c-p2', 'c-p3']) site.addMessage(id, 'client', 'Здравствуйте')
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 500,
+    })
+    const order: string[] = []
+    const onNav = (f: { url(): string }) => {
+      const p = new URL(f.url()).pathname
+      if (/\/c-p\d$/.test(p)) order.push(p)
+    }
+    ab.page.on('framenavigated', onNav)
+    try {
+      const check = ins.chatsOnce(false)
+      await expect.poll(() => order.length, { timeout: 20000 }).toBeGreaterThan(0)
+      const normal = ins.inTab(async () => void order.push('normal'))
+      const press = ins.inTab(async () => void order.push('press'), { urgent: true })
+      await Promise.all([check, normal, press])
+      // The check went on behind the press and read every chat.
+      await expect
+        .poll(() => new Set(order.filter((x) => x.startsWith('/'))).size, { timeout: 30000 })
+        .toBe(3)
+    } finally {
+      ab.page.off('framenavigated', onNav)
+      ins.stop()
+    }
+    expect(order.indexOf('press')).toBeLessThan(order.indexOf('normal'))
+    // At least one chat page came after the press: the check gave way instead of finishing first.
+    const lastChat = Math.max(
+      ...['/chats/c-p1', '/chats/c-p2', '/chats/c-p3'].map((p) => order.lastIndexOf(p)),
+    )
+    expect(order.indexOf('press')).toBeLessThan(lastChat)
+  }, 90000)
+
   it('FR-LEAD-1: a page that asks before it is left is left, and the guard stays online', async () => {
     await loginStandIn(ab.page, site)
     const { g, reports, ins } = guarded()

@@ -14,7 +14,9 @@ export type Insurance = {
    * Work of its own in the account tab (a bid, an order check), in turn with the checks above; the tab goes back
    * to the feed afterwards. The work itself asks can() before it moves the tab. The answer is given as soon as the
    * work is done, without waiting for the way back; `later` queues errands that still need the page (they run before
-   * the tab leaves, after the answer, and their failures are not the caller's).
+   * the tab leaves, after the answer, and their failures are not the caller's). `urgent` is a press Boris made (a
+   * bid, a message to a client): it goes before every check waiting for the tab, and a check already running gives
+   * way at its next page.
    */
   inTab<T>(
     f: (t: {
@@ -22,6 +24,7 @@ export type Insurance = {
       can(): boolean
       later(errand: () => Promise<void>): void
     }) => Promise<T>,
+    o?: { urgent?: boolean },
   ): Promise<T>
 }
 
@@ -90,12 +93,27 @@ export function startInsurance(o: {
   const pause = o.chatPauseMs ?? 2000
   const scroll = { ...BOARD_SCROLL, ...o.board }
   let passes = 0
-  let busy: Promise<unknown> = Promise.resolve()
-  const serial = <T>(f: () => Promise<T>): Promise<T> => {
-    const run = busy.then(f, f)
-    busy = run.catch(() => {})
-    return run
+  // The tab does one piece of work at a time, in turn, except that a press goes before all that waits: on 29.10.2026 a
+  // bid waited 2 minutes behind the chat check, the feed and another order's page.
+  const queue: { urgent: boolean; run: () => Promise<void> }[] = []
+  let pumping = false
+  async function pump() {
+    if (pumping) return
+    pumping = true
+    while (queue.length > 0) {
+      const i = queue.findIndex((j) => j.urgent)
+      const [job] = queue.splice(Math.max(i, 0), 1)
+      await job?.run()
+    }
+    pumping = false
   }
+  const serial = <T>(f: () => Promise<T>, urgent = false): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      queue.push({ urgent, run: () => f().then(resolve, reject) })
+      void pump()
+    })
+  /** A press waits for the tab: a running check stops at its next page and leaves the rest to its next turn. */
+  const pressWaits = () => queue.some((j) => j.urgent)
   async function go(path: string): Promise<boolean> {
     let ok = false
     // One miss is tried again once the page has settled: the page's own navigation (a form that sent) or one stuck
@@ -148,7 +166,7 @@ export function startInsurance(o: {
     const ids = o.eyes.boardWorks() ? [] : [...new Set(feed.refs.map((r) => r.orderId))]
     let opened = 0
     for (const id of ids) {
-      if (opened >= 5 || !can()) break
+      if (opened >= 5 || !can() || pressWaits()) break
       if (await o.eyes.knowsOrder(id)) continue
       await sleep(pause)
       if (!(await go(orderPath(id)))) return
@@ -207,7 +225,7 @@ export function startInsurance(o: {
   async function readTouchedChats() {
     let opened = 0
     for (const id of o.eyes.chatsTouched()) {
-      if (opened >= 3 || !can()) return
+      if (opened >= 3 || !can() || pressWaits()) return
       await sleep(pause)
       if (!(await go(o.parsers.paths.chat(id)))) return
       onFeed = false
@@ -373,7 +391,7 @@ export function startInsurance(o: {
   async function scrollBoard(pages: number) {
     const t0 = Date.now()
     let loaded = 1
-    let stoppedBy: 'pages' | 'end' | 'quiet' | 'time' | 'gate' = 'pages'
+    let stoppedBy: 'pages' | 'end' | 'quiet' | 'time' | 'gate' | 'press' = 'pages'
     const worked: BoardWay[] = []
     let tried: BoardWay[] = []
     while (loaded < pages) {
@@ -383,6 +401,10 @@ export function startInsurance(o: {
       }
       if (Date.now() - t0 >= scroll.budgetMs) {
         stoppedBy = 'time'
+        break
+      }
+      if (pressWaits()) {
+        stoppedBy = 'press'
         break
       }
       const before = o.eyes.board()
@@ -424,10 +446,10 @@ export function startInsurance(o: {
       await readNewOrders()
       passes++
       // Only on the feed page itself (the page links fallback leaves it) and only a board the eyes know.
-      if (onFeed && can() && o.eyes.boardWorks() && o.eyes.board()?.more)
+      if (onFeed && can() && !pressWaits() && o.eyes.boardWorks() && o.eyes.board()?.more)
         await scrollBoard(passes % scroll.fullEvery === 0 ? scroll.fullPages : scroll.pages)
       await readTouchedChats()
-      if (o.parsers.paths.feed && can()) await maybeBackToFeed()
+      if (o.parsers.paths.feed && can() && !pressWaits()) await maybeBackToFeed()
       await o.eyes.onParsed(
         { recognized: false, signals: await o.parsers.fromHeaderDom(o.ab.page) },
         'dom',
@@ -471,6 +493,11 @@ export function startInsurance(o: {
           : (await o.eyes.knownChats()).map((chatId) => ({ chatId, unread: 1, lastAt: null }))
       for (const c of list.filter(pick)) {
         if (!can()) return
+        // A press goes first; the check starts again behind it, so no chat waits for the next 10 minutes.
+        if (pressWaits()) {
+          void chats(pick).catch(() => {})
+          return
+        }
         await sleep(pause)
         if (!(await go(o.parsers.paths.chat(c.chatId)))) return
         await readChat(c.chatId)
@@ -497,6 +524,7 @@ export function startInsurance(o: {
         can(): boolean
         later(errand: () => Promise<void>): void
       }) => Promise<T>,
+      opt?: { urgent?: boolean },
     ): Promise<T> {
       return new Promise<T>((resolve, reject) => {
         void serial(async () => {
@@ -517,9 +545,10 @@ export function startInsurance(o: {
           } catch (e) {
             reject(e)
           }
-          for (const errand of errands) await errand().catch(() => {})
-          if (can()) await maybeBackToFeed()
-        }).catch(() => {})
+          // Errands (the form map, the calibration) give way to a press too.
+          for (const errand of errands) if (!pressWaits()) await errand().catch(() => {})
+          if (can() && !pressWaits()) await maybeBackToFeed()
+        }, opt?.urgent === true).catch(() => {})
       })
     },
     // After a logout or an outage: the feed and the chats with messages since then, one by one (F8).
