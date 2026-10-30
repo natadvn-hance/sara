@@ -9,7 +9,16 @@ import {
 } from '@sara/shared'
 import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
-import { chatMessage, convTurn, lead, question, ruleProposal, task } from '../db/schema'
+import {
+  bidHold,
+  chatMessage,
+  convTurn,
+  lead,
+  leadScore,
+  question,
+  ruleProposal,
+  task,
+} from '../db/schema'
 import { clientNames } from './feed'
 
 /**
@@ -105,9 +114,36 @@ export async function inboxView(db: DbOrTx, now = new Date()): Promise<InboxView
     if (said) words.set(t.id, said.slice(0, 200))
   }
 
+  const decisionIds = tasks.filter((t) => t.kind === 'lead_decision').map((t) => t.id)
+  const holds = new Map(
+    (decisionIds.length
+      ? await db
+          .select({ taskId: bidHold.taskId, at: bidHold.executeAt })
+          .from(bidHold)
+          .where(and(inArray(bidHold.taskId, decisionIds), eq(bidHold.state, 'held')))
+      : []
+    ).map((h) => [h.taskId, new Date(h.at).toISOString()]),
+  )
+  const fits = new Map<string, number>()
+  if (leadIds.length)
+    for (const r of await db
+      .select({ leadId: leadScore.leadId, score: leadScore.score })
+      .from(leadScore)
+      .where(and(inArray(leadScore.leadId, leadIds), eq(leadScore.backtest, false)))
+      .orderBy(asc(leadScore.createdAt)))
+      fits.set(r.leadId, r.score)
+
   const items: InboxItem[] = []
   const leadItem = (t: TaskRow, l: typeof lead.$inferSelect): InboxItem => {
     const spec = TASK_KINDS[t.kind]
+    // A decision from the pult goes through the lead's own presses: the bid waits ten seconds (design 4).
+    const actions = taskActions(t.id, spec?.actions ?? []).map((a) =>
+      t.kind === 'lead_decision' && (a.id === 'bid' || a.id === 'skip')
+        ? { ...a, path: `/api/leads/${encodeURIComponent(l.id)}/${a.id}` }
+        : a,
+    )
+    const fit = fits.get(l.id)
+    const held = holds.get(t.id)
     return {
       id: `task:${t.id}`,
       source: 'task',
@@ -115,6 +151,7 @@ export async function inboxView(db: DbOrTx, now = new Date()): Promise<InboxView
       title: spec?.title ?? t.kind,
       sub: [
         l.city,
+        fit !== undefined ? `наше ${fit}` : null,
         l.bidPriceRub > 0 ? `отклик ${l.bidPriceRub} ₽` : null,
         l.budgetText ? `бюджет ${l.budgetText}` : null,
       ]
@@ -125,9 +162,9 @@ export async function inboxView(db: DbOrTx, now = new Date()): Promise<InboxView
       urgent: false,
       entity: leadRef(l),
       link: leadLink(l.id),
-      actions: taskActions(t.id, spec?.actions ?? []),
+      actions,
       feeRub: l.bidPriceRub > 0 ? l.bidPriceRub : null,
-      hold: null,
+      hold: held ? { executeAt: held } : null,
     }
   }
   const turnItem = (t: TaskRow, turn: TurnRow): InboxItem => {

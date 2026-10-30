@@ -537,12 +537,7 @@ export function SettingsScreen() {
     return <div className="page">{<Rules path={path} />}</div>
   return (
     <div className="page">
-      <Head
-        eyebrow="Паузы, отбор, деньги, уведомления"
-        title="Настройки"
-        accent="Сары"
-        lead="Всё, чем управляется Сара. Паузы и исходящие включаются и выключаются здесь со вторым нажатием; порог балла с подсказкой, что изменится."
-      />
+      <Head title="Настройки" />
       <Screen q={q}>{(v) => <Body v={v} />}</Screen>
     </div>
   )

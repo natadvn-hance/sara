@@ -183,14 +183,7 @@ export function JournalScreen() {
   const one = useScreen<TraceView>(trace ? `/api/journal/trace/${trace}` : null)
   return (
     <div className="page">
-      {trace ? null : (
-        <Head
-          eyebrow="Каждый шаг Сары"
-          title="Журнал"
-          accent="и трасса"
-          lead="Что Сара делала и почему: события по заявкам, клиентам, деньгам и системе. У каждой цепочки есть трасса с вызовами модели."
-        />
-      )}
+      {trace ? null : <Head title="Журнал" />}
       {trace ? (
         <Screen q={one}>{(v) => <Trace v={v} />}</Screen>
       ) : (
