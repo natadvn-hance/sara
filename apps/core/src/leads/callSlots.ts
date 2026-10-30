@@ -147,11 +147,15 @@ export function slotsText(slots: Date[], now: Date): string {
   return orJoin(days.map((x) => `${x.word} в ${x.times.join(', ')}`))
 }
 
-/** Offers in Boris's way, one picked by the order so two orders do not read alike; the times go in at the mark. */
+/**
+ * Offers in Boris's way (30.10.2026: «завершить коротким вопросом, разговорным языком»): one or two plain sentences that
+ * end with a question, one picked by the order so two orders do not read alike; the times go in at the mark.
+ */
 const OFFERS = [
-  `Давайте созвонимся на полчасика, так быстрее разберёмся в задаче. Могу ${SLOTS_MARK}, как вам удобнее?`,
-  `Если удобно, можем созвониться на полчаса и всё обсудить голосом. Я свободен ${SLOTS_MARK})`,
-  `Предлагаю созвониться на полчасика, расскажу, как бы мы это сделали. Удобно ${SLOTS_MARK}?`,
+  `Может, созвонимся на полчасика и обсудим всё голосом? Могу ${SLOTS_MARK}, как вам удобнее?`,
+  `Давайте лучше встретимся на созвоне и всё обсудим лично? Я свободен ${SLOTS_MARK}, что вам удобно?`,
+  `Может, выйдем на созвон на полчаса и разберём всё голосом? Могу ${SLOTS_MARK}, как вам?`,
+  `Предлагаю просто созвониться и обсудить всё лично, минут на тридцать. Удобно ${SLOTS_MARK}?`,
 ]
 
 export function callOfferTemplate(seed: string): string {
