@@ -168,6 +168,17 @@ export const LeadView = z.object({
         reviews: z.string().nullable(),
       })
       .nullable(),
+    /**
+     * The client's own site as Sara read it (Boris, 30.10.2026): the domain with its short summary, or «сайт не
+     * открылся»; and the example sites the client named. None: the order and the chat name no site.
+     */
+    site: z
+      .object({
+        own: z.object({ domain: z.string(), text: z.string() }).nullable(),
+        examples: z.array(z.string()),
+      })
+      .nullable()
+      .optional(),
     seenAt: at,
     status: z.string(),
     feeRub: rub,

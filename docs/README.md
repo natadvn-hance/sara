@@ -16,6 +16,7 @@ IT-компаниях: продукт, интерфейс, требования,
 | | Дорожная карта | `product/roadmap.md` |
 | | Карта пользовательских историй | `product/story-map.md` |
 | | Бэклог | `product/backlog.md` |
+| | Сайт клиента: Сара изучает его и строит на нём ответ | `product/client-site.md` |
 | | Пользователи и карты пути | `product/journeys.md` |
 | | Порядок старта разработки | `product/start-sequence.md` |
 | | Герменевтическое чтение заказов: навык `.claude/skills/hermeneutics/`, встраивание в роли и скоринг | `product/hermeneutics.md` |
