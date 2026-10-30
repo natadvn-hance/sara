@@ -20,12 +20,16 @@ import type { Insurance } from './insurance'
 export const HISTORY_FLAG = 'history_read'
 export const HISTORY_STATUS = 'history_read_status'
 
-/** A chat of the list answer (`rboMessengersByFilter`): the order it belongs to, its tab, unread count, last time. */
+/**
+ * A chat of the list answer (`rboMessengersByFilter`): the order it belongs to, its tab, unread count, last time and
+ * how many messages it holds (null when the answer did not say).
+ */
 export type ListedChat = {
   orderId: string
   filter: string
   unread: number
   lastAt: string | null
+  messages: number | null
 }
 
 type Edge = {
@@ -33,7 +37,11 @@ type Edge = {
     messengerType?: unknown
     messengerExtId?: unknown
     order?: { rboFilterId?: unknown } | null
-    chats?: { unreadMessageCount?: unknown; lastMessage?: { dateCreated?: unknown } | null }[]
+    chats?: {
+      unreadMessageCount?: unknown
+      messagesCount?: unknown
+      lastMessage?: { dateCreated?: unknown } | null
+    }[]
   }
 }
 
@@ -63,6 +71,8 @@ export function listedChats(bodies: unknown[]): {
       filter = f
       const chats = Array.isArray(n.chats) ? n.chats : []
       const unread = chats.reduce((s, c) => s + (Number(c?.unreadMessageCount) || 0), 0)
+      const counts = chats.map((c) => c?.messagesCount).filter((x) => typeof x === 'number')
+      const messages = counts.length > 0 ? counts.reduce((s, x) => s + x, 0) : null
       const lastAt =
         chats
           .map((c) => iso(c?.lastMessage?.dateCreated))
@@ -74,6 +84,7 @@ export function listedChats(bodies: unknown[]): {
         filter: f,
         unread,
         lastAt,
+        messages,
       })
     }
     if (filter !== null && typeof m.totalCount === 'number') total[filter] = m.totalCount
@@ -261,13 +272,17 @@ export async function readHistory(d: HistoryDeps): Promise<string> {
   const { chats, total } = listedChats(await d.answers('list', null))
   const todo: ListedChat[] = []
   let skipped = 0
+  let bare = 0
   for (const c of chats.sort((a, b) => (a.lastAt ?? '').localeCompare(b.lastAt ?? ''))) {
     const fresh = c.lastAt !== null && now() - Date.parse(c.lastAt) < (d.quietMs ?? 4 * DAY)
-    if (c.unread > 0 || fresh || (await d.knownChat(c.orderId))) skipped++
+    // A chat the list counts no message in is an order we never wrote to: nothing to read (29.10.2026, the second
+    // pass stopped on two of them, they came first because they have no last time).
+    if (c.messages === 0) bare++
+    else if (c.unread > 0 || fresh || (await d.knownChat(c.orderId))) skipped++
     else todo.push(c)
   }
   await status(
-    `в списках ${chats.length} чатов (открытых ${total.open ?? '?'}, в архиве ${total.archive ?? '?'}), читаю ${todo.length}, оставляю живой проверке ${skipped}`,
+    `в списках ${chats.length} чатов (открытых ${total.open ?? '?'}, в архиве ${total.archive ?? '?'}), читаю ${todo.length}, оставляю живой проверке ${skipped}, пустых ${bare}`,
   )
   let done = 0
   let kept = 0
@@ -277,40 +292,41 @@ export async function readHistory(d: HistoryDeps): Promise<string> {
     await pause()
     if ((await d.flag()) !== 'go') return stop(`флаг снят, прочитано ${done} из ${todo.length}`)
     const since = at()
-    const got = await whenFree<{ messages: StoredMessage[]; complete: boolean } | string>(
-      async () => {
-        const opened = await open(d.chatPath(c.orderId, c.filter), 'chat', since)
-        if (await looksBlocked()) return 'страница похожа на блокировку'
-        // A chat page without its answer counts as empty: two in a row stop the pass below.
-        if (!opened) return { messages: [], complete: false }
-        await sleep(1500)
-        let h = chatHistory(await d.answers('chat', since), c.orderId)
-        // Older messages come as the list is scrolled up; a chat that does not grow twice is as long as it gets.
-        for (
-          let i = 0, still = 0;
-          i < 8 && !h.complete && h.messages.length > 0 && still < 2;
-          i++
-        ) {
-          await d
-            .page()
-            .evaluate(scrollChatUp)
-            .catch(() => {})
-          await sleep(2500)
-          const next = chatHistory(await d.answers('chat', since), c.orderId)
-          still = next.messages.length > h.messages.length ? 0 : still + 1
-          h = next
-        }
-        return h
-      },
-    )
+    const got = await whenFree<
+      { messages: StoredMessage[]; complete: boolean; answered: boolean } | string
+    >(async () => {
+      const opened = await open(d.chatPath(c.orderId, c.filter), 'chat', since)
+      if (await looksBlocked()) return 'страница похожа на блокировку'
+      // A chat page without its answer: two in a row stop the pass below.
+      if (!opened) return { messages: [], complete: false, answered: false }
+      await sleep(1500)
+      let h = chatHistory(await d.answers('chat', since), c.orderId)
+      // Older messages come as the list is scrolled up; a chat that does not grow twice is as long as it gets.
+      for (let i = 0, still = 0; i < 8 && !h.complete && h.messages.length > 0 && still < 2; i++) {
+        await d
+          .page()
+          .evaluate(scrollChatUp)
+          .catch(() => {})
+        await sleep(2500)
+        const next = chatHistory(await d.answers('chat', since), c.orderId)
+        still = next.messages.length > h.messages.length ? 0 : still + 1
+        h = next
+      }
+      return { ...h, answered: true }
+    })
     if (typeof got === 'string') return stop(`${got}, прочитано ${done} из ${todo.length}`)
-    if (got.messages.length === 0) {
-      // Two chats in a row without an answer: the page is not what it was, a developer looks first.
+    if (!got.answered) {
+      // Two chat pages in a row without an answer: the page is not what it was, a developer looks first.
       if (++empty >= 2)
-        return stop(`два чата подряд без сообщений, прочитано ${done} из ${todo.length}`)
+        return stop(`два чата подряд без ответа сайта, прочитано ${done} из ${todo.length}`)
       continue
     }
     empty = 0
+    // The site answered that the chat is empty: read, nothing to keep.
+    if (got.messages.length === 0) {
+      done++
+      continue
+    }
     if (!got.complete) partial++
     kept += await d.keep(got.messages)
     done++
@@ -372,6 +388,7 @@ const LIST_PART = sql`jsonb_build_object('data', jsonb_build_object('me', jsonb_
     jsonb_build_object('messengerType', e->'node'->'messengerType', 'messengerExtId', e->'node'->'messengerExtId',
       'order', jsonb_build_object('rboFilterId', e->'node'->'order'->'rboFilterId'),
       'chats', coalesce((select jsonb_agg(jsonb_build_object('unreadMessageCount', c->'unreadMessageCount',
+        'messagesCount', c->'messagesCount',
         'lastMessage', jsonb_build_object('dateCreated', c->'lastMessage'->'dateCreated')))
         from jsonb_array_elements(e->'node'->'chats') c), '[]'::jsonb))))
     from jsonb_array_elements(m->'edges') e), '[]'::jsonb)))))`
