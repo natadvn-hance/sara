@@ -386,7 +386,7 @@ export function mergeScreens(
   }
 }
 
-/** «⛔ ОТСЕЯН — критерий — опора», one line per criterion (Boris's form, with a short dash for the long one). */
+/** «⛔ ОТСЕЯН - критерий - опора», one line per criterion (Boris's form, with a short dash). */
 export function screenLines(s: Pick<LeadScreen, 'hits'>): string[] {
   return s.hits.map((h) => `⛔ ОТСЕЯН - ${SCREEN_RU[h.criterion]} - ${h.basis}`)
 }
