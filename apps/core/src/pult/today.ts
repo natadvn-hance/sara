@@ -2,7 +2,7 @@ import { formatRub, type PultState, plural, type TodayView, type WaitingItem } f
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account, convTurn, event, lead, question, task } from '../db/schema'
-import { dayOf } from '../leads/money'
+import { dayOf, walletNow } from '../leads/money'
 import { getSetting } from '../settings/store'
 import { draftsWaiting } from './conversations'
 import { clientNames, readFeed } from './feed'
@@ -25,26 +25,6 @@ const QUESTION_RU: Record<string, string> = {
 }
 /** A question left unanswered this long is no longer waited for on «Сегодня». */
 const QUESTION_FRESH_MS = 48 * 3600 * 1000
-
-/** The wallet: the newer of the account row and the last balance the node reported. */
-async function walletOf(db: Db): Promise<{ balanceRub: number | null; at: string | null }> {
-  const [acc] = await db.select().from(account).orderBy(account.id).limit(1)
-  const [ev] = await db
-    .select({
-      at: event.occurredAt,
-      rub: sql<number | null>`(${event.payload}->>'balance_rub')::int`,
-    })
-    .from(event)
-    .where(eq(event.type, 'profi.balance_changed'))
-    .orderBy(desc(event.occurredAt))
-    .limit(1)
-  const fromAcc = acc?.balanceRub !== null && acc?.balanceRub !== undefined
-  if (ev?.rub !== null && ev?.rub !== undefined && (!fromAcc || (acc?.balanceAt ?? '') < ev.at))
-    return { balanceRub: ev.rub, at: ev.at }
-  return fromAcc
-    ? { balanceRub: acc?.balanceRub ?? null, at: acc?.balanceAt ?? null }
-    : { balanceRub: null, at: null }
-}
 
 /** The order a question is about: the lead itself, the task of its card, or the conversation of a reply. */
 async function questionTargets(db: Db, qs: (typeof question.$inferSelect)[]) {
@@ -155,7 +135,7 @@ async function periodOf(db: Db, days: number): Promise<TodayView['period']> {
 
 export async function todayView(db: Db, days: number, now = new Date()): Promise<TodayView> {
   const queue = await leadQueue(db, now)
-  const wallet = await walletOf(db)
+  const wallet = await walletNow(db)
   const cheapest = queue.queue
     .filter((l) => l.feeRub > 0)
     .map((l) => l.feeRub)

@@ -199,11 +199,34 @@ const VIEWS: Record<string, string> = {
   health: '/health',
 }
 startInMemory(VIEWS[window.location.hash.slice(1)] ?? '/inbox')
+
+/** Said on every screen: these are not Boris's orders, so the preview is never taken for the pult on his data. */
+function DemoBanner() {
+  return (
+    <div
+      role="note"
+      style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 50,
+        padding: '6px 16px',
+        background: '#fff1c2',
+        color: '#4a3800',
+        fontSize: 13,
+        textAlign: 'center',
+      }}
+    >
+      Превью на выдуманных данных: заявки, клиенты и суммы здесь не настоящие. Настоящие в пульте
+      Сары.
+    </div>
+  )
+}
 const root = document.getElementById('root')
 if (root) {
   createRoot(root).render(
     <StrictMode>
       <QueryClientProvider client={new QueryClient()}>
+        <DemoBanner />
         <App />
       </QueryClientProvider>
     </StrictMode>,

@@ -11,11 +11,12 @@ import {
   priceUpTo,
   type QueueOrder,
 } from '@sara/shared'
-import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { account, bidHold, directionVersion, lead, leadLabel, leadScore, task } from '../db/schema'
 import { FOLLOW_UP_EDIT_MAX } from '../leads/draft'
 import { dayOf } from '../leads/money'
+import { leadTaskWaits, waitingCounts } from '../leads/waiting'
 import { getSetting } from '../settings/store'
 import { leadSiteOf } from '../site'
 import { siteCardView, studiedLine } from '../site/view'
@@ -116,18 +117,16 @@ export async function leadQueue(
     .select({ t: task, l: lead })
     .from(task)
     .innerJoin(lead, eq(lead.id, task.entityId))
-    .where(and(eq(task.kind, 'lead_decision'), eq(task.state, 'open')))
-  const dayAgo = now.getTime() - DAY_MS
-  const fresh = open.filter((r) => Date.parse(r.l.seenAt) >= dayAgo)
+    .where(and(eq(task.kind, 'lead_decision'), leadTaskWaits(now)))
   const scores = await lastScores(
     db,
-    fresh.map((r) => r.l.id),
+    open.map((r) => r.l.id),
   )
   const held = await heldBy(
     db,
-    fresh.map((r) => r.t.id),
+    open.map((r) => r.t.id),
   )
-  const queue: LeadRow[] = fresh
+  const queue: LeadRow[] = open
     .map(({ t, l }) => ({
       id: l.id,
       taskId: t.id,
@@ -155,15 +154,24 @@ export async function leadQueue(
     )
     .orderBy(desc(task.resolvedAt))
     .limit(100)
-  const decision = (r: string | null): LeadQueue['decided'][number]['decision'] =>
-    r === 'bid' || r === 'skip' ? r : r === 'closed' || r === 'closed_on_site' ? 'closed' : 'other'
+  // A closed or aged-out order ends its task as a skip (closeOnSite, closeStale): the order's status tells which.
+  const decision = (
+    t: typeof task.$inferSelect,
+    l: typeof lead.$inferSelect,
+  ): LeadQueue['decided'][number]['decision'] => {
+    if (t.resolution === 'bid') return 'bid'
+    if (l.status === 'closed') return 'closed'
+    if (l.status === 'stale') return 'stale'
+    return t.resolution === 'skip' ? 'skip' : 'other'
+  }
   return {
     queue,
-    older: open.length - fresh.length,
+    // The rule closes the old ones (leads/waiting.ts): nothing older waits unseen.
+    older: 0,
     decided: decidedRows.map(({ t, l, reason }) => ({
       id: l.id,
       title: l.title,
-      decision: decision(t.resolution),
+      decision: decision(t, l),
       at: t.resolvedAt ?? t.createdAt,
       feeRub: l.bidPriceRub,
       reason: reason ?? null,
@@ -333,13 +341,7 @@ export async function feeChanged(
   return `Цена изменилась: было ${formatRub(expectedFeeRub)}, стало ${formatRub(row.fee)}. Нажми ещё раз.`
 }
 
-/** Leads waiting for a decision, fresh ones only (FR-LEAD-10). */
+/** Leads waiting for a decision by the one rule of the bot and the pult (FR-LEAD-10). */
 export async function openLeadCount(db: DbOrTx, now = new Date()): Promise<number> {
-  const since = new Date(now.getTime() - DAY_MS).toISOString()
-  const [r] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(task)
-    .innerJoin(lead, eq(lead.id, task.entityId))
-    .where(and(eq(task.kind, 'lead_decision'), eq(task.state, 'open'), gt(lead.seenAt, since)))
-  return r?.n ?? 0
+  return (await waitingCounts(db, now)).lead_decision
 }
