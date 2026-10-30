@@ -98,6 +98,20 @@ export function startInsurance(o: {
   }
   async function go(path: string): Promise<boolean> {
     let ok = false
+    // One miss is tried again once the page has settled: the page's own navigation (a form that sent) or one stuck
+    // request must not take the site for lost and stop every page for 5 minutes, as after a bid on 29.10.2026. A site
+    // that is really gone fails both tries.
+    for (let tries = 0; tries < 2 && !ok; tries++) {
+      if (tries > 0)
+        await o.ab.page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {})
+      ok = await goOnce(path)
+    }
+    // Not awaited: what the guard does next (a reconcile) queues behind this check instead of deadlocking it.
+    void Promise.resolve(o.onNavigate?.(ok)).catch(() => {})
+    return ok
+  }
+  async function goOnce(path: string): Promise<boolean> {
+    let ok = false
     try {
       // A page whose document answered is open. Profi.ru's messenger keeps polling, so its network never goes quiet,
       // and since 29.10.2026 07:14 UTC its pages keep a request open and never fire «load» in 30 s either: waiting
@@ -112,8 +126,6 @@ export function startInsurance(o: {
     } catch {
       ok = false
     }
-    // Not awaited: what the guard does next (a reconcile) queues behind this check instead of deadlocking it.
-    void Promise.resolve(o.onNavigate?.(ok)).catch(() => {})
     return ok
   }
 
