@@ -246,6 +246,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profiScreenUrl: config.profiScreenUrl,
     nodeToken: config.nodeToken,
   })
+  // The recheck starts below, once the core listens: an order gone from the feed before that waits for its tick.
+  let kickRecheck = () => {}
   registerProfiEventsRoute(app, {
     db,
     nodeToken: config.nodeToken,
@@ -254,6 +256,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         {
           db,
           onOrderSeen: (x) => lp.onOrderSeen(x),
+          onOrderGone: () => kickRecheck(),
           onAccountEvent: accountEvents,
           onConversationEvent: conversationEvents,
         },
@@ -313,7 +316,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifier: bot.notifier,
     close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
     tickMs: o.recheckTickMs,
+    now: o.now,
   })
+  kickRecheck = () => recheck.kick()
 
   return {
     url,

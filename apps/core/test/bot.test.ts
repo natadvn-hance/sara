@@ -165,7 +165,7 @@ describe('telegram bot', () => {
     expect(m?.link_preview_options).toEqual({ is_disabled: true })
   })
 
-  it('FR-LEAD-5: the card of a closed order is edited in place: the closed line is added and the buttons go', async () => {
+  it('FR-LEAD-5: the card of a closed order is edited in place into the short closed card, the buttons go', async () => {
     tg.pushStart(111)
     await until(() => tg.sent.length === 1)
     const { messageId } = await bot.notifier.sendLeadCard(CARD)
@@ -179,21 +179,24 @@ describe('telegram bot', () => {
       link_preview_options: { is_disabled: true },
       reply_markup: { inline_keyboard: [] },
     })
-    expect(e?.text.endsWith(`<b>${TEXTS.closedOnSite}</b>`)).toBe(true)
-    expect(e?.text).toContain('<b>🔔 Сайт</b>')
+    expect(e?.text.startsWith(`<b>${TEXTS.closedCard}</b> · Сайт`)).toBe(true)
+    expect(e?.text).toContain(
+      `<a href="https://profi.ru/backoffice/n.php?o=90001">${TEXTS.closedLink}</a>`,
+    )
+    expect(e?.text).not.toContain('🔔')
     // No new message came.
     expect(tg.sent).toHaveLength(2)
   })
 
-  it('FR-LEAD-5: a closed card of a very long order text is edited within 4096 characters', async () => {
+  it('FR-LEAD-5: the closed card of a very long order is short: the order text is gone', async () => {
     tg.pushStart(111)
     await until(() => tg.sent.length === 1)
     const long = { ...CARD, text: 'Очень длинная заявка. '.repeat(1000) }
     const { messageId } = await bot.notifier.sendLeadCard(long)
     await bot.notifier.closeLeadCard(messageId, long)
     expect(tg.edited).toHaveLength(1)
-    expect(tg.edited[0]?.text).toContain('…</blockquote>')
-    expect(tg.edited[0]?.text.endsWith(`<b>${TEXTS.closedOnSite}</b>`)).toBe(true)
+    expect(tg.edited[0]?.text).not.toContain('Очень длинная заявка')
+    expect(tg.edited[0]?.text.length).toBeLessThan(300)
   })
 
   it('FR-LEAD-5: should Telegram refuse the markup, the closed card is edited as plain text, buttons gone', async () => {
@@ -204,7 +207,8 @@ describe('telegram bot', () => {
     await bot.notifier.closeLeadCard(messageId, CARD)
     expect(tg.edited).toHaveLength(1)
     expect(tg.edited[0]?.parse_mode).toBeUndefined()
-    expect(tg.edited[0]?.text).toContain(TEXTS.closedOnSite)
+    expect(tg.edited[0]?.text).toContain(TEXTS.closedCard)
+    expect(tg.edited[0]?.text).toContain('https://profi.ru/backoffice/n.php?o=90001')
     expect(tg.edited[0]?.text).not.toMatch(/<\/?(b|i|a|blockquote)\b/)
     expect(tg.edited[0]?.reply_markup).toEqual({ inline_keyboard: [] })
   })

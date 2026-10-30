@@ -272,7 +272,7 @@ describe('the node refuses (B1)', () => {
     expect(o).toMatchObject({ state: 'failed', errorClass: 'ORDER_CLOSED' })
   })
 
-  it('FR-LEAD-5: a press that ended ORDER_CLOSED closes the card in place: the closed line, no buttons', async () => {
+  it('FR-LEAD-5: a press that ended ORDER_CLOSED makes the card the short closed card at once, no buttons', async () => {
     const id = await cardFor()
     const card = cards().at(-1)
     fake.refuseNext('ORDER_CLOSED')
@@ -283,7 +283,10 @@ describe('the node refuses (B1)', () => {
       message_id: card?.message_id,
       reply_markup: { inline_keyboard: [] },
     })
-    expect(tg.edited[0]?.text).toContain(TEXTS.closedOnSite)
+    expect(tg.edited[0]?.text).toContain(TEXTS.closedCard)
+    // Its page was read open moments before, when the card was made: the closing is dated.
+    expect(tg.edited[0]?.text).toMatch(/закрылась через \d+ мин/)
+    expect(tg.edited[0]?.text).not.toContain('Откликнуться')
     // What Boris pressed stays: the task is his decision, the bid is the failed one.
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
     expect(await payloads('lead.closed_on_site', id)).toEqual([{ via: 'press' }])

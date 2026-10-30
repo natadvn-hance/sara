@@ -408,12 +408,15 @@ export function startInsurance(o: {
   async function feedOnce() {
     await serial(async () => {
       if (!can()) return
+      o.eyes.boardPassStart()
       if (!(await go(o.parsers.paths.feed))) return
       await readNewOrders()
       passes++
       // Only on the feed page itself (the page links fallback leaves it) and only a board the eyes know.
       if (onFeed && can() && o.eyes.boardWorks() && o.eyes.board()?.more)
         await scrollBoard(passes % scroll.fullEvery === 0 ? scroll.fullPages : scroll.pages)
+      // Before the chats: the way back to the feed brings its first page again, which is not this pass's.
+      await o.eyes.boardPassEnd()
       await readTouchedChats()
       if (o.parsers.paths.feed && can()) await maybeBackToFeed()
       await o.eyes.onParsed(

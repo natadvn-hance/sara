@@ -8,7 +8,7 @@ import {
   ProfiOrder,
   type TaskAction,
 } from '@sara/shared'
-import { and, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import type { MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { event, lead, leadScore, task } from '../db/schema'
@@ -26,7 +26,7 @@ import {
   type DraftAnswer,
   markAnswered,
 } from '../learning/questions'
-import { analysisMessages, type LeadCard, TEXTS } from '../notify/cards'
+import { analysisMessages, type ClosedWhen, type LeadCard, TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
@@ -791,10 +791,54 @@ function cardSent(
   })
 }
 
+/** A look this close before the order was found closed dates its closing (to the middle of the two). */
+const CLOSED_EXACT_MS = 30 * 60_000
+
 /**
- * Every message the card of this task went out as (its first card and the cards sent again), edited as closed.
- * The numbers come from the journal (card.sent) and from the task, which also holds those sent before the journal
- * kept them. One message Telegram will not edit never stops the others.
+ * When the order of this lead closed, from the journal (FR-LEAD-5): its publication on the board (or when Sara saw it),
+ * the last sign it was open (the board, a read of its page), and its leaving the feed after that sign. The closing is
+ * exact when the order left the feed, or a look within half an hour before `at` found it open; otherwise only «by» `at`.
+ */
+async function closedWhenOf(l: LeadRow, at: Date): Promise<ClosedWhen> {
+  const rows = await d().db.execute<{
+    published: string | null
+    open_at: string | Date | null
+    gone_at: string | Date | null
+  }>(sql`
+    select
+      (select e.payload->>'published_at' from core.event e
+        where e.type = 'profi.order_seen' and e.entity_kind = 'order' and e.entity_id = ${l.id}
+        order by e.id limit 1) as published,
+      (select max(e.occurred_at) from core.event e
+        where e.entity_id = ${l.id}
+          and ((e.type = 'profi.order_seen' and e.entity_kind = 'order')
+            or (e.type = 'lead.page_read' and e.entity_kind = 'lead'
+              and e.payload->>'ok' = 'true' and e.payload->>'open' = 'true'))) as open_at,
+      (select max(e.occurred_at) from core.event e
+        where e.type = 'profi.order_gone' and e.entity_kind = 'order' and e.entity_id = ${l.id}) as gone_at`)
+  const r = rows.rows[0]
+  const time = (v: string | Date | null | undefined) => (v == null ? null : new Date(v).getTime())
+  const published = time(r?.published)
+  const since = published !== null && Number.isFinite(published) ? published : Date.parse(l.seenAt)
+  const open = time(r?.open_at)
+  const gone = time(r?.gone_at)
+  const iso = (t: number) => new Date(t).toISOString()
+  const base = {
+    since: iso(since),
+    published: published !== null && Number.isFinite(published),
+    openUntil: open === null ? null : iso(open),
+  }
+  if (gone !== null && (open === null || gone > open))
+    return { ...base, at: iso(gone), exact: true }
+  if (open !== null && at.getTime() - open <= CLOSED_EXACT_MS)
+    return { ...base, at: iso((open + at.getTime()) / 2), exact: true }
+  return { ...base, at: at.toISOString(), exact: false }
+}
+
+/**
+ * Every message the card of this task went out as (its first card and the cards sent again), edited into the short
+ * closed card. The numbers come from the journal (card.sent) and from the task, which also holds those sent before
+ * the journal kept them. One message Telegram will not edit never stops the others.
  */
 async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>) {
   const sent = await d()
@@ -818,7 +862,10 @@ async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof le
   }
   if (now?.messageId != null) ids.add(now.messageId)
   if (ids.size === 0) return
-  const card = await cardOfFound(found, false)
+  const card = {
+    ...(await cardOfFound(found, false)),
+    closed: await closedWhenOf(found.lead, new Date()),
+  }
   for (const id of [...ids].sort((a, b) => a - b)) {
     try {
       await d().notifier.closeLeadCard(id, card)
@@ -925,6 +972,9 @@ async function draftThenCard(
       await d().notifier.sendText(
         verdict === 'closed' ? CARD_FLOW_TEXTS.pageClosed : CARD_FLOW_TEXTS.pageBidAlready,
       )
+      // A card Boris already has (he pressed on it) becomes the short closed card at once.
+      const found = verdict === 'closed' ? await leadOfTask(taskId) : null
+      if (found) await closeCardMessages(found)
     }
     return
   }

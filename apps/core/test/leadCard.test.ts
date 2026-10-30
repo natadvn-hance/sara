@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { event, lead, leadScore, task } from '../src/db/schema'
 import { seedDirection } from '../src/direction/store'
 import type { Gateway } from '../src/gateway/gateway'
+import { appendEvent } from '../src/journal/journal'
 import { createLeadPipeline, type LeadPipeline } from '../src/leads/pipeline'
 import { type LeadCard, leadCardText, TEXTS, telegramTextLength } from '../src/notify/cards'
 import type { Notifier } from '../src/notify/notifier'
@@ -477,6 +478,74 @@ describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
   it('FR-LEAD-5: a task that does not exist is no error', async () => {
     await expect(pipeline.closeOnSite(newEventId(), 'recheck')).resolves.toBeUndefined()
     expect(closedCards).toEqual([])
+  })
+  describe('when it closed, from the journal', () => {
+    const MIN = 60_000
+    const ago = (min: number) => new Date(Date.now() - min * MIN).toISOString()
+    const journal = (
+      type: 'profi.order_seen' | 'profi.order_gone' | 'lead.page_read',
+      id: string,
+      min: number,
+      payload: Record<string, unknown>,
+    ) =>
+      appendEvent(db, {
+        type,
+        v: 1,
+        entity: { kind: type === 'lead.page_read' ? 'lead' : 'order', id },
+        account_id: 'hance-marketing',
+        actor: type === 'lead.page_read' ? 'sara' : 'profi',
+        occurred_at: ago(min),
+        causation_id: null,
+        correlation_id: newEventId(),
+        reason: null,
+        payload,
+      })
+    const closedOf = async (id: string) => {
+      const taskId = await openLead(id, { seenAt: ago(150) })
+      await db.update(task).set({ telegramMessageId: 9 }).where(eq(task.id, taskId))
+      await pipeline.closeOnSite(taskId, 'recheck')
+      return closedCards[0]?.card.closed
+    }
+    const near = (iso: string | undefined, min: number) =>
+      expect(Math.abs(Date.parse(iso ?? '') - Date.parse(ago(min)))).toBeLessThan(5_000)
+
+    it('FR-LEAD-5: gone from the feed after it was last seen open: closed exactly then, counted from its publication', async () => {
+      await journal('profi.order_seen', '93101', 140, { published_at: ago(160) })
+      await journal('lead.page_read', '93101', 60, { ok: true, open: true })
+      await journal('profi.order_gone', '93101', 25, { page: 1 })
+      const w = await closedOf('93101')
+      expect(w).toMatchObject({ published: true, exact: true })
+      near(w?.since, 160)
+      near(w?.at, 25)
+      near(w?.openUntil ?? '', 60)
+    })
+
+    it('FR-LEAD-5: no feed signal, but seen open 10 minutes before: closed exactly, in the middle of the two', async () => {
+      await journal('profi.order_seen', '93102', 140, { published_at: ago(150) })
+      await journal('lead.page_read', '93102', 10, { ok: true, open: true })
+      // An older word of the feed, before that look, does not date the closing.
+      await journal('profi.order_gone', '93102', 30, { page: 0 })
+      const w = await closedOf('93102')
+      expect(w).toMatchObject({ published: true, exact: true })
+      near(w?.at, 5)
+    })
+
+    it('FR-LEAD-5: last seen open hours ago: closed only «by» now', async () => {
+      await journal('profi.order_seen', '93103', 140, { published_at: ago(150) })
+      await journal('lead.page_read', '93103', 130, { ok: false, open: null })
+      const w = await closedOf('93103')
+      expect(w).toMatchObject({ published: true, exact: false })
+      near(w?.at, 0)
+      // The board's word is the last sign it was open.
+      near(w?.openUntil ?? '', 140)
+    })
+
+    it('FR-LEAD-5: no time from the board: counted from when Sara saw it, and said so', async () => {
+      await journal('profi.order_seen', '93104', 140, { published_at: null })
+      const w = await closedOf('93104')
+      expect(w).toMatchObject({ published: false, exact: false })
+      near(w?.since, 150)
+    })
   })
 })
 
