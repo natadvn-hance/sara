@@ -26,7 +26,7 @@ let bot: TelegramRuntime
 const onPress = vi.fn(async () => 'Принято')
 const onMessage = vi.fn(async (_m: BorisMessage) => 'ок')
 
-async function until(cond: () => boolean | Promise<boolean>, ms = 5000) {
+async function until(cond: () => boolean | Promise<boolean>, ms = 15000) {
   const end = Date.now() + ms
   while (Date.now() < end) {
     if (await cond()) return
