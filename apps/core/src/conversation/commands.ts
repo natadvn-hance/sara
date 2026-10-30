@@ -11,6 +11,7 @@ import { proposeMind } from '../mind/proposals'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { clientNames } from './dossier'
+import { lastSeen } from './outbox'
 import { editReminder, onReminderPress } from './reminderCard'
 import { holdText, sendHold } from './sendHold'
 import { type SendOptions, STALE_DRAFT } from './sendTexts'
@@ -19,7 +20,7 @@ import { CONV_TEXTS, REMIND_TEXTS } from './texts'
 
 export type CommandDeps = {
   db: Db
-  notifier: Pick<Notifier, 'sendText'>
+  notifier: Pick<Notifier, 'sendText' | 'closeTopic'>
   /** After the switch: a text goes to the client through the outbox (part C6); the answer is for Boris. */
   sendText?(
     conversationId: string,
@@ -56,6 +57,14 @@ export const COMMAND_TEXTS = {
   askText: 'Что отправить клиенту? Пришли текст после двоеточия: «напиши: …».',
   sayAsked: 'Я уже спросила про этот текст: нажми «Отправить» или «Изменить» под моим вопросом.',
   sayConfirm: (words: string) => `Отправлю клиенту так: «${words}»`,
+  /** The forum (docs/product/telegram-forum.md): words in a client's topic. */
+  noChatYet:
+    'С этим клиентом ещё нет чата: он не ответил на отклик. Твой текст не отправляю, пришли его, когда клиент напишет.',
+  nothingToSend:
+    'Здесь нечего отправлять: нет открытого черновика. Напиши текст, и я предложу его отправить.',
+  askFree: 'Пришли сюда новый вариант, и я покажу его перед отправкой.',
+  topicClosed:
+    '📁 Разговор закрыт: не пишу и не напоминаю. Клиент напишет, и тема откроется снова.',
 }
 
 type CardTask = typeof task.$inferSelect
@@ -155,8 +164,15 @@ export async function giveBack(db: Db, conversationId: string, note: string | nu
   await journal(db, 'conv.returned', conversationId, 'boris', { with_note: note !== null })
 }
 
-/** «Закрыть» (FR-CONV-11): no turns, no reminders; the deal, when the new Sara made the bid, is lost. */
-export async function close(db: Db, conversationId: string): Promise<void> {
+/**
+ * «Закрыть» (FR-CONV-11): no turns, no reminders; the deal, when the new Sara made the bid, is lost. In the forum the
+ * client's topic gets the outcome and closes.
+ */
+export async function close(
+  db: Db,
+  conversationId: string,
+  topics?: Pick<Notifier, 'closeTopic'>,
+): Promise<void> {
   const conv = await updateConversation(db, conversationId, { closedAt: new Date().toISOString() })
   await resolveCards(db, conversationId, 'close')
   if (conv.dealId) {
@@ -173,6 +189,7 @@ export async function close(db: Db, conversationId: string): Promise<void> {
     }
   }
   await journal(db, 'conv.closed', conversationId, 'boris')
+  await topics?.closeTopic?.({ conversation: conversationId }, COMMAND_TEXTS.topicClosed)
 }
 
 /** The latest turn of a conversation: Boris's words are kept beside its draft. */
@@ -330,7 +347,7 @@ async function onDormantPress(d: CommandDeps, t: CardTask, action: TaskAction): 
   if (action !== 'close') return COMMAND_TEXTS.notUnderstood
   const [row] = await d.db.select().from(convTurn).where(eq(convTurn.id, t.entityId))
   if (!row) return COMMAND_TEXTS.done
-  await close(d.db, row.conversationId)
+  await close(d.db, row.conversationId, d.notifier)
   return COMMAND_TEXTS.closed
 }
 
@@ -357,7 +374,7 @@ export async function onConvPress(
       await take(d.db, conversationId)
       return COMMAND_TEXTS.taken
     case 'close':
-      await close(d.db, conversationId)
+      await close(d.db, conversationId, d.notifier)
       return COMMAND_TEXTS.closed
     case 'good':
       await d.db
@@ -416,10 +433,17 @@ async function onReminderCardPress(
 async function startEdit(d: CommandDeps, turnId: string): Promise<void> {
   const id = newEventId()
   const now = new Date()
+  const [turn] = await d.db
+    .select({ conversationId: convTurn.conversationId })
+    .from(convTurn)
+    .where(eq(convTurn.id, turnId))
   await d.db
     .insert(question)
     .values({ id, kind: 'conv_edit', entityId: turnId, askedAt: now.toISOString() })
-  const m = await d.notifier.sendText(COMMAND_TEXTS.askEdit)
+  const m = await d.notifier.sendText(
+    COMMAND_TEXTS.askEdit,
+    turn ? { place: { conversation: turn.conversationId } } : undefined,
+  )
   await d.db.update(question).set({ telegramMessageId: m.messageId }).where(eq(question.id, id))
 }
 
@@ -522,6 +546,7 @@ async function onSayPress(d: CommandDeps, st: CardTask, action: TaskAction): Pro
     via?: 'say' | 'edit'
     key?: string | null
   }
+  if (say?.text && (meta as { free?: boolean }).free) return onFreeSayPress(d, st, say, action)
   const [parent] = meta.parent
     ? await d.db.select().from(convTurn).where(eq(convTurn.id, meta.parent))
     : []
@@ -692,7 +717,7 @@ export async function onConvReply(
         messageId: m.messageId,
       })
     case 'close':
-      await close(d.db, turn.conversationId)
+      await close(d.db, turn.conversationId, d.notifier)
       return COMMAND_TEXTS.closed
     case 'confirm': {
       // A typed «да» sends nothing. The button of the same card does, through the usual press.
@@ -711,4 +736,179 @@ export async function onConvReply(
       }
     }
   }
+}
+
+/** The open «Изменить» of a conversation: his next words in its topic are his version. */
+async function openEditOf(db: Db, conversationId: string) {
+  const [edit] = await db
+    .select({ q: question })
+    .from(question)
+    .innerJoin(convTurn, eq(convTurn.id, question.entityId))
+    .where(
+      and(
+        eq(question.kind, 'conv_edit'),
+        isNull(question.answeredAt),
+        eq(convTurn.conversationId, conversationId),
+      ),
+    )
+    .orderBy(desc(question.askedAt))
+    .limit(1)
+  return edit?.q ?? null
+}
+
+/** The latest open card of a conversation (a draft, a reminder, a client of Boris's), with its turn. */
+async function openCardOf(db: Db, conversationId: string) {
+  const [row] = await db
+    .select({ card: task, turn: convTurn })
+    .from(task)
+    .innerJoin(convTurn, eq(convTurn.id, task.entityId))
+    .where(
+      and(
+        eq(task.kind, 'conv_draft'),
+        eq(task.state, 'open'),
+        eq(convTurn.conversationId, conversationId),
+      ),
+    )
+    .orderBy(desc(task.createdAt))
+    .limit(1)
+  return row ?? null
+}
+
+/**
+ * Boris's words in a client's topic of the forum that answer no card and no question (docs/product/telegram-forum.md):
+ * an instruction about this client. A command word works as on the card; while «Изменить» waits, the words are his
+ * version; any other words are his text for the client, shown back with «Отправить», and only that press sends them.
+ */
+export async function onClientText(
+  d: CommandDeps,
+  m: { conversationId: string | null; text: string; voice: boolean; messageId?: number; at: Date },
+): Promise<BorisReply> {
+  const conv = m.conversationId ? await getConversation(d.db, m.conversationId) : null
+  if (!conv) return COMMAND_TEXTS.noChatYet
+  const c = parseCardReply(m.text)
+  const edit = c ? null : await openEditOf(d.db, conv.id)
+  if (edit)
+    return onConvEdit(d, {
+      question: edit,
+      text: m.text,
+      voice: m.voice,
+      messageId: m.messageId,
+      at: m.at,
+    })
+  const open = await openCardOf(d.db, conv.id)
+  const live = !(await getSetting(d.db, 'conv.v1_writes'))
+  switch (c?.cmd) {
+    case 'take':
+      await take(d.db, conv.id)
+      return COMMAND_TEXTS.taken
+    case 'return':
+      await giveBack(d.db, conv.id, c.note)
+      return COMMAND_TEXTS.returned
+    case 'close':
+      await close(d.db, conv.id, d.notifier)
+      return COMMAND_TEXTS.closed
+    case 'confirm': {
+      // A typed «да» sends nothing: the card's own button does.
+      if (!open || (live && !open.turn.text && open.turn.kind !== 'reminder'))
+        return COMMAND_TEXTS.nothingToSend
+      const action: TaskAction = live ? 'send' : 'good'
+      return {
+        text: live ? COMMAND_TEXTS.pressSend : COMMAND_TEXTS.pressGood,
+        rows: [
+          [
+            {
+              text: live ? CONV_TEXTS.buttons.send : CONV_TEXTS.buttons.good,
+              callbackData: formatCallback(open.card.id, action),
+            },
+          ],
+        ],
+      }
+    }
+    case 'say':
+      if (c.text === null) return COMMAND_TEXTS.askText
+  }
+  const words = c?.cmd === 'say' && c.text ? c.text : m.text
+  if (!live || !d.sendText) return say(d, conv.id, words, telegramKey(m.messageId))
+  if (open && open.turn.kind !== 'say')
+    return proposeSay(d, open.turn, words, { via: 'say', voice: m.voice, messageId: m.messageId })
+  return proposeFreeSay(d, conv.id, words, { voice: m.voice, messageId: m.messageId })
+}
+
+/**
+ * Boris's words for a client with no open card (nothing waits for an answer): kept in a row of their own and shown
+ * back with «Отправить» and «Изменить». The press sends them against the chat as it was when he wrote, so a client
+ * who wrote meanwhile is never answered over (CHAT_CHANGED).
+ */
+async function proposeFreeSay(
+  d: CommandDeps,
+  conversationId: string,
+  text: string,
+  o: { voice?: boolean; messageId?: number },
+): Promise<BorisReply> {
+  const rowId =
+    o.messageId !== undefined
+      ? `conv-say:free:${conversationId}:tg:${o.messageId}`
+      : `conv-say:free:${conversationId}:${newEventId()}`
+  const expectLast = await lastSeen(d.db, conversationId)
+  const taskId = newEventId()
+  const made = await d.db.transaction(async (tx) => {
+    const rows = await tx
+      .insert(convTurn)
+      .values({
+        id: rowId,
+        conversationId,
+        kind: 'say',
+        anchorMessageId: expectLast ?? '',
+        state: 'decided',
+        text,
+        decision: 'say',
+        understanding: { free: true, voice: o.voice ?? false, key: sayKey(o), expectLast },
+        taskId,
+      })
+      .onConflictDoNothing()
+      .returning({ id: convTurn.id })
+    if (rows.length === 0) return false
+    await tx.insert(task).values({
+      id: taskId,
+      kind: 'conv_say',
+      entityKind: 'conv_turn',
+      entityId: rowId,
+      priority: 'P1',
+    })
+    return true
+  })
+  if (!made) return COMMAND_TEXTS.sayAsked
+  const b = (label: string, action: TaskAction) => ({
+    text: label,
+    callbackData: formatCallback(taskId, action),
+  })
+  return {
+    text: COMMAND_TEXTS.sayConfirm(text),
+    rows: [[b(CONV_TEXTS.buttons.send, 'send'), b(CONV_TEXTS.buttons.edit, 'edit')]],
+  }
+}
+
+/** A press under words with no card behind them: «Отправить» sends exactly them once, «Изменить» asks again. */
+async function onFreeSayPress(
+  d: CommandDeps,
+  st: CardTask,
+  say: typeof convTurn.$inferSelect,
+  action: TaskAction,
+): Promise<string> {
+  const meta = (say.understanding ?? {}) as { key?: string | null; expectLast?: string | null }
+  if (action === 'edit') {
+    if (!(await closeCard(d.db, st.id, 'edit'))) return COMMAND_TEXTS.done
+    return COMMAND_TEXTS.askFree
+  }
+  if (action !== 'send') return COMMAND_TEXTS.notUnderstood
+  if (await getSetting(d.db, 'conv.v1_writes')) return COMMAND_TEXTS.shadowSend
+  if (!d.sendText || !say.text) return COMMAND_TEXTS.noDraft
+  const hold = await sendHold(d.db, say.conversationId, 'boris')
+  if (hold) return holdText(hold)
+  if (!(await closeCard(d.db, st.id, 'send'))) return COMMAND_TEXTS.done
+  await journal(d.db, 'conv.said', say.conversationId, 'boris', { turn_id: say.id })
+  return d.sendText(say.conversationId, say.text, 'boris', {
+    expectLast: meta.expectLast ?? null,
+    key: meta.key ?? `say:${st.id}`,
+  })
 }

@@ -4,6 +4,9 @@ export const EVENT_TYPES = [
   'setting.changed',
   'security.foreign_chat',
   'telegram.bound',
+  'telegram.forum_bound',
+  'telegram.forum_unbound',
+  'telegram.forum_failed',
   'health.check_failed',
   'profi.order_seen',
   /** An order the last pass over the feed showed is not in this one: closed, most likely (its page tells). */
