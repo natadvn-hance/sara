@@ -11,11 +11,11 @@ import { getSetting } from '../settings/store'
 /** Where the times go in an approved offer; the code puts them in when it sends. */
 export const SLOTS_MARK = '{слоты}'
 
-/** How many times an offer gives. */
-export const SLOTS_OFFERED = 3
-
-/** Where free times come from: the starts of up to `count` free times after `now`, by the source's own rules. */
-export type SlotSource = { slots(now: Date, count: number): Promise<Date[]> }
+/**
+ * Where free times come from: the times to offer after `now`, by the source's own rules. Today's times first, then those
+ * of the next working day; the offer says «или лучше завтра» after today's (Boris, 30.10.2026).
+ */
+export type SlotSource = { slots(now: Date): Promise<Date[]> }
 
 export type WorkHours = {
   /** Moscow hours: a call starts at `from`:00 at the earliest and ends by `to`:00. */
@@ -24,6 +24,8 @@ export type WorkHours = {
   days: number[]
   slotMin: number
   minAheadMin: number
+  /** The times Boris likes best, «16:00» and «17:30»; offered first, the nearest others only when none fits. */
+  preferred: string[]
   /** Moscow hours of the client night, never offered (past midnight when from > to). */
   night: { from: number; to: number } | null
 }
@@ -31,9 +33,6 @@ export type WorkHours = {
 /** Moscow has kept UTC+3 all year since 2014. */
 const MSK_MS = 3 * 3600_000
 const DAY_MS = 24 * 3600_000
-/** The times offered on one day are at least an hour apart, so the client has a real choice. */
-const GAP_MIN = 60
-
 /** The Moscow calendar day of a moment: midnight of it in UTC terms, and its weekday 1 Monday to 7 Sunday. */
 function moscowDay(at: Date): { midnight: number; weekday: number } {
   const shifted = at.getTime() + MSK_MS
@@ -48,59 +47,67 @@ const inNight = (minute: number, night: WorkHours['night']): boolean => {
   return night.from > night.to ? h >= night.from || h < night.to : h >= night.from && h < night.to
 }
 
-/** Up to `count` of the day's starts spread over it, an hour apart at least: the first, the last and between. */
-function spread(starts: number[], count: number, gapMs: number): number[] {
-  if (starts.length === 0 || count <= 0) return []
-  if (count === 1) return [starts[0] as number]
-  const picked: number[] = []
-  for (let j = 0; j < count; j++) {
-    const s = starts[Math.round((j * (starts.length - 1)) / (count - 1))] as number
-    const last = picked.at(-1)
-    if (last === undefined || s - last >= gapMs) picked.push(s)
-  }
-  return picked
+const minuteOf = (hhmm: string): number | null => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim())
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null
 }
 
 /**
- * Times for a call by working hours: only ahead by `minAheadMin` at least, on working days, within the hours and not at
- * night, every `slotMin` minutes, an hour apart. Today when it still has `count` such times, else the next working day
- * (tomorrow, or Monday after a weekend), never a mix. Empty when a week has none.
+ * The starts offered on one working day (minutes since midnight, Moscow): Boris's preferred times that fit the hours and
+ * are not before `earliest`, else the first start of the grid that is. At most two, none when the day has no room.
  */
-export function workHoursSlots(now: Date, w: WorkHours, count = SLOTS_OFFERED): Date[] {
+function dayStarts(w: WorkHours, midnight: number, earliest: number): number[] {
+  const last = w.hours.to * 60 - w.slotMin
+  const ok = (m: number) =>
+    m >= w.hours.from * 60 &&
+    m <= last &&
+    midnight + m * 60_000 - MSK_MS >= earliest &&
+    !inNight(m, w.night)
+  const wanted = [...new Set(w.preferred.map(minuteOf).filter((m): m is number => m !== null))]
+    .filter(ok)
+    .sort((a, b) => a - b)
+  if (wanted.length > 0) return wanted.slice(0, 2)
+  for (let m = w.hours.from * 60; m <= last; m += w.slotMin) if (ok(m)) return [m]
+  return []
+}
+
+/**
+ * Times for a call by working hours (Boris, 30.10.2026): at least `minAheadMin` after now, within the hours, on working
+ * days, not at night; the preferred ones first (16:00 and 17:30). Today's times when any are left, then the next
+ * working day's (tomorrow, or Monday after Friday and the weekend), so the offer always has «or tomorrow». Without
+ * today's, only tomorrow's.
+ */
+export function workHoursSlots(now: Date, w: WorkHours): Date[] {
   const earliest = now.getTime() + w.minAheadMin * 60_000
   const today = moscowDay(now)
-  let fallback: number[] = []
-  for (let d = 0; d < 8; d++) {
+  const out: Date[] = []
+  let days = 0
+  for (let d = 0; d < 8 && days < 2; d++) {
     const midnight = today.midnight + d * DAY_MS
     const weekday = ((today.weekday - 1 + d) % 7) + 1
     if (!w.days.includes(weekday)) continue
-    const starts: number[] = []
-    for (let m = w.hours.from * 60; m + w.slotMin <= w.hours.to * 60; m += w.slotMin) {
-      const at = midnight + m * 60_000 - MSK_MS
-      if (at >= earliest && !inNight(m, w.night)) starts.push(at)
-    }
-    const picked = spread(starts, count, GAP_MIN * 60_000)
-    if (picked.length === count) return picked.map((t) => new Date(t))
-    if (fallback.length === 0 && d > 0) fallback = picked
+    const starts = dayStarts(w, midnight, earliest)
+    if (starts.length === 0 && d === 0) continue
+    // Today counts as a day only when it has times; the next working day always is the «tomorrow».
+    out.push(...starts.map((m) => new Date(midnight + m * 60_000 - MSK_MS)))
+    days++
+    if (d > 0) break
   }
-  return fallback.map((t) => new Date(t))
+  return out
 }
 
 /** Boris's working hours from the settings, read each time: a change in the pult counts from the next offer. */
 export function workHoursSource(db: DbOrTx): SlotSource {
   return {
-    async slots(now, count) {
-      return workHoursSlots(
-        now,
-        {
-          hours: await getSetting(db, 'calls.work_hours'),
-          days: await getSetting(db, 'calls.work_days'),
-          slotMin: await getSetting(db, 'calls.slot_min'),
-          minAheadMin: await getSetting(db, 'calls.min_ahead_min'),
-          night: await getSetting(db, 'conv.night'),
-        },
-        count,
-      )
+    async slots(now) {
+      return workHoursSlots(now, {
+        hours: await getSetting(db, 'calls.work_hours'),
+        days: await getSetting(db, 'calls.work_days'),
+        slotMin: await getSetting(db, 'calls.slot_min'),
+        minAheadMin: await getSetting(db, 'calls.min_ahead_min'),
+        preferred: await getSetting(db, 'calls.preferred'),
+        night: await getSetting(db, 'conv.night'),
+      })
     },
   }
 }
@@ -131,7 +138,10 @@ function dayWord(t: Date, now: Date): string {
 const orJoin = (xs: string[]) =>
   xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} или ${xs.at(-1)}`
 
-/** The times as a client reads them: «сегодня в 12:00, 14:30 или 18:00», «сегодня в 18:00 или завтра в 11:00». */
+/**
+ * The times as a client reads them: «сегодня в 16:00 или 17:30, или лучше завтра» when today has some (Boris, 30.10.2026),
+ * «завтра в 16:00 или 17:30» (or «в понедельник…») when it has none.
+ */
 export function slotsText(slots: Date[], now: Date): string {
   const days: { word: string; times: string[] }[] = []
   for (const t of slots) {
@@ -140,22 +150,22 @@ export function slotsText(slots: Date[], now: Date): string {
     if (day) day.times.push(hhmm(t))
     else days.push({ word, times: [hhmm(t)] })
   }
-  if (days.length === 1) {
-    const [only] = days
-    return only ? `${only.word} в ${orJoin(only.times)}` : ''
-  }
-  return orJoin(days.map((x) => `${x.word} в ${x.times.join(', ')}`))
+  const [first, second] = days
+  if (!first) return ''
+  if (first.word === 'сегодня' && second)
+    return `сегодня в ${orJoin(first.times)}, или лучше ${second.word}`
+  return `${first.word} в ${orJoin(first.times)}`
 }
 
 /**
- * Offers in Boris's way (30.10.2026: «завершить коротким вопросом, разговорным языком»): one or two plain sentences that
+ * Offers in Boris's way (30.10.2026: «завершить коротким вопросом», a little more formal, «на 30 минут», no «полчасика»): one or two plain sentences that
  * end with a question, one picked by the order so two orders do not read alike; the times go in at the mark.
  */
 const OFFERS = [
-  `Может, созвонимся на полчасика и обсудим всё голосом? Могу ${SLOTS_MARK}, как вам удобнее?`,
-  `Давайте лучше встретимся на созвоне и всё обсудим лично? Я свободен ${SLOTS_MARK}, что вам удобно?`,
-  `Может, выйдем на созвон на полчаса и разберём всё голосом? Могу ${SLOTS_MARK}, как вам?`,
-  `Предлагаю просто созвониться и обсудить всё лично, минут на тридцать. Удобно ${SLOTS_MARK}?`,
+  `Предлагаю созвониться на 30 минут и обсудить детали. Вам удобно ${SLOTS_MARK}?`,
+  `Предлагаю обсудить всё на созвоне, минут на 30. Вам подойдёт ${SLOTS_MARK}?`,
+  `Давайте созвонимся на 30 минут и обсудим детали. Вам удобно ${SLOTS_MARK}?`,
+  `Предлагаю встретиться на коротком созвоне, на 30 минут. Вам удобно ${SLOTS_MARK}?`,
 ]
 
 export function callOfferTemplate(seed: string): string {

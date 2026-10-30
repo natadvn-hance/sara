@@ -86,7 +86,7 @@ export const SETTINGS = {
   /** Boris's working hours for calls, Moscow time: a call starts at `from`:00 at the earliest and ends by `to`:00. */
   'calls.work_hours': {
     schema: hours.refine((h) => h.from < h.to, 'from before to'),
-    default: { from: 11, to: 19 },
+    default: { from: 11, to: 20 },
   },
   /**
    * Sites and addresses a client is never given (Boris, 30.10.2026: «сайт нексум не рабочий, его отправлять не нужно»),
@@ -101,6 +101,14 @@ export const SETTINGS = {
   'calls.work_days': {
     schema: z.array(z.number().int().min(1).max(7)).min(1),
     default: [1, 2, 3, 4, 5] as number[],
+  },
+  /** The times Boris likes best for a call, «16:00» and «17:30»: offered first when they fit (Boris, 30.10.2026). */
+  'calls.preferred': {
+    schema: z
+      .array(z.string().regex(/^\d{1,2}:\d{2}$/))
+      .min(1)
+      .max(6),
+    default: ['16:00', '17:30'] as string[],
   },
   /** How long an offered call is, in minutes, and the step of the times offered. */
   'calls.slot_min': { schema: z.number().int().min(15).max(120), default: 30 },

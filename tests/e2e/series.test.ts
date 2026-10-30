@@ -102,7 +102,7 @@ beforeAll(async () => {
       seriesDelayMs: { first: [400, 500], next: [300, 400], call: [300, 400] },
       // Three times ahead of the moment of sending, whatever the clock of the run says.
       callSlots: {
-        slots: async (now) => [3, 5, 7].map((h) => new Date(now.getTime() + h * 3600_000)),
+        slots: async (now) => [3, 5].map((h) => new Date(now.getTime() + h * 3600_000)),
       },
       now: () => NOON,
     },
