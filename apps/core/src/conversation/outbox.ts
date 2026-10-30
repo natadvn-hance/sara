@@ -1,4 +1,4 @@
-import { newEventId, normalizeText } from '@sara/shared'
+import { isTestOrder, newEventId, normalizeText } from '@sara/shared'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { chatMessage, conversation, convTurn, outbox, task } from '../db/schema'
@@ -137,7 +137,9 @@ export async function queueMessage(
   i: MessagePayload & { key: string },
 ): Promise<string | null> {
   if (await getSetting(tx, 'conv.v1_writes')) return null
-  if (i.author === 'sara' && !(await getSetting(tx, 'outbound.messages'))) return null
+  // A test chat's client is made up (docs/ops/test-leads.md): the pause for real clients does not hold it.
+  if (i.author === 'sara' && !isTestOrder(i.chatId) && !(await getSetting(tx, 'outbound.messages')))
+    return null
   if (
     i.author === 'sara' &&
     !(await getSetting(tx, 'conv.autopilot')) &&

@@ -1,0 +1,4 @@
+{
+  "title": "Клиент уходит к другому",
+  "orders": [{ "order": "sample:90000014", "client": { "behaviour": "leaves" } }]
+}

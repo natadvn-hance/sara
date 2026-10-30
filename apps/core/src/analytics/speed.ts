@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
+import { NOT_TEST } from '../testLeads/sql'
 
 export type Stat = {
   count: number
@@ -48,7 +49,7 @@ export async function speedReport(db: DbOrTx): Promise<SpeedReport> {
         and b.payload->>'via' = 'order' and b.occurred_at >= a.occurred_at
       order by b.occurred_at, b.id limit 1
     ) b on true
-    where a.type = 'lead.found'`,
+    where a.type = 'lead.found' and ${NOT_TEST('a.entity_id')}`,
   )
   const yesToBid = await ms(
     db,
@@ -61,7 +62,7 @@ export async function speedReport(db: DbOrTx): Promise<SpeedReport> {
         and a.payload->>'action' = 'bid' and a.occurred_at <= b.occurred_at
       order by a.occurred_at desc, a.id desc limit 1
     ) a on true
-    where b.type = 'bid.sent'`,
+    where b.type = 'bid.sent' and ${NOT_TEST('b.entity_id')}`,
   )
   return { leadToCard: stat(leadToCard), yesToBid: stat(yesToBid) }
 }

@@ -2,6 +2,7 @@ import type { DirectionRules } from '@sara/shared'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { lead, leadLabel, trialScore as trialTable } from '../db/schema'
+import { NOT_TEST } from '../testLeads/sql'
 import { getRun, type RunRow } from './runStore'
 import { type TrialDeps, trialScore } from './trial'
 
@@ -19,7 +20,7 @@ export async function recomputePool(
 ): Promise<string[]> {
   const rows = await db.execute<{ id: string }>(sql`
     select l.id from core.lead l
-    where l.account_id = ${accountId}
+    where l.account_id = ${accountId} and ${NOT_TEST('l.id')}
       and l.status not in ('sorted_out', 'stale')
       and exists (select 1 from core.lead_score s where s.lead_id = l.id and not s.backtest)
     order by l.seen_at desc, l.id desc

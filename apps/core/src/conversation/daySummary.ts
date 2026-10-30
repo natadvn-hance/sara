@@ -1,10 +1,11 @@
 import { newEventId, plural } from '@sara/shared'
-import { and, eq, gte, lt } from 'drizzle-orm'
+import { and, eq, gte, lt, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { convTurn, jobRun } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { mskParts } from '../learning/summary'
 import type { Notifier } from '../notify/notifier'
+import { NOT_TEST } from '../testLeads/sql'
 import { moscowDayStart } from './cards'
 import { turnStats } from './report'
 import { moscowHour } from './time'
@@ -32,6 +33,8 @@ export async function daySummary(
         lt(convTurn.createdAt, to),
         // Only the answers to client turns: a reminder's draft is in the report, not in the evening summary.
         eq(convTurn.kind, 'reply'),
+        // Test chats are no work of the day (docs/ops/test-leads.md).
+        sql`exists (select 1 from core.conversation c where c.id = ${convTurn.conversationId} and ${NOT_TEST('c.chat_id')})`,
       ),
     )
   if (rows.length === 0) return 'empty'
