@@ -135,6 +135,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         m,
       ),
     voiceDir: join(config.dataDir, 'voice'),
+    publicUrl: config.publicUrl,
   })
   const gateway = createGateway({
     db,

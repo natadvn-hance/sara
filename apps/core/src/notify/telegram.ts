@@ -9,6 +9,7 @@ import { appendEvent } from '../journal/journal'
 import { quietNow } from '../leads/cardFlow'
 import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { bindChat, boundChat, boundUser } from './binding'
+import { COMMANDS, type CommandReply } from './botCommands'
 import { closedLeadCardText, leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
 import {
   bindForum,
@@ -93,6 +94,8 @@ export function createTelegramRuntime(d: {
   onMessage?(m: BorisMessage): Promise<BorisReply>
   /** Where voice messages are saved while they are recognized (default: the system temp folder). */
   voiceDir?: string
+  /** The pult's address, for /pult and the commands that point at it. */
+  publicUrl?: string
 }): TelegramRuntime {
   const bot = new Bot(d.token, d.apiRoot ? { client: { apiRoot: d.apiRoot } } : undefined)
   // Every text leaves through here (messages, replies, button answers), so a dash in it becomes a short hyphen once.
@@ -213,6 +216,57 @@ export function createTelegramRuntime(d: {
     await ctx.reply(TEXTS.forumOff)
     if (ctx.chat.type !== 'private') await toOwnChat(TEXTS.forumOff)
   })
+
+  /**
+   * A command's answer. A page opens as the Mini App in Boris's chat (Telegram takes only https there) and as a link in
+   * a group; should Telegram refuse the button, the address goes as text.
+   */
+  async function answerCommand(ctx: Context, r: CommandReply): Promise<void> {
+    if (typeof r === 'string') return void (await ctx.reply(r))
+    const { text, url } = r.open
+    const app = ctx.chat?.type === 'private' && url.startsWith('https://')
+    await ctx
+      .reply(r.text, {
+        reply_markup: { inline_keyboard: [[app ? { text, web_app: { url } } : { text, url }]] },
+      })
+      .catch(async (e: unknown) => {
+        console.error('command button refused', short(e))
+        await ctx.reply(`${r.text}\n${url}`, { link_preview_options: { is_disabled: true } })
+      })
+  }
+
+  // The menu's commands (Boris, 30.10.2026); the forum's two above need Telegram itself.
+  for (const c of COMMANDS) {
+    const run = c.run
+    if (!run) continue
+    bot.command(c.name, async (ctx) => {
+      let r: CommandReply
+      try {
+        r = await run({ db: d.db, publicUrl: d.publicUrl ?? null })
+      } catch (e) {
+        console.error(`/${c.name} failed`, short(e))
+        r = TEXTS.commandFailed
+      }
+      await answerCommand(ctx, r)
+    })
+  }
+
+  /** The list of commands under the menu button, in Boris's chat and in his forum; a refusal is only logged. */
+  async function publishMenu(): Promise<void> {
+    const log = (what: string) => (e: unknown) => console.error(what, short(e))
+    await bot.api
+      .setMyCommands(COMMANDS.map((c) => ({ command: c.name, description: c.description })))
+      .catch(log('commands not set'))
+    await bot.api
+      .setChatMenuButton({ menu_button: { type: 'commands' } })
+      .catch(log('menu button not set'))
+    // A button set for his chat alone (the Mini App once) would hide the list: his chat gets the list too.
+    const own = await boundChat(d.db)
+    if (own !== null)
+      await bot.api
+        .setChatMenuButton({ chat_id: own, menu_button: { type: 'commands' } })
+        .catch(log('menu button of the chat not set'))
+  }
 
   bot.on('my_chat_member', async (ctx) => {
     const f = await forumOf(d.db)
@@ -542,6 +596,7 @@ export function createTelegramRuntime(d: {
     async start() {
       await bot.init()
       lastError = null
+      await publishMenu()
       await new Promise<void>((ready, fail) => {
         // Polling errors must never become an unhandled rejection: that would stop the whole core.
         running = bot.start({ onStart: () => ready() }).catch(async (err) => {
