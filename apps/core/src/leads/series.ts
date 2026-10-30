@@ -6,7 +6,7 @@ import type { Db } from '../db/client'
 import { conversation } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { ProfiClient } from '../profi/client'
-import { fillCallOffer, isCallOffer, SLOTS_OFFERED, type SlotSource } from './callSlots'
+import { fillCallOffer, isCallOffer, type SlotSource } from './callSlots'
 
 /**
  * The series after a bid (Boris, 29.10.2026): «одного сообщения при отклике мало». Before Sara he wrote one to three
@@ -178,7 +178,7 @@ const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 /** Step: the call offer with its times picked now, or null when there are none to give. */
 async function callText(template: string): Promise<string | null> {
   const now = new Date()
-  const slots = await d().slots.slots(now, SLOTS_OFFERED)
+  const slots = await d().slots.slots(now)
   return slots.length > 0 ? fillCallOffer(template, slots, now) : null
 }
 

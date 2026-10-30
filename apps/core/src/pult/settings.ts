@@ -92,6 +92,12 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'locked',
     kind: 'hours',
   },
+  'calls.preferred': {
+    title: 'Любимое время для созвонов',
+    hint: 'По Москве, предлагается первым, если подходит.',
+    edit: 'locked',
+    kind: 'other',
+  },
   'links.blocked': {
     title: 'Ссылки, которые клиентам не даём',
     hint: 'Сайты, которые не работают или не для показа. Сара их не покажет нигде. Добавляет разработчик по твоему слову.',
@@ -142,6 +148,7 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
     keys: [
       'calls.offer',
       'calls.work_hours',
+      'calls.preferred',
       'calls.slot_min',
       'calls.min_ahead_min',
       'links.blocked',

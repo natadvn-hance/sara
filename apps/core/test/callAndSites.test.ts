@@ -23,39 +23,65 @@ const ROOT = resolve(import.meta.dirname, '../../..')
 /** A moment by its Moscow wall clock (UTC+3). */
 const msk = (iso: string) => new Date(`${iso}+03:00`)
 const WORK: WorkHours = {
-  hours: { from: 11, to: 19 },
+  hours: { from: 11, to: 20 },
   days: [1, 2, 3, 4, 5],
   slotMin: 30,
   minAheadMin: 120,
+  preferred: ['16:00', '17:30'],
   night: { from: 23, to: 8 },
 }
-const times = (now: Date) => slotsText(workHoursSlots(now, WORK), now)
+const times = (now: Date, w: WorkHours = WORK) => slotsText(workHoursSlots(now, w), now)
 
-describe('the call offer: three times by Boris’s working hours', () => {
+describe('the call offer: Boris’s preferred times, two hours ahead, until 20:00, and tomorrow', () => {
   // 29.10.2026 is a Thursday, 30.10 a Friday, 2.11 a Monday.
-  it('FR-LEAD-6: a morning offer gives three times of today, an hour apart at least, two hours ahead at least', () => {
-    expect(times(msk('2026-10-29T09:00'))).toBe('сегодня в 11:00, 15:00 или 18:30')
-    expect(times(msk('2026-10-29T12:10'))).toBe('сегодня в 14:30, 16:30 или 18:30')
+  it('FR-LEAD-6: a morning offers 16:00 and 17:30 today, or tomorrow', () => {
+    expect(times(msk('2026-10-29T09:00'))).toBe('сегодня в 16:00 или 17:30, или лучше завтра')
+    expect(times(msk('2026-10-29T13:59'))).toBe('сегодня в 16:00 или 17:30, или лучше завтра')
   })
 
-  it('FR-LEAD-6: when today has too little time left, the times are tomorrow’s, never a mix', () => {
-    expect(times(msk('2026-10-29T16:00'))).toBe('завтра в 11:00, 15:00 или 18:30')
-    expect(times(msk('2026-10-29T22:30'))).toBe('завтра в 11:00, 15:00 или 18:30')
+  it('FR-LEAD-6: at 15:00 only what is two hours ahead is left of the preferred: 17:30', () => {
+    expect(times(msk('2026-10-29T15:00'))).toBe('сегодня в 17:30, или лучше завтра')
+    // Exactly two hours ahead still counts, a minute less does not.
+    expect(times(msk('2026-10-29T15:30'))).toBe('сегодня в 17:30, или лучше завтра')
+    expect(times(msk('2026-10-29T15:31'))).toBe('сегодня в 18:00, или лучше завтра')
   })
 
-  it('FR-LEAD-6: no time on a day off: Friday evening and the weekend offer Monday', () => {
-    expect(times(msk('2026-10-30T17:00'))).toBe('в понедельник в 11:00, 15:00 или 18:30')
-    expect(times(msk('2026-10-31T10:00'))).toBe('в понедельник в 11:00, 15:00 или 18:30')
+  it('FR-LEAD-6: at 16:30 no preferred time is left, the nearest suitable one is, and tomorrow', () => {
+    expect(times(msk('2026-10-29T16:30'))).toBe('сегодня в 18:30, или лучше завтра')
   })
 
-  it('FR-LEAD-6: the hours, the days and the step come from the settings', () => {
-    const short = { ...WORK, hours: { from: 10, to: 13 }, days: [1, 2, 3, 4, 5, 6, 7] }
+  it('FR-LEAD-6: at 19:00 nothing is left today (the latest start is 19:30, two hours ahead is 21:00): tomorrow’s 16:00 and 17:30', () => {
+    expect(times(msk('2026-10-29T19:00'))).toBe('завтра в 16:00 или 17:30')
+    expect(times(msk('2026-10-29T22:30'))).toBe('завтра в 16:00 или 17:30')
+    // Never later than 20:00: a call that would end after it is not offered.
+    const late = workHoursSlots(msk('2026-10-29T17:00'), WORK).map((t) => t.getTime())
+    expect(Math.max(...late.slice(0, 1))).toBeLessThanOrEqual(msk('2026-10-29T19:30').getTime())
+  })
+
+  it('FR-LEAD-6: a weekend offers Monday, Friday evening too', () => {
+    expect(times(msk('2026-10-30T18:00'))).toBe('в понедельник в 16:00 или 17:30')
+    expect(times(msk('2026-10-31T10:00'))).toBe('в понедельник в 16:00 или 17:30')
+    // On Sunday Monday is tomorrow.
+    expect(times(msk('2026-11-01T18:00'))).toBe('завтра в 16:00 или 17:30')
+    // Friday morning: today, then Monday is «tomorrow».
+    expect(times(msk('2026-10-30T09:00'))).toBe(
+      'сегодня в 16:00 или 17:30, или лучше в понедельник',
+    )
+  })
+
+  it('FR-LEAD-6: the hours, the preferred times and the step come from the settings; no working day, no time', () => {
+    const short = {
+      ...WORK,
+      hours: { from: 10, to: 13 },
+      preferred: ['09:00', '11:00'],
+      days: [1, 2, 3, 4, 5, 6, 7],
+    }
     const now = msk('2026-10-31T07:00')
-    expect(slotsText(workHoursSlots(now, short), now)).toBe('сегодня в 10:00, 11:30 или 12:30')
-    // Hours shorter than three times an hour apart: the next day with any, as many as it has.
-    const tiny = { ...WORK, hours: { from: 11, to: 12 } }
-    expect(workHoursSlots(msk('2026-10-29T09:00'), tiny)).toHaveLength(1)
+    expect(times(now, short)).toBe('сегодня в 11:00, или лучше завтра')
     expect(workHoursSlots(msk('2026-10-29T09:00'), { ...WORK, days: [] })).toEqual([])
+    expect(times(msk('2026-10-29T09:00'), { ...WORK, preferred: ['16:00'] })).toBe(
+      'сегодня в 16:00, или лучше завтра',
+    )
   })
 
   it('FR-CONV-5: the offer Boris approved goes with its times put in, and only those may differ', () => {
@@ -64,11 +90,14 @@ describe('the call offer: three times by Boris’s working hours', () => {
     // Short, plain and ending with a question; the times sit inside it.
     expect(template.endsWith('?')).toBe(true)
     expect(template.length).toBeLessThan(160)
-    expect(callOfferTemplate('Другой заказ ' + 'x'.repeat(7))).toMatch(/\?$/)
+    // A little formal, in minutes: no «полчасика».
+    expect(template).toContain('30 минут')
+    expect(template).not.toContain('полчас')
+    expect(callOfferTemplate('Другой заказ xxxxxxx')).toMatch(/\?$/)
     expect(callOfferTemplate('Сайт для клиники')).toBe(template)
     const now = msk('2026-10-29T09:00')
     const sent = fillCallOffer(template, workHoursSlots(now, WORK), now)
-    expect(sent).toContain('сегодня в 11:00, 15:00 или 18:30')
+    expect(sent).toContain('сегодня в 16:00 или 17:30, или лучше завтра')
     expect(sent).not.toContain(SLOTS_MARK)
     expect(sent.endsWith('?')).toBe(true)
     expect(isApprovedText(template, sent)).toBe(true)
