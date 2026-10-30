@@ -44,6 +44,12 @@ function Body({ v }: { v: SystemView }) {
       <p className={`state tone-${bad ? 'bad' : 'ok'} reveal`}>
         <Dot tone={bad ? 'bad' : 'ok'} live />
         {bad ? `Нужно внимание: ${bad} из ${v.parts.length}` : 'Всё работает'}
+        {v.deploy ? (
+          <span className="muted mono" style={{ marginLeft: 'auto', fontSize: 12 }}>
+            версия {v.deploy.version}
+            {v.deploy.startedAt ? ` · запуск ${ago(v.deploy.startedAt)}` : ''}
+          </span>
+        ) : null}
       </p>
       <div className="grid grid-3">
         {v.parts.map((p, i) => (
@@ -106,7 +112,7 @@ function Body({ v }: { v: SystemView }) {
         <Card title="Аккаунты" icon="user">
           <div className="list">
             {v.accounts.map((a) => (
-              <A key={a.id} to="/accounts" className="row">
+              <A key={a.id} to={`/settings/rules/${encodeURIComponent(a.id)}`} className="row">
                 <Dot tone={a.login === 'alive' ? (a.paused ? 'warn' : 'ok') : 'bad'} />
                 <span className="row-main">
                   <span className="row-title">{a.title}</span>

@@ -40,7 +40,7 @@ export async function buildTestApp(
     current: { alive: true, balance_rub: 5000, presence: true, egress_ip: '127.0.0.1' },
   },
   /** The pult's press and backup log (M7); unset, the pult's buttons answer that Sara is starting. */
-  extra: Pick<AppDeps, 'onPress' | 'saveBidText' | 'backupLog'> = {},
+  extra: Pick<AppDeps, 'onPress' | 'saveBidText' | 'backupLog' | 'answerQuestion'> = {},
 ): Promise<TestApp> {
   const dir = await mkdtemp(join(tmpdir(), 'app-'))
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })

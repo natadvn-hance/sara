@@ -6,6 +6,7 @@ import { startInMemory } from '../app/router'
 import '../design/tokens.css'
 import '../design/pult.css'
 import * as f from './fixtures'
+import * as g from './fixtures2'
 
 /**
  * The demo of the pult for the preview page: the real screens over made-up data, with no core behind them. Built
@@ -13,39 +14,127 @@ import * as f from './fixtures'
  */
 
 const PRESS: Record<string, string> = {
-  bid: 'Отклик ушёл (в демо ничего не тратится).',
-  skip: 'Пропустила.',
+  bid: 'Откликаюсь через 10 секунд (в демо ничего не тратится).',
+  skip: 'Пропустила, причину записала.',
   send: 'Отправила клиенту (в демо ничего не уходит).',
   take: 'Клиент твой: Сара больше не пишет ему сама.',
+  close: 'Закрыла.',
+  apply: 'Применила, теперь правила v4.',
+  drop: 'Хорошо, оставляю v3.',
+  want: 'Пишу черновик, пришлю карточку.',
+  open: 'Прислала карточку заявки.',
+  answer: 'Записала.',
+  cancel: 'Отменила, отклик не ушёл.',
+  recheck: 'Перечитала заказ: открыт, цена та же.',
+  decide: 'Записала решение по предложению.',
+  outcome: 'Записала итог сделки.',
+  note: 'Заметку сохранила.',
+  done: 'Убрала.',
+  seen: 'Просмотрено.',
 }
+
+/** The demo's own state: a held bid shows its count, a decided task leaves the Inbox. */
+const state = { held: new Map<string, string>(), gone: new Set<string>() }
 
 function answer(method: string, url: URL, body: unknown): unknown {
   const p = url.pathname
   if (method === 'POST') {
-    const press = /^\/api\/tasks\/[^/]+\/([a-z]+)$/.exec(p)
-    if (press?.[1]) return { message: PRESS[press[1]] ?? 'Готово.' }
+    const bid = /^\/api\/leads\/([^/]+)\/bid$/.exec(p)
+    if (bid?.[1]) {
+      state.held.set(bid[1], new Date(Date.now() + 10_000).toISOString())
+      setTimeout(() => {
+        state.held.delete(bid[1] as string)
+        state.gone.add(`task:t-${bid[1]}`)
+      }, 10_000)
+      return { message: PRESS.bid }
+    }
+    const cancel = /^\/api\/leads\/([^/]+)\/bid\/cancel$/.exec(p)
+    if (cancel?.[1]) {
+      state.held.delete(cancel[1])
+      return { message: PRESS.cancel }
+    }
+    const skip = /^\/api\/leads\/([^/]+)\/skip$/.exec(p)
+    if (skip?.[1]) {
+      state.gone.add(`task:t-${skip[1]}`)
+      return { message: PRESS.skip }
+    }
+    const task = /^\/api\/tasks\/([^/]+)\/([a-z]+)$/.exec(p)
+    if (task?.[1] && task[2]) {
+      state.gone.add(`task:${task[1]}`)
+      return { message: PRESS[task[2]] ?? 'Готово.' }
+    }
+    const q = /^\/api\/questions\/([^/]+)\/([a-z]+)$/.exec(p)
+    if (q?.[1]) {
+      state.gone.add(`question:${q[1]}`)
+      return { message: q[2] === 'skip' ? 'Хорошо, не важно.' : PRESS.answer }
+    }
+    const last = p.split('/').pop() ?? ''
+    if (p.startsWith('/api/settings/threshold/')) return { message: 'Сохранила как правила v4.' }
     if (p.startsWith('/api/settings/'))
       return {
         message:
           (body as { value?: unknown })?.value === false ? 'Поставила на паузу.' : 'Сохранила.',
       }
-    if (p.endsWith('/close')) return { message: 'Разговор закрыт.' }
-    if (p.endsWith('/return')) return { message: 'Клиент снова у Сары.' }
-    return { message: 'Готово.' }
+    if (p.startsWith('/api/notices/')) return { message: PRESS[last] ?? 'Готово.' }
+    if (p === '/api/meetings') return { message: 'Встречу записала.' }
+    return { message: PRESS[last] ?? 'Готово.' }
   }
+  if (p === '/api/inbox')
+    return {
+      ...g.inbox,
+      items: g.inbox.items
+        .filter((i) => !state.gone.has(i.id))
+        .map((i) => {
+          const held = i.entity?.kind === 'lead' ? state.held.get(i.entity.id) : undefined
+          return held ? { ...i, hold: { executeAt: held } } : i
+        }),
+    }
+  if (p === '/api/notices') return g.notices
   if (p === '/api/today') return f.today(Number(url.searchParams.get('period') ?? 7))
   if (p === '/api/leads') return f.leadQueue
-  if (p.startsWith('/api/leads/')) return f.lead(decodeURIComponent(p.split('/')[3] ?? ''))
-  if (p === '/api/conversations') return f.convList
-  if (p.startsWith('/api/conversations/')) return f.conv(p.split('/')[3] ?? '')
+  if (p.startsWith('/api/leads/')) {
+    const id = decodeURIComponent(p.split('/')[3] ?? '')
+    const v = f.lead(id)
+    const held = state.held.get(id)
+    return v
+      ? {
+          ...v,
+          hold: held ? { requestId: 'r1', executeAt: held } : null,
+          score: v.score ? { ...v.score, confidence: 0.82 } : null,
+        }
+      : null
+  }
+  if (p === '/api/clients') return g.clientList
+  if (p.startsWith('/api/clients/')) return g.client(p.split('/')[3] ?? '')
+  if (p === '/api/meetings') return g.meetings
+  if (p === '/api/journal') return g.journal
+  if (p.startsWith('/api/journal/trace/')) return g.trace
+  if (p === '/api/search') return g.search(url.searchParams.get('q') ?? '')
   if (p === '/api/analytics')
     return f.analytics(Number(url.searchParams.get('year') ?? new Date().getFullYear()))
   if (p === '/api/mind') return f.mind
   if (p.startsWith('/api/mind/')) return f.mindRecord(decodeURIComponent(p.split('/')[3] ?? ''))
   if (p === '/api/settings') return f.settings
-  if (p === '/api/system') return f.system
+  if (p.startsWith('/api/settings/threshold/')) {
+    const value = Number(url.searchParams.get('value') ?? 56)
+    return {
+      value,
+      current: 56,
+      version: 3,
+      cardsNow: 12,
+      cardsWould: value < 56 ? 12 + (56 - value) * 2 : Math.max(2, 12 - (value - 56) * 2),
+      lostYes: value > 56 ? Math.min(3, value - 56) : 0,
+      gainedNo: value < 56 ? (56 - value) * 2 : 0,
+    }
+  }
+  if (p === '/api/system')
+    return {
+      ...f.system,
+      deploy: { version: '0.4.2', startedAt: new Date(Date.now() - 5 * 3600_000).toISOString() },
+    }
   if (p === '/api/accounts') return f.accounts
   if (p === '/api/setup') return { next: 'done', completed: [] }
+  if (p === '/api/stream') return null
   return null
 }
 
@@ -66,19 +155,25 @@ window.fetch = async (input, init) => {
 
 /** A bare #token in the preview's link opens that screen (the viewer keeps #settings for itself, hence #prefs). */
 const VIEWS: Record<string, string> = {
+  inbox: '/inbox',
   today: '/today',
   leads: '/leads',
   lead: '/leads/95210417',
-  chats: '/conversations',
-  chat: '/conversations/c-veronika',
+  clients: '/clients',
+  client: '/clients/c-veronika',
+  meetings: '/meetings',
+  notices: '/notices',
+  journal: '/journal',
+  trace: '/journal/trace/corr-95210417',
+  search: '/search?q=керамик',
   analytics: '/analytics',
   mind: '/mind',
   prefs: '/settings',
   health: '/health',
 }
-startInMemory(VIEWS[window.location.hash.slice(1)] ?? '/today')
+startInMemory(VIEWS[window.location.hash.slice(1)] ?? '/inbox')
 const root = document.getElementById('root')
-if (root)
+if (root) {
   createRoot(root).render(
     <StrictMode>
       <QueryClientProvider client={new QueryClient()}>
@@ -86,3 +181,4 @@ if (root)
       </QueryClientProvider>
     </StrictMode>,
   )
+}

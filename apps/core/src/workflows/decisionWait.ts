@@ -1,4 +1,4 @@
-import { DBOS } from '@dbos-inc/dbos-sdk'
+import { DBOS, Error as DBOSErrors } from '@dbos-inc/dbos-sdk'
 import type { TaskAction } from '@sara/shared'
 
 const TOPIC = 'decision'
@@ -29,11 +29,14 @@ export async function startDecisionWait(taskId: string, remindAfterMs: number): 
   )
 }
 
-/** Ends the wait for this task; a task without a running wait (already finished or never started) is fine. */
+/**
+ * Ends the wait for this task; a task without a running wait (already finished or never started) is fine. DBOS
+ * leaves its errors named «Error», so the class tells the missing workflow, not the name.
+ */
 export async function deliverDecision(taskId: string, resolution: TaskAction): Promise<void> {
   try {
     await DBOS.send(workflowId(taskId), resolution, TOPIC, `decision:${taskId}:${resolution}`)
   } catch (e) {
-    if ((e as Error).name !== 'DBOSNonExistentWorkflowError') throw e
+    if (!(e instanceof DBOSErrors.DBOSNonExistentWorkflowError)) throw e
   }
 }
