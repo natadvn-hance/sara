@@ -233,6 +233,15 @@ describe('the test stand', () => {
     expect(chat(other).filter((m) => m.author === 'client')).toEqual([])
   })
 
+  it('NFR-COST-1: a call the model never made, for want of the token, does not count against the day', async () => {
+    await open()
+    answers.push({ error: 'нет токена Claude: пройди мастер в пульте стенда', skipped: true })
+    const id = await stand.addOrder({ from: 'sample', behaviour: 'answers' })
+    await bid(id)
+    await until(() => (stand.state.plans[id]?.note ?? '').includes('токена'))
+    expect(stand.state.usage.calls).toBe(0)
+  })
+
   it('NFR-MAINT-1: Boris writes as the client from the page, and changes how a client behaves', async () => {
     await open()
     const { body } = await api('orders', { from: 'sample', behaviour: 'manual' })
@@ -364,6 +373,9 @@ describe('the client model of the stand', () => {
       token: async () => null,
       cwd: tmpdir(),
     })
-    expect(await model(turn)).toEqual({ error: expect.stringContaining('токена Claude') })
+    expect(await model(turn)).toEqual({
+      error: expect.stringContaining('токена Claude'),
+      skipped: true,
+    })
   })
 })

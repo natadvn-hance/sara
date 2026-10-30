@@ -71,7 +71,7 @@ mirror() {
     echo "begin;"
     echo "delete from core.direction_version; delete from core.direction_profile;"
     echo "delete from core.setting where key not like 'setup.%';"
-    grep -v '^SET \|^SELECT pg_catalog' "$tmp/config.sql"
+    grep -Ev '^(SET |SELECT pg_catalog)' "$tmp/config.sql"
     echo "copy core.setting (key, value, changed_by, changed_at) from stdin;"
     cat "$tmp/settings.tsv"
     echo '\.'
@@ -117,7 +117,7 @@ reset_db() {
     -c "create database sara"
   compose run --rm --no-deps -T stand rm -f /stand-data/state.json
   compose run --rm --no-deps -T core node --import tsx apps/core/src/db/migrate.ts
-  grep -v '^SET \|^SELECT pg_catalog' "$keep/owner_auth.sql" | psql_stand
+  { grep -Ev '^(SET |SELECT pg_catalog)' "$keep/owner_auth.sql" || true; } | psql_stand
   { echo "copy core.setting (key, value, changed_by, changed_at) from stdin;"; cat "$keep/setup.tsv"; echo '\.'; } | psql_stand
   mirror
   compose up -d core stand
@@ -239,6 +239,9 @@ status() {
 
   df -h / | tail -1 | awk '{print "Диск сервера: занято " $3 " из " $2 ", свободно " $4}'
 }
+
+# Sourced (a rehearsal on the Mac), only the functions above are loaded.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 cmd="${1:-status}"
 shift || true

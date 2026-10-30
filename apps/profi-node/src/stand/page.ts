@@ -20,6 +20,7 @@ export const STAND_PAGE = `<!doctype html>
   section, .order { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   button, select, textarea, input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  select { max-width: 100%; min-width: 0; }
   button { cursor: pointer; }
   button.main { background: var(--accent); border-color: var(--accent); color: #fff; }
   textarea { width: 100%; min-height: 56px; resize: vertical; }
@@ -108,7 +109,7 @@ function render() {
       '<textarea placeholder="Написать за клиента">' + esc(drafts[o.id] || '') + '</textarea>' +
       '<div class="row" style="margin-top:6px"><button class="main" data-act="client">Отправить от клиента</button>' +
       '<button data-act="read">Прочитал</button><button data-act="typing">Печатает</button><button data-act="close">Закрыть заказ</button>' +
-      '<select data-act="plan">' + options(data.behaviours, p.behaviour) + '</select></div></div>'
+      '<span class="muted">клиент:</span><select data-act="plan">' + options(data.behaviours, p.behaviour) + '</select></div></div>'
   }).join('')
 }
 async function refresh() {

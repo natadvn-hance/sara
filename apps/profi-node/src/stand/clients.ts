@@ -179,6 +179,7 @@ export function createClients(d: ClientsDeps): Clients {
         .map((m) => ({ who: m.author === 'client' ? 'клиент' : 'исполнитель', text: m.text })),
     })
     if ('error' in out) {
+      if (out.skipped) d.state.usage.calls--
       p.note = out.error
       d.changed()
       return

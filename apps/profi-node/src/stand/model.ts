@@ -12,7 +12,10 @@ export type ClientTurn = {
   dialog: { who: 'клиент' | 'исполнитель'; text: string }[]
 }
 
-export type ClientModel = (turn: ClientTurn) => Promise<TrainerClientOutput | { error: string }>
+/** `skipped`: the model was not called at all, so the day's ceiling does not count it. */
+export type ClientModel = (
+  turn: ClientTurn,
+) => Promise<TrainerClientOutput | { error: string; skipped?: true }>
 
 /**
  * The trainer's client role (roles/trainer-client, haiku) writes the client's next line. The token is the stand core's
@@ -28,7 +31,7 @@ export function createClientModel(o: {
   const dir = join(o.rolesDir, 'trainer-client')
   return async (turn) => {
     const token = await o.token()
-    if (!token) return { error: 'нет токена Claude: пройди мастер в пульте стенда' }
+    if (!token) return { error: 'нет токена Claude: пройди мастер в пульте стенда', skipped: true }
     const meta = RoleMeta.parse(JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')))
     const run = await runClaude({
       bin: o.claudeBin,
