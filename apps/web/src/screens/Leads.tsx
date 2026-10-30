@@ -1,4 +1,11 @@
-import { type LeadQueue, type LeadRow, type LeadView, type QueueOrder, SCREEN_RU, type ScorePart } from '@sara/shared'
+import {
+  type LeadQueue,
+  type LeadRow,
+  type LeadView,
+  type QueueOrder,
+  SCREEN_RU,
+  type ScorePart,
+} from '@sara/shared'
 import { useState } from 'react'
 import { usePress, useScreen } from '../app/data'
 import { ago, count, rub, waited, waitTone } from '../app/format'
