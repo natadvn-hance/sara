@@ -130,7 +130,8 @@ export type LeadRow = z.infer<typeof LeadRow>
 export const LeadDecided = z.object({
   id: z.string(),
   title: z.string(),
-  decision: z.enum(['bid', 'skip', 'closed', 'other']),
+  /** `stale`: nobody decided, the order became a day old and the card folded (FR-LEAD-10). */
+  decision: z.enum(['bid', 'skip', 'closed', 'stale', 'other']),
   at,
   feeRub: rub,
   /** Boris's reason of a skip, when he gave one. */

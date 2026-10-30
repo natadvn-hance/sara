@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { staleCardsSince } from '../leads/waiting'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 
@@ -25,6 +26,9 @@ const HELD_TEXTS = {
     `${n}. ${h.title}, ${h.score === null ? 'без оценки' : `балл ${h.score}`}`,
   more: (n: number) => `И ещё ${n} ${plural(n, ['заявка', 'заявки', 'заявок'])}`,
   button: (n: number) => `Показать №${n}`,
+  /** The one line about the cards folded as stale (leads/staleCards.ts): never a message of their own. */
+  expired: (n: number) =>
+    `Убрала ${n} ${plural(n, ['заявку', 'заявки', 'заявок'])} старше суток, их карточки в боте свёрнуты`,
 }
 
 export const mskParts = (d: Date) => {
@@ -110,7 +114,8 @@ export async function dailySummary(
     where l.status = 'held' and l.seen_at > ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
     order by s.score desc nulls last, l.bid_price_rub, l.seen_at`)
   const held = heldRows.rows
-  if (dropped === 0 && held.length === 0) return 'none'
+  const expired = await staleCardsSince(d.db, new Date(now.getTime() - 24 * 3600_000))
+  if (dropped === 0 && held.length === 0 && expired === 0) return 'none'
 
   const rows = await d.db.execute<Borderline>(sql`
     select l.id as "leadId", l.title, s.score, s.reason
@@ -142,6 +147,10 @@ export async function dailySummary(
     if (lines.length > 0) lines.push('')
     lines.push(HELD_TEXTS.head, ...shown.map((h, i) => HELD_TEXTS.line(picks.length + i + 1, h)))
     if (held.length > shown.length) lines.push(HELD_TEXTS.more(held.length - shown.length))
+  }
+  if (expired > 0) {
+    if (lines.length > 0) lines.push('')
+    lines.push(HELD_TEXTS.expired(expired))
   }
   try {
     if (picks.length === 0 && shown.length === 0) {
