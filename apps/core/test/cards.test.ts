@@ -7,6 +7,7 @@ import {
   leadCardText,
   plainFallback,
   renderLeadCard,
+  spanText,
   TEXTS,
   telegramTextLength,
 } from '../src/notify/cards'
@@ -362,45 +363,89 @@ describe('the lead card length', () => {
 })
 
 describe('the card of an order closed on Profi.ru', () => {
-  const CLOSED = `<b>${TEXTS.closedOnSite}</b>`
+  const H = 3600_000
+  const PUB = '2026-10-30T09:00:00.000Z'
+  const at = (ms: number) => new Date(Date.parse(PUB) + ms).toISOString()
+  const SHORT_LINK = `<a href="https://profi.ru/backoffice/n.php?o=90001">${TEXTS.closedLink}</a>`
 
-  it('FR-LEAD-5: the closed card is the same card with the closed line as its last line', () => {
-    const open = leadCardText(full)
-    const closed = closedLeadCardText(full)
-    expect(closed).toBe(`${open}\n\n${CLOSED}`)
-    expect(closed.split('\n').at(-1)).toBe(CLOSED)
-    expect(TEXTS.closedOnSite).toBe('Заявка закрыта на Профи.ру, откликнуться уже нельзя')
+  it('FR-LEAD-5: the closed card is short: closed, the title, how long it was open, the link; no order text', () => {
+    const closed = closedLeadCardText({
+      ...full,
+      closed: {
+        since: PUB,
+        published: true,
+        at: at(2 * H + 15 * 60_000),
+        exact: true,
+        openUntil: at(H),
+      },
+    })
+    expect(closed).toBe(
+      `<b>🔒 Заявка закрыта</b> · ${full.title} · закрылась через 2 ч 15 мин после публикации\n${SHORT_LINK}`,
+    )
+    expect(closed).not.toContain(full.text.slice(0, 20))
+    expect(closed).not.toContain(LINK)
   })
 
-  it('FR-LEAD-5: a reminder copy closes as the plain card, without «Заявка ждёт решения»', () => {
-    const closed = closedLeadCardText({ ...full, reminder: true })
-    expect(closed).not.toContain('Заявка ждёт решения')
-    expect(closed).not.toContain('⏰')
-    expect(closed.endsWith(CLOSED)).toBe(true)
+  it('FR-LEAD-5: a closing known only roughly says so: open at least so long, closed by HH:MM Moscow time', () => {
+    const w = { since: PUB, published: true, at: at(5 * H + 20 * 60_000), exact: false }
+    expect(
+      closedLeadCardText({ ...full, closed: { ...w, openUntil: at(3 * H + 10 * 60_000) } }),
+    ).toContain(' · была открыта не меньше 3 ч 10 мин, закрыта к 17:20')
+    // Nothing seen open after its publication: only the hour.
+    expect(closedLeadCardText({ ...full, closed: { ...w, openUntil: null } })).toContain(
+      `${full.title} · закрыта к 17:20\n`,
+    )
   })
 
-  it('FR-LEAD-5: a long order text is cut so the closed line still fits within 4096 characters', () => {
-    const long = 'Очень длинная заявка. '.repeat(500)
-    const r = renderLeadCard({ ...full, text: long }, { closed: true })
-    expect(r.textCut).toBe(true)
-    expect(telegramTextLength(r.html)).toBeLessThanOrEqual(4096 - 100)
-    expect(r.html.endsWith(CLOSED)).toBe(true)
-    expect(r.html).toContain(LINK)
-    // A card that was just under the limit before the closed line is cut a little more, never over.
-    for (const n of [3000, 3300, 3400, 3500, 3600, 3700, 3900]) {
-      const edge = renderLeadCard({ ...full, text: 'я'.repeat(n) }, { closed: true })
-      expect(telegramTextLength(edge.html)).toBeLessThanOrEqual(4096 - 100)
-      expect(edge.html.endsWith(CLOSED)).toBe(true)
-    }
+  it('FR-LEAD-5: without the publication time it counts from when Sara saw the order, and says so', () => {
+    expect(
+      closedLeadCardText({
+        ...full,
+        closed: { since: PUB, published: false, at: at(40 * 60_000), exact: true, openUntil: null },
+      }),
+    ).toContain('закрылась через 40 мин после того, как я её увидела')
   })
 
-  it('FR-LEAD-5: the closed line is not on an open card, and the open card is as it was', () => {
-    expect(leadCardText(full)).not.toContain(TEXTS.closedOnSite)
-    expect(renderLeadCard(full)).toEqual(renderLeadCard(full, {}))
+  it('FR-LEAD-5: a card without its closing time is still short and closed', () => {
+    expect(closedLeadCardText(full)).toBe(`<b>🔒 Заявка закрыта</b> · ${full.title}\n${SHORT_LINK}`)
+  })
+
+  it('FR-LEAD-5: the title is escaped and cut like on the card', () => {
+    const closed = closedLeadCardText({ ...full, title: '<Сайт & SEO>' })
+    expect(closed).toContain('&lt;Сайт &amp; SEO&gt;')
+  })
+
+  it('FR-LEAD-10: a card that waited more than a day turns into the short stale card, with how long it waited', () => {
+    const stale = closedLeadCardText({
+      ...full,
+      stale: { since: PUB, at: at(27 * H + 30 * 60_000) },
+      // A stale card never carries the closing of the order.
+      closed: { since: PUB, published: true, at: at(H), exact: true, openUntil: null },
+    })
+    expect(stale).toBe(
+      `<b>⌛ Заявка устарела</b> · ${full.title} · ждала решения 1 день 3 ч\n${SHORT_LINK}`,
+    )
+    expect(stale).not.toContain(DASH)
+    expect(stale).not.toContain('🔒')
+  })
+
+  it('FR-LEAD-5: spans read the way Boris says them', () => {
+    expect(spanText(20_000)).toBe('1 мин')
+    expect(spanText(45 * 60_000)).toBe('45 мин')
+    expect(spanText(H)).toBe('1 ч')
+    expect(spanText(2 * H + 5 * 60_000)).toBe('2 ч 5 мин')
+    expect(spanText(24 * H)).toBe('1 день')
+    expect(spanText(27 * H + 59 * 60_000)).toBe('1 день 3 ч')
+    expect(spanText(5 * 24 * H)).toBe('5 дней')
   })
 
   it('NFR-UX-1: the texts of a closed order have no long dash', () => {
-    for (const t of [closedLeadCardText(full), TEXTS.closedOnSite, TEXTS.recheckDoubt(3, 4)])
+    const w = { since: PUB, published: true, at: at(H), exact: false, openUntil: at(30 * 60_000) }
+    for (const t of [
+      closedLeadCardText({ ...full, closed: w }),
+      closedLeadCardText({ ...full, closed: { ...w, exact: true } }),
+      TEXTS.recheckDoubt(3, 4),
+    ])
       expect(t).not.toContain(DASH)
   })
 

@@ -83,12 +83,16 @@ const actorsOf = async (type: string, id: string) =>
       .where(and(eq(event.type, type), eq(event.entityId, id)))
   ).map((e) => e.actor)
 
-/** An order that came, passed the Sorter and the Scorer and reached Boris as a card. */
+/**
+ * An order that came, passed the Sorter and the Scorer and reached Boris as a card. The board saw it an hour before
+ * the first pass (`first()`), so at that pass it is a fresh order whatever the hour of the run: looked at every 15
+ * minutes (FR-LEAD-5).
+ */
 async function shownCard(): Promise<{ id: string; taskId: string; messageId: number }> {
   const id = orderId()
   const before = leadCards().length
   fake.setOrderPage(id, { bid_price_rub: 145 })
-  await fake.emitOrder({ order_id: id, ...BOARD })
+  await fake.emitOrder({ order_id: id, ...BOARD, seen_at: plus(first(), -60).toISOString() })
   await until(() => leadCards().length === before + 1)
   // The card is in the chat before the task keeps its message number and the journal the moment it went out.
   await until(async () => (await taskOf(id))?.telegramMessageId != null)
@@ -165,7 +169,7 @@ beforeEach(async () => {
 })
 
 describe('a waiting card is looked at again (FR-LEAD-5)', () => {
-  it('FR-LEAD-5: an order still open is read again and its card is left as it is, and not again within the hour', async () => {
+  it('FR-LEAD-5: an order still open is read again and its card is left as it is, and not again within 15 minutes', async () => {
     const { id } = await shownCard()
     const at = first()
     const reads = fake.orderReads.length
@@ -182,19 +186,19 @@ describe('a waiting card is looked at again (FR-LEAD-5)', () => {
       error: null,
       via: 'recheck',
     })
-    // Less than an hour after that look nothing is read; an hour after it the card is looked at again.
-    expect(await app.recheck.tick(plus(at, 30))).toEqual({ checked: 0, closed: 0, doubt: false })
+    // A fresh order: less than 15 minutes after that look nothing is read; then the card is looked at again.
+    expect(await app.recheck.tick(plus(at, 10))).toEqual({ checked: 0, closed: 0, doubt: false })
     expect(fake.orderReads).toHaveLength(reads + 1)
-    expect(await app.recheck.tick(plus(at, 61))).toMatchObject({ checked: 1, closed: 0 })
+    expect(await app.recheck.tick(plus(at, 16))).toMatchObject({ checked: 1, closed: 0 })
     expect(fake.orderReads).toHaveLength(reads + 2)
     expect(tg.edited).toHaveLength(0)
   }, 60000)
 
-  it('FR-LEAD-5: a card is not looked at before it has waited an hour', async () => {
+  it('FR-LEAD-5: a card is not looked at before it has waited 15 minutes', async () => {
     await shownCard()
     const reads = fake.orderReads.length
     // The card went out a moment ago, in the real clock of the run.
-    expect(await app.recheck.tick(plus(new Date(), 20))).toMatchObject({ checked: 0 })
+    expect(await app.recheck.tick(plus(new Date(), 10))).toMatchObject({ checked: 0 })
     expect(fake.orderReads).toHaveLength(reads)
   }, 60000)
 
@@ -236,10 +240,10 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     for (const e of tg.edited) {
       expect(e.reply_markup).toEqual({ inline_keyboard: [] })
       expect(e.parse_mode).toBe('HTML')
-      expect(e.text).toContain(TEXTS.closedOnSite)
-      expect(e.text).toContain(TITLE)
-      // The copy sent again is closed as the plain card.
-      expect(e.text).not.toContain('Заявка ждёт решения')
+      // The short closed card: closed, the title, by when, the link; the order text is gone.
+      expect(e.text.startsWith(`<b>${TEXTS.closedCard}</b> · ${TITLE} · `)).toBe(true)
+      expect(e.text).toContain(`${TEXTS.closedLink}</a>`)
+      expect(e.text).not.toContain(BOARD.text)
     }
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
     expect((await leadOf(id))?.status).toBe('closed')
@@ -317,6 +321,43 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
   }, 60000)
 })
 
+describe('a card that waited more than a day (FR-LEAD-10)', () => {
+  it('FR-LEAD-10: its message turns into the short stale card, its task ends, and its page is not read', async () => {
+    const { id, taskId, messageId } = await shownCard()
+    const day = 27 * 3600_000
+    await db
+      .update(lead)
+      .set({ seenAt: new Date(Date.now() - day).toISOString() })
+      .where(eq(lead.id, id))
+    await db
+      .update(task)
+      .set({ createdAt: new Date(Date.now() - day).toISOString() })
+      .where(eq(task.id, taskId))
+    const reads = fake.orderReads.length
+    expect(await app.stale.tick()).toEqual({ closed: 1 })
+    expect(tg.edited).toHaveLength(1)
+    expect(tg.edited[0]).toMatchObject({
+      message_id: messageId,
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [] },
+    })
+    expect(tg.edited[0]?.text).toContain(`<b>${TEXTS.staleCard}</b> · ${TITLE} · ждала решения`)
+    expect(tg.edited[0]?.text).toContain(`${TEXTS.closedLink}</a>`)
+    expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
+    expect((await leadOf(id))?.status).toBe('stale')
+    expect(await payloads('task.resolved', taskId)).toEqual([{ action: 'skip', reason: 'stale' }])
+    // Nothing is read, nothing is said to Boris, and a press on the old message is «Уже сделано».
+    expect(await app.recheck.tick(first())).toMatchObject({ checked: 0 })
+    expect(fake.orderReads).toHaveLength(reads)
+    const answers = tg.answers.length
+    tg.pushPress(111, `t:${taskId}:bid`)
+    await until(() => tg.answers.length === answers + 1)
+    expect(tg.answers.at(-1)?.text).toBe(TEXTS.alreadyDone)
+    expect(fake.bids).toHaveLength(0)
+    expect(await app.stale.tick()).toEqual({ closed: 0 })
+  }, 60000)
+})
+
 describe('a page that cannot be trusted (FR-LEAD-5)', () => {
   it('FR-LEAD-5: an answer from the node memory, not from the page, closes nothing and ends the pass', async () => {
     const a = await shownCard()
@@ -373,9 +414,14 @@ describe('a page that cannot be trusted (FR-LEAD-5)', () => {
     await settle()
     expect(warnings()).toHaveLength(1)
     expect(tg.edited).toHaveLength(0)
-    // The next day Boris is told again.
-    expect(await app.recheck.tick(plus(at, 25 * 60))).toMatchObject({ doubt: true })
-    await until(() => warnings().length === 2)
+    // The next day the same orders are old: old orders closing together are no doubt (27.10.2026), they are closed.
+    expect(await app.recheck.tick(plus(at, 25 * 60))).toEqual({
+      checked: 3,
+      closed: 3,
+      doubt: false,
+    })
+    for (const c of cards) expect((await taskOf(c.id))?.state).toBe('resolved')
+    expect(warnings()).toHaveLength(1)
   }, 90000)
 })
 
@@ -390,7 +436,7 @@ describe('a bid that ended ORDER_CLOSED (FR-LEAD-5)', () => {
       message_id: messageId,
       reply_markup: { inline_keyboard: [] },
     })
-    expect(tg.edited[0]?.text).toContain(TEXTS.closedOnSite)
+    expect(tg.edited[0]?.text).toContain(TEXTS.closedCard)
     // What Boris pressed stays his decision; the lead is closed all the same.
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
     expect((await leadOf(id))?.status).toBe('closed')

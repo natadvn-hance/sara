@@ -98,6 +98,28 @@ describe('routing of Profi events', () => {
     expect(calls).toEqual(['pipeline', 'account'])
   })
 
+  it('FR-LEAD-5: an order gone from the feed kicks the recheck, whatever the pipeline setting; nothing else hears it', async () => {
+    const { routeProfiEvent } = await import('../src/accounts/profiEvents')
+    const calls: string[] = []
+    const r = {
+      db,
+      onOrderSeen: async () => {
+        calls.push('pipeline')
+      },
+      onOrderGone: () => {
+        calls.push('gone')
+      },
+      onAccountEvent: async () => {
+        calls.push('account')
+      },
+      onConversationEvent: async () => {
+        calls.push('conversation')
+      },
+    }
+    await routeProfiEvent(r, ev('profi.order_gone', { page: 0 }))
+    expect(calls).toEqual(['gone'])
+  })
+
   it('FR-CONV-1: chat events go to the conversation', async () => {
     const { routeProfiEvent } = await import('../src/accounts/profiEvents')
     const calls: string[] = []

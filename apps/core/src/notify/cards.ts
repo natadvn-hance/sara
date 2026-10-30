@@ -10,6 +10,21 @@ export type Reading = {
   job: string
 }
 
+/**
+ * When an order closed on Profi.ru, as far as Sara knows it (FR-LEAD-5): from its publication (or from the moment Sara
+ * first saw it, when the board gave no time) to its closing. The closing is exact when the order left the feed, or a
+ * look shortly before still found it open; otherwise it is only known to be «by» `at`.
+ */
+export type ClosedWhen = {
+  since: string
+  /** `since` is the publication; false: the moment Sara first saw the order. */
+  published: boolean
+  at: string
+  exact: boolean
+  /** The last moment the order was seen open; null: none known. */
+  openUntil: string | null
+}
+
 export type LeadCard = {
   taskId: string
   /** Profi.ru's order number: the link to the order is built from it. */
@@ -52,6 +67,10 @@ export type LeadCard = {
    * full reading for «Разбор» (null: a lead whose reading was stored without it).
    */
   analysis?: { hiddenNeed: string; risk: string; condition: string; reading: Reading | null } | null
+  /** The order closed on Profi.ru: when, for the short closed card. */
+  closed?: ClosedWhen | null
+  /** The card waited more than a day (FR-LEAD-10): from its first message to now, for the short stale card. */
+  stale?: { since: string; at: string } | null
 }
 
 const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
@@ -65,7 +84,7 @@ const REFUSED: Record<string, string> = {
     'страница заказа на Профи.ру выглядит не так, как я умею читать. Ничего не нажала. Откликнись вручную на Профи.ру или подожди исправления, карточка у тебя.',
   NOT_FOUND:
     'служба Профи.ру не знает этот аккаунт или заказ. Ничего не нажала. Посмотри «Состояние системы».',
-  ORDER_CLOSED: 'заявка больше не принимает отклики. Ничего не нажала, деньги не списаны.',
+  ORDER_CLOSED: 'заявка уже закрыта на Профи.ру. Ничего не нажала, деньги не списаны.',
   NO_MONEY:
     'на кошельке Профи.ру не хватает денег. Ничего не нажала. Пополни кошелёк и нажми «Откликнуться» снова, карточка у тебя.',
   UNSAFE_PAYMENT:
@@ -185,8 +204,16 @@ export const TEXTS = {
   followUpsTooLong: (max: number) =>
     `Сообщений вдогонку может быть не больше двух, каждое до ${max} знаков. Не сохранила.`,
   draftLate: 'Заявка уже решена, текст не поменяла',
-  /** The last line of a card whose order closed on Profi.ru: the buttons are gone. */
-  closedOnSite: 'Заявка закрыта на Профи.ру, откликнуться уже нельзя',
+  /** The card of an order closed on Profi.ru, in short (Boris, 30.10.2026): the buttons are gone. */
+  closedCard: '🔒 Заявка закрыта',
+  closedAfter: (span: string, published: boolean) =>
+    `закрылась через ${span} ${published ? 'после публикации' : 'после того, как я её увидела'}`,
+  closedBy: (clock: string, openFor: string | null) =>
+    openFor ? `была открыта не меньше ${openFor}, закрыта к ${clock}` : `закрыта к ${clock}`,
+  closedLink: 'Открыть на Профи.ру',
+  /** A card that waited more than a day (FR-LEAD-10): no longer offered, the buttons are gone. */
+  staleCard: '⌛ Заявка устарела',
+  staleWaited: (span: string) => `ждала решения ${span}`,
   /** Many waiting cards look closed at once: more likely the site changed than that all of them closed. */
   recheckDoubt: (closed: number, checked: number) =>
     `Похоже, Профи.ру поменял страницу заказа: ${closed} из ${checked} проверенных заявок выглядят закрытыми. Карточки не трогаю, посмотри сам.`,
@@ -410,7 +437,7 @@ function draftLines(c: LeadCard): string[] {
  * `shown` is the part of the order text the card carries; `last` is a block after the link (the closed line).
  * Boris chose this layout from three samples on 27.10.2026: the main facts first, the order text last and folded.
  */
-function cardHtml(c: LeadCard, shown: string, last: string | null = null): string {
+function cardHtml(c: LeadCard, shown: string): string {
   return [
     headLines(c),
     clientLines(c),
@@ -419,7 +446,6 @@ function cardHtml(c: LeadCard, shown: string, last: string | null = null): strin
     ...(c.draft?.followUps?.length ? [followUpLines(c)] : []),
     orderLines(shown),
     [linkLine(c.orderId)],
-    ...(last ? [[last]] : []),
   ]
     .map((block) => block.join('\n'))
     .join('\n\n')
@@ -434,22 +460,16 @@ function cutText(text: string, keep: number): string {
 
 /**
  * The lead card as Telegram HTML, within one message: when it is too long, the order text is shortened with «…»
- * (`textCut`) and «Разбор» brings it whole. `closed`: the order closed on Profi.ru, the card ends with that line
- * (counted in the length) and is no reminder any more.
+ * (`textCut`) and «Разбор» brings it whole.
  */
-export function renderLeadCard(
-  card: LeadCard,
-  o: { closed?: boolean } = {},
-): { html: string; textCut: boolean } {
-  const c = o.closed ? { ...card, reminder: false } : card
-  const last = o.closed ? `<b>${TEXTS.closedOnSite}</b>` : null
+export function renderLeadCard(c: LeadCard): { html: string; textCut: boolean } {
   const text = c.text.trim() || NO_TEXT
-  let html = cardHtml(c, text, last)
+  let html = cardHtml(c, text)
   if (telegramTextLength(html) <= FIT) return { html, textCut: false }
   let keep = text.length
   for (let i = 0; i < 10; i++) {
     keep = Math.max(0, keep - (telegramTextLength(html) - FIT) - 1)
-    html = cardHtml(c, cutText(text, keep), last)
+    html = cardHtml(c, cutText(text, keep))
     if (telegramTextLength(html) <= FIT) break
   }
   return { html, textCut: true }
@@ -457,8 +477,50 @@ export function renderLeadCard(
 
 export const leadCardText = (c: LeadCard): string => renderLeadCard(c).html
 
-/** The card of an order that closed on Profi.ru: the same card with the closed line last, and no buttons. */
-export const closedLeadCardText = (c: LeadCard): string => renderLeadCard(c, { closed: true }).html
+/** A stretch of time in Boris's words: «40 мин», «2 ч 15 мин», «1 день 3 ч». */
+export function spanText(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60_000))
+  if (min < 60) return `${min} мин`
+  const h = Math.floor(min / 60)
+  if (h < 24) return min % 60 ? `${h} ч ${min % 60} мин` : `${h} ч`
+  const days = `${Math.floor(h / 24)} ${plural(Math.floor(h / 24), ['день', 'дня', 'дней'])}`
+  return h % 24 ? `${days} ${h % 24} ч` : days
+}
+
+const mskClock = (iso: string) =>
+  new Date(iso).toLocaleTimeString('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+/** How long the order was open, as honestly as the journal knows it. */
+function closedWhenText(w: ClosedWhen): string {
+  const ms = (a: string, b: string) => Date.parse(b) - Date.parse(a)
+  if (w.exact) return TEXTS.closedAfter(spanText(ms(w.since, w.at)), w.published)
+  const openFor =
+    w.openUntil && w.published && ms(w.since, w.openUntil) >= 60_000
+      ? spanText(ms(w.since, w.openUntil))
+      : null
+  return TEXTS.closedBy(mskClock(w.at), openFor)
+}
+
+/**
+ * The card of an order closed on Profi.ru, in short (Boris, 30.10.2026): that it closed, the order's title, how long
+ * it was open, and the link. The full card and its buttons are gone. A card that went stale (`stale`, FR-LEAD-10)
+ * says so instead, with how long it waited.
+ */
+export function closedLeadCardText(c: LeadCard): string {
+  const head = c.stale
+    ? [
+        `<b>${TEXTS.staleCard}</b>`,
+        clean(c.title, CAP.title),
+        TEXTS.staleWaited(spanText(Date.parse(c.stale.at) - Date.parse(c.stale.since))),
+      ]
+    : [`<b>${TEXTS.closedCard}</b>`, clean(c.title, CAP.title)]
+  if (c.closed && !c.stale) head.push(closedWhenText(c.closed))
+  return `${head.join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
+}
 
 const READING_PARTS = [
   ['said', 'Что говорит клиент'],

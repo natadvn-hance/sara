@@ -31,12 +31,22 @@ export type Eyes = {
    * said the board has more pages. Null before the first. The minute check scrolls the board by it.
    */
   board(): { seq: number; more: boolean } | null
+  /**
+   * A pass over the board begins (the minute check opens the feed) and ends (its scroll is done). An order the last
+   * pass saw is gone from the feed when this pass does not show it although it loaded the page the order was on, and
+   * the page after it (or the board to its end): the client closed it, most likely. `profi.order_gone` tells the
+   * core, which reads the page of a waiting card's order at once (FR-LEAD-5).
+   */
+  boardPassStart(): void
+  boardPassEnd(now?: number): Promise<void>
   presence(): boolean
   reset(): void
 }
 
 // Old Sara's line between a live chat and an old one (v1, OLD_ESCALATION_AFTER_MS).
 const KNOWN_CHAT_MS = 3 * 24 * 3600 * 1000
+/** An order the board keeps losing and finding (its place moves by relevance) is told gone at most this often. */
+const GONE_EVERY_MS = 3600 * 1000
 
 /**
  * Turns raw platform data into Profi events: each order and message once, by its platform number, whichever
@@ -60,6 +70,10 @@ export function createEyes(o: {
   let board: { seq: number; more: boolean } | null = null
   // chat → when the stream named it and which message, for the time the message really came.
   const touched = new Map<string, { at: string; messageId: string | null }>()
+  // order → the first board page (from 0) it was on, in the pass going on and in the last one; when it was told gone.
+  let pass: { orders: Map<string, number>; pages: number } | null = null
+  let lastPass: Map<string, number> | null = null
+  const goneAt = new Map<string, number>()
 
   async function knowsOrder(orderId: string): Promise<boolean> {
     const rows = await o.db
@@ -195,8 +209,46 @@ export function createEyes(o: {
     }
     await onSignals(p.signals, body)
     // Counted when its orders are stored and on their way, so a pass that saw the answer arrive leaves nothing behind.
-    if (p.recognized && p.what === 'feed' && source === 'response')
+    if (p.recognized && p.what === 'feed' && source === 'response') {
       board = { seq: (board?.seq ?? 0) + 1, more: p.more === true }
+      if (pass) {
+        for (const s of p.signals)
+          if (s.t === 'order' && !pass.orders.has(s.order.order_id))
+            pass.orders.set(s.order.order_id, pass.pages)
+        pass.pages++
+      }
+    }
+  }
+
+  async function boardPassEnd(now = Date.now()) {
+    const seen = pass
+    pass = null
+    // A pass that got no answer of the board (the feed did not open, the board is silent) tells nothing.
+    if (!seen || seen.pages === 0) return
+    const before = lastPass
+    lastPass = seen.orders
+    if (!before) return
+    // Its last page may lose an order to the next page; the board read to its end loses none.
+    const covered = board?.more === false ? Number.POSITIVE_INFINITY : seen.pages - 1
+    for (const [orderId, page] of before) {
+      if (seen.orders.has(orderId) || page >= covered) continue
+      const told = goneAt.get(orderId)
+      if (told !== undefined && now - told < GONE_EVERY_MS) continue
+      goneAt.delete(orderId)
+      if (goneAt.size >= 500) goneAt.delete(goneAt.keys().next().value ?? '')
+      goneAt.set(orderId, now)
+      await queueEvent(o.db, {
+        type: 'profi.order_gone',
+        accountId: o.accountId,
+        entity: { kind: 'order', id: orderId },
+        payload: { page },
+      }).catch((err) =>
+        console.error(
+          'order gone not queued',
+          err instanceof Error ? err.message.slice(0, 120) : err,
+        ),
+      )
+    }
   }
 
   return {
@@ -302,6 +354,10 @@ export function createEyes(o: {
     },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,
     board: () => board,
+    boardPassStart() {
+      pass = { orders: new Map(), pages: 0 }
+    },
+    boardPassEnd,
     balance: () => balance,
     presence: () => presence,
     reset() {
