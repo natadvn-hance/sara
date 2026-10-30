@@ -852,3 +852,18 @@ export const notice = core.table(
   },
   (t) => [index('notice_created').on(t.createdAt), index('notice_task').on(t.taskId)],
 )
+
+/**
+ * A bid from the pult with ten seconds to cancel (pult v2 design 4, M7 design 6.3): one row per task; `held`, then
+ * `cancelled` or `fired`. The hold lives here, so a closed Mini App does not lose it and «Отменить» from any device
+ * tells the truth.
+ */
+export const bidHold = core.table('bid_hold', {
+  taskId: uuid('task_id').primaryKey(),
+  requestId: uuid('request_id').notNull().unique(),
+  state: text('state').notNull(),
+  expectedFeeRub: integer('expected_fee_rub').notNull(),
+  executeAt: ts('execute_at').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})

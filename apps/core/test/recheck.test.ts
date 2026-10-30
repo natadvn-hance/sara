@@ -58,8 +58,8 @@ const closeCard = async (taskId: string) => {
   if (closeFails.has(taskId)) throw new Error('could not close')
   closed.push(taskId)
 }
-const recheck = (o: { perPass?: number } = {}) =>
-  startCardRecheck({ db, profi, notifier, close: closeCard, tickMs: 3_600_000, ...o })
+const recheck = (o: { perPass?: number; now?: () => Date } = {}) =>
+  startCardRecheck({ db, profi, notifier, close: closeCard, tickMs: 3_600_000, perPass: 4, ...o })
 
 let n = 0
 beforeEach(async () => {
@@ -76,6 +76,10 @@ beforeEach(async () => {
 type Seed = {
   /** Minutes before AT the card went out; null: no card.sent in the journal. */
   sent: number | null
+  /** Minutes before AT the order was seen (its age); by default when the card went out or the task was made. */
+  seen?: number
+  /** The moment the minutes count back from (default AT). */
+  at?: Date
   /** Minutes before AT of the last page read of the lead; none by default. */
   look?: number
   state?: string
@@ -86,6 +90,8 @@ type Seed = {
 
 /** A lead with a decision task and the journal of its card, as the pipeline leaves them. */
 async function card(s: Seed) {
+  const ref = s.at ?? AT
+  const before = (min: number) => new Date(ref.getTime() - min * MIN)
   const id = `8000${++n}`
   const correlationId = newEventId()
   const taskId = newEventId()
@@ -99,7 +105,7 @@ async function card(s: Seed) {
     clientName: 'Ирина',
     budgetText: null,
     bidPriceRub: 210,
-    seenAt: AT.toISOString(),
+    seenAt: before(s.seen ?? s.sent ?? s.createdMin ?? 0).toISOString(),
     status: 'queued',
     correlationId,
   })
@@ -140,6 +146,21 @@ async function card(s: Seed) {
   return { id, taskId }
 }
 
+/** The node told that the order left the feed, `min` minutes before AT. */
+const gone = (id: string, min: number) =>
+  appendEvent(db, {
+    type: 'profi.order_gone',
+    v: 1,
+    entity: { kind: 'order', id },
+    account_id: 'hance-marketing',
+    actor: 'profi',
+    occurred_at: before(min).toISOString(),
+    causation_id: null,
+    correlation_id: newEventId(),
+    reason: null,
+    payload: { page: 0 },
+  })
+
 const pageReads = async (id: string) =>
   (
     await db
@@ -170,14 +191,39 @@ describe('which waiting cards are looked at (FR-LEAD-5)', () => {
     expect((await recheck({ perPass: 2 }).tick(AT)).checked).toBe(2)
   })
 
-  it('FR-LEAD-5: a card is looked at again only when its last look is older than an hour', async () => {
-    const fresh = await card({ sent: 59 })
-    const exact = await card({ sent: 60 })
-    const old = await card({ sent: 61 })
+  it('FR-LEAD-5: a day-old card is looked at again only when its last look is older than an hour', async () => {
+    const fresh = await card({ sent: 59, seen: 600 })
+    const exact = await card({ sent: 60, seen: 600 })
+    const old = await card({ sent: 61, seen: 600 })
     expect((await recheck().tick(AT)).checked).toBe(1)
     expect(reads).toEqual([old.id])
     expect(reads).not.toContain(fresh.id)
     expect(reads).not.toContain(exact.id)
+  })
+
+  it('FR-LEAD-5: a card of an order seen less than 3 hours ago is looked at every 15 minutes', async () => {
+    const waited = await card({ sent: 16, seen: 170 })
+    const soon = await card({ sent: 14, seen: 20 })
+    const dayOld = await card({ sent: 16, seen: 200 })
+    expect((await recheck().tick(AT)).checked).toBe(1)
+    expect(reads).toEqual([waited.id])
+    expect(reads).not.toContain(soon.id)
+    expect(reads).not.toContain(dayOld.id)
+  })
+
+  it('FR-LEAD-5: a card of an order older than a day is looked at every 3 hours', async () => {
+    const due = await card({ sent: 181, seen: 25 * 60 })
+    const notYet = await card({ sent: 170, seen: 25 * 60 })
+    expect((await recheck().tick(AT)).checked).toBe(1)
+    expect(reads).toEqual([due.id])
+    expect(reads).not.toContain(notYet.id)
+  })
+
+  it('FR-LEAD-5: the most overdue look comes first: a fresh card waiting 30 minutes before a day-old one waiting 70', async () => {
+    const dayOld = await card({ sent: 70, seen: 600 })
+    const fresh = await card({ sent: 30, seen: 60 })
+    await recheck().tick(AT)
+    expect(reads).toEqual([fresh.id, dayOld.id])
   })
 
   it('FR-LEAD-5: the last look is the later of the card going out and the last read of its page', async () => {
@@ -190,7 +236,7 @@ describe('which waiting cards are looked at (FR-LEAD-5)', () => {
   })
 
   it('FR-LEAD-5: a read of the recheck itself counts as a look: the same card waits an hour again', async () => {
-    const a = await card({ sent: 300 })
+    const a = await card({ sent: 300, seen: 600 })
     const job = recheck()
     expect((await job.tick(AT)).checked).toBe(1)
     expect((await job.tick(after(30))).checked).toBe(0)
@@ -209,7 +255,7 @@ describe('which waiting cards are looked at (FR-LEAD-5)', () => {
   it('FR-LEAD-5: a task whose card never went out is not looked at; one that kept only its message number is, by its birth', async () => {
     await card({ sent: null, messageId: null, createdMin: 300 })
     const old = await card({ sent: null, createdMin: 300 })
-    const fresh = await card({ sent: null, createdMin: 20 })
+    const fresh = await card({ sent: null, createdMin: 10 })
     await recheck().tick(AT)
     expect(reads).toEqual([old.id])
     expect(reads).not.toContain(fresh.id)
@@ -228,6 +274,87 @@ describe('which waiting cards are looked at (FR-LEAD-5)', () => {
   it('FR-LEAD-5: the first minute of the day hours reads too', async () => {
     await card({ sent: 5000 })
     expect((await recheck().tick(msk('09:00:00', '2026-10-27'))).checked).toBe(1)
+  })
+})
+
+describe('an order gone from the feed (FR-LEAD-5)', () => {
+  it('FR-LEAD-5: its page is read at once, before the cards whose look is due, though its own look is not', async () => {
+    const due = await card({ sent: 300 })
+    const left = await card({ sent: 5, seen: 30 })
+    await gone(left.id, 1)
+    expect((await recheck().tick(AT)).checked).toBe(2)
+    expect(reads).toEqual([left.id, due.id])
+  })
+
+  it('FR-LEAD-5: a gone order whose page was read after it left, or within two minutes, is not read again', async () => {
+    const readSince = await card({ sent: 30, seen: 60, look: 3 })
+    await gone(readSince.id, 4)
+    const justRead = await card({ sent: 30, seen: 60, look: 1 })
+    await gone(justRead.id, 0.5)
+    expect((await recheck().tick(AT)).checked).toBe(0)
+    expect(reads).toEqual([])
+    // Three minutes on, the one that left after its last read is read.
+    expect((await recheck().tick(after(3))).checked).toBe(1)
+    expect(reads).toEqual([justRead.id])
+  })
+
+  it('FR-LEAD-5: a closed gone order is closed by that read', async () => {
+    const left = await card({ sent: 5, seen: 30 })
+    pages[left.id] = { open: false }
+    await gone(left.id, 1)
+    expect(await recheck().tick(AT)).toEqual({ checked: 1, closed: 1, doubt: false })
+    expect(closed).toEqual([left.taskId])
+  })
+
+  it('FR-LEAD-5: a kick runs a pass at once; never at night', async () => {
+    const left = await card({ sent: 5, seen: 30 })
+    await gone(left.id, 1)
+    let at = AT
+    const job = recheck({ now: () => at })
+    job.kick()
+    await vi.waitFor(() => expect(reads).toEqual([left.id]))
+    at = msk('02:00:00', '2026-10-27')
+    const late = await card({ sent: 5, seen: 30 })
+    await gone(late.id, 0)
+    job.kick()
+    await new Promise((r) => setTimeout(r, 300))
+    expect(reads).toEqual([left.id])
+    job.stop()
+  })
+
+  it('FR-LEAD-5: an order that leaves while a pass is reading gets one more pass right after it', async () => {
+    const due = await card({ sent: 300 })
+    let free: () => void = () => {}
+    let held = true
+    const slow = {
+      getOrder: async (...args: Parameters<typeof profi.getOrder>) => {
+        if (held) {
+          held = false
+          await new Promise<void>((r) => {
+            free = r
+          })
+        }
+        return profi.getOrder(...args)
+      },
+    }
+    const job = startCardRecheck({
+      db,
+      profi: slow,
+      notifier,
+      close: closeCard,
+      now: () => AT,
+      tickMs: 3_600_000,
+    })
+    const first = job.tick()
+    await vi.waitFor(() => expect(held).toBe(false))
+    // The pass is reading `due` when the next order leaves the feed.
+    const left = await card({ sent: 5, seen: 30 })
+    await gone(left.id, 0)
+    job.kick()
+    free()
+    await first
+    await vi.waitFor(() => expect(reads).toEqual([due.id, left.id]))
+    job.stop()
   })
 })
 
@@ -330,14 +457,33 @@ describe('what a read page says (FR-LEAD-5)', () => {
 })
 
 describe('when many cards look closed at once (FR-LEAD-5)', () => {
-  const seed = async (total: number, shut: number) => {
+  /** Cards of fresh orders (seen an hour ago, sent 40 minutes ago), the first `shut` of them closed. */
+  const seed = async (total: number, shut: number, o: { old?: boolean; at?: Date } = {}) => {
     const out = []
     for (let i = 0; i < total; i++) {
-      const c = await card({ sent: 300 - i })
+      const c = await card(
+        o.old ? { sent: 300 - i, at: o.at } : { sent: 40 - i, seen: 60 - i, at: o.at },
+      )
       if (i < shut) pages[c.id] = { open: false }
       out.push(c)
     }
     return out
+  }
+  /** A fresh order's page read `min` minutes before AT by another reader (a new order's first read). */
+  const freshRead = async (min: number, open: boolean) => {
+    const c = await card({ sent: 5, seen: min + 5, state: 'resolved' })
+    await appendEvent(db, {
+      type: 'lead.page_read',
+      v: 1,
+      entity: { kind: 'lead', id: c.id },
+      account_id: 'hance-marketing',
+      actor: 'sara',
+      occurred_at: before(min).toISOString(),
+      causation_id: null,
+      correlation_id: newEventId(),
+      reason: null,
+      payload: { ok: true, open, has_bid: false },
+    })
   }
 
   it('FR-LEAD-5: fewer than three checked are closed as they are, even all of them', async () => {
@@ -360,12 +506,49 @@ describe('when many cards look closed at once (FR-LEAD-5)', () => {
     expect(closed).toEqual([cards[0]?.taskId])
   })
 
-  it('FR-LEAD-5: more than half of three or more checked: none is closed, Boris is told', async () => {
-    await seed(3, 2)
+  it('FR-LEAD-5: three fresh pages of three look closed: none is closed, Boris is told', async () => {
+    await seed(3, 3)
     expect(await recheck().tick(AT)).toEqual({ checked: 3, closed: 0, doubt: true })
     expect(closed).toEqual([])
-    expect(said).toEqual([TEXTS.recheckDoubt(2, 3)])
+    expect(said).toEqual([TEXTS.recheckDoubt(3, 3)])
     expect(await eventCount('lead.recheck_doubt')).toBe(1)
+  })
+
+  it('FR-LEAD-5: two of three closed while a fresh page in the same pass reads open: the page works, both are closed', async () => {
+    const cards = await seed(3, 2)
+    expect(await recheck().tick(AT)).toEqual({ checked: 3, closed: 2, doubt: false })
+    expect(closed.sort()).toEqual([cards[0]?.taskId, cards[1]?.taskId].sort())
+    expect(said).toEqual([])
+  })
+
+  it('FR-LEAD-5: old orders closed together are no doubt (27.10.2026): all four are closed', async () => {
+    const cards = await seed(4, 4, { old: true })
+    expect(await recheck().tick(AT)).toEqual({ checked: 4, closed: 4, doubt: false })
+    expect(closed.sort()).toEqual(cards.map((c) => c.taskId).sort())
+    expect(said).toEqual([])
+    expect(await eventCount('lead.recheck_doubt')).toBe(0)
+  })
+
+  it('FR-LEAD-5: old orders closed while a fresh order read open lately: they are closed', async () => {
+    await freshRead(10, true)
+    await seed(3, 3, { old: true })
+    expect(await recheck().tick(AT)).toEqual({ checked: 3, closed: 3, doubt: false })
+  })
+
+  it('FR-LEAD-5: old orders closed while the latest fresh pages read closed too: the page changed, none is closed', async () => {
+    await freshRead(20, false)
+    await freshRead(10, false)
+    await seed(3, 3, { old: true })
+    expect(await recheck().tick(AT)).toEqual({ checked: 3, closed: 0, doubt: true })
+    expect(said).toEqual([TEXTS.recheckDoubt(3, 3)])
+  })
+
+  it('FR-LEAD-5: one fresh page read closed is not enough to doubt, nor fresh reads older than two hours', async () => {
+    await freshRead(10, false)
+    await freshRead(130, false)
+    await freshRead(140, false)
+    await seed(3, 3, { old: true })
+    expect(await recheck().tick(AT)).toEqual({ checked: 3, closed: 3, doubt: false })
   })
 
   it('FR-LEAD-5: all four of four closed is a doubt too', async () => {
@@ -376,14 +559,18 @@ describe('when many cards look closed at once (FR-LEAD-5)', () => {
 
   it('FR-LEAD-5: Boris is told once in twenty-four hours, then again', async () => {
     await seed(3, 3)
-    const job = recheck()
+    const job = recheck({ perPass: 6 })
     expect((await job.tick(AT)).doubt).toBe(true)
     // An hour later the cards are looked at again, look closed again, and Boris is not told a second time.
     expect(await job.tick(after(61))).toEqual({ checked: 3, closed: 0, doubt: true })
-    expect(await job.tick(after(23 * 60))).toEqual({ checked: 3, closed: 0, doubt: true })
     expect(said).toHaveLength(1)
-    expect(await job.tick(after(25 * 60))).toEqual({ checked: 3, closed: 0, doubt: true })
-    expect(said).toEqual([TEXTS.recheckDoubt(3, 3), TEXTS.recheckDoubt(3, 3)])
+    // 23 hours later fresh cards look closed too: still within the day, no second word.
+    await seed(3, 3, { at: after(23 * 60) })
+    expect(await job.tick(after(23 * 60))).toEqual({ checked: 6, closed: 0, doubt: true })
+    expect(said).toHaveLength(1)
+    await seed(3, 3, { at: after(25 * 60) })
+    expect(await job.tick(after(25 * 60))).toEqual({ checked: 6, closed: 0, doubt: true })
+    expect(said).toEqual([TEXTS.recheckDoubt(3, 3), TEXTS.recheckDoubt(6, 6)])
     expect(await eventCount('lead.recheck_doubt')).toBe(2)
     expect(closed).toEqual([])
   })

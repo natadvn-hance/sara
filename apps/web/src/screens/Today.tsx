@@ -114,9 +114,7 @@ function TodayBody({
   return (
     <div className="page">
       <Head
-        eyebrow={dayLabel(t.now)}
-        title="Сара"
-        accent="на смене"
+        title={`Сегодня, ${dayLabel(t.now)}`}
         lead={
           <A to="/health" className={`state tone-${t.state.tone}`}>
             <Dot tone={t.state.tone} live />

@@ -124,8 +124,15 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1793387123656,
-      "tag": "0017_telegram_forum",
+      "when": 1793291701601,
+      "tag": "0017_bid_hold",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793400273709,
+      "tag": "0018_telegram_forum",
       "breakpoints": true
     }
   ]

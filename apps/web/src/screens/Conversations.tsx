@@ -318,12 +318,7 @@ export function ConversationsScreen() {
   const one = useScreen<ConvView>(id ? `/api/conversations/${id}` : null)
   return (
     <div className={`page${id ? ' has-detail' : ''}`}>
-      <Head
-        eyebrow="Режим черновиков"
-        title="Клиенты"
-        accent="Hance"
-        lead="Сара готовит ответ и объясняет, почему так. Клиенту уходит только то, что ты отправил сам."
-      />
+      <Head title="Клиенты" />
       <div className={`split${id ? ' has-detail' : ''}`}>
         <div className="split-list">
           <Screen q={list}>{(l) => <List l={l} current={id} />}</Screen>
