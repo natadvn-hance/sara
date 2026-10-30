@@ -415,6 +415,20 @@ describe('the card of an order closed on Profi.ru', () => {
     expect(closed).toContain('&lt;Сайт &amp; SEO&gt;')
   })
 
+  it('FR-LEAD-10: a card that waited more than a day turns into the short stale card, with how long it waited', () => {
+    const stale = closedLeadCardText({
+      ...full,
+      stale: { since: PUB, at: at(27 * H + 30 * 60_000) },
+      // A stale card never carries the closing of the order.
+      closed: { since: PUB, published: true, at: at(H), exact: true, openUntil: null },
+    })
+    expect(stale).toBe(
+      `<b>⌛ Заявка устарела</b> · ${full.title} · ждала решения 1 день 3 ч\n${SHORT_LINK}`,
+    )
+    expect(stale).not.toContain(DASH)
+    expect(stale).not.toContain('🔒')
+  })
+
   it('FR-LEAD-5: spans read the way Boris says them', () => {
     expect(spanText(20_000)).toBe('1 мин')
     expect(spanText(45 * 60_000)).toBe('45 мин')

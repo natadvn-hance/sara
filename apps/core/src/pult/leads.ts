@@ -97,8 +97,7 @@ export async function leadQueue(db: DbOrTx, now = new Date()): Promise<LeadQueue
     decided: decidedRows.map(({ t, l }) => ({
       id: l.id,
       title: l.title,
-      // A card closed with its order on Profi.ru (FR-LEAD-5) ends as a skip: the lead says it closed.
-      decision: l.status === 'closed' ? 'closed' : decision(t.resolution),
+      decision: decision(t.resolution),
       at: t.resolvedAt ?? t.createdAt,
       feeRub: l.bidPriceRub,
     })),

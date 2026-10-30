@@ -321,6 +321,43 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
   }, 60000)
 })
 
+describe('a card that waited more than a day (FR-LEAD-10)', () => {
+  it('FR-LEAD-10: its message turns into the short stale card, its task ends, and its page is not read', async () => {
+    const { id, taskId, messageId } = await shownCard()
+    const day = 27 * 3600_000
+    await db
+      .update(lead)
+      .set({ seenAt: new Date(Date.now() - day).toISOString() })
+      .where(eq(lead.id, id))
+    await db
+      .update(task)
+      .set({ createdAt: new Date(Date.now() - day).toISOString() })
+      .where(eq(task.id, taskId))
+    const reads = fake.orderReads.length
+    expect(await app.stale.tick()).toEqual({ closed: 1 })
+    expect(tg.edited).toHaveLength(1)
+    expect(tg.edited[0]).toMatchObject({
+      message_id: messageId,
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [] },
+    })
+    expect(tg.edited[0]?.text).toContain(`<b>${TEXTS.staleCard}</b> · ${TITLE} · ждала решения`)
+    expect(tg.edited[0]?.text).toContain(`${TEXTS.closedLink}</a>`)
+    expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
+    expect((await leadOf(id))?.status).toBe('stale')
+    expect(await payloads('task.resolved', taskId)).toEqual([{ action: 'skip', reason: 'stale' }])
+    // Nothing is read, nothing is said to Boris, and a press on the old message is «Уже сделано».
+    expect(await app.recheck.tick(first())).toMatchObject({ checked: 0 })
+    expect(fake.orderReads).toHaveLength(reads)
+    const answers = tg.answers.length
+    tg.pushPress(111, `t:${taskId}:bid`)
+    await until(() => tg.answers.length === answers + 1)
+    expect(tg.answers.at(-1)?.text).toBe(TEXTS.alreadyDone)
+    expect(fake.bids).toHaveLength(0)
+    expect(await app.stale.tick()).toEqual({ closed: 0 })
+  }, 60000)
+})
+
 describe('a page that cannot be trusted (FR-LEAD-5)', () => {
   it('FR-LEAD-5: an answer from the node memory, not from the page, closes nothing and ends the pass', async () => {
     const a = await shownCard()

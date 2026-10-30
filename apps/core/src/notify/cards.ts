@@ -69,6 +69,8 @@ export type LeadCard = {
   analysis?: { hiddenNeed: string; risk: string; condition: string; reading: Reading | null } | null
   /** The order closed on Profi.ru: when, for the short closed card. */
   closed?: ClosedWhen | null
+  /** The card waited more than a day (FR-LEAD-10): from its first message to now, for the short stale card. */
+  stale?: { since: string; at: string } | null
 }
 
 const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
@@ -209,6 +211,9 @@ export const TEXTS = {
   closedBy: (clock: string, openFor: string | null) =>
     openFor ? `была открыта не меньше ${openFor}, закрыта к ${clock}` : `закрыта к ${clock}`,
   closedLink: 'Открыть на Профи.ру',
+  /** A card that waited more than a day (FR-LEAD-10): no longer offered, the buttons are gone. */
+  staleCard: '⌛ Заявка устарела',
+  staleWaited: (span: string) => `ждала решения ${span}`,
   /** Many waiting cards look closed at once: more likely the site changed than that all of them closed. */
   recheckDoubt: (closed: number, checked: number) =>
     `Похоже, Профи.ру поменял страницу заказа: ${closed} из ${checked} проверенных заявок выглядят закрытыми. Карточки не трогаю, посмотри сам.`,
@@ -502,11 +507,18 @@ function closedWhenText(w: ClosedWhen): string {
 
 /**
  * The card of an order closed on Profi.ru, in short (Boris, 30.10.2026): that it closed, the order's title, how long
- * it was open, and the link. The full card and its buttons are gone.
+ * it was open, and the link. The full card and its buttons are gone. A card that went stale (`stale`, FR-LEAD-10)
+ * says so instead, with how long it waited.
  */
 export function closedLeadCardText(c: LeadCard): string {
-  const head = [`<b>${TEXTS.closedCard}</b>`, clean(c.title, CAP.title)]
-  if (c.closed) head.push(closedWhenText(c.closed))
+  const head = c.stale
+    ? [
+        `<b>${TEXTS.staleCard}</b>`,
+        clean(c.title, CAP.title),
+        TEXTS.staleWaited(spanText(Date.parse(c.stale.at) - Date.parse(c.stale.since))),
+      ]
+    : [`<b>${TEXTS.closedCard}</b>`, clean(c.title, CAP.title)]
+  if (c.closed && !c.stale) head.push(closedWhenText(c.closed))
   return `${head.join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
 }
 

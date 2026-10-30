@@ -83,6 +83,12 @@ export type LeadPipeline = {
    * `press`: Boris's bid ended ORDER_CLOSED; his task stays as he decided it, only the card is closed.
    */
   closeOnSite(taskId: string, via: 'recheck' | 'press'): Promise<void>
+  /**
+   * FR-LEAD-10: a waiting card whose order and card are both older than a day at `at` is no longer offered: its task
+   * ends as skipped (stale), the lead is stale, every message of its card becomes the short stale card. True when it
+   * ended here; a task decided meanwhile, or not that old, is left alone.
+   */
+  closeStale(taskId: string, at?: Date): Promise<boolean>
   /** Boris's answer to the request after «Изменить»: the new bid text; the reply goes back to him. */
   onDraftText(a: DraftAnswer): Promise<string>
   /**
@@ -837,12 +843,15 @@ async function closedWhenOf(l: LeadRow, at: Date): Promise<ClosedWhen> {
 
 /**
  * Every message the card of this task went out as (its first card and the cards sent again), edited into the short
- * closed card. The numbers come from the journal (card.sent) and from the task, which also holds those sent before
- * the journal kept them. One message Telegram will not edit never stops the others.
+ * closed card, or the short stale card (`stale`). The numbers come from the journal (card.sent) and from the task,
+ * which also holds those sent before the journal kept them. One message Telegram will not edit never stops the others.
  */
-async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>) {
+async function closeCardMessages(
+  found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>,
+  o: { stale?: Date } = {},
+) {
   const sent = await d()
-    .db.select({ payload: event.payload })
+    .db.select({ payload: event.payload, at: event.occurredAt })
     .from(event)
     .where(
       and(
@@ -862,9 +871,15 @@ async function closeCardMessages(found: NonNullable<Awaited<ReturnType<typeof le
   }
   if (now?.messageId != null) ids.add(now.messageId)
   if (ids.size === 0) return
+  // The wait counts from the first message of the card (the task's birth when the journal has none).
+  const first = Math.min(
+    ...[found.task.createdAt, ...sent.map((e) => e.at)].map((t) => new Date(t).getTime()),
+  )
   const card = {
     ...(await cardOfFound(found, false)),
-    closed: await closedWhenOf(found.lead, new Date()),
+    ...(o.stale
+      ? { stale: { since: new Date(first).toISOString(), at: o.stale.toISOString() } }
+      : { closed: await closedWhenOf(found.lead, new Date()) }),
   }
   for (const id of [...ids].sort((a, b) => a - b)) {
     try {
@@ -1439,6 +1454,50 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         )
       }
       await closeCardMessages(found)
+    },
+
+    async closeStale(taskId, at = new Date()) {
+      const found = await leadOfTask(taskId)
+      if (!found || found.task.kind !== 'lead_decision') return false
+      const { lead: l } = found
+      if (!isStale(l.seenAt, at) || !isStale(found.task.createdAt, at)) return false
+      const ended = await d().db.transaction(async (tx) => {
+        const rows = await tx
+          .update(task)
+          .set({ state: 'resolved', resolution: 'skip', resolvedAt: at.toISOString() })
+          .where(and(eq(task.id, taskId), eq(task.state, 'open')))
+          .returning({ id: task.id })
+        if (rows.length === 0) return false
+        await appendEvent(
+          tx,
+          ev('task.resolved', { kind: 'task', id: taskId }, l.correlationId, 'sara', {
+            action: 'skip',
+            reason: 'stale',
+          }),
+        )
+        await tx
+          .update(lead)
+          .set({ status: 'stale' })
+          .where(and(eq(lead.id, l.id), ne(lead.status, 'bid_sent'), ne(lead.status, 'closed')))
+        await appendEvent(
+          tx,
+          ev('lead.stale', { kind: 'lead', id: l.id }, l.correlationId, 'sara', {
+            seen_at: new Date(l.seenAt).toISOString(),
+            via: 'card',
+          }),
+        )
+        return true
+      })
+      if (!ended) return false
+      await deliverDecision(taskId, 'skip').catch((err) =>
+        console.error(
+          'decision wait not released',
+          taskId,
+          err instanceof Error ? err.message.slice(0, 200) : err,
+        ),
+      )
+      await closeCardMessages(found, { stale: at })
+      return true
     },
 
     onDraftText,

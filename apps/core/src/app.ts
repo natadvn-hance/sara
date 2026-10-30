@@ -34,6 +34,7 @@ import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
 import { SERIES_DELAYS, type SeriesDeps, setSeriesDeps } from './leads/series'
+import { type StaleSweep, startStaleSweep } from './leads/staleCards'
 import { handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
 import { ensureMindIndex } from './mind/indexer'
@@ -64,6 +65,8 @@ export type RunningApp = {
   pipeline: LeadPipeline
   /** The look at waiting cards (FR-LEAD-5); tests drive it with tick(at). */
   recheck: CardRecheck
+  /** The sweep of cards that waited more than a day (FR-LEAD-10); tests call stale.tick instead. */
+  stale: StaleSweep
   close(): Promise<void>
 }
 
@@ -82,8 +85,10 @@ export type StartOptions = {
   learningTickMs?: number
   /** How often the school's jobs run (default a minute). */
   schoolTickMs?: number
-  /** How often waiting cards are looked at again (default 10 minutes); tests call recheck.tick instead. */
+  /** How often waiting cards are looked at again (default 5 minutes); tests call recheck.tick instead. */
   recheckTickMs?: number
+  /** How often cards that waited more than a day are ended (default 5 minutes); tests call stale.tick instead. */
+  staleTickMs?: number
   /** The clock of the greeting of a bid (default the real one); tests fix the hour. */
   now?: () => Date
 }
@@ -319,6 +324,13 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     now: o.now,
   })
   kickRecheck = () => recheck.kick()
+  // Cards that waited more than a day are no longer offered: ended and turned short, a few at a time (FR-LEAD-10).
+  const stale = startStaleSweep({
+    db,
+    close: (taskId, at) => lp.closeStale(taskId, at),
+    tickMs: o.staleTickMs,
+    now: o.now,
+  })
 
   return {
     url,
@@ -328,8 +340,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     pipeline: lp,
     recheck,
+    stale,
     async close() {
       recheck.stop()
+      stale.stop()
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()
