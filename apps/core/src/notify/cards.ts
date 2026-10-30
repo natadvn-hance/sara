@@ -1,4 +1,5 @@
 import { type ClientInfo, formatCallback, formatRub, plural } from '@sara/shared'
+import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
 export type Reading = {
@@ -410,15 +411,31 @@ function whyBlocks(c: LeadCard): string[][] {
 
 /**
  * The series under the bid (Boris, 29.10.2026): what goes into the chat a minute or two after it, each message as its
- * own quote. Nothing when the bid has none.
+ * own quote, and the call offer last (Boris, 30.10.2026), its times shown as words: the code picks them when it sends.
+ * Nothing when the bid has none.
  */
 function followUpLines(c: LeadCard): string[] {
-  const series = c.draft?.followUps ?? []
-  if (series.length === 0) return []
+  const all = c.draft?.followUps ?? []
+  const series = all.filter((t) => !isCallOffer(t))
+  const call = all.find(isCallOffer)
+  if (all.length === 0) return []
   return [
-    '<b>✍️ Вдогонку</b>  ·  через 1-2 минуты после отклика',
-    ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
-    '<i>Уйдёт тем же нажатием, если клиент ещё не ответил</i>',
+    ...(series.length > 0
+      ? [
+          '<b>✍️ Вдогонку</b>  ·  через 1-2 минуты после отклика',
+          ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
+        ]
+      : []),
+    ...(call
+      ? [
+          '<b>📞 Созвон</b>  ·  ещё через 1-2 минуты',
+          `<blockquote>${clip(call, CAP.followUp)
+            .split(SLOTS_MARK)
+            .map(esc)
+            .join('<i>[три времени по рабочим часам]</i>')}</blockquote>`,
+        ]
+      : []),
+    `<i>Уйдёт тем же нажатием, если клиент ещё не ответил${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,
   ]
 }
 

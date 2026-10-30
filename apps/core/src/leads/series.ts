@@ -6,6 +6,7 @@ import type { Db } from '../db/client'
 import { conversation } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { ProfiClient } from '../profi/client'
+import { fillCallOffer, isCallOffer, SLOTS_OFFERED, type SlotSource } from './callSlots'
 
 /**
  * The series after a bid (Boris, 29.10.2026): «одного сообщения при отклике мало». Before Sara he wrote one to three
@@ -23,15 +24,25 @@ export type SeriesDeps = {
   /**
    * The waits, from and to in ms: before the first message (after the bid) and before each next one (after the one
    * before). Boris's own: the second message 0.7-3.5 minutes after the bid, about 1.6, the third half a minute after
-   * it (growth-points, 29.10.2026). The moment within follows the order, the same on a resume.
+   * it (growth-points, 29.10.2026); the call offer a minute or two after the message before it (Boris, 30.10.2026). The
+   * moment within follows the order, the same on a resume.
    */
-  delayMs: { first: SeriesWait; next: SeriesWait }
+  delayMs: { first: SeriesWait; next: SeriesWait; call: SeriesWait }
+  /** Where the times of the call offer come from: Boris's working hours, his calendar later (M6). */
+  slots: SlotSource
 }
 
 export type SeriesWait = readonly [number, number]
 
-/** The waits of the live series: a minute or two after the bid, then 20-40 seconds between the messages. */
-export const SERIES_DELAYS = { first: [60_000, 120_000], next: [20_000, 40_000] } as const
+/**
+ * The waits of the live series: a minute or two after the bid, then 20-40 seconds between the messages, and the call
+ * offer a minute or two after them.
+ */
+export const SERIES_DELAYS = {
+  first: [60_000, 120_000],
+  next: [20_000, 40_000],
+  call: [60_000, 120_000],
+} as const
 
 let deps: SeriesDeps | null = null
 
@@ -80,7 +91,14 @@ export function seriesDelay(leadId: string, n: number, [from, to]: SeriesWait): 
   return from + (h % (Math.max(0, to - from) + 1))
 }
 
-export type SeriesStop = 'client_replied' | 'boris_wrote' | 'boris_leads' | 'not_now' | 'not_sent'
+export type SeriesStop =
+  | 'client_replied'
+  | 'boris_wrote'
+  | 'boris_leads'
+  | 'not_now'
+  | 'not_sent'
+  /** The call offer found no free time to give. */
+  | 'no_slots'
 
 /** What the chat says before a message: go, with the last message the node must still see, or stop. */
 export type SeriesGround =
@@ -122,6 +140,7 @@ export async function groundSeries(job: SeriesJob, sent: readonly string[]): Pro
 async function queueSeries(
   job: SeriesJob,
   n: number,
+  text: string,
   g: { chatId: string; expectLast: string | null },
   again: boolean,
 ): Promise<string | null> {
@@ -130,7 +149,7 @@ async function queueSeries(
       key: seriesKey(job.leadId, n, again),
       accountId: job.accountId,
       chatId: g.chatId,
-      text: job.followUps[n] ?? '',
+      text,
       author: 'sara',
       expectLast: g.expectLast,
     }),
@@ -156,14 +175,26 @@ async function journal(job: SeriesJob, type: EventType, payload: Record<string, 
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 
 /** One message: the chat read, the outbox, the delivery; once more after the chat moved under it (CHAT_CHANGED). */
-async function sendOne(job: SeriesJob, n: number, sent: string[]): Promise<SeriesStop | null> {
+/** Step: the call offer with its times picked now, or null when there are none to give. */
+async function callText(template: string): Promise<string | null> {
+  const now = new Date()
+  const slots = await d().slots.slots(now, SLOTS_OFFERED)
+  return slots.length > 0 ? fillCallOffer(template, slots, now) : null
+}
+
+async function sendOne(
+  job: SeriesJob,
+  n: number,
+  text: string,
+  sent: string[],
+): Promise<SeriesStop | null> {
   for (const again of [false, true]) {
     const g = await DBOS.runStep(() => groundSeries(job, sent), {
       name: `ground-${n}${again ? '-again' : ''}`,
       ...DB_STEP,
     })
     if (!g.go) return g.why
-    const id = await DBOS.runStep(() => queueSeries(job, n, g, again), {
+    const id = await DBOS.runStep(() => queueSeries(job, n, text, g, again), {
       name: `queue-${n}${again ? '-again' : ''}`,
       ...DB_STEP,
     })
@@ -182,8 +213,20 @@ async function runSeries(job: SeriesJob): Promise<void> {
   const sent: string[] = []
   for (let n = 0; n < job.followUps.length; n++) {
     const waits = d().delayMs
-    await DBOS.sleep(seriesDelay(job.leadId, n, n === 0 && !job.late ? waits.first : waits.next))
-    const stop = await sendOne(job, n, sent)
+    const approved = job.followUps[n] ?? ''
+    const call = isCallOffer(approved)
+    await DBOS.sleep(
+      seriesDelay(
+        job.leadId,
+        n,
+        n === 0 && !job.late ? waits.first : call ? waits.call : waits.next,
+      ),
+    )
+    // Only the call offer has a step of its own here: a series of before it resumes along the steps it took.
+    const text = call
+      ? await DBOS.runStep(() => callText(approved), { name: `times-${n}`, ...DB_STEP })
+      : approved
+    const stop = text === null ? 'no_slots' : await sendOne(job, n, text, sent)
     if (stop) {
       await DBOS.runStep(() => journal(job, 'bid.series_stopped', { n, why: stop }), {
         name: `stopped-${n}`,
@@ -191,7 +234,7 @@ async function runSeries(job: SeriesJob): Promise<void> {
       })
       return
     }
-    sent.push(job.followUps[n] ?? '')
+    sent.push(text ?? '')
     await DBOS.runStep(() => journal(job, 'bid.series_sent', { n }), {
       name: `sent-${n}`,
       ...DB_STEP,

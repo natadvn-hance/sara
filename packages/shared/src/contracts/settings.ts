@@ -78,6 +78,32 @@ export const SETTINGS = {
   'conv.max_wait_s': { schema: z.number().int().positive(), default: 600 },
   /** FR-CONV-8: Moscow hours when only urgent replies go to a client. */
   'conv.night': { schema: hours, default: { from: 23, to: 8 } },
+  /**
+   * The series after a bid ends with an offer to talk for half an hour and three times to choose from (Boris,
+   * 30.10.2026). Off, the series is as before.
+   */
+  'calls.offer': { schema: z.boolean(), default: true },
+  /** Boris's working hours for calls, Moscow time: a call starts at `from`:00 at the earliest and ends by `to`:00. */
+  'calls.work_hours': {
+    schema: hours.refine((h) => h.from < h.to, 'from before to'),
+    default: { from: 11, to: 19 },
+  },
+  /** Boris's working days for calls, 1 Monday to 7 Sunday. */
+  'calls.work_days': {
+    schema: z.array(z.number().int().min(1).max(7)).min(1),
+    default: [1, 2, 3, 4, 5] as number[],
+  },
+  /** How long an offered call is, in minutes, and the step of the times offered. */
+  'calls.slot_min': { schema: z.number().int().min(15).max(120), default: 30 },
+  /** The earliest time offered is this many minutes from the moment the offer is sent. */
+  'calls.min_ahead_min': {
+    schema: z
+      .number()
+      .int()
+      .min(0)
+      .max(24 * 60),
+    default: 120,
+  },
   /** FR-CONV-12: Moscow hours without reminders to clients. */
   'conv.reminder_quiet': { schema: hours, default: { from: 23, to: 9 } },
   /** FR-NOTIF-3: draft cards of conversations a Moscow day. */

@@ -298,8 +298,11 @@ function ScoreBlock({
   )
 }
 
-/** The places of the series after the bid (Boris, 29.10.2026): the links, then two lines; an empty one is not sent. */
-const FOLLOW_UP_SLOTS = ['first', 'second', 'third'] as const
+/**
+ * The places of the series after the bid (Boris, 29.10.2026): the links, two lines and the call offer (30.10.2026);
+ * an empty one is not sent.
+ */
+const FOLLOW_UP_SLOTS = ['first', 'second', 'third', 'fourth'] as const
 
 /** The bid text with its price range; while the decision is open it is edited here, the card in Telegram stays. */
 function BidCard({ v }: { v: LeadView }) {
@@ -360,7 +363,7 @@ function BidCard({ v }: { v: LeadView }) {
             <label key={slot} className="kv" htmlFor={`bid-follow-${slot}`}>
               <span className="muted" style={{ fontSize: 13 }}>
                 Вдогонку {k + 1}: через 1-2 минуты после отклика, если клиент ещё не ответил. Пусто:
-                не отправлять
+                не отправлять. {'{слоты}'} Сара заменит на три времени для созвона
               </span>
               <textarea
                 id={`bid-follow-${slot}`}
