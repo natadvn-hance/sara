@@ -15,6 +15,7 @@ import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
 import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
 import { sendTurnReply } from './conversation/outbox'
+import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
 import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
 import { registerConversationRoutes } from './conversation/routes'
@@ -450,6 +451,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
+  const owed = startOwed({ db, notifier: bot.notifier }, o.learningTickMs)
   const reconcile = startReconcile(
     conversationDeps,
     config.accounts.map((a) => a.id),
@@ -492,6 +494,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       reconcile.stop()
       clearInterval(mindTimer)
       conversationSummary.stop()
+      owed.stop()
       gateway.stop()
       await bot.stop()
       await app.close()

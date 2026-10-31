@@ -430,6 +430,21 @@ export const conversation = core.table(
   (t) => [uniqueIndex('conversation_account_chat').on(t.accountId, t.chatId)],
 )
 
+/**
+ * Where the reminders «клиент ждёт ответа» of a conversation stand (Boris, 31.10: a client must never be left without
+ * an answer): the last client message they are about, how many steps of the ladder went, when, and the message of the
+ * last one in Telegram, which the next one replaces. The row goes when the client is answered, taken or closed.
+ */
+export const convOwed = core.table('conv_owed', {
+  conversationId: uuid('conversation_id')
+    .primaryKey()
+    .references(() => conversation.id),
+  anchorMessageId: text('anchor_message_id').notNull(),
+  steps: integer('steps').notNull().default(0),
+  lastAt: ts('last_at'),
+  messageId: bigint('message_id', { mode: 'number' }),
+})
+
 /** Every chat message Sara knows, live or exported from history, with whose voice it is (FR-CONV-2, FR-TRAIN-1). */
 export const chatMessage = core.table(
   'chat_message',

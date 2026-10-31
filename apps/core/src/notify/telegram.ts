@@ -703,6 +703,19 @@ export function createTelegramRuntime(d: {
             if (!String((e as Error).message).includes('message is not modified')) throw e
           })
       },
+      async topicLink(place) {
+        try {
+          const f = await forumOf(d.db)
+          const k = f ? await topicKey(d.db, place) : null
+          const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+          return f && t
+            ? `https://t.me/c/${String(f.chatId).replace(/^-100/, '')}/${t.threadId}`
+            : null
+        } catch (e) {
+          console.error('topic link', short(e))
+          return null
+        }
+      },
       async closeTopic(place, outcome) {
         try {
           const f = await forumOf(d.db)

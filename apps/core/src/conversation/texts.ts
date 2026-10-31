@@ -95,6 +95,46 @@ export const CONV_TEXTS = {
   /** A client's message the moment the core hears it, in the client's topic: the draft comes later (Boris, 31.10). */
   clientSaid: (name: string | null, text: string) => `💬 ${name || 'Клиент'}: ${text}`,
 
+  /** A client waits for Boris's answer (Boris, 31.10): in his topic, with the draft's buttons when there is a draft. */
+  owedReminder: (v: {
+    name: string | null
+    waited: string
+    words: string
+    draft: string | null
+    canAnswer: boolean
+  }) => {
+    const e = (x: string) => esc(hyphenated(x))
+    const words = v.words.trim()
+    return [
+      `⏰ <b>${e(v.name ?? 'Клиент')}</b> ждёт ответа ${v.waited}`,
+      words
+        ? `<blockquote>${e(words.length > 300 ? `${words.slice(0, 299)}…` : words)}</blockquote>`
+        : null,
+      v.draft
+        ? `<b>✍️ Ответ Сары:</b>\n<blockquote>${e(v.draft.trim())}</blockquote>`
+        : e(
+            v.canAnswer
+              ? 'Ответ ждёт твоего «Отправить».'
+              : 'Ответа Сары нет: напиши клиенту сам или нажми «Беру сам».',
+          ),
+    ]
+      .filter(Boolean)
+      .join('\n')
+  },
+
+  /** One list of the clients who wait, to the general topic (daily, and after a deploy). */
+  owedSummary: (
+    list: { name: string | null; order: string | null; waited: string; link: string | null }[],
+  ) => {
+    const e = (x: string) => esc(hyphenated(x))
+    const rows = list.map((c) => {
+      const who = e(c.name ?? 'Клиент')
+      const head = c.link ? `<a href="${c.link}">${who}</a>` : who
+      return `• ${head}${c.order ? `, заказ «${e(c.order)}»` : ''}: ждёт ${c.waited}`
+    })
+    return [`⏰ <b>Ждут твоего ответа: ${list.length}</b>`, ...rows].join('\n')
+  },
+
   authorUnclear: (chatId: string) =>
     `⚠️ В чате заказа ${chatId} не понимаю, кто написал последние сообщения: клиент или наша сторона. Пока ничего не отвечаю, посмотри сам.`,
 
