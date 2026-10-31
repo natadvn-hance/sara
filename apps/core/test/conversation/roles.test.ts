@@ -27,7 +27,7 @@ const M4_ROLES = {
     schema: CheckerOutput,
   },
   reminder: {
-    meta: { version: 1, model: 'sonnet', priority: 'P1', timeoutMs: 120000 },
+    meta: { version: 2, model: 'sonnet', priority: 'P1', timeoutMs: 120000 },
     schema: ReminderOutput,
   },
   examiner: {
