@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { queueMessage } from '../../apps/core/src/conversation/outbox'
-import { event, lead, outbox } from '../../apps/core/src/db/schema'
+import { conversation, event, lead, outbox } from '../../apps/core/src/db/schema'
 import { isApprovedText, isCallOffer, SLOTS_MARK } from '../../apps/core/src/leads/callSlots'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
@@ -322,6 +322,21 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await until(() => sentTo(id).length === 2)
     expect(await events('bid.series_stopped', id)).toEqual([])
     expect(sentTo(id)).toHaveLength(2)
+  })
+
+  it("FR-CONV-10: the site's tail of the bid (price and contacts, a moment after it) is part of the bid: no stop, the conversation stays Sara's (31.10.2026)", async () => {
+    const id = await cardFor()
+    press()
+    await until(() => fake.bids.length === 1)
+    await fake.addChatMessage({
+      chatId: id,
+      author: 'specialist',
+      text: 'Стоимость от 30000 до 45000 руб.\nусл.\nКонтакты:\n+7-900-000-00-00',
+    })
+    await until(() => sentTo(id).length === 2)
+    expect(await events('bid.series_stopped', id)).toEqual([])
+    const [conv] = await db.select().from(conversation).where(eq(conversation.orderId, id))
+    expect(conv?.owner ?? 'sara').toBe('sara')
   })
 
   it('FR-UI-1: Boris gets one message for the whole bid: sending, sent, then the line about the series (31.10.2026)', async () => {
