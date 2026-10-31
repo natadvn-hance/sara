@@ -21,6 +21,15 @@ const rubIn = (text: string | null) => {
 /** What may open the form: the answer's opener words and the fee the opener shows beside «Продолжить». */
 export type Opener = { words: string | null; feeRub: number | null }
 
+/** Why the form did not open, for the node's log and the record of a refused bid. */
+export type OpenerMiss =
+  | 'no_opener'
+  | 'opener_fee'
+  | 'two_openers'
+  | 'opener_sends'
+  | 'may_not'
+  | 'no_field'
+
 // «Продолжить» with the fee beside it (the live opener: a div of two divs, so no space in its text).
 const CONTINUE_PRICED = /^\s*Продолжить\s*\d[\d\s]*₽\s*$/
 
@@ -40,8 +49,22 @@ export async function openForm(
     /** «Продолжить» as the September button; the node's own calibration never uses it. */
     september?: boolean
   } = {},
-): Promise<{ open: boolean; pressed: boolean; by: string | null }> {
-  const none = { open: false, pressed: false, by: null }
+): Promise<{
+  open: boolean
+  pressed: boolean
+  by: string | null
+  /** Why it did not open; null when it did. */
+  why?: OpenerMiss | null
+  /** The amount the «Продолжить» opener showed, when one was there. */
+  shownRub?: number | null
+}> {
+  const none = (why: OpenerMiss, shownRub: number | null = null) => ({
+    open: false,
+    pressed: false,
+    by: null,
+    why,
+    shownRub,
+  })
   const text = shown(page, TEXT)
   const tariffs = page.locator(TARIFFS)
   const priced = tariffs.locator('*').filter({ hasText: CONTINUE_PRICED }).filter({ visible: true })
@@ -76,7 +99,8 @@ export async function openForm(
     .catch(() => ({ n: 0, one: false, text: '' }))
   if (seen.n > 0) {
     const fee = Number(seen.text.replace(/[^\d]/g, ''))
-    if (!seen.one || opener.feeRub === null || fee !== opener.feeRub) return none
+    if (!seen.one) return none('two_openers', fee)
+    if (opener.feeRub === null || fee !== opener.feeRub) return none('opener_fee', fee)
     press = priced.last()
     by = `${CONTINUE} ${fee} ₽`
   } else {
@@ -92,19 +116,20 @@ export async function openForm(
       }
     }
   }
-  if (!press) return none
+  if (!press) return none('no_opener')
   // Never what sends a form: an opener is no submit and lives outside the form.
   const sends = await press
     .evaluate((el) => !!el.closest('form, button[type="submit"], input[type="submit"]'))
     .catch(() => true)
-  if (sends || (o.may && !o.may())) return none
+  if (sends) return none('opener_sends')
+  if (o.may && !o.may()) return none('may_not')
   await press.click({ timeout: 5000 }).catch(() => {})
   const open = await text
     .first()
     .waitFor({ timeout: ms })
     .then(() => true)
     .catch(() => false)
-  return { open, pressed: true, by }
+  return { open, pressed: true, by, why: open ? null : 'no_field', shownRub: null }
 }
 
 // The block of the open form: the one that holds the text field (live: bid_window_container).
