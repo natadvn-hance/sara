@@ -74,6 +74,30 @@ async function ourTexts(db: Db, conv: ConversationRow): Promise<Map<string, 'sar
   return texts
 }
 
+/** The tail the site adds to a bid a moment after it: «Стоимость от 30000 до 45000 руб. усл. Контакты: +7…». */
+const BID_TAIL = /^\s*Стоимость(?![\p{L}])[\s\S]{0,300}?(?:руб|₽)/iu
+/** How near to the bid its tail lands (it was 1 ms in the chat of order 95583456). */
+const BID_TAIL_MS = 10_000
+
+/**
+ * Whether a message is the site's tail of our bid, not someone writing (Boris, 31.10.2026: it made the conversation
+ * Boris's and stopped the series): it follows the bid text we sent, right after it, and says what the bid costs.
+ */
+export function isBidTail(
+  chat: readonly Pick<ChatMessage, 'author' | 'text' | 'sent_at' | 'platform_message_id'>[],
+  m: Pick<ChatMessage, 'author' | 'text' | 'sent_at' | 'platform_message_id'>,
+  ours: Map<string, 'sara' | 'boris'>,
+): boolean {
+  if (m.author !== 'specialist' || !BID_TAIL.test(m.text)) return false
+  const i = chat.findIndex((x) => x.platform_message_id === m.platform_message_id)
+  const before = i > 0 ? chat[i - 1] : undefined
+  return (
+    before?.author === 'specialist' &&
+    ours.get(normalizeText(before.text)) === 'sara' &&
+    Math.abs(Date.parse(m.sent_at) - Date.parse(before.sent_at)) <= BID_TAIL_MS
+  )
+}
+
 /**
  * Whose voice a live message is (ADR-024). Old Sara's own evidence is known only to the history export (part A);
  * live, a message from our side is the new Sara's when her outbox holds its text, and Boris's only when it is
@@ -124,14 +148,16 @@ export async function syncChat(
   const added: StoredMessage[] = []
   for (const m of fresh) {
     const approx = first && heardAt.getTime() - new Date(m.sent_at).getTime() > FRESH_MS
-    const who = liveAuthor(
-      m,
-      ours,
-      !first &&
-        switchedMs !== null &&
-        new Date(m.sent_at).getTime() > switchedMs &&
-        heardAt.getTime() > switchedMs,
-    )
+    const who = isBidTail(chat, m, ours)
+      ? ({ author: 'sara', basis: 'outbox' } as const)
+      : liveAuthor(
+          m,
+          ours,
+          !first &&
+            switchedMs !== null &&
+            new Date(m.sent_at).getTime() > switchedMs &&
+            heardAt.getTime() > switchedMs,
+        )
     const [row] = await d.db
       .insert(chatMessage)
       .values({

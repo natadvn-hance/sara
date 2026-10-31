@@ -109,6 +109,8 @@ export type ProfiSite = {
   /** The next `n` page requests are cut off before any answer, as one lost request is. */
   dropNext(n: number): void
   muteRtp(on: boolean): void
+  /** The stream only names the chat with news and the message number, as the live one does; the words are on its page. */
+  streamNamesOnly(on: boolean): void
   changeLayout(): void
   close(): Promise<void>
 }
@@ -226,6 +228,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let askLeave = false
   let drops = 0
   let rtpMuted = false
+  let namesOnly = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
   const state = {
@@ -344,8 +347,13 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         })),
       })
     }
-    if (p.startsWith('/api/chat/'))
-      return json(res, { messages: chats.get(p.slice('/api/chat/'.length)) ?? [] })
+    if (p.startsWith('/api/chat/')) {
+      const messages = chats.get(p.slice('/api/chat/'.length)) ?? []
+      json(res, { messages })
+      // As the live site: a chat its page showed is read.
+      for (const m of messages) m.read = true
+      return
+    }
     if (p === '/graphql' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}') as { variables?: { id?: string } }
       const found = orders.find((x) => x.id === body.variables?.id)
@@ -518,9 +526,15 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     },
     addMessage(chatId, author, text) {
       const id = `m${++seq}`
-      const m: SiteMessage = { id, side: author, text, ts: new Date().toISOString(), read: false }
+      // Our own messages are read: the list counts only what the other side wrote.
+      const read = author === 'specialist'
+      const m: SiteMessage = { id, side: author, text, ts: new Date().toISOString(), read }
       chats.set(chatId, [...(chats.get(chatId) ?? []), m])
-      push({ type: 'message.new', chatId, message: m })
+      push(
+        namesOnly
+          ? { type: 'chat.touched', chatId, messageId: id }
+          : { type: 'message.new', chatId, message: m },
+      )
       return id
     },
     logout() {
@@ -545,6 +559,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         for (const s of sockets) s.destroy()
         for (const c of clients) c.terminate()
       }
+    },
+    streamNamesOnly(on) {
+      namesOnly = on
     },
     muteRtp(on) {
       rtpMuted = on
