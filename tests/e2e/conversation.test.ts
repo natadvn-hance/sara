@@ -157,7 +157,14 @@ describe('a conversation end to end', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]?.messageIds).toHaveLength(3)
     expect(cards()).toHaveLength(1)
-    expect(cards()[0]?.text).toContain('Клиент: «Здравствуйте')
+    // Each message reached Boris at once as its own; the one card does not repeat them.
+    const said = tg.sent.filter((m) => !m.reply_markup && m.text.startsWith('💬 '))
+    expect(said.map((m) => m.text.replace(/^💬 [^:]+: /, ''))).toEqual([
+      'Здравствуйте',
+      'Как начнём?',
+      'И по срокам',
+    ])
+    expect(cards()[0]?.text).not.toContain('Здравствуйте')
     expect(cards()[0]?.text).toContain('Режим тени: клиенту ничего не ушло.')
   }, 40000)
 
@@ -215,7 +222,7 @@ describe('a conversation end to end', () => {
     expect(await db.select().from(outbox)).toHaveLength(0)
     const [t] = await turns()
     expect(t?.decision).toBe('draft')
-    expect(cards()[0]?.text).toContain('Черновик ответа:')
+    expect(cards()[0]?.text).toContain('<b>✍️ Ответ Сары:</b>')
     expect(cards()[0]?.text).not.toContain('Режим тени')
     const actions = cards()[0]
       ?.reply_markup?.inline_keyboard.flat()
