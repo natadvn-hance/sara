@@ -1,4 +1,10 @@
-import { AnalystOutput, type ClientInfo, type ProfiOrder, plural } from '@sara/shared'
+import {
+  AnalystOutput,
+  type ClientInfo,
+  type LeadSite,
+  type ProfiOrder,
+  plural,
+} from '@sara/shared'
 import { publicLink } from '../conversation/caseLink'
 import { CASE_LINK } from '../conversation/check/phrases'
 import type { CaseHit } from '../conversation/types'
@@ -10,6 +16,7 @@ import {
   type ReplyProfile,
 } from '../direction/reply'
 import type { Gateway } from '../gateway/gateway'
+import { siteSection } from '../site/view'
 import { fixClientText, greetingFor, moscowPartOfDay } from '../text/clientText'
 import { bidCaseProblems, bidCasesText, chosenCase } from './bidCases'
 import { firstName, namesToHide } from './clientName'
@@ -522,6 +529,8 @@ export async function writeDraft(
     sites?: HanceSite[]
     /** Links a client is never given (links.blocked, Boris 30.10.2026). */
     blockedLinks?: string[]
+    /** The client's own site as Sara read it (Boris, 30.10.2026); the text may name a detail of it. */
+    site?: LeadSite | null
     now?: Date
   } = {},
 ): Promise<Draft | DraftMiss> {
@@ -540,6 +549,7 @@ export async function writeDraft(
     analystProfileText(profile),
     bidCasesText(mindCases, opts.blockedLinks),
     sitesText(opts.sites ?? []),
+    siteSection(opts.site),
     recentOpenersText(recent),
   ].filter((t) => t !== '')
   const base = analystInput(o, maxBody, extra.join('\n\n'))
@@ -580,6 +590,7 @@ export async function writeDraft(
       recentBids: _recent,
       sites: _sites,
       blockedLinks: _blocked,
+      site: _site,
       ...callOpts
     } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })

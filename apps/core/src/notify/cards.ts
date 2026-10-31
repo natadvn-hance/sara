@@ -1,5 +1,6 @@
-import { type ClientInfo, formatCallback, formatRub, plural } from '@sara/shared'
+import { type ClientInfo, formatCallback, formatRub, type LeadSite, plural } from '@sara/shared'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
+import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
 export type Reading = {
@@ -74,6 +75,11 @@ export type LeadCard = {
   closed?: ClosedWhen | null
   /** The card waited more than a day (FR-LEAD-10): from its first message to now, for the short stale card. */
   stale?: { since: string; at: string } | null
+  /**
+   * The client's own site as Sara read it (Boris, 30.10.2026): its short summary against the order, or «сайт не
+   * открылся»; and the example sites the client named. None: the order names no site.
+   */
+  site?: LeadSite | null
 }
 
 const orders = (n: number) => `${n} ${plural(n, ['заявку', 'заявки', 'заявок'])}`
@@ -266,6 +272,7 @@ const CAP = {
   reading: 1500,
   line: 200,
   who: 90,
+  site: 230,
 } as const
 
 const NO_TEXT = 'Текста заявки нет.'
@@ -379,6 +386,26 @@ function clientLines(c: LeadCard): string[] {
   return [parts.join(' · ')]
 }
 
+/**
+ * The client's own site (Boris, 30.10.2026): one line with the summary Sara made of it against the order, or the note that
+ * it did not open (the bid is then written as usual). The examples the client likes are named on a line of their own.
+ */
+function siteLines(c: LeadCard): string[] {
+  const view = siteCardView(c.site)
+  const studied = studiedLine(c.site)
+  return [
+    ...(view.own
+      ? [
+          `🌐 <b>Сайт клиента:</b> ${clean(view.own.domain, CAP.short)} · ${clean(view.own.text, CAP.site)}`,
+        ]
+      : []),
+    ...(view.examples.length > 0
+      ? [`🔗 Пример, который нравится клиенту: ${clean(view.examples.join(', '), CAP.short)}`]
+      : []),
+    ...(studied ? [`📎 <b>Изучила:</b> ${clean(studied, CAP.site)}`] : []),
+  ]
+}
+
 const orderLines = (shown: string) => [
   '<b>📄 Текст заявки</b>',
   `<blockquote expandable>${esc(shown)}</blockquote>`,
@@ -480,7 +507,7 @@ function draftLines(c: LeadCard): string[] {
 function cardHtml(c: LeadCard, shown: string): string {
   return [
     headLines(c),
-    clientLines(c),
+    [...clientLines(c), ...siteLines(c)],
     ...whyBlocks(c),
     draftLines(c),
     ...(c.draft?.followUps?.length ? [followUpLines(c)] : []),
@@ -637,6 +664,19 @@ export function analysisMessages(c: LeadCard): string[] {
     }
   } else {
     room.add(NO_READING)
+  }
+  const g = c.site?.digest
+  if (g) {
+    const part = (label: string, items: string[]) =>
+      items.length > 0
+        ? `<b>${label}</b>\n${items.map((x) => `• ${clean(x, CAP.line)}`).join('\n')}`
+        : null
+    const block = [
+      part('Ценное из ссылок и файлов', g.valuable),
+      part('Что клиент считает важным', g.cares),
+      part('Чего не хватает', g.missing),
+    ].filter((x): x is string => x !== null)
+    if (block.length > 0) room.add(block.join('\n\n'))
   }
   if (!reading || text.length > FULL_TEXT_ABOVE || renderLeadCard(c).textCut)
     addOrderText(text.length > FULL_TEXT_MAX ? cutText(text, FULL_TEXT_MAX) : text, room)

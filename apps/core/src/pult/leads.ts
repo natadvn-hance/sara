@@ -17,6 +17,8 @@ import { account, bidHold, directionVersion, lead, leadLabel, leadScore, task } 
 import { FOLLOW_UP_EDIT_MAX } from '../leads/draft'
 import { dayOf } from '../leads/money'
 import { getSetting } from '../settings/store'
+import { leadSiteOf } from '../site'
+import { siteCardView, studiedLine } from '../site/view'
 import { seriesWithoutBlocked } from '../text/blockedLinks'
 
 /** «Заявки» (M7 design 5.3): the queue by value and one lead with its score, разбор, bid text and obstacles. */
@@ -27,6 +29,12 @@ export const BID_LIMIT = 500
 
 export const orderUrl = (id: string) =>
   `https://profi.ru/backoffice/n.php?o=${encodeURIComponent(id)}`
+
+/** The client's own site for the lead screen: its summary or the note that it did not open; none when none is named. */
+function siteView(stored: unknown): LeadView['lead']['site'] {
+  const site = leadSiteOf(stored)
+  return site ? { ...siteCardView(site), studied: studiedLine(site) } : null
+}
 
 const READING_RU: Record<keyof AnalystOutput['reading'], string> = {
   said: 'Говорит прямо',
@@ -248,6 +256,7 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
       client: info.success
         ? { since: info.data.on_profi_since, phone: info.data.phone_verified, reviews }
         : null,
+      site: siteView(l.clientSite),
       seenAt: l.seenAt,
       status: l.status,
       feeRub: l.bidPriceRub,

@@ -1,4 +1,5 @@
 import type { ChatAuthor } from '@sara/shared'
+import { siteLines } from '../site/view'
 import type { CaseHit, CheckIssue, Dossier, DossierMessage, MindHit, Recall } from './types'
 
 const WHO: Record<ChatAuthor, string> = {
@@ -129,6 +130,8 @@ export function formatInterlocutorInput(
 ): string {
   const turn = new Set(d.turnMessageIds)
   const parts: string[] = [FRAME_NOTE, orderPart(d), clientPart(d)]
+  const site = siteLines(d.site)
+  if (site.length > 0) parts.push(['## Сайт клиента', ...site].join('\n'))
   parts.push(
     [
       '## Отклик',
