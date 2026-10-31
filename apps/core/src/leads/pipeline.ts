@@ -79,6 +79,7 @@ import {
 } from './screen'
 import { sitesForBid } from './siteOrder'
 import { sortOrder } from './sorter'
+import { telegramLineOf } from './telegramLine'
 
 export type LeadPipelineDeps = {
   db: Db
@@ -354,9 +355,13 @@ async function draftFor(
       now: greetingMoment(),
     })
     // The series ends with an offer to talk for half an hour (Boris, 30.10.2026); its times go in when it is sent.
-    return dr.text !== null && (await getSetting(d().db, 'calls.offer'))
-      ? { ...dr, callOffer: callOfferTemplate(`${o.title}\n${o.text}`) }
-      : dr
+    const withCall =
+      dr.text !== null && (await getSetting(d().db, 'calls.offer'))
+        ? { ...dr, callOffer: callOfferTemplate(`${o.title}\n${o.text}`) }
+        : dr
+    // And last, his Telegram in his words (31.10.2026), when the setting names one.
+    const tg = dr.text !== null ? telegramLineOf(await getSetting(d().db, 'series.telegram')) : null
+    return tg ? ({ ...withCall, telegram: tg } as Draft) : withCall
   } catch (err) {
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
     return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
@@ -365,7 +370,11 @@ async function draftFor(
 
 /** The whole series a draft brings: the Analyst's messages, then the call offer; null when there are none. */
 function seriesOf(dr: Draft): string[] | null {
-  const all = [...(dr.followUps ?? []), ...(dr.callOffer ? [dr.callOffer] : [])]
+  const all = [
+    ...(dr.followUps ?? []),
+    ...(dr.callOffer ? [dr.callOffer] : []),
+    ...(dr.telegram ? [dr.telegram] : []),
+  ]
   return all.length > 0 ? all : null
 }
 

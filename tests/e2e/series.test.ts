@@ -160,6 +160,7 @@ beforeEach(async () => {
   await setSetting(db, 'conv.autopilot', false, 'boris')
   // The call offer has its own test below; the others are about the Analyst's messages.
   await setSetting(db, 'calls.offer', false, 'boris')
+  await setSetting(db, 'series.telegram', '', 'boris')
 })
 
 describe('the series after a bid (Boris, 29.10.2026)', () => {
@@ -363,6 +364,28 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await until(() => sentTo(id).length === 2)
     expect(tg.shown('Не знаю, ушёл ли отклик')).toBe(false)
     expect(tg.edited.some((m) => m.text.startsWith('✅ Отклик отправлен'))).toBe(true)
+  })
+
+  it('FR-CONV-9: the last message of the series is his Telegram, after the call offer, once, and an empty nick turns it off (31.10.2026)', async () => {
+    await setSetting(db, 'calls.offer', true, 'boris')
+    await setSetting(db, 'series.telegram', '@bmnoian', 'boris')
+    const id = await cardFor()
+    const card = tg.sent.filter((m) => m.reply_markup).at(-1)?.text ?? ''
+    expect(card).toContain('Телеграм')
+    expect(card).toContain('Если удобнее, пишите в тг @bmnoian)')
+    press()
+    await until(() => sentTo(id).length === 4)
+    const texts = sentTo(id).map((m) => m.text)
+    expect(texts.slice(0, 2)).toEqual([FIRST, SECOND])
+    expect(texts[3]).toBe('Если удобнее, пишите в тг @bmnoian)')
+    expect(texts[3]).not.toMatch(/[ёЁ—–]/)
+    await settle()
+    expect(sentTo(id)).toHaveLength(4)
+    expect(
+      sentTo(id)
+        .map((m) => m.idempotency_key)
+        .at(-1),
+    ).toBe(`msg:series:${id}:3`)
   })
 
   it('FR-CONV-9: the series ends with the call offer, its three times put in when it is sent (Boris, 30.10.2026)', async () => {
