@@ -231,6 +231,7 @@ async function policySettings(db: Db, accountId: string, chatId: string): Promis
       !test && (a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false),
     night: await getSetting(db, 'conv.night'),
     autonomy: (await getSetting(db, 'conv.autonomy')) as Record<Topic, 'self' | 'draft' | 'call'>,
+    blockedLinks: await getSetting(db, 'links.blocked'),
   }
 }
 
