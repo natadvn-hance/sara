@@ -13,7 +13,14 @@ import { getSetting, setSetting } from '../settings/store'
 /** What a command answers: a line, or a line with one button that opens a page (the pult). */
 export type CommandReply = string | { text: string; open: { text: string; url: string } }
 
-export type CommandContext = { db: Db; publicUrl: string | null }
+export type CommandContext = {
+  db: Db
+  publicUrl: string | null
+  /** The words after the command (/test …). */
+  args: string
+  /** Test orders into the live Sara; none while they are starting (docs/ops/test-leads.md). */
+  test?: (args: string) => Promise<string>
+}
 
 export type BotCommand = {
   /** Telegram's command: lower case letters, digits and underscores. */
@@ -130,12 +137,20 @@ async function pult(c: CommandContext): Promise<CommandReply> {
   return { text: COMMAND_TEXTS.pult, open: { text: COMMAND_TEXTS.openPult, url: c.publicUrl } }
 }
 
-/** The menu, in its order. /test and /test_clear belong to the test stand: until it lands they say «скоро». */
+/** The menu, in its order. /test and /test_clear go to the test orders; without them they say «скоро». */
 export const COMMANDS: BotCommand[] = [
   { name: 'status', description: 'Что сейчас: состояние, кошелёк, ждёт тебя', run: status },
   { name: 'queue', description: 'Заявки, которые ждут решения', run: queue },
-  { name: 'test', description: 'Подкинуть тестовую заявку', run: async () => COMMAND_TEXTS.soon },
-  { name: 'test_clear', description: 'Стереть тестовое', run: async () => COMMAND_TEXTS.soon },
+  {
+    name: 'test',
+    description: 'Подкинуть тестовую заявку',
+    run: async (c) => (c.test ? c.test(c.args) : COMMAND_TEXTS.soon),
+  },
+  {
+    name: 'test_clear',
+    description: 'Стереть тестовое',
+    run: async (c) => (c.test ? c.test('стереть') : COMMAND_TEXTS.soon),
+  },
   { name: 'pause', description: 'Пауза: не пишу клиентам и не трачу деньги', run: pause },
   { name: 'resume', description: 'Снять паузу', run: resume },
   { name: 'pult', description: 'Открыть пульт', run: pult },

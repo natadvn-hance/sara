@@ -1,0 +1,6 @@
+{
+  "title": "Клиент просит созвон",
+  "orders": [
+    { "order": "sample:90000017", "client": { "behaviour": "call", "persona": "p-stand-startup" } }
+  ]
+}

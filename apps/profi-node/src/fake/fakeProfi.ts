@@ -32,6 +32,19 @@ export type FakeOrderPage = Partial<
   >
 > & { fail?: ProfiErrorClass; delayMs?: number }
 
+/** Everything the fake keeps about the site, to carry it over a restart of the core (test orders, docs/ops/test-leads.md). */
+export type FakeSnapshot = {
+  orders: ProfiOrder[]
+  pages: [string, FakeOrderPage][]
+  chats: { chatId: string; orderId: string | null; messages: ChatMessage[] }[]
+  onSite: string[]
+  bidResults: [string, SubmitBidOutput][]
+  sentMessages: [string, SendMessageOutput][]
+  health: SessionHealthOutput
+  balance: number
+  lastMessageNo: number
+}
+
 export type FakeProfi = {
   url: string
   bids: SubmitBidInput[]
@@ -69,6 +82,22 @@ export type FakeProfi = {
   markBid(orderId: string): void
   /** Called at the start of every submit_bid, before the fake decides anything. */
   onSubmit(hook: ((i: SubmitBidInput) => Promise<void> | void) | null): void
+  /** Called once a new bid is on the fake site, never for a repeat or a refusal: the stand puts it into the chat. */
+  onPlaced(hook: ((i: SubmitBidInput, out: SubmitBidOutput) => Promise<void> | void) | null): void
+  /** Called once a new message of ours is in its chat, never for a repeat. */
+  onSent(
+    hook: ((i: SendMessageInput, platformMessageId: string) => Promise<void> | void) | null,
+  ): void
+  /** Called after anything the snapshot holds has changed. */
+  onChange(hook: (() => void) | null): void
+  snapshot(): FakeSnapshot
+  /** The wallet now: what session_health answers and what the next bid is taken from. */
+  setBalance(rub: number): void
+  /**
+   * Forgets every order, chat and bid, the wallet back to `balance`. Message numbers go on counting, so a message of
+   * before is never mistaken for a new one.
+   */
+  reset(balance: number): void
   /** session_health answers only after this many milliseconds. */
   delayHealth(ms: number): void
   /** send_message works (and answers) only after this many milliseconds: a tab that is busy; 0 is at once. */
@@ -94,6 +123,10 @@ export async function createFakeProfi(o: {
   nodeToken: string
   permitSecret: string
   extra?: ExtraRoute
+  /** What a snapshot kept: the fake starts where it stopped. */
+  initial?: FakeSnapshot
+  /** Where it listens (default 127.0.0.1); the test stand listens for the core in another container. */
+  host?: string
 }): Promise<FakeProfi> {
   const bids: SubmitBidInput[] = []
   const orderReads: string[] = []
@@ -121,8 +154,25 @@ export async function createFakeProfi(o: {
   let hook: ((i: SubmitBidInput) => Promise<void> | void) | null = null
   let healthDelay = 0
   let sendDelay = 0
+  let placed: ((i: SubmitBidInput, out: SubmitBidOutput) => Promise<void> | void) | null = null
+  let afterSend: ((i: SendMessageInput, platformMessageId: string) => Promise<void> | void) | null =
+    null
+  let changed: (() => void) | null = null
   // Orders with this account's bid on the fake site.
   const onSite = new Set<string>()
+  if (o.initial) {
+    const i = o.initial
+    for (const order of i.orders) emitted.set(order.order_id, order)
+    for (const [id, page] of i.pages) pages.set(id, page)
+    for (const c of i.chats) chats.set(c.chatId, { orderId: c.orderId, messages: c.messages })
+    for (const id of i.onSite) onSite.add(id)
+    for (const [key, out] of i.bidResults) results.set(key, out)
+    for (const [key, out] of i.sentMessages) sentMessages.set(key, out)
+    health = i.health
+    balance = i.balance
+    lastMessageNo = i.lastMessageNo
+  }
+  const change = () => changed?.()
 
   /** Appends to the chat in page order; a message without its own time comes after the chat's last one. */
   function append(
@@ -158,6 +208,7 @@ export async function createFakeProfi(o: {
       read: m.read,
     }
     chat.messages.push(message)
+    change()
     return { message, orderId: chat.orderId }
   }
 
@@ -234,6 +285,8 @@ export async function createFakeProfi(o: {
         bids.push(i)
         onSite.add(i.order_id)
         results.set(i.idempotency_key, out)
+        change()
+        await placed?.(i, out)
       }
       // A lost answer: the bid is on the site, the caller never hears back.
       if (dropAcks > 0) {
@@ -262,6 +315,8 @@ export async function createFakeProfi(o: {
         messages.push(i)
         out = { found_on_page: true, platform_message_id: message.platform_message_id }
         sentMessages.set(i.idempotency_key, out)
+        change()
+        await afterSend?.(i, message.platform_message_id)
       }
       // A lost answer: the message is in the chat, the caller never hears back.
       if (dropSendAcks > 0) {
@@ -272,7 +327,7 @@ export async function createFakeProfi(o: {
     },
   }
 
-  const server = await serveMcp(() => createProfiMcpServer(impl), o.port, o.extra)
+  const server = await serveMcp(() => createProfiMcpServer(impl), o.port, o.extra, o.host)
 
   async function deliver(e: EventEnvelope): Promise<void> {
     let lastError: unknown
@@ -326,12 +381,14 @@ export async function createFakeProfi(o: {
     orderReads,
     setOrderPage(orderId, page) {
       pages.set(orderId, page)
+      change()
     },
     async emitOrder(partial) {
       const base = sampleOrders()[0]
       if (!base) throw new Error('no sample orders')
       const order: ProfiOrder = { ...base, seen_at: new Date().toISOString(), ...partial }
       emitted.set(order.order_id, order)
+      change()
       const e: EventEnvelope = {
         id: newEventId(),
         type: 'profi.order_seen',
@@ -392,6 +449,7 @@ export async function createFakeProfi(o: {
     },
     setHealth(h) {
       health = { ...health, ...h }
+      change()
     },
     setFee(rub) {
       fee = rub
@@ -401,9 +459,47 @@ export async function createFakeProfi(o: {
     },
     markBid(orderId) {
       onSite.add(orderId)
+      change()
     },
     onSubmit(h) {
       hook = h
+    },
+    onPlaced(h) {
+      placed = h
+    },
+    onSent(h) {
+      afterSend = h
+    },
+    onChange(h) {
+      changed = h
+    },
+    snapshot() {
+      return structuredClone({
+        orders: [...emitted.values()],
+        pages: [...pages],
+        chats: [...chats].map(([chatId, c]) => ({ chatId, ...c })),
+        onSite: [...onSite],
+        bidResults: [...results],
+        sentMessages: [...sentMessages],
+        health,
+        balance,
+        lastMessageNo,
+      })
+    },
+    setBalance(rub) {
+      balance = rub
+      health = { ...health, balance_rub: rub }
+      change()
+    },
+    reset(rub) {
+      for (const m of [emitted, pages, results, sentMessages, sent, chats]) m.clear()
+      onSite.clear()
+      bids.length = 0
+      messages.length = 0
+      orderReads.length = 0
+      balance = rub
+      health = { ...health, balance_rub: rub }
+      change()
     },
     delayHealth(ms) {
       healthDelay = ms

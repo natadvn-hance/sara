@@ -4,6 +4,7 @@ import {
   ClientInfo,
   type EventEnvelope,
   type GetOrderOutput,
+  isTestOrder,
   LeadScreen,
   type LeadSite,
   newEventId,
@@ -581,6 +582,10 @@ async function storeScreen(
 async function processOrder(e: EventEnvelope): Promise<void> {
   const order = ProfiOrder.parse(e.payload)
   const correlationId = e.correlation_id
+  // A test order (docs/ops/test-leads.md) goes the whole way and always reaches Boris: where the live Sara would stop,
+  // the card says so instead. Every check of `test` below is the order's number, so a live run never changes its steps.
+  const test = isTestOrder(order.order_id)
+  const liveSkip: string[] = []
   // Runs recorded before M2 return a boolean; 'stale' is a new order too old to offer (FR-LEAD-10).
   const isNew = await DBOS.runStep(
     (): Promise<boolean | 'stale'> =>
@@ -670,7 +675,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (bySense.stop) return
   }
 
-  if (sorted.verdict === 'reject') {
+  if (sorted.verdict === 'reject' && test)
+    liveSkip.push(`Сортировщик отсеял бы: ${sorted.reason ?? 'чужая заявка'}`)
+  if (sorted.verdict === 'reject' && !test) {
     await DBOS.runStep(
       () =>
         d().db.transaction(async (tx) => {
@@ -737,7 +744,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             confidence: scored.confidence,
             model: scored.model,
           })
-          if (scored.decision === 'drop') {
+          // A test order goes on to its card, so it never stands among the day's dropped orders.
+          if (scored.decision === 'drop' && !test) {
             await tx.update(lead).set({ status: 'scored_out' }).where(eq(lead.id, order.order_id))
             // A dropped order never reaches the task step, so its sorter verdict is journaled here.
             if (sorted.verdict) {
@@ -775,10 +783,17 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       { name: 'route', ...DB_STEP },
     )
     // An order another direction got, or none (a direction in the shadow or still a draft never wins): no card.
-    if (!route.mine) return
+    if (!route.mine && !test) return
+    if (!route.mine) liveSkip.push('заявка ушла бы другому направлению')
   }
   // Below the threshold or a stop factor: kept for the daily summary, nothing goes to Boris.
-  if (scored?.decision === 'drop') return
+  if (scored?.decision === 'drop' && !test) return
+  if (scored?.decision === 'drop')
+    liveSkip.push(
+      scored.stopFactor
+        ? `стоп-фактор: ${scored.stopFactor}`
+        : `оценка ${scored.score} ниже порога`,
+    )
 
   // Only an order that passed the Sorter and the Scorer on what the board showed costs a visit of the one tab. A run
   // recorded before this step existed resumes along its old steps and keeps the board's data.
@@ -789,7 +804,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   if (await DBOS.patch('order-page')) {
     // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
     // (with its draft, draftThenCard).
-    const held = await DBOS.runStep(() => capSpent().catch(() => false), { name: 'capBeforePage' })
+    const held = await DBOS.runStep(async () => !test && (await capSpent().catch(() => false)), {
+      name: 'capBeforePage',
+    })
     if (!held) {
       const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
         name: 'orderPage',
@@ -841,7 +858,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   const draft = (await DBOS.patch('analyst-draft'))
     ? await DBOS.runStep(
         async () =>
-          (await capSpent().catch(() => false))
+          !test && (await capSpent().catch(() => false))
             ? null
             : draftFor(
                 { ...order, ...withPage },
@@ -863,8 +880,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       d().db.transaction(async (tx) => {
         const id = newEventId()
         await lockCards(tx)
+        // A test order takes no place in the day's cards and is never held for the summary.
         const full =
-          (await cardsToday(tx, new Date())) >= (await getSetting(tx, 'cards.max_per_day'))
+          !test && (await cardsToday(tx, new Date())) >= (await getSetting(tx, 'cards.max_per_day'))
         if (sorted.verdict) {
           await appendEvent(
             tx,
@@ -915,7 +933,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     // What the order page added (a name or a text the board lacked) is on the card too.
     clientName: withPage.client_name,
     text: withPage.text,
-    verdict: sorted.verdict,
+    // Only a test order comes this far rejected; its card says the Sorter would have stopped it (liveSkip).
+    verdict: sorted.verdict === 'reject' ? 'maybe' : sorted.verdict,
     reason: sorted.reason,
     bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
@@ -930,6 +949,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         }
       : null,
     analysis: cardAnalysis(draft?.analysis),
+    ...(liveSkip.length > 0 && { liveSkip: liveSkip.join('; ') }),
     site,
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
@@ -1567,6 +1587,8 @@ function learnFrom(
   /** The reason came with the press (the pult): nothing to ask. */
   ask = true,
 ): void {
+  // A test order teaches nothing: no label, no «почему?» (docs/ops/test-leads.md).
+  if (isTestOrder(label.leadId)) return
   void (async () => {
     const labeled = await recordLabel(d().db, label)
     if (labeled.surprise && ask)
@@ -1601,7 +1623,9 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (action === 'bid' && found.task.state === 'open') {
         // Before anything is closed or spent: the task stays open for whoever the order really belongs to.
         if (await lostRoute(d().db, l.id, l.accountId)) return TEXTS.lostRoute
-        if (!(await getSetting(d().db, 'outbound.bids'))) return TEXTS.bidsPausedPress
+        // A test order spends nothing and reaches no client: neither the pause nor the wallet holds it.
+        if (!isTestOrder(l.id) && !(await getSetting(d().db, 'outbound.bids')))
+          return TEXTS.bidsPausedPress
         // No text to send yet: the card waits for «Изменить», and the wallet need not be read.
         if (l.draftText === null) return TEXTS.noDraft
         // The fee is the most the node may pay, so an unknown one never goes: the page is read now (#89 could not).
@@ -1619,7 +1643,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
           await askForDraft(d(), { taskId, title: l.title }, new Date(), 'price')
           return TEXTS.waitingPrice
         }
-        wallet = await readWallet(d().profi, l.accountId)
+        if (!isTestOrder(l.id)) wallet = await readWallet(d().profi, l.accountId)
       }
       let outboxId: string | null = null
       let refusal: string | null = null
@@ -1643,11 +1667,13 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
                 ? TEXTS.noDraft
                 : now.draftPriceRub === null
                   ? TEXTS.noPrice
-                  : await refuseSpend(tx, {
-                      feeRub: now.bidPriceRub,
-                      balanceRub: wallet,
-                      now: new Date(),
-                    })
+                  : isTestOrder(l.id)
+                    ? null
+                    : await refuseSpend(tx, {
+                        feeRub: now.bidPriceRub,
+                        balanceRub: wallet,
+                        now: new Date(),
+                      })
             // Rolled back: the task stays open and nothing about the bid is written.
             if (refusal) tx.rollback()
           }

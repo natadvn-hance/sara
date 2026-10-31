@@ -1,0 +1,4 @@
+{
+  "title": "Клиент прочитал и молчит (напоминания)",
+  "orders": [{ "order": "sample:90000016", "client": { "behaviour": "silent" } }]
+}

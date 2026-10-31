@@ -21,6 +21,8 @@ export function createBotControl(d: {
   apiRoot?: string
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onMessage?(m: BorisMessage): Promise<BorisReply | null>
+  /** Boris's /test with the words after it (test orders, docs/ops/test-leads.md). */
+  onTest?(args: string): Promise<string>
   voiceDir?: string
   /** The pult's address, for /pult. */
   publicUrl?: string
@@ -39,6 +41,7 @@ export function createBotControl(d: {
         db: d.db,
         onPress: d.onPress,
         onMessage: d.onMessage,
+        onTest: d.onTest,
         voiceDir: d.voiceDir,
         publicUrl: d.publicUrl,
       })
