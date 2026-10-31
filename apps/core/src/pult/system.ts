@@ -7,6 +7,7 @@ import type { AppDeps } from '../api/deps'
 import type { DbOrTx } from '../db/client'
 import { account, event, modelCall } from '../db/schema'
 import { runHealthChecks } from '../health/checks'
+import { sheetPart } from '../sheet/sync'
 import { notTest } from '../testLeads/sql'
 
 /** «Здоровье» (M7): the node of Profi.ru, the session, the link, the backups and the Claude limit, read only. */
@@ -206,6 +207,8 @@ export async function systemView(d: AppDeps & { backupLog?: string }): Promise<S
   }
   parts.splice(1, 0, node)
   parts.push(await linkPart(d.db), await backupPart(d.backupLog, now))
+  const sheet = await sheetPart(d.db, !!d.sheetLinked, now)
+  if (sheet) parts.push(sheet)
 
   const limit = await claudeLimit(d.db)
   // The status check knows only its own probe; the roles working in the last two hours say as much (M7, 28.10).

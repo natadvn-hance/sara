@@ -59,6 +59,7 @@ import { createSecretary, type Secretary } from './secretary/secretary'
 import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
+import { startSheetSync } from './sheet/sync'
 import type { Fetched } from './site/fetch'
 import { createResolver, type Press } from './tasks/resolve'
 import { testCommand } from './testLeads/command'
@@ -341,6 +342,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         ? pipeline.saveBidText(p)
         : Promise.resolve({ saved: false, message: 'Сара ещё запускается' }),
     backupLog: config.backupLog,
+    sheetLinked: !!(config.sheet.url && config.sheet.secret),
   }
   await seedAccounts(db, config.accounts)
   for (const a of config.accounts) {
@@ -468,6 +470,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     now: o.now,
   })
 
+  // Boris's Google Sheet next to the pult (FR-ANL-7): its own pace, its failures never reach the work above.
+  const sheet = startSheetSync({ db, url: config.sheet.url, secret: config.sheet.secret })
+
   return {
     url,
     app,
@@ -480,6 +485,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     stale,
     async close() {
       recheck.stop()
+      sheet.stop()
       stale.stop()
       await testLeads?.close()
       learning.stop()
