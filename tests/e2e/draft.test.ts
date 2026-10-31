@@ -63,7 +63,7 @@ const eventsOf = (type: string, id: string) =>
     .where(and(eq(event.type, type), eq(event.entityId, id)))
 const ASK =
   'Пришли новый текст отклика на «Сайт для стоматологической клиники» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама. Цену услуги можно прислать отдельной строкой, например «цена 5000».'
-const said = (t: string) => tg.sent.some((m) => m.text === t)
+const said = (t: string) => tg.sent.some((m) => m.text === t) || tg.edited.some((m) => m.text === t)
 const editRequests = () =>
   db.select().from(question).where(eq(question.kind, 'edit_draft')).orderBy(question.askedAt)
 /** Presses «Изменить» on the card and waits for Sara's request; returns the request's message id. */
@@ -134,6 +134,7 @@ beforeEach(async () => {
   await resetDb(db)
   await seedDirection(db, 'hance-marketing')
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.answers.length = 0
   tg.markups.length = 0
   fake.bids.length = 0
@@ -401,7 +402,7 @@ describe('the bid', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     tg.pushPress(111, button(cards()[0], 'bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
     expect(fake.bids[0]).toMatchObject({ order_id: id, text: DRAFT, price_rub: 90000 })
   })
@@ -464,7 +465,7 @@ describe('the pult', { timeout: 30000 }, () => {
       { before: CLEAN, after: NEW, voice: false },
     ])
     tg.pushPress(111, button(cards()[0], 'bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids[0]).toMatchObject({ text: `Ирина, добрый день!\n\n${NEW}`, price_rub: 70000 })
     // Decided: the text is no longer edited.
     expect((await post(cookie, `/api/leads/${id}/text`, { text: NEW })).status).toBe(409)
@@ -512,7 +513,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     const journal = await db.select({ p: event.payload }).from(event)
     expect(JSON.stringify(journal)).not.toContain('Ирина')
     tg.pushPress(111, button(cards()[1], 'bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids[0]).toMatchObject({
       text: `Ирина, добрый день!\n\n${NEW}`,
       price_rub: 90000,
@@ -590,7 +591,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     tg.pushText(111, '20000', (await asked())?.telegramMessageId ?? undefined)
     await until(() => said('Записала цену услуги для «Сайт для стоматологической клиники»'))
     tg.pushPress(111, button(cards()[2], 'bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids[0]).toMatchObject({
       text: 'Ирина, добрый день!\n\nСделаем сайт. Когда старт?',
       price_rub: 20000,
@@ -713,7 +714,7 @@ describe('the laid-out card', () => {
     expect((await db.select().from(task).where(eq(task.entityId, id)))[0]?.state).toBe('open')
 
     tg.pushPress(111, button(cards()[0], 'bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 2)
     expect(razbor()[1]?.text).toBe(razbor()[0]?.text)
