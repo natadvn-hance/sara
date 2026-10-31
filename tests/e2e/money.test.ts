@@ -54,7 +54,7 @@ async function decisionTaskOf(leadId: string) {
   const [t] = await db.select().from(task).where(eq(task.entityId, leadId))
   return t
 }
-const bidSent = () => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен'))
+const bidSent = () => tg.shown('✅ Отклик отправлен')
 
 beforeAll(async () => {
   tg = await createFakeTelegram()
@@ -105,6 +105,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDb(db)
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.answers.length = 0
   fake.bids.length = 0
   fake.setHealth({ balance_rub: 5000 })

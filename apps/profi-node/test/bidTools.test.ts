@@ -85,6 +85,8 @@ const tools = (
     parsers?: Parsers
     afterOrderPage?: BidRuntime['afterOrderPage']
     clientMs?: number
+    closeMs?: number
+    confirmMs?: number
   } = {},
 ) =>
   createBidTools({
@@ -92,8 +94,9 @@ const tools = (
     permitSecret: SECRET,
     parsers: o.parsers ?? parsers,
     answerMs: 5000,
-    closeMs: 3000,
+    closeMs: o.closeMs ?? 3000,
     lookAgainMs: 300,
+    confirmMs: o.confirmMs ?? 1500,
     clientMs: o.clientMs ?? 1500,
     accounts: new Map([
       [
@@ -489,8 +492,9 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
   }, 60000)
 
   it('FR-LEAD-8: a bid the order page shows only on the second look is confirmed, not unsure (30.10.2026)', async () => {
-    // The site took the bid, but its order answer right after still says there is none.
+    // The site took the bid, but its order answer right after still says there is none, and its bar is not refreshed.
     site.bidSettings.hasBidLag = 1
+    site.bidSettings.barBalance = 5000
     const id = site.addOrder({ price: 71 })
     const out = await tools().submitBid(bid(id))
     expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
@@ -503,6 +507,37 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     const out = await tools().submitBid(bid(id))
     expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
     expect(site.bids).toHaveLength(1)
+  }, 60000)
+
+  it('FR-LEAD-8: a bid taken while the form stays open and the order answer lags is confirmed by the wallet in seconds (31.10.2026)', async () => {
+    // Order 95583456: pressed 09:17:53, the money gone at once, the form open 30 s, UNCERTAIN at 09:19:04.
+    site.bidSettings.formStays = true
+    site.bidSettings.hasBidLag = 100
+    const id = site.addOrder({ price: 71 })
+    const t0 = Date.now()
+    // A form wait of 2 × 20 s, as the old wait for the form would have taken.
+    const out = await tools({ closeMs: 20_000 }).submitBid(bid(id))
+    expect(Date.now() - t0).toBeLessThan(15_000)
+    expect(out).toEqual({ found_on_page: false, spent_rub: 71, balance_after_rub: 4929 })
+    expect(site.bids).toHaveLength(1)
+    const [row] = await db.select().from(bidAttempt)
+    expect(row?.result).toEqual(out)
+  }, 60000)
+
+  it('FR-LEAD-8: a bid the order answer shows only after a few looks is still confirmed on the page (31.10.2026)', async () => {
+    site.bidSettings.hasBidLag = 3
+    site.bidSettings.barBalance = 5000
+    const id = site.addOrder({ price: 71 })
+    const out = await tools({ confirmMs: 5000 }).submitBid(bid(id))
+    expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
+  }, 60000)
+
+  it('NFR-REL-4: money the opener took is not taken for the press: a lost send stays UNCERTAIN', async () => {
+    site.bidSettings.openerCharges = 71
+    site.bidSettings.mode = 'lost'
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id)))).toBe('UNCERTAIN')
+    expect(site.bids).toEqual([])
   }, 60000)
 
   it('FR-LEAD-8: a closed form without the bid on the page is UNCERTAIN', async () => {

@@ -110,6 +110,8 @@ export type BidLook = {
   openerAmount: number | null
   /** A widget in a frame of the page asks the backoffice API for another client first (an advert, a similar order). */
   klientDecoy: boolean
+  /** The form stays as it was after a bid the site took (live 31.10.2026: open 30 s, the money already gone). */
+  formStays: boolean
 }
 
 // The bid block is drawn from the page's own answer (POST /graphql, orders[].boOrderScreen), like the live page of
@@ -160,7 +162,8 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
   document.getElementById('bid-send').onclick = async () => {
     const r = await fetch('/api/bid', { method: 'POST', body: JSON.stringify({ orderId: '${id}', price: document.getElementById('bid-price').value, priceTo: document.getElementById('bid-price-to').value, text: document.getElementById('bid-text').value }) })
     const a = await r.json()
-    if (a.ok) box.innerHTML = '<p class="bid-done">Отклик отправлен</p>'
+    if (a.ok && !${look.formStays}) box.innerHTML = '<p class="bid-done">Отклик отправлен</p>'
+    else if (a.ok) return
     else box.querySelector('.error').textContent = a.error || 'Не получилось'
   }
 })`,

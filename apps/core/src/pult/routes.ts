@@ -23,6 +23,7 @@ import { inboxView } from './inbox'
 import { journalView, traceView } from './journalView'
 import { feeChanged, leadQueue, leadView } from './leads'
 import { mindRecordView, mindView } from './mind'
+import { decideProposal } from './mindDecide'
 import { searchView } from './search'
 import { pultMay, settingsView } from './settings'
 import { registerStreamRoute } from './stream'
@@ -86,6 +87,10 @@ const JournalQuery = z.object({
   before: z.string().max(40).optional(),
 })
 const SearchQuery = z.object({ q: z.string().max(200).default('') })
+const DecideBody = z.object({
+  decision: z.enum(['yes', 'no']),
+  reason: z.string().trim().min(1).max(500).nullable().default(null),
+})
 const ThresholdQuery = z.object({ value: z.coerce.number().int().min(0).max(100) })
 const ThresholdBody = z.object({
   value: z.number().int().min(0).max(100),
@@ -188,6 +193,19 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       return analyticsView(d.db, year ?? new Date().getFullYear())
     })
     scoped.get('/api/mind', async () => mindView(d.db))
+    scoped.post('/api/mind/proposals/:id/decide', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const body = DecideBody.safeParse(req.body ?? {})
+      if (!body.success || !z.uuid().safeParse(id).success)
+        return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      const r = await decideProposal(
+        { db: d.db, writer: d.mindWriter },
+        id,
+        body.data.decision,
+        body.data.reason,
+      )
+      return r.ok ? { message: r.message } : reply.code(409).send({ error: r.message })
+    })
     scoped.get('/api/mind/:id', async (req, reply) => {
       const v = await mindRecordView(d.db, (req.params as { id: string }).id)
       return v ?? reply.code(404).send({ error: PULT_TEXTS.notFound })

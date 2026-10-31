@@ -201,7 +201,7 @@ export function createEyes(o: {
   }
 
   async function onParsed(p: ParseResult, source: 'rtp' | 'response' | 'dom', body?: unknown) {
-    // The feed is read every minute, so its silence is the sign of a changed site (ADR-002).
+    // The feed is read twice a minute, so its silence is the sign of a changed site (ADR-002).
     if (p.recognized && p.what === 'feed') {
       lastRecognized = Date.now()
       layoutReported = false
