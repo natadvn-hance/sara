@@ -1,0 +1,8 @@
+{
+  "title": "Три копии реальных заказов, клиенты отвечают",
+  "orders": [
+    { "order": "real", "client": { "behaviour": "answers" } },
+    { "order": "real", "client": { "behaviour": "price" }, "after_s": 60 },
+    { "order": "real", "client": { "behaviour": "call" }, "after_s": 120 }
+  ]
+}

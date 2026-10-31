@@ -1,0 +1,21 @@
+{
+  "title": "День целиком: пять заказов, пять разных клиентов",
+  "orders": [
+    {
+      "order": "sample:90000015",
+      "client": { "behaviour": "answers", "persona": "p-stand-salon" }
+    },
+    {
+      "order": "sample:90000004",
+      "client": { "behaviour": "price", "persona": "p-stand-factory" },
+      "after_s": 60
+    },
+    {
+      "order": "sample:90000017",
+      "client": { "behaviour": "call", "persona": "p-stand-startup" },
+      "after_s": 120
+    },
+    { "order": "sample:90000016", "client": { "behaviour": "silent" }, "after_s": 180 },
+    { "order": "sample:90000014", "client": { "behaviour": "leaves" }, "after_s": 240 }
+  ]
+}

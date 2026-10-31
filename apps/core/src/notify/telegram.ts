@@ -92,6 +92,8 @@ export function createTelegramRuntime(d: {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   /** Boris's text or voice (saved to a file first); the answer goes back to him (null: it comes on its own later). */
   onMessage?(m: BorisMessage): Promise<BorisReply | null>
+  /** /test with the words after it: test orders into the live Sara (docs/ops/test-leads.md). */
+  onTest?(args: string): Promise<string>
   /** Where voice messages are saved while they are recognized (default: the system temp folder). */
   voiceDir?: string
   /** The pult's address, for /pult and the commands that point at it. */
@@ -254,7 +256,12 @@ export function createTelegramRuntime(d: {
     bot.command(c.name, async (ctx) => {
       let r: CommandReply
       try {
-        r = await run({ db: d.db, publicUrl: d.publicUrl ?? null })
+        r = await run({
+          db: d.db,
+          publicUrl: d.publicUrl ?? null,
+          args: ctx.match ?? '',
+          test: d.onTest,
+        })
       } catch (e) {
         console.error(`/${c.name} failed`, short(e))
         r = TEXTS.commandFailed

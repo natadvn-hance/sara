@@ -4,6 +4,7 @@ import type { Db } from '../db/client'
 import { account, convTurn, event, lead, question, task } from '../db/schema'
 import { dayOf } from '../leads/money'
 import { getSetting } from '../settings/store'
+import { NOT_TEST } from '../testLeads/sql'
 import { draftsWaiting } from './conversations'
 import { clientNames, readFeed } from './feed'
 import { leadQueue } from './leads'
@@ -135,17 +136,20 @@ async function doingOf(
   return { text: 'Слежу за лентой заявок и чатами Профи.ру', at: lastAt }
 }
 
-/** A period of 7 or 30 days: found, passed the rules, bids, replies, wins and money. */
+/** A period of 7 or 30 days: found, passed the rules, bids, replies, wins and money; test orders not counted. */
 async function periodOf(db: Db, days: number): Promise<TodayView['period']> {
   const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString()
   const r = await db.execute<Omit<TodayView['period'], 'days'>>(sql`
     select
-      (select count(*)::int from core.lead where seen_at >= ${since}) as found,
-      (select count(*)::int from core.task where kind = 'lead_decision' and created_at >= ${since}) as passed,
-      (select count(distinct entity_id)::int from core.event where type = 'bid.sent' and occurred_at >= ${since}) as bids,
-      (select count(*)::int from core.deal where created_at >= ${since}
+      (select count(*)::int from core.lead where seen_at >= ${since} and ${NOT_TEST('id')}) as found,
+      (select count(*)::int from core.task where kind = 'lead_decision' and created_at >= ${since}
+         and ${NOT_TEST('entity_id')}) as passed,
+      (select count(distinct entity_id)::int from core.event where type = 'bid.sent' and occurred_at >= ${since}
+         and ${NOT_TEST('entity_id')}) as bids,
+      (select count(*)::int from core.deal where created_at >= ${since} and ${NOT_TEST('lead_id')}
          and stage in ('talking','call_proposed','call_booked','call_done','won')) as replied,
-      (select count(*)::int from core.deal where created_at >= ${since} and stage = 'won') as won,
+      (select count(*)::int from core.deal where created_at >= ${since} and stage = 'won'
+         and ${NOT_TEST('lead_id')}) as won,
       (select coalesce(sum((payload->>'amount_rub')::int), 0)::int from core.event
          where type = 'spend.recorded' and occurred_at >= ${since}) as "spentRub"`)
   const row = r.rows[0]
@@ -229,8 +233,9 @@ export async function todayView(db: Db, days: number, now = new Date()): Promise
 
   const day = await dayOf(db, now)
   const cards = await db.execute<{ n: number }>(sql`
-    select count(*)::int as n from core.event where type = 'card.sent'
-      and occurred_at >= ((${now.toISOString()}::timestamptz at time zone ${MSK})::date::timestamp at time zone ${MSK})`)
+    select count(*)::int as n from core.event e where e.type = 'card.sent'
+      and exists (select 1 from core.task t where t.id::text = e.entity_id and ${NOT_TEST('t.entity_id')})
+      and e.occurred_at >= ((${now.toISOString()}::timestamptz at time zone ${MSK})::date::timestamp at time zone ${MSK})`)
   const feed = await readFeed(db)
   const limit = await claudeLimit(db)
   return {

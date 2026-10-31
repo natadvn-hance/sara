@@ -1,4 +1,11 @@
-import { type ChatMessage, formatCallback, newEventId, normalizeText } from '@sara/shared'
+import {
+  type ChatMessage,
+  formatCallback,
+  isTestOrder,
+  newEventId,
+  normalizeText,
+  shownTitle,
+} from '@sara/shared'
 import { and, asc, desc, eq, gte, isNotNull, like, ne, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
@@ -374,7 +381,8 @@ export async function checkGround(
     )
     .limit(1)
   if (running) return SKIP('идёт ход разговора')
-  if (!o.dormant && !v1Writes) {
+  // A test chat (docs/ops/test-leads.md): neither the pause for real clients nor the live account holds it.
+  if (!o.dormant && !v1Writes && !isTestOrder(conv.chatId)) {
     if (await accountHolds(db, conv.accountId)) return SKIP('аккаунт на паузе')
     if (!(await getSetting(db, 'outbound.messages'))) return SKIP('пауза «Пишет клиентам»')
   }
@@ -792,7 +800,7 @@ export async function dormantStep(
   const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
   const taskId = newEventId()
   const m = await d.notifier.sendButtons(
-    CONV_TEXTS.dormant(l?.clientName || null, l?.title ?? null, sent),
+    CONV_TEXTS.dormant(l?.clientName || null, l ? shownTitle(l.id, l.title) : null, sent),
     [[{ text: CONV_TEXTS.buttons.close, callbackData: formatCallback(taskId, 'close') }]],
     { place: { conversation: conv.id } },
   )
