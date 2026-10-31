@@ -266,13 +266,13 @@ describe('the series on the card and in time', () => {
   it('FR-LEAD-6: the card shows the series under the bid, each message on its own, approved by the same press', () => {
     const html = leadCardText(card)
     const bid = html.indexOf('Анна, добрый день!')
-    const series = html.indexOf('Вдогонку</b>  ·  через 1-2 минуты после отклика')
+    const series = html.indexOf('Вдогонку</b>  ·  уйдет сразу за откликом')
     expect(bid).toBeGreaterThan(-1)
     expect(series).toBeGreaterThan(bid)
     expect(html).toContain('<blockquote>https://lisa-clinic.example/</blockquote>')
     expect(html).toContain('<blockquote>Из недавнего)</blockquote>')
     expect(html).toContain('<blockquote>Сделаем быстро)</blockquote>')
-    expect(html).toContain('Уйдёт тем же нажатием, если клиент ещё не ответил')
+    expect(html).toContain('Уйдет тем же нажатием, сразу за откликом')
     // A bid without a series: no such block at all.
     const none = leadCardText({ ...card, draft: { text: card.draft?.text ?? '', priceRub: 30000 } })
     expect(none).not.toContain('Вдогонку')
