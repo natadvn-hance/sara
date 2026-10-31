@@ -111,7 +111,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
         env:
           npm_config_store_dir: ${{ runner.tool_cache }}/pnpm-store
-      # A macOS runner has no service containers: the job starts its own Postgres and removes it at the end.
+      # A macOS runner has no service containers: the job starts its own Postgres and removes it at the end, with its
+      # data volume (-v), or each run leaves one behind and the Mac disk fills up.
       # Each runner on the Mac has its own container and port, apart from each other and the dev sessions.
       - name: Start Postgres
         run: |
@@ -119,7 +120,7 @@ jobs:
           name="sara-ci-pg-$RUNNER_NAME"
           echo "CI_PG=$name" >> "$GITHUB_ENV"
           echo "DATABASE_URL=postgres://sara:sara@localhost:$port/sara" >> "$GITHUB_ENV"
-          docker rm -f "$name" >/dev/null 2>&1 || true
+          docker rm -fv "$name" >/dev/null 2>&1 || true
           docker run -d --name "$name" -e POSTGRES_USER=sara -e POSTGRES_PASSWORD=sara -e POSTGRES_DB=sara \
             -p "$port:5432" pgvector/pgvector:pg16
           for i in $(seq 1 30); do docker exec "$name" pg_isready -U sara >/dev/null 2>&1 && exit 0; sleep 2; done
@@ -138,4 +139,4 @@ jobs:
       - run: pnpm --filter @sara/web build
       - name: Stop Postgres
         if: always()
-        run: docker rm -f "${CI_PG:-sara-ci-pg-$RUNNER_NAME}" >/dev/null 2>&1 || true
+        run: docker rm -fv "${CI_PG:-sara-ci-pg-$RUNNER_NAME}" >/dev/null 2>&1 || true
