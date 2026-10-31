@@ -14,6 +14,7 @@ import type {
   Topic,
 } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
+import type { HanceSite } from '../leads/siteOrder'
 
 /**
  * The types the M4 parts share (plan «Карта интерфейсов»). Part 0 lays them down with stub bodies at their paths;
@@ -93,6 +94,8 @@ export type Recall = {
   always: MindHit[]
   /** Up to three cases of Hance that fit the client's words, none of them already told in this chat. */
   cases: CaseHit[]
+  /** The sites of Hance of an order for a site (links.blocked left out); none for any other order. */
+  sites?: HanceSite[]
 }
 
 export type MindSearch = {
@@ -159,6 +162,8 @@ export type CaseCheck = {
   told: { id: string; title: string }[]
   /** What the Interlocutor chose; null when its answer had no case. */
   choice: CaseChoice | null
+  /** The reply shows sites of Hance (a client of a site order asked for examples): no case, and no story either. */
+  sitesShown?: boolean
 }
 
 export type CheckInput = {

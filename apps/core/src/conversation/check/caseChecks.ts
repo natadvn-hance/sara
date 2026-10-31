@@ -308,7 +308,7 @@ export function caseIssues(
   if (choice?.case_id && !chosen && !toldIds.has(choice.case_id))
     issues.push({ id: 'case.unknown', detail: `кейс ${choice.case_id} не из кейсов этого хода` })
   else if (!choice?.case_id) {
-    const claim = claimsIn(text)[0]
+    const claim = c.sitesShown ? undefined : claimsIn(text)[0]
     if (claim)
       issues.push({
         id: 'case.unknown',

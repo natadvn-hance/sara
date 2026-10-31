@@ -19,11 +19,11 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 /** The M4 roles: their meta (design 5.14, plan D2 and D3) and the schema each answers with. */
 const M4_ROLES = {
   interlocutor: {
-    meta: { version: 8, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
+    meta: { version: 9, model: 'opus', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 120000 },
     schema: InterlocutorOutput,
   },
   checker: {
-    meta: { version: 4, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
+    meta: { version: 6, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
     schema: CheckerOutput,
   },
   reminder: {
@@ -57,6 +57,25 @@ describe('the M4 roles', () => {
     expect(role).toContain('Сара не выбрала кейс: любой рассказ о проекте это unsupported')
   })
 
+  it('FR-SITE-29: the Interlocutor thinks before it answers and never says there are no examples while there is something to show', async () => {
+    const role = await readFile(join(ROLES, 'interlocutor/role.md'), 'utf8')
+    expect(role).toMatch(/## Как ты думаешь/)
+    expect(role).toMatch(/что человек спросил на самом деле/)
+    expect(role).toMatch(/Никогда не говори клиенту «нет примеров», «нет кейса»/)
+    expect(role).toMatch(/По заказу на сайт всегда есть сайты/)
+    // «А вы кто вообще» is a question about Hance, not a try to break the rules.
+    expect(role).toMatch(/«А вы кто вообще».*не проверка на бота/)
+    expect(role).not.toMatch(/честно скажи, что похожий опыт/)
+  })
+
+  it('FR-CONV-4: the Checker catches inventions about the client but does not push an answer into a template', async () => {
+    const role = await readFile(join(ROLES, 'checker/role.md'), 'utf8')
+    expect(role).toMatch(/Не утверждения и общие слова о том, чем занимается Hance/)
+    expect(role).toMatch(/что Сара говорит о клиенте, его бизнесе или сайте, чего нет в досье/)
+    expect(role).toMatch(/живая короткая фраза, простой ответ в одну строку/)
+    expect(role).toMatch(/Не требуй шаблонных формулировок/)
+  })
+
   it('FR-CONV-5: the Interlocutor takes «хорошо» after a call proposal as agreement, not as the end', async () => {
     const role = await readFile(join(ROLES, 'interlocutor/role.md'), 'utf8')
     // The rule for «none» names the exception, so the two places that mention «ок» and «хорошо» agree.
@@ -75,7 +94,7 @@ describe('the M4 roles', () => {
     expect(rule).toMatch(/не пиши, что кто-то позвонит, перезвонит или наберёт/i)
     expect(rule).toMatch(/не называй время звонка/i)
     // The field list no longer says the text of a call is empty.
-    const field = role.split('\n').find((l) => /^9\. text/.test(l)) ?? ''
+    const field = role.split('\n').find((l) => /^10\. text/.test(l)) ?? ''
     expect(field).toMatch(/call_boris это короткий черновик для Бориса/)
     expect(field).not.toMatch(/При ходе call_boris и none: null/)
   })
