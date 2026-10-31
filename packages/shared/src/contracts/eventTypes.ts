@@ -29,6 +29,8 @@ export const EVENT_TYPES = [
   'lead.page_read',
   /** Stage 1 «Отсев»: the criteria that fired, unclear or lacked data (no quotes: they stay on the lead). */
   'lead.screened',
+  /** The client's own site was read for a bid or a turn (no address or words in the payload: status, platform, facts). */
+  'lead.site_read',
   /** The order of a waiting card closed on Profi.ru: its card was closed (via: a recheck or a press that failed). */
   'lead.closed_on_site',
   /** Too many waiting cards looked closed at once: none was closed, Boris was told (closed, checked). */

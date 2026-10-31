@@ -58,6 +58,7 @@ import { createSecretary, type Secretary } from './secretary/secretary'
 import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
+import type { Fetched } from './site/fetch'
 import { createResolver, type Press } from './tasks/resolve'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
@@ -100,6 +101,10 @@ export type StartOptions = {
   staleTickMs?: number
   /** The clock of the greeting of a bid (default the real one); tests fix the hour. */
   now?: () => Date
+  /** How a page of a client's site is fetched; the tests give a made-up site. */
+  siteFetch?: (url: string) => Promise<Fetched>
+  /** How a file attached to an order is downloaded; the tests give bytes. */
+  fileFetch?: (url: string) => Promise<Fetched>
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -200,6 +205,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifyRetry: o.notifyRetry,
     now: o.now,
     mind: createMindSearch(db),
+    siteFetch: o.siteFetch,
+    fileFetch: o.fileFetch,
   })
   const lp = pipeline
   setOutboxDeps({

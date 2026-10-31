@@ -115,6 +115,17 @@ export const ClientInfo = z.object({
 })
 export type ClientInfo = z.infer<typeof ClientInfo>
 
+/**
+ * A file the client attached to the order (the order page's documents and gallery, Boris 30.10.2026 evening: «файлы …
+ * эту информацию нужно будет изучать перед откликом»): the technical task as a PDF, DOCX or XLSX, pictures, a brief.
+ */
+export const OrderAttachment = z.object({
+  kind: z.enum(['document', 'image']),
+  url: z.string().min(1),
+  name: z.string(),
+})
+export type OrderAttachment = z.infer<typeof OrderAttachment>
+
 export const GetOrderOutput = ProfiOrder.extend({
   open: z.boolean(),
   published_at: z.iso.datetime().nullable(),
@@ -127,6 +138,8 @@ export const GetOrderOutput = ProfiOrder.extend({
    * (the tab may not move, the page gave no order answer) and answers from what it stored; absent: an older node.
    */
   from_page: z.boolean().optional(),
+  /** The files attached to the order; absent from a node that does not read them yet, empty when there are none. */
+  attachments: z.array(OrderAttachment).optional(),
 })
 export type GetOrderOutput = z.infer<typeof GetOrderOutput>
 
