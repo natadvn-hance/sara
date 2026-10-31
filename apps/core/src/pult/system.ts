@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import type { SystemPart, SystemView } from '@sara/shared'
 import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm'
 import type { AppDeps } from '../api/deps'
@@ -10,6 +12,21 @@ import { notTest } from '../testLeads/sql'
 /** «Здоровье» (M7): the node of Profi.ru, the session, the link, the backups and the Claude limit, read only. */
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const
+
+/** When this core started: the last deploy or restart, for «Состояние». */
+const STARTED_AT = new Date().toISOString()
+/** The version of Sara this core runs, from the repository's package.json (release-please keeps it). */
+const VERSION = (() => {
+  try {
+    const root = resolve(import.meta.dirname, '../../../..')
+    return (
+      (JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version?: string })
+        .version ?? '?'
+    )
+  } catch {
+    return '?'
+  }
+})()
 const DAY_MS = 24 * 3600 * 1000
 
 export type ClaudeLimit = { limited: boolean; until: string | null; since: string | null }
@@ -228,6 +245,7 @@ export async function systemView(d: AppDeps & { backupLog?: string }): Promise<S
   const accounts = await d.db.select().from(account).orderBy(account.id)
   return {
     parts,
+    deploy: { version: VERSION, startedAt: STARTED_AT },
     claude: { limited: limit.limited, until: limit.until, roles },
     accounts: accounts.map((a) => ({
       id: a.id,

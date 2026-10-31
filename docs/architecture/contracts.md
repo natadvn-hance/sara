@@ -280,7 +280,10 @@ true`) или кошелёк в шапке стал меньше на сумму
 - Настройки (пульт v2): `POST /api/settings/{key} {value, confirm?}`; паузы и
   исходящие (`outbound.bids`, `outbound.messages`, `conv.reminders`) выключаются
   сразу, включаются только с `confirm: true` (второе нажатие); автопилот только
-  выключается. Порог: `GET /api/settings/threshold/{accountId}?value=` (подсказка
+  выключается. Разум: `POST /api/mind/proposals/{id}/decide {decision:
+  yes|no, reason?}` («да» идёт к писателю M5, пока он не записал, состояние
+  `accepted`, «ждёт записи»). Состояние отдаёт `deploy {version, startedAt}`.
+  Порог: `GET /api/settings/threshold/{accountId}?value=` (подсказка
   по оценкам 7 дней), `POST /api/settings/threshold/{accountId} {value,
   expectedVersion}` создаёт новую версию правил.
 - Схема: `GET /api/openapi.json`, строится из схем zod пульта
