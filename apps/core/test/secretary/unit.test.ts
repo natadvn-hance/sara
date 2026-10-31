@@ -58,6 +58,7 @@ describe('the Secretary, its parts', () => {
         'settings',
         'health',
         'analytics',
+        'counts',
         'set_setting',
         'skip_lead',
         'offer_bid',
