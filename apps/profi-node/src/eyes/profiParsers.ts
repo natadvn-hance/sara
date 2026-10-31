@@ -1,6 +1,7 @@
 import type { MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
 import { clientInfoFromAnswer } from './clientInfo'
+import { listedChats } from './history'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
@@ -302,6 +303,19 @@ export const profiParsers: Parsers = {
     // Kept as a path on the site, whatever form the menu uses.
     const u = new URL(href, 'https://profi.ru')
     return `${u.pathname}${u.search}`
+  },
+
+  // Told by its shape alone, as the archive reader read it live (28.10.2026), whatever address it came from.
+  chatsFromAnswer(_url, body) {
+    const list = (body as { data?: { me?: { rboMessengersByFilter?: unknown } } } | null)?.data?.me
+      ?.rboMessengersByFilter
+    if (!list) return null
+    // The order chat lives at r.php?id=<order number>; the answer names it by that number (messengerExtId).
+    return listedChats([body]).chats.map((c) => ({
+      chatId: c.orderId,
+      unread: c.unread,
+      lastAt: c.lastAt,
+    }))
   },
 
   async fromChatsDom(page) {

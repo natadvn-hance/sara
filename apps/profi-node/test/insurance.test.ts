@@ -638,11 +638,15 @@ describe('insurance and the account tab', () => {
     expect(seen.map((t) => t.payload.seen_via)).toEqual(['stream'])
   }, 60000)
 
-  it('FR-CONV-1: when the chats list shows no chats, the 10-minute check rereads the chats Sara knows', async () => {
+  it('FR-CONV-1: when the chats list shows no chats and gives no answer, the check rereads the chats Sara knows', async () => {
     await loginStandIn(ab.page, site)
     site.addMessage('c-known', 'client', 'Здравствуйте')
-    // The real list page of 24.10.2026: no chat links at all.
-    const parsers: Parsers = { ...standInParsers, fromChatsDom: async () => [] }
+    // The real list page of 24.10.2026: no chat links at all, and here no answer of the list either.
+    const parsers: Parsers = {
+      ...standInParsers,
+      fromChatsDom: async () => [],
+      chatsFromAnswer: undefined,
+    }
     const eyes = createEyes({ accountId: 'hance-marketing', db, parsers })
     const ins = startInsurance({
       eyes,
