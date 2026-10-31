@@ -51,6 +51,8 @@ export type FakeTelegram = {
   sent: SentMessage[]
   /** Edits Telegram accepted, in order (refused ones are not here): closed cards, the M4 shadow card. */
   edited: EditedMessage[]
+  /** Whether a message was sent, or edited into, a text that starts with `prefix` (a bid's one status message is both). */
+  shown(prefix: string): boolean
   /** Buttons replaced on a sent message (editMessageReplyMarkup): a card decided in the pult. */
   markups: { message_id: number; reply_markup: EditedMessage['reply_markup'] }[]
   answers: { callback_query_id: string; text?: string }[]
@@ -382,6 +384,8 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     username: 'sara_dev_bot',
     sent,
     edited,
+    shown: (prefix) =>
+      sent.some((m) => m.text.startsWith(prefix)) || edited.some((m) => m.text.startsWith(prefix)),
     markups,
     answers,
     actions,

@@ -94,6 +94,8 @@ export type StartOptions = {
   busyRetry?: { delayMs: number; tries: number }
   /** When an unsure bid is looked for on its order (default after 5 minutes, 30 minutes and 2 hours). */
   reconcileDelaysMs?: number[]
+  /** The first looks at the order page after an unsure bid, within a minute (31.10.2026); empty when a test sets the retry or reconcile waits. */
+  quickLookDelaysMs?: number[]
   /** The waits of the series after a bid: before its first message and between the next ones (SERIES_DELAYS). */
   seriesDelayMs?: SeriesDeps['delayMs']
   /** Where the times of the call offer come from (default Boris's working hours); tests fix them. */
@@ -237,6 +239,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
     // The first look a minute after: a bid the node could not see at once is usually on its page by then, and its
     // series still goes in time (30.10.2026).
+    quickLookDelaysMs:
+      o.quickLookDelaysMs ??
+      (o.reconcileDelaysMs || o.retryDelaysMs ? [] : [3_000, 5_000, 7_000, 10_000, 15_000, 20_000]),
     reconcileDelaysMs: o.reconcileDelaysMs ?? [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),

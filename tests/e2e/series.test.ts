@@ -96,6 +96,7 @@ beforeAll(async () => {
       retryDelaysMs: [50, 50],
       busyRetry: { delayMs: 50, tries: 2 },
       reconcileDelaysMs: [800, 800],
+      quickLookDelaysMs: [250, 250],
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
@@ -128,6 +129,7 @@ beforeEach(async () => {
   clientFirst = false
   await resetDb(db)
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.answers.length = 0
   fake.bids.length = 0
   fake.messages.length = 0
@@ -194,7 +196,13 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     const id = await cardFor()
     press()
     await until(async () => (await events('bid.series_stopped', id)).length === 1)
-    expect(await events('bid.series_stopped', id)).toEqual([{ n: 0, why: 'client_replied' }])
+    expect(await events('bid.series_stopped', id)).toEqual([
+      expect.objectContaining({
+        n: 0,
+        why: 'client_replied',
+        detail: expect.objectContaining({ rule: 'client_message' }),
+      }),
+    ])
     expect(sentTo(id)).toEqual([])
   })
 
@@ -204,7 +212,9 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await until(() => sentTo(id).length === 1)
     await fake.addChatMessage({ chatId: id, author: 'client', text: 'Да, интересно' })
     await until(async () => (await events('bid.series_stopped', id)).length === 1)
-    expect(await events('bid.series_stopped', id)).toEqual([{ n: 1, why: 'client_replied' }])
+    expect(await events('bid.series_stopped', id)).toEqual([
+      expect.objectContaining({ n: 1, why: 'client_replied' }),
+    ])
     expect(sentTo(id).map((m) => m.text)).toEqual([FIRST])
   })
 
@@ -226,7 +236,9 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     const id = await cardFor()
     press()
     await until(async () => (await events('bid.series_stopped', id)).length === 1)
-    expect(await events('bid.series_stopped', id)).toEqual([{ n: 0, why: 'not_now' }])
+    expect(await events('bid.series_stopped', id)).toEqual([
+      expect.objectContaining({ n: 0, why: 'not_now' }),
+    ])
     expect(sentTo(id)).toEqual([])
   })
 
@@ -282,7 +294,7 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     expect(tg.sent.some((m) => m.text.includes('Сообщения вдогонку не отправляла'))).toBe(false)
   })
 
-  it('FR-CONV-9: a bid found later than a quarter of an hour after the press has no series, and Boris is told so', async () => {
+  it('FR-CONV-9: a bid found on its order long after the press gets its series at once all the same (31.10.2026)', async () => {
     fake.failAcks(3)
     const id = await cardFor()
     press()
@@ -291,13 +303,51 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
         (r) => r.state === 'uncertain',
       ),
     )
-    // The press was twenty minutes ago by the time the bid shows on its order.
+    // The press was twenty minutes ago by the time the bid shows on its order: no age limit any more.
     await db.execute(
       sql`update core.outbox set created_at = now() - interval '20 minutes' where kind = 'bid'`,
     )
-    await until(() => tg.sent.some((m) => m.text.includes('Сообщения вдогонку не отправляла')))
-    await settle()
-    expect(sentTo(id)).toEqual([])
+    await until(() => sentTo(id).length === 2)
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    expect(
+      tg.sent.concat(tg.edited).some((m) => m.text.includes('Сообщения вдогонку не отправляла')),
+    ).toBe(false)
+  })
+
+  it('FR-CONV-9: a card of an unknown author, the site itself, does not stop the series (31.10.2026)', async () => {
+    const id = await cardFor()
+    press()
+    await until(() => fake.bids.length === 1)
+    await fake.addChatMessage({ chatId: id, author: 'unknown', text: 'Отклик отправлен' })
+    await until(() => sentTo(id).length === 2)
+    expect(await events('bid.series_stopped', id)).toEqual([])
+    expect(sentTo(id)).toHaveLength(2)
+  })
+
+  it('FR-UI-1: Boris gets one message for the whole bid: sending, sent, then the line about the series (31.10.2026)', async () => {
+    const id = await cardFor()
+    press()
+    await until(() => tg.sent.some((m) => m.text.startsWith('⏳ Отправляю отклик')))
+    await until(() => sentTo(id).length === 2)
+    await until(() => tg.edited.some((m) => m.text.includes('Вдогонку ушло 2 сообщения')))
+    const [first] = tg.sent.filter((m) => m.text.startsWith('⏳'))
+    const edits = tg.edited.filter(
+      (m) => m.message_id === (first as { message_id: number }).message_id,
+    )
+    expect(edits.at(0)?.text).toMatch(/^✅ Отклик отправлен/)
+    expect(edits.at(-1)?.text).toMatch(/^✅ Отклик отправлен.*\nВдогонку ушло 2 сообщения/)
+    // No pile of notices: nothing else about the bid was sent.
+    expect(tg.sent.filter((m) => /Отклик|отклик/.test(m.text) && !m.reply_markup)).toHaveLength(1)
+  })
+
+  it('FR-LEAD-4: an unsure bid is looked for within seconds, and «не знаю, ушёл ли» is not said when it shows (31.10.2026)', async () => {
+    fake.failAcks(3)
+    const id = await cardFor()
+    press()
+    await until(async () => (await events('bid.sent', id)).length === 1)
+    await until(() => sentTo(id).length === 2)
+    expect(tg.shown('Не знаю, ушёл ли отклик')).toBe(false)
+    expect(tg.edited.some((m) => m.text.startsWith('✅ Отклик отправлен'))).toBe(true)
   })
 
   it('FR-CONV-9: the series ends with the call offer, its three times put in when it is sent (Boris, 30.10.2026)', async () => {
