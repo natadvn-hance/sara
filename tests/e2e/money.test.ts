@@ -245,6 +245,7 @@ describe('the card flow', () => {
       'profi.order_seen',
       'lead.found',
       'model.called',
+      'lead.screened',
       'lead.routed',
       'lead.sorted',
       'lead.held',

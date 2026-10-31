@@ -6,6 +6,7 @@ import {
   type LeadQueue,
   type LeadRow,
   type LeadScores,
+  LeadScreen,
   type LeadView,
   priceUpTo,
   type QueueOrder,
@@ -251,6 +252,7 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
       feeRub: l.bidPriceRub,
       url: orderUrl(l.id),
     },
+    screen: LeadScreen.safeParse(l.screen).data ?? null,
     score: s
       ? {
           value: s.score,

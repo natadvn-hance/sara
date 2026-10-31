@@ -118,7 +118,7 @@ export async function pickSampleLeads(db: Db, accountId: string): Promise<LeadRo
   if (out.length < SAMPLE_ORDERS) {
     const shown = await db.execute<{ id: string }>(sql`
       select l.id from core.lead l
-      where l.account_id = ${accountId} and l.status not in ('stale', 'sorted_out')
+      where l.account_id = ${accountId} and l.status not in ('stale', 'sorted_out', 'screened_out')
         and (select s.decision from core.lead_score s where s.lead_id = l.id and not s.backtest
              order by s.created_at desc limit 1) = 'show'
       order by l.seen_at desc limit ${SAMPLE_ORDERS}`)
@@ -142,7 +142,7 @@ export async function pickSampleLeads(db: Db, accountId: string): Promise<LeadRo
         .select()
         .from(lead)
         .where(
-          sql`${lead.accountId} = ${accountId} and ${lead.status} not in ('stale', 'sorted_out')`,
+          sql`${lead.accountId} = ${accountId} and ${lead.status} not in ('stale', 'sorted_out', 'screened_out')`,
         )
         .orderBy(desc(lead.seenAt))
         .limit(SAMPLE_ORDERS),
