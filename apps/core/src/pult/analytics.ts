@@ -1,8 +1,8 @@
 import { type AnalyticsView, FUNNEL_STAGES, type FunnelStage } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
-import { stageOf } from './clients'
 import { NOT_TEST } from '../testLeads/sql'
+import { stageOf } from './clients'
 
 /**
  * Boris's three tables (docs/product/analytics-metrics.md) from what Sara knows today: bids and spends from the
