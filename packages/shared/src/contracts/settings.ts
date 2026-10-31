@@ -79,9 +79,9 @@ export const SETTINGS = {
    */
   'conv.autopilot': { schema: z.boolean(), default: false },
   /** FR-CONV-7: the turn waits this long after the last client message the core heard... */
-  'conv.quiet_after_message_s': { schema: z.number().int().positive(), default: 45 },
+  'conv.quiet_after_message_s': { schema: z.number().int().positive(), default: 15 },
   /** ...and this long after the last «печатает». */
-  'conv.quiet_after_typing_s': { schema: z.number().int().positive(), default: 20 },
+  'conv.quiet_after_typing_s': { schema: z.number().int().positive(), default: 10 },
   /** FR-CONV-7: never longer than this from the first message of the turn. */
   'conv.max_wait_s': { schema: z.number().int().positive(), default: 600 },
   /** FR-CONV-8: Moscow hours when only urgent replies go to a client. */

@@ -83,6 +83,18 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'count',
   },
+  'conv.quiet_after_message_s': {
+    title: 'Ждать после сообщения клиента, сек',
+    hint: 'Сара отвечает, когда клиент молчит столько. Своё сообщение клиента ты видишь сразу, ждёт только черновик.',
+    edit: 'free',
+    kind: 'count',
+  },
+  'conv.quiet_after_typing_s': {
+    title: 'Ждать после «печатает», сек',
+    hint: 'Пока клиент печатает, Сара не отвечает.',
+    edit: 'free',
+    kind: 'count',
+  },
   'conv.night': {
     title: 'Ночь для клиентов',
     hint: 'По Москве: ночью клиентам уходят только срочные ответы.',
@@ -163,6 +175,8 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'reminder.decision_after_min',
       'cards.quiet_hours',
       'notify.push',
+      'conv.quiet_after_message_s',
+      'conv.quiet_after_typing_s',
       'conv.night',
       'conv.reminder_quiet',
       'secretary.turns_per_day',

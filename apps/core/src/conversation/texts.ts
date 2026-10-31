@@ -80,6 +80,9 @@ const REMINDER_STEP_RU = {
 } as const
 
 export const CONV_TEXTS = {
+  /** A client's message the moment the core hears it, in the client's topic: the draft comes later (Boris, 31.10). */
+  clientSaid: (name: string | null, text: string) => `💬 ${name || 'Клиент'}: ${text}`,
+
   authorUnclear: (chatId: string) =>
     `⚠️ В чате заказа ${chatId} не понимаю, кто написал последние сообщения: клиент или наша сторона. Пока ничего не отвечаю, посмотри сам.`,
 
