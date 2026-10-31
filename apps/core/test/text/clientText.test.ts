@@ -28,7 +28,7 @@ describe('fixClientText: the final period of a paragraph (FR-SPEECH-3, rule 4)',
 
   it('FR-SPEECH-3: a period after a bracket, a quote, a number or a domain goes too', () => {
     expect(fixClientText('Это недорого (от 30 тысяч).')).toBe('Это недорого (от 30 тысяч)')
-    expect(fixClientText('Назовём это «Старт».')).toBe('Назовём это «Старт»')
+    expect(fixClientText('Назовем это «Старт».')).toBe('Назовем это «Старт»')
     expect(fixClientText('Срок до 18.00.')).toBe('Срок до 18.00')
     expect(fixClientText('Смотрите на hance.ru.')).toBe('Смотрите на hance.ru')
   })
@@ -37,16 +37,16 @@ describe('fixClientText: the final period of a paragraph (FR-SPEECH-3, rule 4)',
     expect(fixClientText('Нужны сайт, бот и т.д.')).toBe('Нужны сайт, бот и т.д.')
     expect(fixClientText('Нужны сайт, бот и т. д.')).toBe('Нужны сайт, бот и т. д.')
     expect(fixClientText('Работаем с ООО и т.д. Пишите.')).toBe('Работаем с ООО и т.д. Пишите')
-    expect(fixClientText('Нужны сайт, бот и т.п.\n\nЕщё')).toBe('Нужны сайт, бот и т.п.\n\nЕщё')
+    expect(fixClientText('Нужны сайт, бот и т.п.\n\nЕще')).toBe('Нужны сайт, бот и т.п.\n\nЕще')
     expect(fixClientText('Например, см. выше, т.е. сейчас')).toBe('Например, см. выше, т.е. сейчас')
   })
 
   it('FR-SPEECH-3: a short abbreviation at the end of a paragraph keeps its period', () => {
-    expect(fixClientText('Сайт обойдётся в 30 000 руб.')).toBe('Сайт обойдётся в 30 000 руб.')
+    expect(fixClientText('Сайт обойдется в 30 000 руб.')).toBe('Сайт обойдется в 30 000 руб.')
     expect(fixClientText('Бюджет до 5 млн.')).toBe('Бюджет до 5 млн.')
     expect(fixClientText('Это 40 тыс.')).toBe('Это 40 тыс.')
     expect(fixClientText('Офис: г. Краснодар, ул.')).toBe('Офис: г. Краснодар, ул.')
-    expect(fixClientText('С 2020 г.\n\nЕщё')).toBe('С 2020 г.\n\nЕщё')
+    expect(fixClientText('С 2020 г.\n\nЕще')).toBe('С 2020 г.\n\nЕще')
     expect(fixClientText('Площадь 40 кв.')).toBe('Площадь 40 кв.')
   })
 
@@ -79,7 +79,7 @@ describe('fixClientText: paragraphs and spaces (FR-SPEECH-3, rule 15)', () => {
   })
 
   it('FR-SPEECH-3: spaces are trimmed and doubled spaces are one, a non-breaking space stays', () => {
-    expect(fixClientText('  Привет   мир \n\n   Ещё  одно   ')).toBe('Привет мир\n\nЕщё одно')
+    expect(fixClientText('  Привет   мир \n\n   Еще  одно   ')).toBe('Привет мир\n\nЕще одно')
     expect(fixClientText(`Цена 50${NBSP}000${NBSP}₽`)).toBe(`Цена 50${NBSP}000${NBSP}₽`)
   })
 
@@ -103,8 +103,8 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
 
   it('NFR-UX-1: a dash at the start of a line, before a comma and at the end leaves no trace', () => {
     expect(fixClientText(`${LONG} Привет\n\n- Раз\n- Два`)).toBe('Привет\n\nРаз\nДва')
-    expect(fixClientText(`Ждём ${LONG}, потом отвечу`)).toBe('Ждём, потом отвечу')
-    expect(fixClientText(`Ждём вас ${LONG}`)).toBe('Ждём вас')
+    expect(fixClientText(`Ждем ${LONG}, потом отвечу`)).toBe('Ждем, потом отвечу')
+    expect(fixClientText(`Ждем вас ${LONG}`)).toBe('Ждем вас')
     expect(fixClientText(`Стоимость (${LONG} уточним) такая`)).toBe('Стоимость (уточним) такая')
   })
 
@@ -119,7 +119,7 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
 
   it('NFR-UX-1: a spaced dash between two numbers that is no range becomes a comma, not a hyphen', () => {
     expect(fixClientText(`Цена 5000 ${LONG} 3 этапа`)).toBe('Цена 5000, 3 этапа')
-    expect(fixClientText(`Берём 20 ${MEDIUM} 10 штук`)).toBe('Берём 20, 10 штук')
+    expect(fixClientText(`Берем 20 ${MEDIUM} 10 штук`)).toBe('Берем 20, 10 штук')
     expect(fixClientText(`Ровно 100 ${LONG} 100 штук`)).toBe('Ровно 100, 100 штук')
     expect(fixClientText('Сайт 2 - 1 этап')).toBe('Сайт 2, 1 этап')
   })
@@ -154,7 +154,7 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
   })
 
   it('NFR-UX-1: a number before a dash and a word after it is not a range', () => {
-    expect(fixClientText(`Берём 5 ${LONG} это мало`)).toBe('Берём 5 это мало')
+    expect(fixClientText(`Берем 5 ${LONG} это мало`)).toBe('Берем 5 это мало')
   })
 
   it('NFR-UX-1: a hyphen inside a common word becomes a space', () => {
@@ -226,8 +226,8 @@ describe('fixClientText: dashes and hyphens (NFR-UX-1, rule 3)', () => {
   })
 
   it('NFR-UX-1: a name of the list keeps its hyphen, in any case form', () => {
-    expect(fixClientText('Мы партнёры 1С:Франчайзи и работаем с 1С-Битрикс')).toBe(
-      'Мы партнёры 1С:Франчайзи и работаем с 1С-Битрикс',
+    expect(fixClientText('Мы партнеры 1С:Франчайзи и работаем с 1С-Битрикс')).toBe(
+      'Мы партнеры 1С:Франчайзи и работаем с 1С-Битрикс',
     )
     expect(fixClientText('Офис в санкт-петербурге, клиент из ростова-на-дону')).toBe(
       'Офис в санкт-петербурге, клиент из ростова-на-дону',
@@ -530,5 +530,19 @@ describe('isGreetingForm and leadingGreeting (FR-SPEECH-3, rule 5)', () => {
     expect(leadingGreeting('Здравствуйте! Посмотрел задачу')).toBeNull()
     expect(leadingGreeting('Добрый день, посмотрел задачу')).toBeNull()
     expect(leadingGreeting('')).toBeNull()
+  })
+})
+
+describe('no «е» in a client text (Boris, 31.10.2026)', () => {
+  it('writes «е» in place of «е» and «Е» in place of «Е», and a link keeps its letters', () => {
+    const yo = String.fromCharCode(0x451)
+    const cap = String.fromCharCode(0x401)
+    const link = `https://site.ru/a${yo}`
+    const out = fixClientText(`Добрый день!\n\nАрт${yo}м, ещ${yo} вопрос: ${link}. ${cap}лка ждет`)
+    expect(out.replace(link, '')).not.toMatch(new RegExp(`[${yo}${cap}]`))
+    expect(out).toContain(link)
+    expect(out).toContain('Артем, еще вопрос')
+    expect(out).toContain('Елка')
+    expect(fixClientText(out)).toBe(out)
   })
 })
