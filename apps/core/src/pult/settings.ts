@@ -72,14 +72,12 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     kind: 'hours',
   },
   'conv.reminder_quiet': { title: 'Без напоминаний клиентам', edit: 'locked', kind: 'hours' },
-<<<<<<< HEAD
   'secretary.turns_per_day': {
     title: 'Ответов Сары в чате в день',
     hint: 'Разговор с Сарой идёт на Opus и тратит общую подписку Claude.',
     edit: 'free',
     kind: 'count',
   },
-=======
   'calls.offer': {
     title: 'Предлагает созвон после отклика',
     hint: 'Последнее сообщение серии: созвониться на полчаса, три времени на выбор.',
@@ -106,7 +104,6 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
   },
   'calls.slot_min': { title: 'Длина созвона, мин', edit: 'free', kind: 'count' },
   'calls.min_ahead_min': { title: 'Созвон не раньше чем через, мин', edit: 'free', kind: 'count' },
->>>>>>> bba31751 (feat(core,web): the series ends with a call offer, and an order of a site gets a technical bid and 3-4 Hance sites)
 }
 
 const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
