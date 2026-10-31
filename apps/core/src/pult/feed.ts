@@ -3,6 +3,8 @@ import {
   formatRub,
   isTestOrder,
   type LineTone,
+  SCREEN_RU,
+  type ScreenCriterion,
   type SettingKey,
   shownTitle,
 } from '@sara/shared'
@@ -45,6 +47,19 @@ const SAYS: Record<string, (e: Row, n: Names) => Said | null> = {
       area: 'lead',
       tone: 'ok',
       text: `Оценила ${q(n.lead.get(e.entityId))}${score === null ? '' : `: балл ${score}`}${pass ? '' : ', не наша'}`,
+    }
+  },
+  'lead.screened': (e, n) => {
+    const out = (e.payload as { criteria?: unknown } | null)?.criteria
+    const criteria = Array.isArray(out)
+      ? out.filter((c): c is ScreenCriterion => c in SCREEN_RU)
+      : []
+    if (criteria.length === 0) return null
+    const stops = (e.payload as { stops?: unknown } | null)?.stops === true
+    return {
+      area: 'lead',
+      tone: 'ok',
+      text: `${stops ? 'Отсеяла' : 'Отсеяла бы'} ${q(n.lead.get(e.entityId))}: ${criteria.map((c) => SCREEN_RU[c]).join(', ')}`,
     }
   },
   'lead.drafted': (e, n) => ({

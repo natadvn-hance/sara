@@ -54,7 +54,9 @@ async function noteUnclear(d: ConversationEventDeps, conv: ConversationRow, id: 
     payload: { platform_message_id: id, count: after.unclearCount },
   })
   if (after.unclearCount === UNCLEAR_TELL_AT)
-    await d.notifier.sendText(CONV_TEXTS.authorUnclear(conv.chatId))
+    await d.notifier.sendText(CONV_TEXTS.authorUnclear(conv.chatId), {
+      place: { conversation: conv.id },
+    })
 }
 
 /**

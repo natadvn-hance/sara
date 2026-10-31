@@ -10,7 +10,7 @@ import { buildServer } from './api/server'
 import { requireSession } from './auth/session'
 import type { Config } from './config'
 import { forwardTurn, sendTurnCard } from './conversation/cards'
-import { onConvEdit, onConvPress, onConvReply } from './conversation/commands'
+import { onClientText, onConvEdit, onConvPress, onConvReply } from './conversation/commands'
 import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
 import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
@@ -186,6 +186,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
           onConvEdit: (a) => onConvEdit(commandDeps(), a),
           onSecretary: (w) =>
             secretary ? secretary.take(w) : Promise.resolve('Сара ещё запускается'),
+          onClientText: (c) => onClientText(commandDeps(), c),
         },
         m,
       ),
@@ -194,6 +195,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       testLeads
         ? testCommand(testLeads, args, config.publicUrl)
         : Promise.resolve('Тестовые заявки ещё запускаются'),
+    publicUrl: config.publicUrl,
   })
   const gateway = createGateway({
     db,

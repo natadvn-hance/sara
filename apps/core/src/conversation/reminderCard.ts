@@ -99,6 +99,7 @@ export async function sendReminderCard(
       text,
     }),
     [[button(b.send, 'send'), button(b.edit, 'edit'), button(b.skip, 'skip')]],
+    { place: { conversation: conv.id } },
   )
   await d.db.transaction(async (tx) => {
     await tx.insert(task).values({

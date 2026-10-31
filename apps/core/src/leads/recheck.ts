@@ -183,7 +183,7 @@ export function startCardRecheck(d: {
       limit 1`)
     if (recent.rows.length > 0) return
     try {
-      await d.notifier.sendText(TEXTS.recheckDoubt(closed, checked))
+      await d.notifier.sendText(TEXTS.recheckDoubt(closed, checked), { place: 'leads' })
     } catch (err) {
       // Not written down: the next pass tries again.
       console.error('recheck warning not sent', errText(err))

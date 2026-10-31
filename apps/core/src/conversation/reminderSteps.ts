@@ -802,6 +802,7 @@ export async function dormantStep(
   const m = await d.notifier.sendButtons(
     CONV_TEXTS.dormant(l?.clientName || null, l ? shownTitle(l.id, l.title) : null, sent),
     [[{ text: CONV_TEXTS.buttons.close, callbackData: formatCallback(taskId, 'close') }]],
+    { place: { conversation: conv.id } },
   )
   await d.db.transaction(async (tx) => {
     await tx.insert(task).values({

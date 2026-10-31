@@ -7,17 +7,31 @@ const ROLE = resolve(import.meta.dirname, '../../../roles/sorter')
 const role = () => readFile(join(ROLE, 'role.md'), 'utf8')
 
 describe('the Sorter role judges by the board snippet, like old Sara', () => {
-  it('FR-LEAD-2: the role names what to skip: one platform, narrow Direct, one-off technical work, staff vacancies, percent-only, non-marketing', async () => {
+  it('FR-LEAD-2: the role names what to skip: one platform, one-off technical work, staff vacancies, non-marketing', async () => {
     const text = await role()
-    for (const mark of [
-      'Wildberries',
-      'Директ',
-      'парсинг',
-      'вакансия в штат',
-      'только за процент',
-      'не про маркетинг',
-    ])
+    for (const mark of ['Wildberries', 'парсинг', 'вакансия в штат', 'не про маркетинг'])
       expect(text).toContain(mark)
+  })
+
+  it('the screen (Boris, 30.10.2026): criteria 4-6 by core or background, with his examples and a quote', async () => {
+    const text = await role()
+    for (const mark of ['direct', 'wordpress', 'small_fix', 'core', 'unclear', 'quote'])
+      expect(text).toContain(mark)
+    for (const example of [
+      '«Нужно настроить рекламу в Директе»: суть',
+      '«Директ крутим, но не окупается, нужна стратегия»: фон',
+      '«Поправить кнопку на сайте»: вся задача',
+      '«Поправить кнопку и выстроить воронку»: часть большей задачи',
+    ])
+      expect(text).toContain(example)
+    expect(text).toMatch(/Сомнение всегда в пользу заявки/)
+  })
+
+  it('the screen rule 6: percent-only and the other old red flags never stop an order', async () => {
+    const text = await role()
+    expect(text).toMatch(/Работа только за процент[^.]*не повод отсеивать/)
+    const reject = text.slice(text.indexOf('Отсеивай'), text.indexOf('Работа только за процент'))
+    expect(reject).not.toMatch(/процент|Директ/)
   })
 
   it('FR-LEAD-2: the role passes strategy, diagnostics, positioning and business support, and passes when in doubt', async () => {
