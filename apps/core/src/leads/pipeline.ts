@@ -1160,7 +1160,7 @@ async function closedWhenOf(l: LeadRow, at: Date): Promise<ClosedWhen> {
  */
 async function closeCardMessages(
   found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>,
-  o: { stale?: Date } = {},
+  o: { stale?: Date; byBoris?: boolean } = {},
 ) {
   const sent = await d()
     .db.select({ payload: event.payload, at: event.occurredAt })
@@ -1189,9 +1189,11 @@ async function closeCardMessages(
   )
   const card = {
     ...(await cardOfFound(found, false)),
-    ...(o.stale
-      ? { stale: { since: new Date(first).toISOString(), at: o.stale.toISOString() } }
-      : { closed: await closedWhenOf(found.lead, new Date()) }),
+    ...(o.byBoris
+      ? { closedByBoris: true }
+      : o.stale
+        ? { stale: { since: new Date(first).toISOString(), at: o.stale.toISOString() } }
+        : { closed: await closedWhenOf(found.lead, new Date()) }),
   }
   for (const id of [...ids].sort((a, b) => a - b)) {
     try {
@@ -1736,8 +1738,19 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         },
         'why_skip',
         l.title,
-        !fromPult,
+        // No «почему?» after a close (Boris, 31.10.2026): the label keeps what the rules need to guess the reason.
+        action === 'bid' && !fromPult,
       )
+      // «Закрыть заявку»: the card he pressed is edited into «📁 Заявка закрыта», whoever pressed (the bot, the pult,
+      // the secretary); a card that never went out has nothing to edit.
+      if (action === 'skip' && found.task.kind === 'lead_decision')
+        await closeCardMessages(found, { byBoris: true }).catch((err) =>
+          console.error(
+            'closed card not edited',
+            taskId,
+            err instanceof Error ? err.message.slice(0, 200) : err,
+          ),
+        )
       return action === 'skip' ? TEXTS.skipped : TEXTS.bidQueued
     },
 

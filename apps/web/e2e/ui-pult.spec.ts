@@ -244,21 +244,13 @@ test('FR-UI-6, ST-M7-03: a lead is skipped from the Inbox in two presses with a 
   const row = page.locator('.task', { hasText: 'Заявка ждёт решения' })
   await expect(row.getByRole('link', { name: /Стратегия для студии керамики/ })).toBeVisible()
   await expect(page.locator('.task', { hasText: 'Черновик ответа клиенту' })).toBeVisible()
-  await row.getByRole('button', { name: 'Пропустить' }).click()
+  await row.getByRole('button', { name: 'Закрыть заявку' }).click()
   await row.getByRole('button', { name: 'не наш профиль' }).click()
-  await expect(page.getByRole('status')).toHaveText('Пропущено')
+  await expect(page.getByRole('status')).toHaveText('Заявка закрыта')
   await expect(row).toHaveCount(0)
   // The bell's notice of this lead is done now, from the task's state.
   await page.goto('/notices')
   await expect(page.getByText('Заявка: Стратегия для студии керамики')).toHaveCount(0)
-  // The bot is the one setup.spec bound to the fake Telegram earlier in the same run (the specs share the core).
-  const markups = (await (await request.get('http://127.0.0.1:18082/_control/markups')).json()) as {
-    message_id: number
-    reply_markup: { inline_keyboard: { text: string }[][] }
-  }[]
-  expect(
-    markups.find((m) => m.message_id === 4242)?.reply_markup.inline_keyboard[0]?.[0]?.text,
-  ).toBe('Решено в приложении: пропущено')
 })
 
 test('FR-ANL-5, FR-MEET-4: a contract with its sum is written on the client and a call is added', async ({

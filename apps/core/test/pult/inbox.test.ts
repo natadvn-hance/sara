@@ -317,10 +317,26 @@ describe('the resolver: one press from anywhere, the Telegram card marked when i
         .update(task)
         .set({ state: 'resolved', resolution: p.action, resolvedAt: new Date().toISOString() })
         .where(sql`${task.id} = ${p.taskId}`)
-      return 'Пропущено'
+      return 'Заявка закрыта'
     })
-    expect(await resolve({ taskId: LEAD_TASK, action: 'skip', source: 'pult' })).toBe('Пропущено')
-    expect(marked).toEqual([{ id: 777, note: 'Решено в приложении: пропущено' }])
+    expect(await resolve({ taskId: LEAD_TASK, action: 'bid', source: 'pult' })).toBe(
+      'Заявка закрыта',
+    )
+    expect(marked).toEqual([{ id: 777, note: 'Решено в приложении: отклик' }])
+  })
+
+  it('FR-LEAD-7: a lead closed from the pult is not marked: the pipeline already edited its card into «📁 Заявка закрыта»', async () => {
+    marked.length = 0
+    await db.update(task).set({ telegramMessageId: 779 }).where(sql`${task.id} = ${LEAD_TASK}`)
+    const resolve = resolver(async (p) => {
+      await db
+        .update(task)
+        .set({ state: 'resolved', resolution: p.action, resolvedAt: new Date().toISOString() })
+        .where(sql`${task.id} = ${p.taskId}`)
+      return 'Заявка закрыта'
+    })
+    await resolve({ taskId: LEAD_TASK, action: 'skip', source: 'pult' })
+    expect(marked).toEqual([])
   })
 
   it('FR-UI-6: a press from Telegram, or one that leaves the task open, marks nothing', async () => {
