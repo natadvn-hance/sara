@@ -160,16 +160,6 @@ export function createTelegramRuntime(d: {
     await ctx.reply(TEXTS.bound)
   })
 
-  bot.command('test', async (ctx) => {
-    if (!d.onTest) return
-    await ctx.reply(await d.onTest(ctx.match ?? ''))
-  })
-  // The menu's own command for «стереть» (a menu command has no words after it).
-  bot.command('test_clear', async (ctx) => {
-    if (!d.onTest) return
-    await ctx.reply(await d.onTest('стереть'))
-  })
-
   /** An answer to Boris's message: a line, with its buttons when it has some; none when it comes later. */
   const answer = async (ctx: Context, r: BorisReply | null) => {
     if (r === null) return
@@ -266,7 +256,12 @@ export function createTelegramRuntime(d: {
     bot.command(c.name, async (ctx) => {
       let r: CommandReply
       try {
-        r = await run({ db: d.db, publicUrl: d.publicUrl ?? null })
+        r = await run({
+          db: d.db,
+          publicUrl: d.publicUrl ?? null,
+          args: ctx.match ?? '',
+          test: d.onTest,
+        })
       } catch (e) {
         console.error(`/${c.name} failed`, short(e))
         r = TEXTS.commandFailed
