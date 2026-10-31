@@ -130,6 +130,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     () => testLeads?.profi ?? null,
   )
 
+  // The one function of /test, /test_clear and the Secretary's tools.
+  const testCommandOf = (args: string) =>
+    testLeads
+      ? testCommand(testLeads, args, config.publicUrl)
+      : Promise.resolve('Тестовые заявки ещё запускаются')
+
   let pipeline: LeadPipeline | null = null
   // ADR-027: Boris's free words go to the Secretary once the core listens; until then the bot says Sara is starting.
   let secretary: Secretary | null = null
@@ -199,10 +205,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         m,
       ),
     voiceDir: join(config.dataDir, 'voice'),
-    onTest: (args) =>
-      testLeads
-        ? testCommand(testLeads, args, config.publicUrl)
-        : Promise.resolve('Тестовые заявки ещё запускаются'),
+    onTest: testCommandOf,
     publicUrl: config.publicUrl,
   })
   const gateway = createGateway({
@@ -266,6 +269,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         a,
       ),
     system: () => systemView(deps),
+    test: (args) => testCommandOf(args),
   }
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
   const mind = createMindSearch(db)
