@@ -12,7 +12,7 @@ import {
   recentOpenersText,
   writeDraft,
 } from '../src/leads/draft'
-import { SERIES_DELAYS, seriesDelay } from '../src/leads/series'
+import { foreignOurs, SERIES_DELAYS, seriesDelay } from '../src/leads/series'
 import { type LeadCard, leadCardText } from '../src/notify/cards'
 import { caseOf } from './helpers/conversation'
 
@@ -266,24 +266,23 @@ describe('the series on the card and in time', () => {
   it('FR-LEAD-6: the card shows the series under the bid, each message on its own, approved by the same press', () => {
     const html = leadCardText(card)
     const bid = html.indexOf('Анна, добрый день!')
-    const series = html.indexOf('Вдогонку</b>  ·  через 1-2 минуты после отклика')
+    const series = html.indexOf('Вдогонку</b>  ·  уйдет сразу за откликом')
     expect(bid).toBeGreaterThan(-1)
     expect(series).toBeGreaterThan(bid)
     expect(html).toContain('<blockquote>https://lisa-clinic.example/</blockquote>')
     expect(html).toContain('<blockquote>Из недавнего)</blockquote>')
     expect(html).toContain('<blockquote>Сделаем быстро)</blockquote>')
-    expect(html).toContain('Уйдёт тем же нажатием, если клиент ещё не ответил')
+    expect(html).toContain('Уйдет тем же нажатием, сразу за откликом')
     // A bid without a series: no such block at all.
     const none = leadCardText({ ...card, draft: { text: card.draft?.text ?? '', priceRub: 30000 } })
     expect(none).not.toContain('Вдогонку')
   })
 
-  it('FR-LEAD-6: the first message waits a minute or two, the next half a minute, the same moment on a resume', () => {
-    // Boris's own (growth-points, 29.10.2026): about 1.6 minutes after the bid, then 0.3-0.6 minutes apart.
+  it('FR-LEAD-6: the series goes at once, a second or two after the bid and two or three seconds apart, the same moment on a resume (31.10.2026)', () => {
     expect(SERIES_DELAYS).toEqual({
-      first: [60_000, 120_000],
-      next: [20_000, 40_000],
-      call: [60_000, 120_000],
+      first: [1_000, 2_000],
+      next: [2_000, 3_000],
+      call: [2_000, 3_000],
     })
     for (const [n, [from, to]] of [
       [0, SERIES_DELAYS.first],
@@ -294,5 +293,41 @@ describe('the series on the card and in time', () => {
       expect(ms).toBeLessThanOrEqual(to)
       expect(seriesDelay('95377001', n, [from, to])).toBe(ms)
     }
+  })
+})
+
+describe('what the chat holds beside the bid (Boris, 31.10.2026: order 95583456 stopped as «boris_wrote»)', () => {
+  const msg = (
+    id: string,
+    author: 'specialist' | 'client' | 'unknown',
+    text: string,
+    at: string,
+  ) => ({
+    platform_message_id: id,
+    chat_id: 'c',
+    author,
+    sent_at: `2026-10-31T12:18:${at}.000Z`,
+    text,
+    read: true,
+  })
+  const BID = msg('1', 'specialist', 'Добрый день! Текст отклика', '00')
+
+  it('FR-CONV-9: the bid alone, the series already sent and a line of the site beside the bid stop nothing', () => {
+    const series = msg('2', 'specialist', 'Первое вдогонку', '30')
+    expect(foreignOurs([BID], [])).toBeUndefined()
+    expect(foreignOurs([BID, series], ['Первое вдогонку'])).toBeUndefined()
+    // The price line comes a moment after the bid.
+    expect(
+      foreignOurs([BID, msg('3', 'specialist', 'Что-то от площадки', '05')], []),
+    ).toBeUndefined()
+    // Or says what it is: the price or the response.
+    expect(
+      foreignOurs([BID, msg('3', 'specialist', 'Стоимость услуги: от 30 000 ₽', '50')], []),
+    ).toBeUndefined()
+  })
+
+  it("FR-CONV-9: a message of our side that is neither the bid, the series nor the site's line is someone writing", () => {
+    const other = msg('4', 'specialist', 'Давайте я сам вам позвоню, когда вам удобно будет', '55')
+    expect(foreignOurs([BID, other], [])).toBe(other)
   })
 })

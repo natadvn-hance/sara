@@ -369,8 +369,8 @@ function BidCard({ v }: { v: LeadView }) {
           {FOLLOW_UP_SLOTS.map((slot, k) => (
             <label key={slot} className="kv" htmlFor={`bid-follow-${slot}`}>
               <span className="muted" style={{ fontSize: 13 }}>
-                Вдогонку {k + 1}: через 1-2 минуты после отклика, если клиент ещё не ответил. Пусто:
-                не отправлять. {'{слоты}'} Сара заменит на три времени для созвона
+                Вдогонку {k + 1}: уйдет сразу за откликом, если клиент ещё не ответил. Пусто: не
+                отправлять. {'{слоты}'} Сара заменит на три времени для созвона
               </span>
               <textarea
                 id={`bid-follow-${slot}`}
@@ -412,8 +412,7 @@ function BidCard({ v }: { v: LeadView }) {
           {v.bid.followUps.length > 0 ? (
             <div className="grid" style={{ gap: 8 }}>
               <span className="muted" style={{ fontSize: 13 }}>
-                Вдогонку, через 1-2 минуты после отклика. Уйдёт тем же нажатием, если клиент ещё не
-                ответил
+                Вдогонку, сразу за откликом. Уйдет тем же нажатием, если клиент ещё не ответил
               </span>
               {v.bid.followUps.map((f) => (
                 <div key={f} className="quote" style={{ whiteSpace: 'pre-line' }}>

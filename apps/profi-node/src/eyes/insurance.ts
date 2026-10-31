@@ -55,10 +55,10 @@ const BOARD_WAYS: BoardWay[] = ['wheel', 'last_card', 'container', 'button']
 const MORE_BUTTON =
   /^\s*(показать\s+ещ[её]|ещ[её]\s+заказ|показать\s+больше|загрузить\s+ещ[её]|больше\s+заказов)/i
 // The board answers about 17 orders at a time, by relevance and not by time (346 on 24.10.2026): a new order of low
-// relevance sits far down. The first pages every minute, the whole board about every 10 minutes.
+// relevance sits far down. The first pages every 30 seconds, the whole board about every 10 minutes, as before.
 const BOARD_SCROLL = {
   pages: 4,
-  fullEvery: 10,
+  fullEvery: 20,
   fullPages: 30,
   pauseMs: 1200,
   budgetMs: 50000,
@@ -510,9 +510,26 @@ export function startInsurance(o: {
     })
   }
 
+  // A check still waiting or running is not queued again: a whole-board pass (up to 50 s) would otherwise stack the
+  // 30-second passes behind it and the tab would never rest on the feed.
+  const unlessBusy = (f: () => Promise<void>) => {
+    let busy = false
+    return () => {
+      if (busy) return
+      busy = true
+      void f()
+        .catch(() => {})
+        .finally(() => {
+          busy = false
+        })
+    }
+  }
   const timers = [
-    setInterval(() => void feedOnce().catch(() => {}), o.feedEveryMs ?? 60000),
-    setInterval(() => void chats((c) => c.unread > 0).catch(() => {}), o.chatsEveryMs ?? 600000),
+    setInterval(unlessBusy(feedOnce), o.feedEveryMs ?? 30000),
+    setInterval(
+      unlessBusy(() => chats((c) => c.unread > 0)),
+      o.chatsEveryMs ?? 600000,
+    ),
   ]
 
   return {

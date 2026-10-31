@@ -147,6 +147,7 @@ export const TEXTS = {
     'Не знаю, ушёл ли отклик: площадка не ответила. Проверь заявку на Профи.ру, прежде чем откликаться вручную.',
   bidsPausedPress: 'Отправка откликов на паузе. Включи её и нажми снова.',
   lostRoute: 'Эта заявка досталась другому направлению',
+  bidSending: (title: string) => `⏳ Отправляю отклик: ${title}…`,
   bidSent: (title: string, spentRub: number) =>
     `✅ Отклик отправлен: ${title}, ${formatRub(spentRub)}`,
   bidRefused: (title: string, errorClass: string) =>
@@ -494,20 +495,20 @@ function followUpLines(c: LeadCard): string[] {
   return [
     ...(series.length > 0
       ? [
-          '<b>✍️ Вдогонку</b>  ·  через 1-2 минуты после отклика',
+          '<b>✍️ Вдогонку</b>  ·  уйдет сразу за откликом',
           ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
         ]
       : []),
     ...(call
       ? [
-          '<b>📞 Созвон</b>  ·  ещё через 1-2 минуты',
+          '<b>📞 Созвон</b>  ·  следом, через пару секунд',
           `<blockquote>${clip(call, CAP.followUp)
             .split(SLOTS_MARK)
             .map(esc)
             .join('<i>[три времени по рабочим часам]</i>')}</blockquote>`,
         ]
       : []),
-    `<i>Уйдёт тем же нажатием, если клиент ещё не ответил${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,
+    `<i>Уйдет тем же нажатием, сразу за откликом${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,
   ]
 }
 

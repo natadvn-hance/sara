@@ -107,6 +107,7 @@ beforeEach(async () => {
   await resetDb(db)
   await seedDirection(db, 'hance-marketing')
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.pushStart(111)
   await until(() => tg.sent.length === 1)
   await setSetting(db, 'pipeline.leads', true, 'boris')
@@ -241,7 +242,7 @@ describe('scoring in the lead pipeline', () => {
       .flatMap((m) => m.reply_markup?.inline_keyboard.flat() ?? [])
       .find((b) => b.callback_data.endsWith(':bid'))
     tg.pushPress(111, bid?.callback_data ?? '')
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids.some((b) => b.idempotency_key === `bid:${id}`)).toBe(true)
   }, 30000)
 
@@ -287,7 +288,7 @@ describe('scoring in the lead pipeline', () => {
         ?.reply_markup?.inline_keyboard.flat()
         .find((b) => b.callback_data.endsWith(':bid'))
       tg.pushPress(111, bid?.callback_data ?? '')
-      await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+      await until(() => tg.shown('✅ Отклик отправлен'))
       expect(fake.bids.some((b) => b.idempotency_key === `bid:${id}`)).toBe(true)
 
       byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(50) }
