@@ -87,6 +87,7 @@ export function useLive(): void {
     const abort = new AbortController()
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let pending: ReturnType<typeof setTimeout> | undefined
     const connect = async () => {
       try {
         const res = await fetch('/api/stream', {
@@ -99,17 +100,18 @@ export function useLive(): void {
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buf = ''
-        let last = 0
         for (;;) {
           const { value, done } = await reader.read()
           if (done) break
           buf += decoder.decode(value, { stream: true })
           const parts = buf.split('\n\n')
           buf = parts.pop() ?? ''
-          if (parts.some((p) => p.startsWith('data:')) && Date.now() - last > 1500) {
-            last = Date.now()
-            void client.invalidateQueries({ queryKey: ['screen'] })
-          }
+          // Several events in a row are one reading of the screens, a second after the first of them.
+          if (parts.some((p) => p.startsWith('data:')) && !pending)
+            pending = setTimeout(() => {
+              pending = undefined
+              void client.invalidateQueries({ queryKey: ['screen'] })
+            }, 1000)
         }
       } catch {
         // No stream (an old core, the demo, no network): the polling carries on.
@@ -121,6 +123,7 @@ export function useLive(): void {
     return () => {
       stopped = true
       clearTimeout(timer)
+      clearTimeout(pending)
       abort.abort()
     }
   }, [client])
