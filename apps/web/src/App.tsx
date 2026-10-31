@@ -11,30 +11,17 @@ import { OnboardingPage } from './pages/Onboarding'
 import { RecomputePage } from './pages/Recompute'
 import { SetupPage } from './pages/Setup'
 import { AnalyticsScreen } from './screens/Analytics'
-import { ConversationsScreen } from './screens/Conversations'
+import { ClientsScreen } from './screens/Clients'
 import { HealthScreen } from './screens/Health'
 import { InboxScreen } from './screens/Inbox'
 import { JournalScreen } from './screens/Journal'
 import { LeadsScreen } from './screens/Leads'
+import { MeetingsScreen } from './screens/Meetings'
 import { MindScreen } from './screens/Mind'
 import { NoticesScreen } from './screens/Notices'
 import { SearchScreen } from './screens/Search'
 import { SettingsScreen } from './screens/Settings'
 import { TodayScreen } from './screens/Today'
-
-/** A section that comes with the next update: said plainly, with the way back. */
-function SoonScreen({ title }: { title: string }) {
-  return (
-    <div className="page">
-      <header className="head reveal">
-        <div className="head-main">
-          <h1 className="h1">{title}</h1>
-          <p className="lead">Этот раздел появится со следующим обновлением пульта.</p>
-        </div>
-      </header>
-    </div>
-  )
-}
 
 /** The first page: the wizard until the setup is done, then the Inbox (pult v2 design 2). */
 function Home() {
@@ -64,9 +51,9 @@ function Accounts({ path }: { path: string }) {
 const SCREENS: Record<string, (path: string) => ReactNode> = {
   inbox: () => <InboxScreen />,
   leads: () => <LeadsScreen />,
-  clients: () => <ConversationsScreen />,
+  clients: () => <ClientsScreen />,
   today: () => <TodayScreen />,
-  meetings: () => <SoonScreen title="Встречи" />,
+  meetings: () => <MeetingsScreen />,
   mind: () => <MindScreen />,
   settings: (path) =>
     path.startsWith('/accounts') ? <Accounts path={path} /> : <SettingsScreen />,

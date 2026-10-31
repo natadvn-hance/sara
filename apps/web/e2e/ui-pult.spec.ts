@@ -39,6 +39,7 @@ async function clean() {
   await sql('delete from core.task where id = any($1::uuid[])', [[LEAD_TASK, DRAFT_TASK]])
   await sql('delete from core.conv_turn where conversation_id = $1', [CONV])
   await sql('delete from core.chat_message where conversation_id = $1', [CONV])
+  await sql('delete from core.meeting where conversation_id = $1', [CONV])
   await sql('delete from core.conversation where id = $1', [CONV])
   await sql('delete from core.lead_score where lead_id = $1', [LEAD])
   await sql('delete from core.lead where id = $1', [LEAD])
@@ -258,4 +259,25 @@ test('FR-UI-6, ST-M7-03: a lead is skipped from the Inbox in two presses with a 
   expect(
     markups.find((m) => m.message_id === 4242)?.reply_markup.inline_keyboard[0]?.[0]?.text,
   ).toBe('Решено в приложении: пропущено')
+})
+
+test('FR-ANL-5, FR-MEET-4: a contract with its sum is written on the client and a call is added', async ({
+  page,
+}) => {
+  await page.goto(`/clients/${CONV}`)
+  await expect(page.getByRole('heading', { name: 'Вероника' })).toBeVisible()
+  await page.getByRole('button', { name: 'Договор' }).click()
+  await page.getByLabel('Сумма договора, ₽').fill('60000')
+  await page.getByRole('button', { name: 'Записать договор' }).click()
+  await expect(page.getByRole('status')).toHaveText('Записала договор.')
+  await expect(page.getByText(/договор · 60\s000\s₽/)).toBeVisible()
+  await page.goto('/meetings')
+  await expect(page.getByRole('heading', { name: 'Встречи', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Добавить встречу' }).first().click()
+  await page.getByLabel('С кем и о чём').fill('Созвон с Вероникой')
+  await page.getByLabel('Когда').fill('2030-01-15T15:00')
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status')).toHaveText('Встречу записала.')
+  await expect(page.getByText('Созвон с Вероникой')).toBeVisible()
+  await sql(`delete from core.meeting where title = 'Созвон с Вероникой'`)
 })

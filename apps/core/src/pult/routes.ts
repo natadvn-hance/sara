@@ -9,7 +9,16 @@ import { appendEvent } from '../journal/journal'
 import { markSeen, noticeList, putAway } from '../notify/center'
 import { setSetting } from '../settings/store'
 import { analyticsView } from './analytics'
-import { conversationList, conversationView } from './conversations'
+import {
+  addMeeting,
+  CLIENT_TEXTS,
+  clientList,
+  clientView,
+  meetingList,
+  meetingOutcome,
+  noteClient,
+  recordOutcome,
+} from './clients'
 import { inboxView } from './inbox'
 import { journalView, traceView } from './journalView'
 import { feeChanged, leadQueue, leadView } from './leads'
@@ -78,6 +87,31 @@ const SearchQuery = z.object({ q: z.string().max(200).default('') })
 const LeadsQuery = z.object({ order: z.enum(QUEUE_ORDERS).default('combined') })
 const BidBody = z.object({ expectedFeeRub: z.number().int() })
 const SkipBody = z.object({ reason: z.string().trim().min(1).max(500).optional() })
+const NoteBody = z.object({
+  text: z
+    .string()
+    .trim()
+    .max(2000)
+    .nullable()
+    .transform((t) => (t ? t : null)),
+})
+const OutcomeBody = z.object({
+  outcome: z.enum(['won', 'lost']).nullable(),
+  amountRub: z.number().int().positive().max(1_000_000_000).nullable().default(null),
+  reason: z.string().trim().min(1).max(500).nullable().default(null),
+  service: z.string().trim().min(1).max(200).nullable().default(null),
+})
+const MeetingBody = z.object({
+  title: z.string().trim().min(1).max(300),
+  at: z.iso.datetime().nullable().default(null),
+  channel: z.string().trim().min(1).max(100).nullable().default(null),
+  clientId: z.uuid().nullable().default(null),
+  note: z.string().trim().min(1).max(1000).nullable().default(null),
+})
+const MeetingOutcomeBody = z.object({
+  outcome: z.enum(['held', 'missed', 'moved']),
+  amountRub: z.number().int().positive().max(1_000_000_000).nullable().default(null),
+})
 
 /** The pult's screens (contract C4 in `@sara/shared`): read only, plus presses, answers and limits. */
 export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
@@ -105,10 +139,42 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       const v = await leadView(d.db, (req.params as { id: string }).id)
       return v ?? reply.code(404).send({ error: PULT_TEXTS.notFound })
     })
-    scoped.get('/api/conversations', async () => conversationList(d.db))
-    scoped.get('/api/conversations/:id', async (req, reply) => {
-      const v = await conversationView(d.db, (req.params as { id: string }).id)
+    scoped.get('/api/clients', async () => clientList(d.db))
+    scoped.get('/api/clients/:id', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const v = z.uuid().safeParse(id).success ? await clientView(d.db, id) : null
       return v ?? reply.code(404).send({ error: PULT_TEXTS.notFound })
+    })
+    scoped.get('/api/meetings', async () => meetingList(d.db))
+
+    scoped.post('/api/clients/:id/note', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const body = NoteBody.safeParse(req.body ?? {})
+      if (!body.success || !z.uuid().safeParse(id).success)
+        return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      const message = await noteClient(d.db, id, body.data.text)
+      return message ? { message } : reply.code(404).send({ error: CLIENT_TEXTS.noClient })
+    })
+    scoped.post('/api/clients/:id/outcome', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const body = OutcomeBody.safeParse(req.body ?? {})
+      if (!body.success || !z.uuid().safeParse(id).success)
+        return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      const message = await recordOutcome(d.db, id, body.data)
+      return message ? { message } : reply.code(404).send({ error: CLIENT_TEXTS.noClient })
+    })
+    scoped.post('/api/meetings', async (req, reply) => {
+      const body = MeetingBody.safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      return { message: await addMeeting(d.db, body.data) }
+    })
+    scoped.post('/api/meetings/:id/outcome', async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const body = MeetingOutcomeBody.safeParse(req.body ?? {})
+      if (!body.success || !z.uuid().safeParse(id).success)
+        return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      const message = await meetingOutcome(d.db, id, body.data)
+      return message ? { message } : reply.code(404).send({ error: CLIENT_TEXTS.noMeeting })
     })
     scoped.get('/api/analytics', async (req) => {
       const { year } = Year.parse(req.query ?? {})

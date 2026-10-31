@@ -1,6 +1,7 @@
 import { type AnalyticsView, FUNNEL_STAGES, type FunnelStage } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
+import { stageOf } from './clients'
 import { NOT_TEST } from '../testLeads/sql'
 
 /**
@@ -61,6 +62,12 @@ type BidRow = {
   month: number
   stage: string | null
   spend: number
+  /** Boris's outcome of the deal in the pult (pult v2 design 5), the client's note and the service he named. */
+  outcome: string | null
+  amount_rub: number | null
+  service: string | null
+  note: string | null
+  closed: boolean
 }
 
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null)
@@ -76,11 +83,16 @@ export async function analyticsView(db: DbOrTx, year: number): Promise<Analytics
     )
     select b.lead_id, l.account_id, l.client_name as client, l.category, b.bid_at,
       extract(month from b.bid_at at time zone 'Europe/Moscow')::int as month,
-      d.stage, coalesce(s.spend, 0)::int as spend
+      d.stage, coalesce(s.spend, 0)::int as spend,
+      c.outcome, c.amount_rub, c.service, c.note, (c.closed_at is not null) as closed
     from b
     join core.lead l on l.id = b.lead_id
     left join core.deal d on d.lead_id = b.lead_id
     left join s on s.lead_id = b.lead_id
+    left join lateral (
+      select * from core.conversation cv where cv.order_id = b.lead_id
+      order by cv.updated_at desc limit 1
+    ) c on true
     where extract(year from b.bid_at at time zone 'Europe/Moscow')::int = ${year}
     order by b.bid_at`)
 
@@ -91,25 +103,31 @@ export async function analyticsView(db: DbOrTx, year: number): Promise<Analytics
     service: string
     stage: FunnelStage
     spend: number
+    deal: number | null
+    note: string | null
     link: string
   }
   const clients = new Map<string, Client>()
   for (const b of r.rows) {
     const key = `${b.account_id}\u0000${b.client.trim().toLowerCase()}`
-    const stage = funnelStage(b.stage)
+    const stage = stageOf({ outcome: b.outcome, closedAt: b.closed ? 'closed' : null }, b.stage)
     const c = clients.get(key)
     if (!c) {
       clients.set(key, {
         month: b.month,
         client: b.client || 'без имени',
-        service: b.category,
+        service: b.service ?? b.category,
         stage,
         spend: b.spend,
+        deal: b.outcome === 'won' ? b.amount_rub : null,
+        note: b.note,
         link: `/leads/${encodeURIComponent(b.lead_id)}`,
       })
       continue
     }
     c.spend += b.spend
+    if (b.outcome === 'won' && b.amount_rub !== null) c.deal = (c.deal ?? 0) + b.amount_rub
+    if (b.note) c.note = b.note
     if (RANK[stage] > RANK[c.stage] || (c.stage === 'Отвалился' && stage !== 'Отвалился'))
       c.stage = stage
   }
@@ -126,35 +144,29 @@ export async function analyticsView(db: DbOrTx, year: number): Promise<Analytics
     return { stage, count, share: pct(count, bids) }
   })
 
-  const months: AnalyticsView['months'] = MONTHS.map((name, i) => {
-    const m = list.filter((c) => c.month === i + 1)
-    const won = m.filter((c) => c.stage === 'Закрыта').length
+  /** Revenue and the average check count only contracts with a sum (analytics-metrics.md, section 4). */
+  const money = (m: Client[]) => {
+    const won = m.filter((c) => c.stage === 'Закрыта')
+    const priced = won.filter((c) => c.deal !== null)
+    const revenue = priced.reduce((s, c) => s + (c.deal ?? 0), 0)
     const spend = m.reduce((s, c) => s + c.spend, 0)
     return {
-      month: name,
       bids: m.length,
-      won,
+      won: won.length,
       lost: m.filter((c) => c.stage === 'Отвалился').length,
-      conversion: pct(won, m.length),
-      avgCheckRub: null,
-      revenueRub: null,
+      conversion: pct(won.length, m.length),
+      avgCheckRub: priced.length ? Math.round(revenue / priced.length) : null,
+      revenueRub: priced.length ? revenue : null,
       spendRub: spend,
-      cacRub: won > 0 ? Math.round(spend / won) : null,
+      cacRub: won.length > 0 ? Math.round(spend / won.length) : null,
     }
-  })
-  const won = list.filter((c) => c.stage === 'Закрыта').length
-  const spend = list.reduce((s, c) => s + c.spend, 0)
-  months.push({
-    month: 'ИТОГО',
-    bids,
-    won,
-    lost: list.filter((c) => c.stage === 'Отвалился').length,
-    conversion: pct(won, bids),
-    avgCheckRub: null,
-    revenueRub: null,
-    spendRub: spend,
-    cacRub: won > 0 ? Math.round(spend / won) : null,
-  })
+  }
+  const months: AnalyticsView['months'] = MONTHS.map((name, i) => ({
+    month: name,
+    ...money(list.filter((c) => c.month === i + 1)),
+  }))
+  months.push({ month: 'ИТОГО', ...money(list) })
+  const unpriced = list.filter((c) => c.stage === 'Закрыта' && c.deal === null).length
 
   return {
     year,
@@ -163,16 +175,21 @@ export async function analyticsView(db: DbOrTx, year: number): Promise<Analytics
       client: c.client,
       service: c.service,
       stage: c.stage,
-      dealRub: null,
+      dealRub: c.deal,
       spendRub: c.spend,
-      ltvRub: null,
-      note: null,
+      ltvRub: c.deal,
+      note: c.note,
       link: c.link,
     })),
     funnel,
     months,
     notes: [
-      'Суммы договоров, выручка, средний чек и LTV появятся с итогами встреч (M6): Сара их пока не знает.',
+      ...(unpriced
+        ? [
+            `Сумма договора не названа у ${unpriced}: они в «Закрытых сделках», но не в среднем чеке.`,
+          ]
+        : []),
+      'Договор и сумму записывает Борис на экране клиента или в итоге встречи; LTV пока равен сумме договоров, продления появятся позже.',
       'Отклики старой Сары до 24.10 сюда пока не перенесены.',
       'Клиент сейчас это имя на аккаунте: два заказа одного человека с одним именем считаются одним клиентом.',
     ],
