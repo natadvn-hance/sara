@@ -322,7 +322,7 @@ describe('walking skeleton', () => {
     await until(() => cards().length === 1)
     tg.pushPress(111, lastCardData('skip'))
     await until(() => tg.answers.length === 1)
-    expect(tg.answers[0]?.text).toBe('Пропущено')
+    expect(tg.answers[0]?.text).toBe('Заявка закрыта')
     const [l] = await db
       .select()
       .from(lead)

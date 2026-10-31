@@ -46,7 +46,7 @@ const leadItem = (l: (typeof leadQueue.queue)[number], urgent = false): InboxIte
   link: `/leads/${l.id}`,
   actions: [
     act('bid', 'Откликнуться', `/api/leads/${l.id}/bid`, 'primary', 'fee'),
-    act('skip', 'Пропустить', `/api/leads/${l.id}/skip`, 'ghost', 'reason'),
+    act('skip', 'Закрыть заявку', `/api/leads/${l.id}/skip`, 'ghost', 'reason'),
   ],
   feeRub: l.feeRub,
   hold: null,

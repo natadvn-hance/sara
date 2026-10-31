@@ -225,7 +225,7 @@ export const SECRETARY_TOOLS = {
   }),
   skip_lead: tool({
     description:
-      'Пропустить заявку из очереди (как кнопка «Пропустить»). taskId из leads или lead.',
+      'Закрыть заявку из очереди (как кнопка «Закрыть заявку»). taskId из leads или lead.',
     input: z.object({ taskId: z.string() }),
     run: async (d, _t, i) => {
       const t = await openLeadTask(d.db, i.taskId)

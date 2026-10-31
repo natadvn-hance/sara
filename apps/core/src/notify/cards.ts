@@ -85,6 +85,8 @@ export type LeadCard = {
   closed?: ClosedWhen | null
   /** The card waited more than a day (FR-LEAD-10): from its first message to now, for the short stale card. */
   stale?: { since: string; at: string } | null
+  /** Boris closed the card himself («Закрыть заявку»): the short card says so and nothing else. */
+  closedByBoris?: boolean
   /**
    * The client's own site as Sara read it (Boris, 30.10.2026): its short summary against the order, or «сайт не
    * открылся»; and the example sites the client named. None: the order names no site.
@@ -139,7 +141,7 @@ export const TEXTS = {
   leadsTopic: 'Заявки',
   commandFailed: 'Не получилось ответить на команду. Попробуй ещё раз чуть позже.',
   alreadyDone: 'Уже сделано',
-  skipped: 'Пропущено',
+  skipped: 'Заявка закрыта',
   bidQueued: 'Отправляю отклик',
   bidsPaused: 'Отклик не ушёл: отправка откликов на паузе',
   bidFailed: 'Отклик не ушёл: площадка ответила ошибкой. Посмотри «Состояние системы».',
@@ -246,6 +248,9 @@ export const TEXTS = {
   draftLate: 'Заявка уже решена, текст не поменяла',
   /** The card of an order closed on Profi.ru, in short (Boris, 30.10.2026): the buttons are gone. */
   closedCard: '🔒 Заявка закрыта',
+  /** Boris closed the card with the button: the same short card, a folder instead of a lock. */
+  closedByBorisCard: '📁 Заявка закрыта',
+  closeButton: 'Закрыть заявку',
   closedAfter: (span: string, published: boolean) =>
     `закрылась через ${span} ${published ? 'после публикации' : 'после того, как я её увидела'}`,
   closedBy: (clock: string, openFor: string | null) =>
@@ -601,6 +606,8 @@ function closedWhenText(w: ClosedWhen): string {
  * says so instead, with how long it waited.
  */
 export function closedLeadCardText(c: LeadCard): string {
+  if (c.closedByBoris)
+    return `${[`<b>${TEXTS.closedByBorisCard}</b>`, clean(c.title, CAP.title)].join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
   const head = c.stale
     ? [
         `<b>${TEXTS.staleCard}</b>`,
@@ -716,7 +723,7 @@ export function leadCardKeyboard(c: LeadCard) {
       [
         { text: TEXTS.analysisButton, callback_data: formatCallback(c.taskId, 'razbor') },
         { text: TEXTS.editButton, callback_data: formatCallback(c.taskId, 'edit') },
-        { text: 'Пропустить', callback_data: formatCallback(c.taskId, 'skip') },
+        { text: TEXTS.closeButton, callback_data: formatCallback(c.taskId, 'skip') },
       ],
     ],
   }

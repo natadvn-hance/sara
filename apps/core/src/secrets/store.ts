@@ -1,7 +1,12 @@
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-export type SecretName = 'telegram_bot_token' | 'claude_oauth_token' | 'session_secret'
+export type SecretName =
+  | 'telegram_bot_token'
+  | 'claude_oauth_token'
+  | 'session_secret'
+  /** Pult v2: the VAPID key pair of Web Push (JSON of two JWKs), made once on the server. */
+  | 'push_vapid'
 
 export type SecretStore = {
   get(name: SecretName): Promise<string | null>

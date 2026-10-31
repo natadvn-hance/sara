@@ -14,13 +14,22 @@ import { clientInfoFromAnswer } from '../eyes/clientInfo'
 import type { Eyes } from '../eyes/eyes'
 import { readFormMap } from '../eyes/formMap'
 import type { Insurance } from '../eyes/insurance'
+import { pageShape } from '../eyes/pageShape'
 import type { Parsers } from '../eyes/parsers'
 import { profiParsers } from '../eyes/profiParsers'
 import { ProfiToolError, type ProfiToolsImpl } from '../mcp/server'
 import { findBidAttempt, markOrderBid, saveBidResult, savePress } from '../store/raw'
 import { storedOrder } from '../tools/readTools'
 import { requireAlive, type SessionState } from '../watch/sessionWatch'
-import { clickSubmit, closedNotice, fillForm, formOnScreen, openForm, readPayment } from './form'
+import {
+  clickSubmit,
+  closedNotice,
+  fillForm,
+  formOnScreen,
+  type OpenerMiss,
+  openForm,
+  readPayment,
+} from './form'
 import { type OrderScreen, orderScreenFromAnswer } from './screen'
 
 export type BidRuntime = {
@@ -43,6 +52,24 @@ type AfterPress = {
   form: 'closed' | 'sent' | 'open'
   /** The wallet before the press, when the press sent a request; null: only the order page can confirm. */
   walletBefore: number | null
+}
+/**
+ * Where a bid call is and what it saw: the one line of the node's log a failure leaves, and the record of a page the
+ * node could not read (31.10.2026, order 95590077: two refusals left no word of which check said no).
+ */
+type BidTrace = {
+  step: string
+  feeRub?: number | null
+  walletRub?: number | null
+  opener?: { why: OpenerMiss | null; shownRub: number | null } | null
+}
+const OPENER_WORDS: Record<OpenerMiss, string> = {
+  no_opener: 'кнопки, которая открывает форму, на странице нет',
+  opener_fee: 'сумма на «Продолжить» не та, что в заказе',
+  two_openers: 'кнопок «Продолжить» несколько',
+  opener_sends: 'кнопка открытия похожа на отправку',
+  may_not: 'вкладке стало нельзя нажимать',
+  no_field: 'после нажатия поле текста не появилось',
 }
 const FORM_WORDS: Record<AfterPress['form'], string> = {
   closed: 'форма закрылась',
@@ -114,9 +141,50 @@ export function createBidTools(o: {
    * An unsure press, with why in the node's log (30.10.2026: three bids of five on 28.10 were unsure, and the log could
    * not tell a form that stayed open from an order page that did not show the bid yet).
    */
+  const told = new WeakSet<Error>()
   const unsure = (orderId: string, why: string) => {
     console.error(`UNCERTAIN ${orderId}: ${why}`)
-    return uncertain()
+    const e = uncertain()
+    told.add(e)
+    return e
+  }
+  /** One line of the node's log per failed bid: the class, the step and the message (an unsure one has its own). */
+  function logFailure(orderId: string, trace: BidTrace, e: unknown) {
+    if (e instanceof Error && told.has(e)) return
+    const cls = e instanceof ProfiToolError ? e.errorClass : 'INTERNAL'
+    const msg = e instanceof Error ? e.message.slice(0, 200) : String(e)
+    const saw = [
+      trace.feeRub != null ? `цена ${trace.feeRub} ₽` : null,
+      trace.walletRub != null ? `кошелёк ${trace.walletRub} ₽` : null,
+    ].filter(Boolean)
+    console.error(
+      `BID ${orderId} ${cls} на шаге «${trace.step}»: ${msg}${saw.length ? ` (${saw.join(', ')})` : ''}`,
+    )
+  }
+  /**
+   * A bid refused for a page the node could not read: what the node saw and the page's outline (tags and classes,
+   * never its text) are kept in node.raw_event, so the next look tells which part of the page changed.
+   */
+  async function keepRefusal(r: BidRuntime, orderId: string, trace: BidTrace, message: string) {
+    const page = r.page()
+    const shape = await pageShape(page).catch(() => [])
+    await r.eyes
+      .onRaw({
+        kind: 'dom',
+        url: page.url(),
+        body: {
+          what: 'bid_refused',
+          orderId,
+          step: trace.step,
+          message,
+          feeRub: trace.feeRub ?? null,
+          walletRub: trace.walletRub ?? null,
+          opener: trace.opener ?? null,
+          shape,
+        },
+        receivedAt: new Date().toISOString(),
+      })
+      .catch(() => {})
   }
   const tooLate = () =>
     fail('RATE_LIMITED', 'Срок нажатия прошёл или ядро перестало ждать, отклик не нажат')
@@ -296,10 +364,12 @@ export function createBidTools(o: {
     i: SubmitBidInput,
     t: { go: Go; can(): boolean },
     late: () => boolean,
+    trace: BidTrace,
   ): Promise<SubmitBidOutput> {
     const page = r.page()
     const id = i.order_id
     const key = i.idempotency_key
+    trace.step = 'страница заказа'
     const opened = await openOrder(page, t.go, id)
     if (!opened.ok) throw fail('RATE_LIMITED', 'Страница заказа не открылась, отклик не нажат')
     await keepFormMap(r, page)
@@ -308,8 +378,12 @@ export function createBidTools(o: {
       if (await closedNotice(page)) throw fail('ORDER_CLOSED', 'Заказ больше не принимает отклики')
       throw fail('LAYOUT_CHANGED', 'Страница заказа не дала свой ответ, отклик не нажат')
     }
+    trace.feeRub = s.feeRub
+    trace.step = 'кошелёк в шапке'
     // Before any money only the wallet the page itself shows counts, never one remembered.
     const wallet = await walletOnPage(r, page)
+    trace.walletRub = wallet
+    trace.step = 'ответ страницы заказа'
     if (s.hasBid === true) {
       await markOrderBid(o.db, i.account_id, id)
       return {
@@ -325,8 +399,10 @@ export function createBidTools(o: {
     const price = i.price_rub ?? null
     if (s.priceRequired && price === null)
       throw fail('INTERNAL', 'Профи.ру требует «Стоимость услуги», а цены в отклике нет')
-    if (s.feeRub === null || wallet === null)
-      throw fail('LAYOUT_CHANGED', 'Не прочитал цену отклика или кошелёк, отклик не нажат')
+    if (s.feeRub === null)
+      throw fail('LAYOUT_CHANGED', 'Не прочитал цену отклика в ответе страницы, отклик не нажат')
+    if (wallet === null)
+      throw fail('LAYOUT_CHANGED', 'Не прочитал кошелёк в шапке страницы, отклик не нажат')
     if (s.feeRub > i.max_fee_rub) throw dearer(s.feeRub, i.max_fee_rub)
     if (wallet < s.feeRub)
       throw fail('NO_MONEY', `В кошельке ${wallet} ₽, а отклик стоит ${s.feeRub} ₽`)
@@ -359,13 +435,27 @@ export function createBidTools(o: {
 
     let due = s.feeRub
     try {
+      trace.step = 'кнопка открытия формы'
       // «Продолжить» is pressed only beside the order's own fee, checked above against max_fee_rub.
       const form = await openForm(page, { words: s.openerText, feeRub: s.feeRub }, undefined, {
         may: () => t.can() && !late(),
+        card: true,
       })
       openerPressed = form.pressed
-      if (!form.open)
-        return await refuse(stopped() ?? fail('LAYOUT_CHANGED', 'Форма отклика не открылась'))
+      trace.opener = { why: form.why ?? null, shownRub: form.shownRub ?? null }
+      if (!form.open) {
+        const why =
+          form.why === 'opener_fee'
+            ? `на «Продолжить» ${form.shownRub} ₽, а в заказе ${s.feeRub} ₽`
+            : form.why
+              ? OPENER_WORDS[form.why]
+              : 'причина не видна'
+        return await refuse(
+          stopped() ??
+            fail('LAYOUT_CHANGED', `Форма отклика не открылась: ${why}, отклик не нажат`),
+        )
+      }
+      trace.step = 'оплата в форме'
       const pay = await readPayment(page, wallet)
       due = pay.dueRub ?? s.feeRub
       if (due > i.max_fee_rub) return await refuse(dearer(due, i.max_fee_rub))
@@ -384,6 +474,7 @@ export function createBidTools(o: {
           ),
         )
       }
+      trace.step = 'поля формы'
       const filled = await fillForm(page, { priceRub: price, text: i.text })
       if (filled === 'no_field')
         return await refuse(fail('LAYOUT_CHANGED', 'Поля формы отклика не нашлись'))
@@ -408,6 +499,7 @@ export function createBidTools(o: {
     const walletNow = await headerWallet(page)
     const before = walletNow === null ? wallet : Math.min(wallet, walletNow)
     const send = watchSend(page)
+    trace.step = 'нажатие «Откликнуться»'
     try {
       const clicked = await clickSubmit(page, s.submitText)
       // Nothing was pressed after all.
@@ -424,6 +516,7 @@ export function createBidTools(o: {
     } finally {
       send.stop()
     }
+    trace.step = 'проверка после нажатия'
     return confirm(r, i, due, t, after)
   }
 
@@ -485,45 +578,66 @@ export function createBidTools(o: {
     },
 
     async submitBid(i, signal) {
-      if (!verifyPermit(o.permitSecret, i))
-        throw fail('INTERNAL', 'Разрешение ядра не подходит к отклику')
-      // The core stopped waiting (the call was cancelled) or the permit's deadline passed: no press any more.
-      const late = () => signal?.aborted === true || Date.now() > Date.parse(i.not_after)
-      const r = runtime(i.account_id)
-      const known = await findBidAttempt(o.db, i.idempotency_key)
-      if (known?.result) return known.result as SubmitBidOutput
-      if (known) {
-        const due = known.dueRub
-        return r
-          .inTab((t) => confirm(r, i, due, t), { urgent: true })
-          .catch(() => Promise.reject(uncertain()))
+      const trace: BidTrace = { step: 'разрешение ядра' }
+      try {
+        return await submit(i, signal, trace)
+      } catch (e) {
+        logFailure(i.order_id, trace, e)
+        throw e
       }
-      if (late()) throw tooLate()
-      requireAlive(r.watch)
-      return r.inTab(
-        async (t) => {
-          // A twin of this call may have pressed while this one waited for the tab.
-          const twin = await findBidAttempt(o.db, i.idempotency_key)
-          if (twin?.result) return twin.result as SubmitBidOutput
-          if (twin) return confirm(r, i, twin.dueRub, t)
-          if (late()) throw tooLate()
-          requireAlive(r.watch)
-          if (!t.can())
-            throw fail(
-              'RATE_LIMITED',
-              'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
-            )
-          try {
-            return await bid(r, i, t, late)
-          } catch (e) {
-            if (e instanceof ProfiToolError) throw e
-            // A failure of our own before the press (the database, the browser): nothing was pressed.
-            const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
-            throw fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`)
-          }
-        },
-        { urgent: true },
-      )
     },
+  }
+
+  async function submit(
+    i: SubmitBidInput,
+    signal: AbortSignal | undefined,
+    trace: BidTrace,
+  ): Promise<SubmitBidOutput> {
+    if (!verifyPermit(o.permitSecret, i))
+      throw fail('INTERNAL', 'Разрешение ядра не подходит к отклику')
+    // The core stopped waiting (the call was cancelled) or the permit's deadline passed: no press any more.
+    const late = () => signal?.aborted === true || Date.now() > Date.parse(i.not_after)
+    const r = runtime(i.account_id)
+    const known = await findBidAttempt(o.db, i.idempotency_key)
+    if (known?.result) return known.result as SubmitBidOutput
+    if (known) {
+      const due = known.dueRub
+      return r
+        .inTab((t) => confirm(r, i, due, t), { urgent: true })
+        .catch(() => Promise.reject(uncertain()))
+    }
+    if (late()) throw tooLate()
+    trace.step = 'вход на Профи.ру'
+    requireAlive(r.watch)
+    trace.step = 'очередь вкладки'
+    return r.inTab(
+      async (t) => {
+        // A twin of this call may have pressed while this one waited for the tab.
+        const twin = await findBidAttempt(o.db, i.idempotency_key)
+        if (twin?.result) return twin.result as SubmitBidOutput
+        if (twin) return confirm(r, i, twin.dueRub, t)
+        if (late()) throw tooLate()
+        requireAlive(r.watch)
+        if (!t.can())
+          throw fail(
+            'RATE_LIMITED',
+            'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
+          )
+        try {
+          return await bid(r, i, t, late, trace)
+        } catch (e) {
+          if (e instanceof ProfiToolError) {
+            // The tab is still on the order page: its outline shows what the node could not read.
+            if (e.errorClass === 'LAYOUT_CHANGED')
+              await keepRefusal(r, i.order_id, trace, e.message)
+            throw e
+          }
+          // A failure of our own before the press (the database, the browser): nothing was pressed.
+          const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
+          throw fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`)
+        }
+      },
+      { urgent: true },
+    )
   }
 }
