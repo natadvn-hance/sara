@@ -3,6 +3,7 @@ import type { DirectionRules } from '@sara/shared'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { calibrationItem, directionRun, lead, trialScore as trialTable } from '../db/schema'
+import { NOT_TEST } from '../testLeads/sql'
 import { rulesHash } from './hash'
 import { createRun, getRun, type RunRow } from './runStore'
 import { type TrialDeps, trialScore } from './trial'
@@ -33,7 +34,7 @@ async function candidates(db: DbOrTx, accountId: string): Promise<Candidate[]> {
       where s.lead_id = l.id and not s.backtest order by s.created_at desc limit 1
     ) as score
     from core.lead l
-    where l.account_id = ${accountId}
+    where l.account_id = ${accountId} and ${NOT_TEST('l.id')}
       and l.status not in ('sorted_out', 'stale')
       and l.seen_at > now() - make_interval(days => ${WINDOW_DAYS})
       and not exists (

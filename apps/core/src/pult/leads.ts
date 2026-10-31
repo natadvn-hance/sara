@@ -10,6 +10,7 @@ import {
   type LeadView,
   priceUpTo,
   type QueueOrder,
+  shownTitle,
 } from '@sara/shared'
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
@@ -19,6 +20,7 @@ import { dayOf } from '../leads/money'
 import { getSetting } from '../settings/store'
 import { leadSiteOf } from '../site'
 import { siteCardView, studiedLine } from '../site/view'
+import { seriesWithoutBlocked } from '../text/blockedLinks'
 
 /** «Заявки» (M7 design 5.3): the queue by value and one lead with its score, разбор, bid text and obstacles. */
 
@@ -131,7 +133,7 @@ export async function leadQueue(
     .map(({ t, l }) => ({
       id: l.id,
       taskId: t.id,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       city: l.city,
       category: l.category,
       score: scores.get(l.id)?.score ?? null,
@@ -162,7 +164,7 @@ export async function leadQueue(
     older: open.length - fresh.length,
     decided: decidedRows.map(({ t, l, reason }) => ({
       id: l.id,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       decision: decision(t.resolution),
       at: t.resolvedAt ?? t.createdAt,
       feeRub: l.bidPriceRub,
@@ -246,7 +248,7 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
     lead: {
       id: l.id,
       accountId: l.accountId,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       city: l.city,
       category: l.category,
       text: l.text,
@@ -293,7 +295,10 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
       priceFromRub: l.draftPriceRub,
       priceToRub: l.draftPriceRub === null ? null : priceUpTo(l.draftPriceRub),
       limit: BID_LIMIT,
-      followUps: l.draftFollowUps ?? [],
+      followUps: seriesWithoutBlocked(
+        l.draftFollowUps ?? [],
+        await getSetting(db, 'links.blocked'),
+      ),
       followUpLimit: FOLLOW_UP_EDIT_MAX,
     },
     task: t ? { id: t.id, open: t.state === 'open', resolution: t.resolution } : null,

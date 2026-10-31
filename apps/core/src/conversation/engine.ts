@@ -248,7 +248,7 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
   }
   // The link of a case is the code's: put after the checks, when the client asked and the case allows it.
   if (issues.length === 0 && output?.move === 'reply' && output.text && chosen) {
-    const link = caseLink(chosen, output.case?.moment ?? null)
+    const link = caseLink(chosen, output.case?.moment ?? null, input.settings.blockedLinks)
     if (link) output = { ...output, text: `${output.text}\n\n${link}` }
   }
   const decision = decide({

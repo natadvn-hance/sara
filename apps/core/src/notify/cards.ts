@@ -1,4 +1,13 @@
-import { type ClientInfo, formatCallback, formatRub, type LeadSite, plural } from '@sara/shared'
+import {
+  type ClientInfo,
+  formatCallback,
+  formatRub,
+  isTestOrder,
+  type LeadSite,
+  plural,
+  TEST_MARK,
+} from '@sara/shared'
+import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
 import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
@@ -70,10 +79,14 @@ export type LeadCard = {
    * full reading for «Разбор» (null: a lead whose reading was stored without it).
    */
   analysis?: { hiddenNeed: string; risk: string; condition: string; reading: Reading | null } | null
+  /** A test order only: where the live Sara would have stopped and sent no card (docs/ops/test-leads.md). */
+  liveSkip?: string | null
   /** The order closed on Profi.ru: when, for the short closed card. */
   closed?: ClosedWhen | null
   /** The card waited more than a day (FR-LEAD-10): from its first message to now, for the short stale card. */
   stale?: { since: string; at: string } | null
+  /** Boris closed the card himself («Закрыть заявку»): the short card says so and nothing else. */
+  closedByBoris?: boolean
   /**
    * The client's own site as Sara read it (Boris, 30.10.2026): its short summary against the order, or «сайт не
    * открылся»; and the example sites the client named. None: the order names no site.
@@ -126,8 +139,9 @@ export const TEXTS = {
   forumLost:
     'Меня убрали из группы с темами: снова пишу всё сюда, в личный чат. Привязать заново: /forum в группе.',
   leadsTopic: 'Заявки',
+  commandFailed: 'Не получилось ответить на команду. Попробуй ещё раз чуть позже.',
   alreadyDone: 'Уже сделано',
-  skipped: 'Пропущено',
+  skipped: 'Заявка закрыта',
   bidQueued: 'Отправляю отклик',
   bidsPaused: 'Отклик не ушёл: отправка откликов на паузе',
   bidFailed: 'Отклик не ушёл: площадка ответила ошибкой. Посмотри «Состояние системы».',
@@ -135,6 +149,7 @@ export const TEXTS = {
     'Не знаю, ушёл ли отклик: площадка не ответила. Проверь заявку на Профи.ру, прежде чем откликаться вручную.',
   bidsPausedPress: 'Отправка откликов на паузе. Включи её и нажми снова.',
   lostRoute: 'Эта заявка досталась другому направлению',
+  bidSending: (title: string) => `⏳ Отправляю отклик: ${title}…`,
   bidSent: (title: string, spentRub: number) =>
     `✅ Отклик отправлен: ${title}, ${formatRub(spentRub)}`,
   bidRefused: (title: string, errorClass: string) =>
@@ -233,6 +248,9 @@ export const TEXTS = {
   draftLate: 'Заявка уже решена, текст не поменяла',
   /** The card of an order closed on Profi.ru, in short (Boris, 30.10.2026): the buttons are gone. */
   closedCard: '🔒 Заявка закрыта',
+  /** Boris closed the card with the button: the same short card, a folder instead of a lock. */
+  closedByBorisCard: '📁 Заявка закрыта',
+  closeButton: 'Закрыть заявку',
   closedAfter: (span: string, published: boolean) =>
     `закрылась через ${span} ${published ? 'после публикации' : 'после того, как я её увидела'}`,
   closedBy: (clock: string, openFor: string | null) =>
@@ -329,7 +347,18 @@ const noPeriod = (s: string) => s.replace(/[.\s]+$/, '')
 const orderUrl = (orderId: string) =>
   `https://profi.ru/backoffice/n.php?o=${encodeURIComponent(orderId)}`
 const linkLine = (orderId: string) =>
-  `<a href="${orderUrl(orderId)}">Открыть заявку на Профи.ру</a>`
+  isTestOrder(orderId)
+    ? '<i>Заявка понарошку: на Профи.ру её нет, клиент на странице тестовых заявок</i>'
+    : `<a href="${orderUrl(orderId)}">Открыть заявку на Профи.ру</a>`
+
+/** The first lines of a test order's card: what it is, and where the live Sara would have stopped. */
+function testLines(c: LeadCard): string[] {
+  if (!isTestOrder(c.orderId)) return []
+  return [
+    `<b>${TEST_MARK}</b>: Профи.ру и деньги не трогаются`,
+    ...(c.liveSkip ? [`<i>В бою карточки бы не было: ${clean(c.liveSkip, CAP.reason)}</i>`] : []),
+  ]
+}
 
 function verdictLine(c: LeadCard): string {
   if (c.verdict === 'fit') return `Подходит: ${clean(c.reason, CAP.reason)}`
@@ -344,6 +373,7 @@ function headLines(c: LeadCard): string[] {
     c.bidPriceRub > 0 ? `отклик ${formatRub(c.bidPriceRub)}` : 'цена отклика пока неизвестна'
   const facts = [c.score ? `🎯 <b>балл ${c.score.value}</b>` : null, `💰 ${budget}`, `🧾 ${fee}`]
   return [
+    ...testLines(c),
     ...(c.reminder ? [`<b>⏰ ${title}</b>`, '<i>Заявка ждёт решения</i>'] : [`<b>🔔 ${title}</b>`]),
     ...(c.city.trim() ? [`📍 ${clean(c.city, CAP.short)}`] : []),
     facts.filter(Boolean).join('  ·  '),
@@ -459,15 +489,31 @@ function whyBlocks(c: LeadCard): string[][] {
 
 /**
  * The series under the bid (Boris, 29.10.2026): what goes into the chat a minute or two after it, each message as its
- * own quote. Nothing when the bid has none.
+ * own quote, and the call offer last (Boris, 30.10.2026), its times shown as words: the code picks them when it sends.
+ * Nothing when the bid has none.
  */
 function followUpLines(c: LeadCard): string[] {
-  const series = c.draft?.followUps ?? []
-  if (series.length === 0) return []
+  const all = c.draft?.followUps ?? []
+  const series = all.filter((t) => !isCallOffer(t))
+  const call = all.find(isCallOffer)
+  if (all.length === 0) return []
   return [
-    '<b>✍️ Вдогонку</b>  ·  через 1-2 минуты после отклика',
-    ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
-    '<i>Уйдёт тем же нажатием, если клиент ещё не ответил</i>',
+    ...(series.length > 0
+      ? [
+          '<b>✍️ Вдогонку</b>  ·  уйдет сразу за откликом',
+          ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
+        ]
+      : []),
+    ...(call
+      ? [
+          '<b>📞 Созвон</b>  ·  следом, через пару секунд',
+          `<blockquote>${clip(call, CAP.followUp)
+            .split(SLOTS_MARK)
+            .map(esc)
+            .join('<i>[три времени по рабочим часам]</i>')}</blockquote>`,
+        ]
+      : []),
+    `<i>Уйдет тем же нажатием, сразу за откликом${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,
   ]
 }
 
@@ -560,6 +606,8 @@ function closedWhenText(w: ClosedWhen): string {
  * says so instead, with how long it waited.
  */
 export function closedLeadCardText(c: LeadCard): string {
+  if (c.closedByBoris)
+    return `${[`<b>${TEXTS.closedByBorisCard}</b>`, clean(c.title, CAP.title)].join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
   const head = c.stale
     ? [
         `<b>${TEXTS.staleCard}</b>`,
@@ -675,7 +723,7 @@ export function leadCardKeyboard(c: LeadCard) {
       [
         { text: TEXTS.analysisButton, callback_data: formatCallback(c.taskId, 'razbor') },
         { text: TEXTS.editButton, callback_data: formatCallback(c.taskId, 'edit') },
-        { text: 'Пропустить', callback_data: formatCallback(c.taskId, 'skip') },
+        { text: TEXTS.closeButton, callback_data: formatCallback(c.taskId, 'skip') },
       ],
     ],
   }

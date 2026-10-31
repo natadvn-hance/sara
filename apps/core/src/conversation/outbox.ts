@@ -1,11 +1,13 @@
-import { newEventId, normalizeText } from '@sara/shared'
+import { isTestOrder, newEventId, normalizeText } from '@sara/shared'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { chatMessage, conversation, convTurn, outbox, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { isApprovedText } from '../leads/callSlots'
 import type { BidPayload } from '../leads/outbox'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { hasBlockedLink } from '../text/blockedLinks'
 import { getConversation } from './store'
 
 export { SEND_TEXTS, type SendOptions } from './sendTexts'
@@ -77,7 +79,7 @@ async function borisPressed(
 }
 
 /** The key of a message of the series after a bid: `series:<order>:<place>`, `:2` on its one try after the chat moved. */
-const SERIES_KEY = /^series:([^:]+):([0-2])(?::2)?$/
+const SERIES_KEY = /^series:([^:]+):([0-3])(?::2)?$/
 
 /**
  * Whether the message is one of the series Boris approved with his press on «Откликнуться» (Boris, 29.10.2026): the bid
@@ -103,8 +105,10 @@ async function seriesApproved(
       ),
     )
   const p = bid?.payload as BidPayload | undefined
-  if (!p?.taskId || p.accountId !== m.accountId || p.followUps?.[Number(place)] !== m.text)
-    return false
+  const approved = p?.followUps?.[Number(place)]
+  if (!p?.taskId || p.accountId !== m.accountId || approved === undefined) return false
+  // The text pressed, or for the call offer that text with only its times put in by the code.
+  if (!isApprovedText(approved, m.text)) return false
   const [t] = await tx
     .select({ id: task.id })
     .from(task)
@@ -137,7 +141,12 @@ export async function queueMessage(
   i: MessagePayload & { key: string },
 ): Promise<string | null> {
   if (await getSetting(tx, 'conv.v1_writes')) return null
-  if (i.author === 'sara' && !(await getSetting(tx, 'outbound.messages'))) return null
+  // A test chat's client is made up (docs/ops/test-leads.md): the pause for real clients does not hold it.
+  if (i.author === 'sara' && !isTestOrder(i.chatId) && !(await getSetting(tx, 'outbound.messages')))
+    return null
+  // Boris's own words are his; Sara's never carry a link a client is not to be given (links.blocked, 30.10.2026).
+  if (i.author === 'sara' && hasBlockedLink(i.text, await getSetting(tx, 'links.blocked')))
+    return null
   if (
     i.author === 'sara' &&
     !(await getSetting(tx, 'conv.autopilot')) &&

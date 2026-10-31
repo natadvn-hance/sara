@@ -64,7 +64,7 @@ const leadCards = () =>
 const button = (action: string, m = leadCards().at(-1)) =>
   m?.reply_markup?.inline_keyboard.flat().find((b) => b.callback_data.endsWith(`:${action}`))
 const press = (action: string) => tg.pushPress(111, button(action)?.callback_data ?? '')
-const said = (t: string) => tg.sent.some((m) => m.text === t)
+const said = (t: string) => tg.sent.some((m) => m.text === t) || tg.edited.some((m) => m.text === t)
 const leadOf = async (id: string) => (await db.select().from(lead).where(eq(lead.id, id)))[0]
 const taskOf = async (id: string) => (await db.select().from(task).where(eq(task.entityId, id)))[0]
 const payloads = async (type: string, id: string) =>
@@ -288,10 +288,13 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
   }, 60000)
 
-  it('FR-LEAD-5: a task Boris already decided is never read, and its card is left as it is', async () => {
+  it('FR-LEAD-5: a task Boris already decided is never read, and its card is left as his close made it', async () => {
     const decided = await shownCard()
     press('skip')
     await until(async () => (await taskOf(decided.id))?.state === 'resolved')
+    // His own close edited that card into «📁 Заявка закрыта»; the recheck must not touch it again.
+    await until(() => tg.edited.some((e) => e.message_id === decided.messageId))
+    tg.edited.length = 0
     const open = await shownCard()
     fake.setOrderPage(decided.id, { open: false })
     fake.setOrderPage(open.id, { open: false })
@@ -303,7 +306,7 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     expect((await leadOf(decided.id))?.status).toBe('skipped')
   }, 60000)
 
-  it('FR-LEAD-5: Boris deciding while the page is being read keeps his decision: the card is not touched', async () => {
+  it('FR-LEAD-5: Boris deciding while the page is being read keeps his decision: the recheck does not touch the card', async () => {
     const { id } = await shownCard()
     // The read is slow, so Boris's press lands in the middle of it.
     fake.setOrderPage(id, { open: false, delayMs: 2500 })
@@ -315,7 +318,8 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     await pass
     expect(await actorsOf('task.resolved', (await taskOf(id))?.id ?? '')).toEqual(['boris'])
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
-    expect(tg.edited).toHaveLength(0)
+    // The only edit is his own close: the short «📁» card, never the site-closed «🔒» one.
+    expect(tg.edited.map((e) => e.text.includes('📁 Заявка закрыта'))).toEqual([true])
     expect(await payloads('lead.closed_on_site', id)).toEqual([])
     expect((await leadOf(id))?.status).toBe('skipped')
   }, 60000)
@@ -431,12 +435,13 @@ describe('a bid that ended ORDER_CLOSED (FR-LEAD-5)', () => {
     fake.refuseNext('ORDER_CLOSED')
     press('bid')
     await until(() => said(TEXTS.bidRefused(TITLE, 'ORDER_CLOSED')))
-    await until(() => tg.edited.length === 1)
-    expect(tg.edited[0]).toMatchObject({
+    const cardEdits = () => tg.edited.filter((e) => e.message_id === messageId)
+    await until(() => cardEdits().length === 1)
+    expect(cardEdits()[0]).toMatchObject({
       message_id: messageId,
       reply_markup: { inline_keyboard: [] },
     })
-    expect(tg.edited[0]?.text).toContain(TEXTS.closedCard)
+    expect(cardEdits()[0]?.text).toContain(TEXTS.closedCard)
     // What Boris pressed stays his decision; the lead is closed all the same.
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
     expect((await leadOf(id))?.status).toBe('closed')

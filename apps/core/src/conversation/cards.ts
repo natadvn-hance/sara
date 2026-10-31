@@ -1,4 +1,4 @@
-import { formatCallback, newEventId, type TaskAction, type Tone } from '@sara/shared'
+import { formatCallback, newEventId, shownTitle, type TaskAction, type Tone } from '@sara/shared'
 import { and, desc, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, convTurn, lead, task } from '../db/schema'
@@ -47,7 +47,7 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
   const told = understanding?.case
   return {
     name: l?.clientName || null,
-    orderTitle: l?.title ?? null,
+    orderTitle: l ? shownTitle(l.id, l.title) : null,
     clientWords: ids
       .map((id) => byId.get(id) ?? '')
       .filter(Boolean)

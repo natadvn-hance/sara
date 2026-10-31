@@ -49,7 +49,10 @@ const settle = () => new Promise((r) => setTimeout(r, 800))
 const cards = () => tg.sent.filter((m) => m.reply_markup)
 const button = (action: string, m = cards().at(-1)) =>
   m?.reply_markup?.inline_keyboard.flat().find((b) => b.callback_data.endsWith(`:${action}`))
-const said = (t: string) => tg.sent.some((m) => m.text === t)
+/** The edits of cards (a bid's own status message is edited too). */
+const cardEdits = () =>
+  tg.edited.filter((e) => tg.sent.some((m) => m.message_id === e.message_id && m.reply_markup))
+const said = (t: string) => tg.sent.some((m) => m.text === t) || tg.edited.some((m) => m.text === t)
 const leadOf = async (id: string) => (await db.select().from(lead).where(eq(lead.id, id)))[0]
 const taskOf = async (id: string) => (await db.select().from(task).where(eq(task.entityId, id)))[0]
 const payloads = async (type: string, id: string) =>
@@ -187,7 +190,7 @@ describe('the service price (K2)', () => {
     expect(await payloads('draft.edited', id)).toEqual([])
     await until(() => cards().length === 2)
     press()
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids[0]).toMatchObject({ order_id: id, price_rub: 5000, max_fee_rub: 210 })
   })
 
@@ -238,7 +241,7 @@ describe('the node refuses (B1)', () => {
     expect((await leadOf(id))?.status).toBe('queued')
     expect(await payloads('bid.failed', id)).toEqual([{ reason: 'NO_MONEY', given_back: true }])
     press()
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
   })
 
@@ -246,9 +249,9 @@ describe('the node refuses (B1)', () => {
     await cardFor()
     fake.refuseNext('RATE_LIMITED', 2)
     press()
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
-    expect(tg.sent.some((m) => m.text.includes('не ушёл'))).toBe(false)
+    expect(tg.sent.concat(tg.edited).some((m) => m.text.includes('не ушёл'))).toBe(false)
   })
 
   it('FR-LEAD-8: a tab busy through all the tries gives the order back', async () => {
@@ -278,15 +281,15 @@ describe('the node refuses (B1)', () => {
     fake.refuseNext('ORDER_CLOSED')
     press()
     await until(() => said(TEXTS.bidRefused(TITLE, 'ORDER_CLOSED')))
-    await until(() => tg.edited.length === 1)
-    expect(tg.edited[0]).toMatchObject({
+    await until(() => cardEdits().length === 1)
+    expect(cardEdits()[0]).toMatchObject({
       message_id: card?.message_id,
       reply_markup: { inline_keyboard: [] },
     })
-    expect(tg.edited[0]?.text).toContain(TEXTS.closedCard)
+    expect(cardEdits()[0]?.text).toContain(TEXTS.closedCard)
     // Its page was read open moments before, when the card was made: the closing is dated.
-    expect(tg.edited[0]?.text).toMatch(/закрылась через \d+ мин/)
-    expect(tg.edited[0]?.text).not.toContain('Откликнуться')
+    expect(cardEdits()[0]?.text).toMatch(/закрылась через \d+ мин/)
+    expect(cardEdits()[0]?.text).not.toContain('Откликнуться')
     // What Boris pressed stays: the task is his decision, the bid is the failed one.
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
     expect(await payloads('lead.closed_on_site', id)).toEqual([{ via: 'press' }])
@@ -299,7 +302,7 @@ describe('the node refuses (B1)', () => {
     press()
     await until(() => said(TEXTS.bidRefused(TITLE, 'NO_MONEY')))
     await settle()
-    expect(tg.edited).toHaveLength(0)
+    expect(cardEdits()).toHaveLength(0)
   })
 })
 
@@ -381,7 +384,7 @@ describe('a second press after a give-back (B3) and the pause in the delivery (M
     expect((await taskOf(id))?.state).toBe('open')
     await setSetting(db, 'outbound.bids', true, 'boris')
     press()
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
     const [o] = await db.select().from(outbox)
     expect(o?.state).toBe('confirmed')
@@ -460,13 +463,13 @@ describe('the text at the press (M8)', () => {
       .update(lead)
       .set({ draftText: 'Ирина, добрый день!\n\nДругой текст.' })
       .where(eq(lead.id, id))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids[0]?.text).toBe('Ирина, добрый день!\n\nДругой текст')
   }, 20000)
 })
 
 describe('the greeting and the voice of the bid at the moment it is sent (FR-LEAD-6, NFR-UX-1)', () => {
-  const sentOk = () => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен'))
+  const sentOk = () => tg.shown('✅ Отклик отправлен')
 
   it('FR-LEAD-6: a bid pressed at 11:59 Moscow time greets «доброе утро»', async () => {
     moment = new Date('2026-10-26T08:59:00Z')

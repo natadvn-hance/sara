@@ -79,7 +79,7 @@ beforeEach(async () => {
   t = await buildTestApp(db, {}, undefined, {
     onPress: async (p) => {
       presses.push(p)
-      return 'Пропущено'
+      return 'Заявка закрыта'
     },
     bids: {
       hold: async (leadId, fee) => {
@@ -171,9 +171,9 @@ describe('the lead presses of the pult', () => {
     expect(cancels).toEqual([A])
   })
 
-  it('FR-LEAD-7: «Пропустить» with a reason is the card press from the pult; a decided lead answers so', async () => {
+  it('FR-LEAD-7: «Закрыть заявку» with a reason is the card press from the pult; a decided lead answers so', async () => {
     expect((await post(`/api/leads/${B}/skip`, { reason: 'дорого' })).body).toEqual({
-      message: 'Пропущено',
+      message: 'Заявка закрыта',
     })
     expect(presses).toEqual([{ taskId: TB, action: 'skip', source: 'pult', reason: 'дорого' }])
     await db.update(task).set({ state: 'resolved', resolution: 'skip' })

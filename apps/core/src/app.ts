@@ -30,6 +30,7 @@ import { seedProfile } from './direction/profile'
 import { resumeRuns } from './direction/runs'
 import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
+import { type SlotSource, workHoursSource } from './leads/callSlots'
 import { cancelHold, holdBid, setHoldDeps } from './leads/hold'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
@@ -61,6 +62,10 @@ import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
 import type { Fetched } from './site/fetch'
 import { createResolver, type Press } from './tasks/resolve'
+import { testCommand } from './testLeads/command'
+import { routeTestOrders } from './testLeads/router'
+import { registerTestRoutes } from './testLeads/routes'
+import { startTestLeads, type TestLeads } from './testLeads/testLeads'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
 
@@ -76,6 +81,8 @@ export type RunningApp = {
   pipeline: LeadPipeline
   /** The look at waiting cards (FR-LEAD-5); tests drive it with tick(at). */
   recheck: CardRecheck
+  /** Test orders inside the live Sara (docs/ops/test-leads.md); null when the made-up Profi.ru did not start. */
+  testLeads: TestLeads | null
   /** The sweep of cards that waited more than a day (FR-LEAD-10); tests call stale.tick instead. */
   stale: StaleSweep
   close(): Promise<void>
@@ -88,8 +95,12 @@ export type StartOptions = {
   busyRetry?: { delayMs: number; tries: number }
   /** When an unsure bid is looked for on its order (default after 5 minutes, 30 minutes and 2 hours). */
   reconcileDelaysMs?: number[]
+  /** The first looks at the order page after an unsure bid, within a minute (31.10.2026); empty when a test sets the retry or reconcile waits. */
+  quickLookDelaysMs?: number[]
   /** The waits of the series after a bid: before its first message and between the next ones (SERIES_DELAYS). */
   seriesDelayMs?: SeriesDeps['delayMs']
+  /** Where the times of the call offer come from (default Boris's working hours); tests fix them. */
+  callSlots?: SlotSource
   remindAfterMs?: () => Promise<number>
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** How often the learning jobs run (default a minute); tests call them directly instead. */
@@ -102,6 +113,8 @@ export type StartOptions = {
   staleTickMs?: number
   /** The clock of the greeting of a bid (default the real one); tests fix the hour. */
   now?: () => Date
+  /** How fast the clients of test orders answer and how much they may write (default a live client's pace, 40 a day). */
+  testLeads?: Pick<Parameters<typeof startTestLeads>[0], 'timing' | 'limits'>
   /** How a page of a client's site is fetched; the tests give a made-up site. */
   siteFetch?: (url: string) => Promise<Fetched>
   /** How a file attached to an order is downloaded; the tests give bytes. */
@@ -113,7 +126,18 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   await migrate(config.databaseUrl)
   const { db, close: closeDb } = createDb(config.databaseUrl)
   const secrets = createSecretStore(config.dataDir)
-  const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
+  // A test order goes to the made-up Profi.ru inside the core, everything else to the node behind its lock.
+  let testLeads: TestLeads | null = null
+  const profi = routeTestOrders(
+    createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret }),
+    () => testLeads?.profi ?? null,
+  )
+
+  // The one function of /test, /test_clear and the Secretary's tools.
+  const testCommandOf = (args: string) =>
+    testLeads
+      ? testCommand(testLeads, args, config.publicUrl)
+      : Promise.resolve('Тестовые заявки ещё запускаются')
 
   let pipeline: LeadPipeline | null = null
   // ADR-027: Boris's free words go to the Secretary once the core listens; until then the bot says Sara is starting.
@@ -186,6 +210,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     voiceDir: join(config.dataDir, 'voice'),
     // Each new notice rings the phone and the computer of the kinds Boris chose (pult v2 design 6).
     onNotice: (kind) => void pushNotice({ db, secrets, publicUrl: config.publicUrl }, kind),
+    onTest: testCommandOf,
+    publicUrl: config.publicUrl,
   })
   const gateway = createGateway({
     db,
@@ -219,12 +245,20 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
     // The first look a minute after: a bid the node could not see at once is usually on its page by then, and its
     // series still goes in time (30.10.2026).
+    quickLookDelaysMs:
+      o.quickLookDelaysMs ??
+      (o.reconcileDelaysMs || o.retryDelaysMs ? [] : [3_000, 5_000, 7_000, 10_000, 15_000, 20_000]),
     reconcileDelaysMs: o.reconcileDelaysMs ?? [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
   })
-  setSeriesDeps({ db, profi, delayMs: o.seriesDelayMs ?? SERIES_DELAYS })
+  setSeriesDeps({
+    db,
+    profi,
+    delayMs: o.seriesDelayMs ?? SERIES_DELAYS,
+    slots: o.callSlots ?? workHoursSource(db),
+  })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   secretaryTools = {
     db,
@@ -243,6 +277,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         a,
       ),
     system: () => systemView(deps),
+    test: (args) => testCommandOf(args),
   }
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
   const mind = createMindSearch(db)
@@ -374,7 +409,24 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   registerSchoolRoutes(app, school)
   registerConversationRoutes(app, commandDeps())
   registerSecretaryMcp(app, { keys: turnKeys, deps: () => secretaryTools })
+  // The made-up Profi.ru of test orders: if it cannot start, the live Sara works on without test orders.
+  testLeads = await startTestLeads({
+    db,
+    dataDir: config.dataDir,
+    nodeToken: config.nodeToken,
+    permitSecret: config.permitSecret,
+    claudeBin: config.claudeBin,
+    rolesDir: config.rolesDir,
+    token: () => secrets.get('claude_oauth_token'),
+    claudeEnv: o.claudeEnv,
+    ...o.testLeads,
+  }).catch((e) => {
+    console.error('test orders did not start', e instanceof Error ? e.message : e)
+    return null
+  })
+  registerTestRoutes(app, { testLeads: () => testLeads })
   const url = await app.listen({ port: config.port, host: config.host })
+  testLeads?.listen(url)
   const port = (app.server.address() as AddressInfo).port
   secretary = createSecretary({
     db,
@@ -433,10 +485,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     pipeline: lp,
     recheck,
+    testLeads,
     stale,
     async close() {
       recheck.stop()
       stale.stop()
+      await testLeads?.close()
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()

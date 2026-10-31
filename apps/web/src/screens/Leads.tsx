@@ -18,7 +18,7 @@ import { HoldBar, SKIP_REASONS } from '../ui/task'
 
 const DECIDED: Record<LeadQueue['decided'][number]['decision'], string> = {
   bid: 'отклик',
-  skip: 'пропущена',
+  skip: 'закрыта',
   closed: 'закрылась',
   other: 'решена',
 }
@@ -167,7 +167,7 @@ function Queue({
 }
 
 /**
- * The decision: «Откликнуться» waits ten seconds in the core and can be cancelled; «Пропустить» asks why here, one
+ * The decision: «Откликнуться» waits ten seconds in the core and can be cancelled; «Закрыть заявку» asks why here, one
  * tap on a reason or none; «Перепроверить» reads the order page now.
  */
 function Decide({ v }: { v: LeadView }) {
@@ -183,7 +183,7 @@ function Decide({ v }: { v: LeadView }) {
         {t.resolution === 'bid'
           ? 'отклик'
           : t.resolution === 'skip'
-            ? `пропущена${v.label?.reason ? `, ${v.label.reason}` : ''}`
+            ? `закрыта${v.label?.reason ? `, ${v.label.reason}` : ''}`
             : (t.resolution ?? 'закрыта')}
         .
       </p>
@@ -241,7 +241,7 @@ function Decide({ v }: { v: LeadView }) {
               disabled={busy !== null || !reason.trim()}
               onClick={() => skip(reason.trim())}
             >
-              Пропустить
+              Закрыть заявку
             </Btn>
             <Btn size="sm" onClick={() => setSkipping(false)}>
               Отмена
@@ -259,7 +259,7 @@ function Decide({ v }: { v: LeadView }) {
             {fee > 0 ? `Откликнуться за ${rub(fee)}` : 'Цена отклика неизвестна'}
           </Btn>
           <Btn disabled={busy !== null} onClick={() => setSkipping(true)}>
-            Пропустить
+            Закрыть заявку
           </Btn>
           <Btn
             size="sm"
@@ -305,8 +305,11 @@ function ScoreBlock({
   )
 }
 
-/** The places of the series after the bid (Boris, 29.10.2026): the links, then two lines; an empty one is not sent. */
-const FOLLOW_UP_SLOTS = ['first', 'second', 'third'] as const
+/**
+ * The places of the series after the bid (Boris, 29.10.2026): the links, two lines and the call offer (30.10.2026);
+ * an empty one is not sent.
+ */
+const FOLLOW_UP_SLOTS = ['first', 'second', 'third', 'fourth'] as const
 
 /** The bid text with its price range; while the decision is open it is edited here, the card in Telegram stays. */
 function BidCard({ v }: { v: LeadView }) {
@@ -366,8 +369,8 @@ function BidCard({ v }: { v: LeadView }) {
           {FOLLOW_UP_SLOTS.map((slot, k) => (
             <label key={slot} className="kv" htmlFor={`bid-follow-${slot}`}>
               <span className="muted" style={{ fontSize: 13 }}>
-                Вдогонку {k + 1}: через 1-2 минуты после отклика, если клиент ещё не ответил. Пусто:
-                не отправлять
+                Вдогонку {k + 1}: уйдет сразу за откликом, если клиент ещё не ответил. Пусто: не
+                отправлять. {'{слоты}'} Сара заменит на три времени для созвона
               </span>
               <textarea
                 id={`bid-follow-${slot}`}
@@ -409,8 +412,7 @@ function BidCard({ v }: { v: LeadView }) {
           {v.bid.followUps.length > 0 ? (
             <div className="grid" style={{ gap: 8 }}>
               <span className="muted" style={{ fontSize: 13 }}>
-                Вдогонку, через 1-2 минуты после отклика. Уйдёт тем же нажатием, если клиент ещё не
-                ответил
+                Вдогонку, сразу за откликом. Уйдет тем же нажатием, если клиент ещё не ответил
               </span>
               {v.bid.followUps.map((f) => (
                 <div key={f} className="quote" style={{ whiteSpace: 'pre-line' }}>

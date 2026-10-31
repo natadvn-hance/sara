@@ -7,7 +7,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { queueMessage } from '../../apps/core/src/conversation/outbox'
-import { event, lead, outbox } from '../../apps/core/src/db/schema'
+import { conversation, event, lead, outbox } from '../../apps/core/src/db/schema'
+import { isApprovedText, isCallOffer, SLOTS_MARK } from '../../apps/core/src/leads/callSlots'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
@@ -95,10 +96,15 @@ beforeAll(async () => {
       retryDelaysMs: [50, 50],
       busyRetry: { delayMs: 50, tries: 2 },
       reconcileDelaysMs: [800, 800],
+      quickLookDelaysMs: [250, 250],
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
-      seriesDelayMs: { first: [400, 500], next: [300, 400] },
+      seriesDelayMs: { first: [400, 500], next: [300, 400], call: [300, 400] },
+      // Three times ahead of the moment of sending, whatever the clock of the run says.
+      callSlots: {
+        slots: async (now) => [3, 5].map((h) => new Date(now.getTime() + h * 3600_000)),
+      },
       now: () => NOON,
     },
   )
@@ -123,6 +129,7 @@ beforeEach(async () => {
   clientFirst = false
   await resetDb(db)
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.answers.length = 0
   fake.bids.length = 0
   fake.messages.length = 0
@@ -151,6 +158,8 @@ beforeEach(async () => {
   await setSetting(db, 'outbound.messages', true, 'boris')
   await setSetting(db, 'conv.v1_writes', false, 'boris')
   await setSetting(db, 'conv.autopilot', false, 'boris')
+  // The call offer has its own test below; the others are about the Analyst's messages.
+  await setSetting(db, 'calls.offer', false, 'boris')
 })
 
 describe('the series after a bid (Boris, 29.10.2026)', () => {
@@ -187,7 +196,13 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     const id = await cardFor()
     press()
     await until(async () => (await events('bid.series_stopped', id)).length === 1)
-    expect(await events('bid.series_stopped', id)).toEqual([{ n: 0, why: 'client_replied' }])
+    expect(await events('bid.series_stopped', id)).toEqual([
+      expect.objectContaining({
+        n: 0,
+        why: 'client_replied',
+        detail: expect.objectContaining({ rule: 'client_message' }),
+      }),
+    ])
     expect(sentTo(id)).toEqual([])
   })
 
@@ -197,7 +212,9 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await until(() => sentTo(id).length === 1)
     await fake.addChatMessage({ chatId: id, author: 'client', text: 'Да, интересно' })
     await until(async () => (await events('bid.series_stopped', id)).length === 1)
-    expect(await events('bid.series_stopped', id)).toEqual([{ n: 1, why: 'client_replied' }])
+    expect(await events('bid.series_stopped', id)).toEqual([
+      expect.objectContaining({ n: 1, why: 'client_replied' }),
+    ])
     expect(sentTo(id).map((m) => m.text)).toEqual([FIRST])
   })
 
@@ -219,7 +236,9 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     const id = await cardFor()
     press()
     await until(async () => (await events('bid.series_stopped', id)).length === 1)
-    expect(await events('bid.series_stopped', id)).toEqual([{ n: 0, why: 'not_now' }])
+    expect(await events('bid.series_stopped', id)).toEqual([
+      expect.objectContaining({ n: 0, why: 'not_now' }),
+    ])
     expect(sentTo(id)).toEqual([])
   })
 
@@ -275,7 +294,7 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     expect(tg.sent.some((m) => m.text.includes('Сообщения вдогонку не отправляла'))).toBe(false)
   })
 
-  it('FR-CONV-9: a bid found later than a quarter of an hour after the press has no series, and Boris is told so', async () => {
+  it('FR-CONV-9: a bid found on its order long after the press gets its series at once all the same (31.10.2026)', async () => {
     fake.failAcks(3)
     const id = await cardFor()
     press()
@@ -284,13 +303,123 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
         (r) => r.state === 'uncertain',
       ),
     )
-    // The press was twenty minutes ago by the time the bid shows on its order.
+    // The press was twenty minutes ago by the time the bid shows on its order: no age limit any more.
     await db.execute(
       sql`update core.outbox set created_at = now() - interval '20 minutes' where kind = 'bid'`,
     )
-    await until(() => tg.sent.some((m) => m.text.includes('Сообщения вдогонку не отправляла')))
+    await until(() => sentTo(id).length === 2)
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    expect(
+      tg.sent.concat(tg.edited).some((m) => m.text.includes('Сообщения вдогонку не отправляла')),
+    ).toBe(false)
+  })
+
+  it('FR-CONV-9: a card of an unknown author, the site itself, does not stop the series (31.10.2026)', async () => {
+    const id = await cardFor()
+    press()
+    await until(() => fake.bids.length === 1)
+    await fake.addChatMessage({ chatId: id, author: 'unknown', text: 'Отклик отправлен' })
+    await until(() => sentTo(id).length === 2)
+    expect(await events('bid.series_stopped', id)).toEqual([])
+    expect(sentTo(id)).toHaveLength(2)
+  })
+
+  it("FR-CONV-10: the site's tail of the bid (price and contacts, a moment after it) is part of the bid: no stop, the conversation stays Sara's (31.10.2026)", async () => {
+    const id = await cardFor()
+    press()
+    await until(() => fake.bids.length === 1)
+    await fake.addChatMessage({
+      chatId: id,
+      author: 'specialist',
+      text: 'Стоимость от 30000 до 45000 руб.\nусл.\nКонтакты:\n+7-900-000-00-00',
+    })
+    await until(() => sentTo(id).length === 2)
+    expect(await events('bid.series_stopped', id)).toEqual([])
+    const [conv] = await db.select().from(conversation).where(eq(conversation.orderId, id))
+    expect(conv?.owner ?? 'sara').toBe('sara')
+  })
+
+  it('FR-UI-1: Boris gets one message for the whole bid: sending, sent, then the line about the series (31.10.2026)', async () => {
+    const id = await cardFor()
+    press()
+    await until(() => tg.sent.some((m) => m.text.startsWith('⏳ Отправляю отклик')))
+    await until(() => sentTo(id).length === 2)
+    await until(() => tg.edited.some((m) => m.text.includes('Вдогонку ушло 2 сообщения')))
+    const [first] = tg.sent.filter((m) => m.text.startsWith('⏳'))
+    const edits = tg.edited.filter(
+      (m) => m.message_id === (first as { message_id: number }).message_id,
+    )
+    expect(edits.at(0)?.text).toMatch(/^✅ Отклик отправлен/)
+    expect(edits.at(-1)?.text).toMatch(/^✅ Отклик отправлен.*\nВдогонку ушло 2 сообщения/)
+    // No pile of notices: nothing else about the bid was sent.
+    expect(tg.sent.filter((m) => /Отклик|отклик/.test(m.text) && !m.reply_markup)).toHaveLength(1)
+  })
+
+  it('FR-LEAD-4: an unsure bid is looked for within seconds, and «не знаю, ушёл ли» is not said when it shows (31.10.2026)', async () => {
+    fake.failAcks(3)
+    const id = await cardFor()
+    press()
+    await until(async () => (await events('bid.sent', id)).length === 1)
+    await until(() => sentTo(id).length === 2)
+    expect(tg.shown('Не знаю, ушёл ли отклик')).toBe(false)
+    expect(tg.edited.some((m) => m.text.startsWith('✅ Отклик отправлен'))).toBe(true)
+  })
+
+  it('FR-CONV-9: the series ends with the call offer, its three times put in when it is sent (Boris, 30.10.2026)', async () => {
+    await setSetting(db, 'calls.offer', true, 'boris')
+    const id = await cardFor()
+    const series = (await db.select().from(lead).where(eq(lead.id, id)))[0]?.draftFollowUps ?? []
+    expect(series).toHaveLength(3)
+    const template = series[2] ?? ''
+    expect(isCallOffer(template)).toBe(true)
+    // The card shows the offer with its times in words.
+    expect(cards().at(-1)?.text).toContain('Созвон')
+    press()
+    await until(() => sentTo(id).length === 3)
+    const [, , call] = sentTo(id).map((m) => m.text)
+    expect(call).not.toContain(SLOTS_MARK)
+    expect(isApprovedText(template, call ?? '')).toBe(true)
+    expect(call).toMatch(/\d{1,2}:\d{2}/)
+    expect(sentTo(id)[2]?.idempotency_key).toBe(`msg:series:${id}:2`)
+  })
+
+  it('FR-LEAD-6: a link of the list in the stored series is left out at the press, nothing of it is sent (30.10.2026)', async () => {
+    const id = await cardFor()
+    // A draft made before the site was put on the list still holds its link.
+    await db
+      .update(lead)
+      .set({ draftFollowUps: ['https://nexum.su/ - сайт', FIRST, `${SECOND}\nhttps://nexum.su/`] })
+      .where(eq(lead.id, id))
+    press()
+    await until(() => fake.bids.length === 1)
+    const [row] = await db.select().from(outbox).where(eq(outbox.kind, 'bid'))
+    // The link-only message goes; a line with the link goes from the message that has words too.
+    expect((row?.payload as { followUps?: string[] } | undefined)?.followUps).toEqual([
+      FIRST,
+      SECOND,
+    ])
+    await until(() => sentTo(id).length === 2)
     await settle()
-    expect(sentTo(id)).toEqual([])
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    expect(JSON.stringify(sentTo(id))).not.toContain('nexum')
+  })
+
+  it('FR-LEAD-6: a message of Sara’s that holds a link of the list is not queued, Boris’s own words are his', async () => {
+    await setSetting(db, 'conv.autopilot', true, 'boris')
+    const queued = (author: 'sara' | 'boris', text: string, key: string) =>
+      db.transaction((tx) =>
+        queueMessage(tx, {
+          key,
+          accountId: 'hance-marketing',
+          chatId: 'chat-links',
+          text,
+          author,
+          expectLast: null,
+        }),
+      )
+    expect(await queued('sara', 'Вот наш сайт https://nexum.su/', 'k1')).toBeNull()
+    expect(await queued('sara', 'Вот наш сайт https://zmksk.ru/', 'k2')).not.toBeNull()
+    expect(await queued('boris', 'Вот https://nexum.su/ старый сайт', 'k3')).not.toBeNull()
   })
 
   it('FR-CONV-5: in drafts mode only the series Boris pressed passes: another text under its key is refused', async () => {

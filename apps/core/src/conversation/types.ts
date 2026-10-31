@@ -188,6 +188,8 @@ export type PolicySettings = {
   accountPaused: boolean
   night: { from: number; to: number }
   autonomy: Record<Topic, 'self' | 'draft' | 'call'>
+  /** Links a client is never given (links.blocked); a case's link of the list is left out of the reply. */
+  blockedLinks?: string[]
 }
 
 export type Decision = {

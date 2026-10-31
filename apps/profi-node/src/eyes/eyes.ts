@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, max } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, max, sql } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
 import { rawMessage, rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
@@ -19,6 +19,11 @@ export type Eyes = {
   chatsTouched(): string[]
   /** Chats with news seen in the last 3 days, newest first, 3 at most: what the 10-minute check rereads. */
   knownChats(now?: number): Promise<string[]>
+  /**
+   * The time (ms) of the newest message the node holds of each of these chats. It is never before the message's real
+   * time: a message read from the page takes the moment it was seen, one the stream named that moment.
+   */
+  lastStored(chatIds: string[]): Promise<Map<string, number>>
   /**
    * A chat page was read. On the first reading of a chat only the client's messages after our last one are news;
    * what came before is history from before Sara watched, kept without events.
@@ -201,7 +206,7 @@ export function createEyes(o: {
   }
 
   async function onParsed(p: ParseResult, source: 'rtp' | 'response' | 'dom', body?: unknown) {
-    // The feed is read every minute, so its silence is the sign of a changed site (ADR-002).
+    // The feed is read twice a minute, so its silence is the sign of a changed site (ADR-002).
     if (p.recognized && p.what === 'feed') {
       lastRecognized = Date.now()
       layoutReported = false
@@ -301,6 +306,18 @@ export function createEyes(o: {
         .orderBy(desc(last))
         .limit(3)
       return rows.map((r) => r.chatId)
+    },
+    async lastStored(chatIds) {
+      if (chatIds.length === 0) return new Map()
+      const rows = await o.db
+        .select({
+          chatId: rawMessage.chatId,
+          ms: sql<string>`extract(epoch from max(${rawMessage.sentAt})) * 1000`,
+        })
+        .from(rawMessage)
+        .where(and(eq(rawMessage.accountId, o.accountId), inArray(rawMessage.chatId, chatIds)))
+        .groupBy(rawMessage.chatId)
+      return new Map(rows.map((r) => [r.chatId, Number(r.ms)]))
     },
     async onChatRead(chatId, p) {
       const touch = touched.get(chatId)
