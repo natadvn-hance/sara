@@ -59,6 +59,10 @@ import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
 import { createResolver, type Press } from './tasks/resolve'
+import { testCommand } from './testLeads/command'
+import { routeTestOrders } from './testLeads/router'
+import { registerTestRoutes } from './testLeads/routes'
+import { startTestLeads, type TestLeads } from './testLeads/testLeads'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
 
@@ -74,6 +78,8 @@ export type RunningApp = {
   pipeline: LeadPipeline
   /** The look at waiting cards (FR-LEAD-5); tests drive it with tick(at). */
   recheck: CardRecheck
+  /** Test orders inside the live Sara (docs/ops/test-leads.md); null when the made-up Profi.ru did not start. */
+  testLeads: TestLeads | null
   /** The sweep of cards that waited more than a day (FR-LEAD-10); tests call stale.tick instead. */
   stale: StaleSweep
   close(): Promise<void>
@@ -100,6 +106,8 @@ export type StartOptions = {
   staleTickMs?: number
   /** The clock of the greeting of a bid (default the real one); tests fix the hour. */
   now?: () => Date
+  /** How fast the clients of test orders answer and how much they may write (default a live client's pace, 40 a day). */
+  testLeads?: Pick<Parameters<typeof startTestLeads>[0], 'timing' | 'limits'>
 }
 
 /** Puts the whole core together: database, durable processes, gateway, bot, pipeline and HTTP. */
@@ -107,7 +115,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   await migrate(config.databaseUrl)
   const { db, close: closeDb } = createDb(config.databaseUrl)
   const secrets = createSecretStore(config.dataDir)
-  const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
+  // A test order goes to the made-up Profi.ru inside the core, everything else to the node behind its lock.
+  let testLeads: TestLeads | null = null
+  const profi = routeTestOrders(
+    createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret }),
+    () => testLeads?.profi ?? null,
+  )
 
   let pipeline: LeadPipeline | null = null
   // ADR-027: Boris's free words go to the Secretary once the core listens; until then the bot says Sara is starting.
@@ -177,6 +190,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         m,
       ),
     voiceDir: join(config.dataDir, 'voice'),
+    onTest: (args) =>
+      testLeads
+        ? testCommand(testLeads, args, config.publicUrl)
+        : Promise.resolve('Тестовые заявки ещё запускаются'),
   })
   const gateway = createGateway({
     db,
@@ -360,7 +377,24 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   registerSchoolRoutes(app, school)
   registerConversationRoutes(app, commandDeps())
   registerSecretaryMcp(app, { keys: turnKeys, deps: () => secretaryTools })
+  // The made-up Profi.ru of test orders: if it cannot start, the live Sara works on without test orders.
+  testLeads = await startTestLeads({
+    db,
+    dataDir: config.dataDir,
+    nodeToken: config.nodeToken,
+    permitSecret: config.permitSecret,
+    claudeBin: config.claudeBin,
+    rolesDir: config.rolesDir,
+    token: () => secrets.get('claude_oauth_token'),
+    claudeEnv: o.claudeEnv,
+    ...o.testLeads,
+  }).catch((e) => {
+    console.error('test orders did not start', e instanceof Error ? e.message : e)
+    return null
+  })
+  registerTestRoutes(app, { testLeads: () => testLeads })
   const url = await app.listen({ port: config.port, host: config.host })
+  testLeads?.listen(url)
   const port = (app.server.address() as AddressInfo).port
   secretary = createSecretary({
     db,
@@ -419,10 +453,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     pipeline: lp,
     recheck,
+    testLeads,
     stale,
     async close() {
       recheck.stop()
       stale.stop()
+      await testLeads?.close()
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()

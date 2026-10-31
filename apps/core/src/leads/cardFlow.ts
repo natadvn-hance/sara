@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { getSetting } from '../settings/store'
+import { NOT_TEST } from '../testLeads/sql'
 
 /** Card flow texts for Boris (Russian, plain, no long dash). */
 export const CARD_FLOW_TEXTS = {
@@ -46,12 +47,12 @@ export async function quietNow(db: DbOrTx, now: Date): Promise<boolean> {
 /**
  * FR-NOTIF-3: lead cards of the Moscow day of `now`, as decision tasks (a card the bot could not send yet still
  * counts, the reminder brings it). The caller holds the cards lock, so two orders at once cannot both take the
- * last place.
+ * last place. Test orders take no place (docs/ops/test-leads.md).
  */
 export async function cardsToday(tx: DbOrTx, now: Date): Promise<number> {
   const r = await tx.execute<{ n: number }>(sql`
     select count(*)::int as n from core.task t
-    where t.kind = 'lead_decision'
+    where t.kind = 'lead_decision' and ${NOT_TEST('t.entity_id')}
       and (t.created_at at time zone 'Europe/Moscow')::date
         = (${now.toISOString()}::timestamptz at time zone 'Europe/Moscow')::date`)
   return r.rows[0]?.n ?? 0

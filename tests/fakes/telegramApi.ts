@@ -319,6 +319,14 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           chat: { id: chatId, type: 'private' },
           from: { id: chatId, is_bot: false, first_name: 'Борис' },
           text,
+          // A command (/test …) comes with its entity, as Telegram sends it.
+          ...(text.startsWith('/')
+            ? {
+                entities: [
+                  { type: 'bot_command', offset: 0, length: text.split(' ')[0]?.length ?? 1 },
+                ],
+              }
+            : {}),
           ...(replyTo
             ? {
                 reply_to_message: {

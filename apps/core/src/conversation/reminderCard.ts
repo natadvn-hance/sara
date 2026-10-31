@@ -1,4 +1,4 @@
-import { formatCallback, newEventId, type TaskAction } from '@sara/shared'
+import { formatCallback, newEventId, shownTitle, type TaskAction } from '@sara/shared'
 import { and, eq, like } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { convTurn, lead, task } from '../db/schema'
@@ -94,7 +94,7 @@ export async function sendReminderCard(
   const m = await d.notifier.sendButtons(
     CONV_TEXTS.reminderCard({
       name: l?.clientName || null,
-      orderTitle: l?.title ?? null,
+      orderTitle: l ? shownTitle(l.id, l.title) : null,
       step,
       text,
     }),
