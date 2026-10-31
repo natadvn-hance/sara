@@ -19,11 +19,11 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 /** The M4 roles: their meta (design 5.14, plan D2 and D3) and the schema each answers with. */
 const M4_ROLES = {
   interlocutor: {
-    meta: { version: 7, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
+    meta: { version: 8, model: 'sonnet', fallbackModel: 'opus', priority: 'P0', timeoutMs: 120000 },
     schema: InterlocutorOutput,
   },
   checker: {
-    meta: { version: 4, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
+    meta: { version: 5, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
     schema: CheckerOutput,
   },
   reminder: {
@@ -75,7 +75,7 @@ describe('the M4 roles', () => {
     expect(rule).toMatch(/не пиши, что кто-то позвонит, перезвонит или наберёт/i)
     expect(rule).toMatch(/не называй время звонка/i)
     // The field list no longer says the text of a call is empty.
-    const field = role.split('\n').find((l) => /^9\. text/.test(l)) ?? ''
+    const field = role.split('\n').find((l) => /^10\. text/.test(l)) ?? ''
     expect(field).toMatch(/call_boris это короткий черновик для Бориса/)
     expect(field).not.toMatch(/При ходе call_boris и none: null/)
   })

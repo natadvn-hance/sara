@@ -169,6 +169,13 @@ export function formatInterlocutorInput(
       ...(withoutCase ? [NO_CASE_NOW] : r.cases.length ? r.cases.map(formatCase) : [NO_CASES]),
     ].join('\n\n'),
   )
+  if (r.sites?.length)
+    parts.push(
+      [
+        '## Сайты Hance',
+        ...r.sites.map((s) => `[${s.id}] ${s.name}: ${s.what} Показывать: ${s.when}`),
+      ].join('\n\n'),
+    )
   parts.push(
     [
       '## Образцы Бориса',

@@ -11,8 +11,16 @@ import { syncChat } from '../../src/conversation/sync'
 import type { Dossier, PolicySettings } from '../../src/conversation/types'
 import { convTurn, lead } from '../../src/db/schema'
 import { createGateway } from '../../src/gateway/gateway'
+import { SITES_RECORD } from '../../src/leads/siteOrder'
 import { createSecretStore } from '../../src/secrets/store'
-import { caseOf, chatMsg, fakeMind, interlocutorAnswer, stubProfi } from '../helpers/conversation'
+import {
+  caseOf,
+  chatMsg,
+  fakeMind,
+  interlocutorAnswer,
+  mindHit,
+  stubProfi,
+} from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
@@ -857,5 +865,115 @@ describe('cases in a turn', () => {
       { id: 'k-case-01', title: 'Лиса-Клиник: онлайн-запись' },
       { id: 'k-case-02', title: 'Сеть кофеен: реклама, Сочи' },
     ])
+  })
+})
+
+const SITES_BODY = `# Сайты Hance для показа клиенту
+
+## Стальной Каркас
+
+- Ссылка: https://zmksk.ru/
+- Подпись: металлоконструкции, корпоративный сайт
+- Что: многостраничный корпоративный сайт производителя.
+- Показывать: производство, B2B.
+
+## Бубочка
+
+- Ссылка: https://bubochkabrand.ru/
+- Подпись: магазин детской одежды на Tilda
+- Что: интернет-магазин на Tilda.
+- Показывать: магазин, бренд.
+
+## Royalty Teams
+
+- Ссылка: https://www.royalty-teams.ru/
+- Подпись: сайт IT-компании
+- Что: лендинг IT-компании.
+- Показывать: IT, услуги для бизнеса.
+
+## Cognio
+
+- Ссылка: https://hance.pro/cognio/
+- Подпись: сервис диагностики навыков
+- Что: страница продукта.
+- Показывать: онлайн-сервис.`
+
+const mindWithSites = () => {
+  const m = fakeMind()
+  return {
+    ...m,
+    byIds: async (ids: string[]) =>
+      ids.includes(SITES_RECORD)
+        ? [mindHit(SITES_RECORD, 'knowledge', { body: SITES_BODY })]
+        : m.byIds(ids),
+  }
+}
+
+describe('sites of Hance in a reply to a client of a site order (Boris, 31.10.2026)', () => {
+  it('FR-SITE-29: «покажите примеры» on a site order is answered with sites, not a case', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Вот несколько сайтов, которые мы делали. Какой из них ближе к тому, что вы хотите?',
+        sites: ['zmksk.ru', 'hance.pro/cognio', 'royalty-teams.ru'],
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: mindWithSites() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.issues).toEqual([])
+    const text = plan.output?.text ?? ''
+    expect(text).toContain('https://zmksk.ru/ - металлоконструкции, корпоративный сайт')
+    expect(text).toContain('https://hance.pro/cognio/ - сервис диагностики навыков')
+    expect(text).toContain('https://www.royalty-teams.ru/ - сайт IT-компании')
+    expect(text).not.toContain('★')
+    const asked = (await callsOf('interlocutor'))[0]?.stdin ?? ''
+    expect(asked).toContain('## Сайты Hance')
+    // The gateway hides the addresses of the list behind labels and gives them back in the answer, as in the bid.
+    expect(asked).toContain('Стальной Каркас: многостраничный корпоративный сайт производителя.')
+  })
+
+  it('FR-SITE-30: a blocked link is not offered, and an order that is not for a site has no sites section', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({ sites: ['zmksk.ru', 'bubochkabrand.ru'] }),
+      checker: CLEAN_CHECK,
+    })
+    const blocked = await planTurn(
+      { gateway: gw, mind: mindWithSites() },
+      {
+        dossier: d,
+        names: ['Анна'],
+        settings: { ...settings, blockedLinks: ['zmksk.ru'] },
+        now: new Date(),
+      },
+    )
+    expect(blocked.recall.sites?.map((x) => x.id)).toEqual([
+      'bubochkabrand.ru',
+      'royalty-teams.ru',
+      'hance.pro/cognio',
+    ])
+    expect(blocked.output?.text).not.toContain('zmksk.ru')
+    const other = await planTurn(
+      { gateway: gw, mind: mindWithSites() },
+      {
+        dossier: {
+          ...d,
+          order: {
+            ...d.order!,
+            title: 'Продвижение клиники',
+            category: 'SEO',
+            text: 'Нужны заявки',
+          },
+        },
+        names: ['Анна'],
+        settings,
+        now: new Date(),
+      },
+    )
+    expect(other.recall.sites).toEqual([])
+    expect(other.output?.text).not.toContain('https://')
   })
 })
