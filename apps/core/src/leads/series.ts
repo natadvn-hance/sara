@@ -1,19 +1,21 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type EventType, normalizeText } from '@sara/shared'
+import { type ChatMessage, type EventType, normalizeText } from '@sara/shared'
 import { and, eq } from 'drizzle-orm'
 import { deliverMessage, queueMessage } from '../conversation/outbox'
 import type { Db } from '../db/client'
 import { conversation } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { ProfiClient } from '../profi/client'
+import { addStatusLine, seriesLine } from './bidStatus'
 import { fillCallOffer, isCallOffer, type SlotSource } from './callSlots'
 
 /**
  * The series after a bid (Boris, 29.10.2026): «одного сообщения при отклике мало». Before Sara he wrote one to three
  * short messages within four minutes of his bid (a case or a link «из недавнего)», a promise, a smile), and every such
  * series got an answer. The Analyst writes the series with the bid, Boris approves both with one press, and this
- * durable process sends it into the order's chat once the bid is confirmed: the first message a minute or two after
- * the bid, the next ones half a minute apart. Before each one the chat is read again: once the client has answered, or Boris wrote himself, the series
+ * durable process sends it into the order's chat once the bid is confirmed: the first message a second or two after
+ * the bid (Boris, 31.10.2026: «все письма сразу, в ту же секунду»), the next ones two or three seconds apart, only to
+ * keep their order. Before each one the chat is read again: once the client has answered, or Boris wrote himself, the series
  * stops and the conversation goes on as usual. It goes through the message outbox, so the pause of messages to clients,
  * shadow and the line of drafts mode hold for it as for any message of Sara's, and each message goes once.
  */
@@ -35,13 +37,13 @@ export type SeriesDeps = {
 export type SeriesWait = readonly [number, number]
 
 /**
- * The waits of the live series: a minute or two after the bid, then 20-40 seconds between the messages, and the call
- * offer a minute or two after them.
+ * The waits of the live series (Boris, 31.10.2026: «после отклика отправлять все письма сразу, в ту же секунду»): a
+ * second or two after the bid, then two or three seconds between the messages, so that they arrive in their order.
  */
 export const SERIES_DELAYS = {
-  first: [60_000, 120_000],
-  next: [20_000, 40_000],
-  call: [60_000, 120_000],
+  first: [1_000, 2_000],
+  next: [2_000, 3_000],
+  call: [2_000, 3_000],
 } as const
 
 let deps: SeriesDeps | null = null
@@ -62,17 +64,11 @@ export type SeriesJob = {
   /** The texts as Boris approved them with the bid. */
   followUps: string[]
   /**
-   * The bid was found on its order later, minutes after the press: the moment for a first wait of a minute or two has
-   * passed, so the first message waits only as long as the next ones do.
+   * The bid was found on its order later than the press: the first message waits only as long as the next ones do.
+   * Kept for a run recorded before the waits were short.
    */
   late?: boolean
 }
-
-/**
- * A bid found on its order later than this after the press gets no series (Boris's own went within four minutes of
- * his bid): «Из недавнего)» a quarter of an hour on reads as a reminder, not as the same breath as the bid.
- */
-export const SERIES_LATE_MS = 15 * 60_000
 
 /** One series per order, whatever presses or restarts there are. */
 export const seriesWorkflowId = (leadId: string) => `bid-series:${leadId}`
@@ -100,10 +96,38 @@ export type SeriesStop =
   /** The call offer found no free time to give. */
   | 'no_slots'
 
+/** Which rule stopped the series and the authors of the chat's messages in order, never their text (ADR-016). */
+export type StopDetail = { rule: string; authors: string[] }
+
 /** What the chat says before a message: go, with the last message the node must still see, or stop. */
 export type SeriesGround =
   | { go: true; chatId: string; expectLast: string | null }
-  | { go: false; why: SeriesStop }
+  | { go: false; why: SeriesStop; detail: StopDetail }
+
+/** How near to the bid a second message of our side is still part of it (the price line the site adds to a bid). */
+const BID_BURST_MS = 15_000
+/** A line of the site about the bid itself: its price or its mark, short. */
+const BID_NOTE = /(стоимост|₽|руб|отклик)/i
+
+/**
+ * Whether a message of our side that is not the series was written by someone on the site, not by a service of it: the
+ * bid is the first message of ours, and what the site puts beside it (a price line a moment later, a note about the
+ * response) is not Boris writing (Boris, 31.10.2026: the series of order 95583456 stopped as «boris_wrote» though he
+ * wrote nothing). A message of an author nobody knows (the site's own cards) is no one's word either.
+ */
+export function foreignOurs(
+  messages: readonly ChatMessage[],
+  sent: readonly string[],
+): ChatMessage | undefined {
+  const ours = new Set(sent.map(normalizeText))
+  const mine = messages.filter((m) => m.author === 'specialist')
+  const bidAt = mine[0] ? Date.parse(mine[0].sent_at) : Number.NaN
+  return mine.slice(1).find((m) => {
+    if (ours.has(normalizeText(m.text))) return false
+    if (Math.abs(Date.parse(m.sent_at) - bidAt) <= BID_BURST_MS) return false
+    return !(m.text.length <= 160 && BID_NOTE.test(m.text))
+  })
+}
 
 /**
  * Step: the order's chat read again before message `n` (`sent` are the texts of the series already in it). The chat of
@@ -118,21 +142,25 @@ export async function groundSeries(job: SeriesJob, sent: readonly string[]): Pro
     .from(conversation)
     .where(and(eq(conversation.accountId, job.accountId), eq(conversation.orderId, job.leadId)))
   if (conv && (conv.owner !== 'sara' || conv.closedAt !== null))
-    return { go: false, why: 'boris_leads' }
+    return {
+      go: false,
+      why: 'boris_leads',
+      detail: {
+        rule: conv.closedAt !== null ? 'conversation_closed' : 'conversation_owner',
+        authors: [],
+      },
+    }
   const chatId = conv?.chatId ?? job.leadId
   const messages = await d()
     .profi.readChat(job.accountId, chatId)
     .then((r) => r.messages)
     .catch(() => [])
-  if (messages.some((m) => m.author === 'client')) return { go: false, why: 'client_replied' }
-  const ours = new Set(sent.map(normalizeText))
-  const mine = messages.filter((m) => m.author === 'specialist')
-  // The first message of our side is the bid itself; after it only the series may stand.
-  if (
-    messages.some((m) => m.author === 'unknown') ||
-    mine.slice(1).some((m) => !ours.has(normalizeText(m.text)))
-  )
-    return { go: false, why: 'boris_wrote' }
+  const authors = messages.map((m) => m.author)
+  if (authors.includes('client'))
+    return { go: false, why: 'client_replied', detail: { rule: 'client_message', authors } }
+  // The first message of our side is the bid itself; after it only the series, or the site's own lines, may stand.
+  if (foreignOurs(messages, sent))
+    return { go: false, why: 'boris_wrote', detail: { rule: 'other_specialist_message', authors } }
   return { go: true, chatId, expectLast: messages.at(-1)?.platform_message_id ?? null }
 }
 
@@ -187,26 +215,26 @@ async function sendOne(
   n: number,
   text: string,
   sent: string[],
-): Promise<SeriesStop | null> {
+): Promise<{ why: SeriesStop; detail?: StopDetail } | null> {
   for (const again of [false, true]) {
     const g = await DBOS.runStep(() => groundSeries(job, sent), {
       name: `ground-${n}${again ? '-again' : ''}`,
       ...DB_STEP,
     })
-    if (!g.go) return g.why
+    if (!g.go) return { why: g.why, detail: g.detail }
     const id = await DBOS.runStep(() => queueSeries(job, n, text, g, again), {
       name: `queue-${n}${again ? '-again' : ''}`,
       ...DB_STEP,
     })
-    if (!id) return 'not_now'
+    if (!id) return { why: 'not_now', detail: { rule: 'outbox_refused', authors: [] } }
     const r = await DBOS.runStep(() => deliverMessage(d(), id), {
       name: `deliver-${n}${again ? '-again' : ''}`,
       ...DB_STEP,
     })
     if (r === 'confirmed') return null
-    if (r !== 'changed') return 'not_sent'
+    if (r !== 'changed') return { why: 'not_sent', detail: { rule: `delivery_${r}`, authors: [] } }
   }
-  return 'not_sent'
+  return { why: 'not_sent', detail: { rule: 'chat_changed_twice', authors: [] } }
 }
 
 async function runSeries(job: SeriesJob): Promise<void> {
@@ -226,12 +254,14 @@ async function runSeries(job: SeriesJob): Promise<void> {
     const text = call
       ? await DBOS.runStep(() => callText(approved), { name: `times-${n}`, ...DB_STEP })
       : approved
-    const stop = text === null ? 'no_slots' : await sendOne(job, n, text, sent)
+    const stop = text === null ? { why: 'no_slots' as const } : await sendOne(job, n, text, sent)
     if (stop) {
-      await DBOS.runStep(() => journal(job, 'bid.series_stopped', { n, why: stop }), {
+      await DBOS.runStep(() => journal(job, 'bid.series_stopped', { n, ...stop }), {
         name: `stopped-${n}`,
         ...DB_STEP,
       })
+      if (await DBOS.patch('bid-series-status'))
+        await DBOS.runStep(() => status(job, sent.length, stop.why), { name: 'status-stopped' })
       return
     }
     sent.push(text ?? '')
@@ -240,6 +270,13 @@ async function runSeries(job: SeriesJob): Promise<void> {
       ...DB_STEP,
     })
   }
+  if (await DBOS.patch('bid-series-status'))
+    await DBOS.runStep(() => status(job, sent.length), { name: 'status-done' })
+}
+
+/** Step: the line about the series goes under the status message of the bid (one message for the whole bid). */
+async function status(job: SeriesJob, sent: number, why?: SeriesStop): Promise<void> {
+  await addStatusLine(job.leadId, seriesLine(sent, why)).catch(() => {})
 }
 
 const seriesWorkflow = DBOS.registerWorkflow(runSeries, { name: 'bidSeries' })

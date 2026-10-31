@@ -64,7 +64,7 @@ const leadCards = () =>
 const button = (action: string, m = leadCards().at(-1)) =>
   m?.reply_markup?.inline_keyboard.flat().find((b) => b.callback_data.endsWith(`:${action}`))
 const press = (action: string) => tg.pushPress(111, button(action)?.callback_data ?? '')
-const said = (t: string) => tg.sent.some((m) => m.text === t)
+const said = (t: string) => tg.sent.some((m) => m.text === t) || tg.edited.some((m) => m.text === t)
 const leadOf = async (id: string) => (await db.select().from(lead).where(eq(lead.id, id)))[0]
 const taskOf = async (id: string) => (await db.select().from(task).where(eq(task.entityId, id)))[0]
 const payloads = async (type: string, id: string) =>
@@ -431,12 +431,13 @@ describe('a bid that ended ORDER_CLOSED (FR-LEAD-5)', () => {
     fake.refuseNext('ORDER_CLOSED')
     press('bid')
     await until(() => said(TEXTS.bidRefused(TITLE, 'ORDER_CLOSED')))
-    await until(() => tg.edited.length === 1)
-    expect(tg.edited[0]).toMatchObject({
+    const cardEdits = () => tg.edited.filter((e) => e.message_id === messageId)
+    await until(() => cardEdits().length === 1)
+    expect(cardEdits()[0]).toMatchObject({
       message_id: messageId,
       reply_markup: { inline_keyboard: [] },
     })
-    expect(tg.edited[0]?.text).toContain(TEXTS.closedCard)
+    expect(cardEdits()[0]?.text).toContain(TEXTS.closedCard)
     // What Boris pressed stays his decision; the lead is closed all the same.
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
     expect((await leadOf(id))?.status).toBe('closed')

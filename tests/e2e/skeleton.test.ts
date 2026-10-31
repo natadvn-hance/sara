@@ -114,6 +114,7 @@ beforeEach(async () => {
   remindMs = 3_600_000
   await resetDb(db)
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.answers.length = 0
   fake.bids.length = 0
   tg.pushStart(111)
@@ -150,7 +151,7 @@ describe('walking skeleton', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     tg.pushPress(111, lastCardData('bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
     expect(fake.bids[0]?.text).toMatch(/^Ирина, добрый день!\n\nПонимаю, клинике/)
     expect(fake.bids[0]?.idempotency_key).toBe(`bid:${id}`)
@@ -210,7 +211,7 @@ describe('walking skeleton', () => {
     expect(await db.select().from(outbox)).toHaveLength(0)
     await setSetting(db, 'outbound.bids', true, 'boris')
     tg.pushPress(111, lastCardData('bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
   })
 
@@ -219,8 +220,8 @@ describe('walking skeleton', () => {
     await until(() => cards().length === 1)
     fake.failAcks(10)
     tg.pushPress(111, lastCardData('bid'))
-    await until(() => tg.sent.some((m) => m.text.startsWith('Не знаю, ушёл ли отклик')))
-    expect(tg.sent.some((m) => m.text.startsWith('Отклик не ушёл'))).toBe(false)
+    await until(() => tg.shown('Не знаю, ушёл ли отклик'))
+    expect(tg.sent.concat(tg.edited).some((m) => m.text.startsWith('Отклик не ушёл'))).toBe(false)
     expect(fake.bids).toHaveLength(1)
     const [o] = await db.select().from(outbox)
     expect(o?.state).toBe('uncertain')
