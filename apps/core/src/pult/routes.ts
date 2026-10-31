@@ -27,6 +27,7 @@ import { searchView } from './search'
 import { pultMay, settingsView } from './settings'
 import { registerStreamRoute } from './stream'
 import { systemView } from './system'
+import { setThreshold, thresholdHint } from './threshold'
 import { todayView } from './today'
 
 export const PULT_TEXTS = {
@@ -35,6 +36,7 @@ export const PULT_TEXTS = {
   noAction: 'Это действие из пульта пока недоступно, сделай его в Telegram.',
   noFee: 'Нужна цена отклика, которую ты видел.',
   locked: 'Это меняется не здесь: включает разработчик после проверок, выключить можно паузой.',
+  confirmOn: 'Включение просит второго нажатия.',
   badValue: 'Такое значение не подходит.',
   noText: 'Нужен текст отклика или стоимость услуги.',
   decided: 'Заявка уже решена.',
@@ -84,6 +86,11 @@ const JournalQuery = z.object({
   before: z.string().max(40).optional(),
 })
 const SearchQuery = z.object({ q: z.string().max(200).default('') })
+const ThresholdQuery = z.object({ value: z.coerce.number().int().min(0).max(100) })
+const ThresholdBody = z.object({
+  value: z.number().int().min(0).max(100),
+  expectedVersion: z.number().int().positive(),
+})
 const LeadsQuery = z.object({ order: z.enum(QUEUE_ORDERS).default('combined') })
 const BidBody = z.object({ expectedFeeRub: z.number().int() })
 const SkipBody = z.object({ reason: z.string().trim().min(1).max(500).optional() })
@@ -337,11 +344,33 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       return r.saved ? { message: r.message } : reply.code(409).send({ error: r.message })
     })
 
+    scoped.get('/api/settings/threshold/:accountId', async (req, reply) => {
+      const { accountId } = req.params as { accountId: string }
+      const q = ThresholdQuery.safeParse(req.query ?? {})
+      if (!q.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      try {
+        return await thresholdHint(d.db, accountId, q.data.value)
+      } catch {
+        return reply.code(404).send({ error: PULT_TEXTS.notFound })
+      }
+    })
+    scoped.post('/api/settings/threshold/:accountId', async (req, reply) => {
+      const { accountId } = req.params as { accountId: string }
+      const body = ThresholdBody.safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      const r = await setThreshold(d.db, accountId, body.data.value, body.data.expectedVersion)
+      return r.ok
+        ? { message: r.message, version: r.version }
+        : reply.code(409).send({ error: r.message })
+    })
+
     scoped.post('/api/settings/:key', async (req, reply) => {
       const { key } = req.params as { key: string }
-      const value = (req.body as { value?: unknown } | null)?.value
+      const body = (req.body as { value?: unknown; confirm?: unknown } | null) ?? {}
+      const value = body.value
       if (!(key in SETTINGS)) return reply.code(404).send({ error: PULT_TEXTS.notFound })
-      if (!pultMay(key, value)) return reply.code(403).send({ error: PULT_TEXTS.locked })
+      if (!pultMay(key, value, body.confirm === true))
+        return reply.code(403).send({ error: PULT_TEXTS.locked })
       const parsed = SETTINGS[key].schema.safeParse(value)
       if (!parsed.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
       await setSetting(d.db, key, parsed.data as never, 'boris')
