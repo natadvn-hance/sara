@@ -308,7 +308,7 @@ function dropFinalPeriod(line: string): string {
 }
 
 /**
- * The text of a client message the way Boris writes it (rules 3, 4, 15): no long or medium dash, no hyphen in
+ * The text of a client message the way Boris writes it (rules 3, 4, 15): no «ё» (it is «е»), no long or medium dash, no hyphen in
  * common words («что то»), no period at the end of a paragraph or a line, one empty line between paragraphs,
  * trimmed spaces. A hyphen stays in names, brands, numbers and links; «?», «!», «…» and «)» at the end stay;
  * emoji are not touched. A single line break inside a paragraph stays, and the line before it loses its final
@@ -338,6 +338,9 @@ function fixOnce(text: string): string {
       saved.push(m)
       return String.fromCharCode(SLOT_BASE + saved.length - 1)
     })
+    // Boris, 31.10.2026: «в письмах не должно быть буквы ё, вместо неё е».
+    .replace(/ё/g, 'е')
+    .replace(/Ё/g, 'Е')
   const lines = removeDashes(hidden)
     .split('\n')
     .map((line) => dropFinalPeriod(line.replace(/[ \t]+/g, ' ').trim()).trim())
