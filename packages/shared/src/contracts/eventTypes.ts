@@ -49,6 +49,8 @@ export const EVENT_TYPES = [
   'client.noted',
   'meeting.created',
   'meeting.outcome',
+  /** Pult v2: Boris's «да» or «нет» to a proposal for the mind (decision; no text). */
+  'mind.decided',
   'bid.sent',
   'bid.failed',
   /** A message of the series after the bid went into the order's chat (n: its place in the series). */

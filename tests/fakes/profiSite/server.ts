@@ -68,6 +68,8 @@ export type BidSettings = BidLook & {
   hasBidLag: number
   /** The send of a bid is answered this late, in ms: the form stays open meanwhile. */
   postDelayMs: number
+  /** The top bar shows this wallet whatever was spent (a bar not refreshed yet); null: the real one. */
+  barBalance: number | null
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -254,6 +256,8 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     formShown: true,
     hasBidLag: 0,
     postDelayMs: 0,
+    formStays: false,
+    barBalance: null,
   })
   /** Orders whose taken bid the order answer does not show yet, and for how many more answers. */
   const bidLag = new Map<string, number>()
@@ -265,7 +269,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       .writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       .end(
         (bidSettings.showWallet ? body : body.replace(/<span class="balance"[\s\S]*?<\/span>/, ''))
-          .replaceAll('__BALANCE__', String(state.balance))
+          .replaceAll('__BALANCE__', String(bidSettings.barBalance ?? state.balance))
           .replaceAll('__PRESENCE__', 'on') +
           (hang ? '<img src="/hang" alt="">' : '') +
           (askLeave ? LEAVE_ASK : ''),
