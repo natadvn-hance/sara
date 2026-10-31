@@ -977,3 +977,92 @@ describe('sites of Hance in a reply to a client of a site order (Boris, 31.10.20
     expect(other.output?.text).not.toContain('https://')
   })
 })
+
+const CALL_NOW = new Date('2026-10-31T09:00:00Z')
+const CALL_SLOTS = [
+  new Date('2026-10-31T13:00:00Z'),
+  new Date('2026-10-31T14:30:00Z'),
+  new Date('2026-11-01T13:00:00Z'),
+]
+const callSource = { slots: async () => CALL_SLOTS }
+
+describe('a call is offered with real times (Boris, 31.10.2026)', () => {
+  it('FR-CONV-13: to «О чём вы?» the reply offers the voice, and the mark becomes real times', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Мы агентство Hance из Краснодара, делаем сайты. Можем и здесь, но лучше голосом: всё проговорим и познакомимся. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind(), slots: callSource },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues).toEqual([])
+    expect(plan.output?.text).toContain('Вам удобно сегодня в 16:00 или 17:30, или лучше завтра?')
+    expect(plan.output?.text).not.toContain('{слоты}')
+    const asked = (await callsOf('interlocutor'))[0]?.stdin ?? ''
+    expect(asked).toContain('## Время для созвона')
+    expect(asked).toContain('Свободные времена есть')
+  })
+
+  it('FR-CONV-13: «покажите примеры» on a site order gives the sites and the times of a call', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Вот несколько наших сайтов. Лучше голосом всё проговорить и познакомиться. Вам удобно {слоты}?',
+        sites: ['zmksk.ru', 'hance.pro/cognio', 'royalty-teams.ru'],
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: mindWithSites(), slots: callSource },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues).toEqual([])
+    const text = plan.output?.text ?? ''
+    expect(text).toContain('сегодня в 16:00 или 17:30, или лучше завтра')
+    expect(text).toContain('https://zmksk.ru/')
+    expect(text).toContain('https://hance.pro/cognio/')
+  })
+
+  it('FR-CONV-13: without times the model is told to ask when it suits, and a stray mark is made a plain phrase', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Лучше голосом всё проговорить. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.output?.text).toBe(
+      'Лучше голосом всё проговорить. Вам удобно в удобное для вас время?',
+    )
+    const asked = (await callsOf('interlocutor'))[0]?.stdin ?? ''
+    expect(asked).toContain('Свободных времён сейчас нет')
+  })
+
+  it('FR-CONV-13: «прямого кейса у меня нет» and its kin are refused by the code', async () => {
+    for (const text of [
+      'Прямого кейса по клиникам у меня нет, зато можно созвониться.',
+      'К сожалению, у нас нет примеров именно в вашей нише.',
+      'Нет такого опыта, если быть честным.',
+    ]) {
+      const d = await dossierOf()
+      const gw = await gateway({ interlocutor: interlocutorAnswer({ text }), checker: CLEAN_CHECK })
+      const plan = await planTurn(
+        { gateway: gw, mind: fakeMind() },
+        { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+      )
+      expect(
+        plan.issues.map((x) => x.id),
+        text,
+      ).toContain('case.no_examples')
+      await resetDb(db)
+    }
+  })
+})

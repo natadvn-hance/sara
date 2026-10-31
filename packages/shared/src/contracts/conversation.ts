@@ -177,6 +177,7 @@ export const CHECK_SEVERITY = {
   'case.closed': 'S1',
   'case.ad': 'S3',
   'case.link': 'S3',
+  'case.no_examples': 'S2',
   'checker.case': 'S2',
 } as const satisfies Record<string, 'S1' | 'S2' | 'S3'>
 export type CheckId = keyof typeof CHECK_SEVERITY

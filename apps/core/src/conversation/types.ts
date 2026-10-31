@@ -14,6 +14,7 @@ import type {
   Topic,
 } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
+import type { SlotSource } from '../leads/callSlots'
 import type { HanceSite } from '../leads/siteOrder'
 
 /**
@@ -96,6 +97,8 @@ export type Recall = {
   cases: CaseHit[]
   /** The sites of Hance of an order for a site (links.blocked left out); none for any other order. */
   sites?: HanceSite[]
+  /** Whether there are real times for a call now; the reply then carries the mark where the program puts them. */
+  hasCallSlots?: boolean
 }
 
 export type MindSearch = {
@@ -220,4 +223,9 @@ export type TurnPlan = {
   case?: CaseHit
 }
 
-export type EngineDeps = { gateway: Gateway; mind: MindSearch }
+export type EngineDeps = {
+  gateway: Gateway
+  mind: MindSearch
+  /** Where the times of a call come from (Boris's working hours); without it a reply never offers times. */
+  slots?: SlotSource
+}

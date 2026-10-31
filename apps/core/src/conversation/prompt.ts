@@ -169,6 +169,14 @@ export function formatInterlocutorInput(
       ...(withoutCase ? [NO_CASE_NOW] : r.cases.length ? r.cases.map(formatCase) : [NO_CASES]),
     ].join('\n\n'),
   )
+  parts.push(
+    [
+      '## Время для созвона',
+      r.hasCallSlots
+        ? 'Свободные времена есть. Предлагая созвон, поставь в текст метку {слоты} там, где называются времена: программа подставит настоящие. Сами времена, дни и числа не пиши.'
+        : 'Свободных времён сейчас нет. Предлагая созвон, спроси, когда клиенту удобно, и метку {слоты} не ставь.',
+    ].join('\n'),
+  )
   if (r.sites?.length)
     parts.push(
       [

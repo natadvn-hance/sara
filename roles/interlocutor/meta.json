@@ -1,6 +1,6 @@
 {
   "name": "interlocutor",
-  "version": 9,
+  "version": 10,
   "model": "opus",
   "fallbackModel": "sonnet",
   "priority": "P0",

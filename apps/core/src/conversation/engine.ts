@@ -1,4 +1,5 @@
 import { InterlocutorOutput } from '@sara/shared'
+import { fillCallOffer, isCallOffer, type SlotSource } from '../leads/callSlots'
 import { chosenSites, siteLine, sitesForBid } from '../leads/siteOrder'
 import { agreesToCallProposal, detectCallRequest } from './callDetector'
 import { caseLink } from './caseLink'
@@ -148,6 +149,20 @@ const recalledIds = (r: Recall, cases: CaseHit[]) =>
     ...cases,
   ].map((h) => h.id)
 
+/** The times a call can be offered, none without a source or when it fails. */
+async function callTimesFor(slots: SlotSource | undefined, now: Date): Promise<Date[]> {
+  if (!slots) return []
+  try {
+    return await slots.slots(now)
+  } catch (e) {
+    console.error('call slots failed', e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
+/** Where the mark stands when there are no times: the question stays whole. */
+const NO_TIMES = 'в удобное для вас время'
+
 /** A fault of the case in a reply: the rewrite after one may not tell a case at all. */
 const isCaseIssue = (x: CheckIssue) => x.id.startsWith('case.') || x.id === 'checker.case'
 
@@ -157,9 +172,12 @@ const isCaseIssue = (x: CheckIssue) => x.id.startsWith('case.') || x.id === 'che
  */
 export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<TurnPlan> {
   const d = input.dossier
+  // The times of a call are the program's (Boris, 31.10.2026): the model puts a mark, the program puts real times in.
+  const callTimes = await callTimesFor(deps.slots, input.now)
   const r: Recall = {
     ...(await recall(deps.mind, d)),
     sites: d.order ? await sitesForBid(deps.mind, d.order, input.settings.blockedLinks) : [],
+    hasCallSlots: callTimes.length > 0,
   }
   const said = clientTurn(d)
   // A phone or a word of a call, or a bare «да» to our message that proposed a call.
@@ -255,6 +273,8 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     if (output.move === 'call_boris') break
     withoutCase = issues.some(isCaseIssue)
   }
+  if (issues.length === 0 && output?.move === 'reply' && output.text && isCallOffer(output.text))
+    output = { ...output, text: fillCallOffer(output.text, callTimes, input.now, NO_TIMES) }
   // The sites of Hance shown to a client of a site order are the code's too: the lines come from the record, never from
   // the model's text (Boris, 31.10.2026: to «покажите примеры» show sites, not a case of another niche).
   const shownSites =

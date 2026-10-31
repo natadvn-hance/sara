@@ -178,8 +178,8 @@ export function callOfferTemplate(seed: string): string {
 export const isCallOffer = (text: string) => text.includes(SLOTS_MARK)
 
 /** The offer with its times put in at the mark. */
-export const fillCallOffer = (template: string, slots: Date[], now: Date) =>
-  template.split(SLOTS_MARK).join(slotsText(slots, now))
+export const fillCallOffer = (template: string, slots: Date[], now: Date, whenNone = '') =>
+  template.split(SLOTS_MARK).join(slots.length > 0 ? slotsText(slots, now) : whenNone)
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 

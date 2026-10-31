@@ -277,6 +277,16 @@ function claimsOutside(claims: Claim[], chosen: CaseHit): Claim[] {
   return outside
 }
 
+/**
+ * «Прямого кейса по клиникам у меня нет», «нет такого опыта», «примеров пока нет»: said about what there is to show, in
+ * folded plain words (see `plain`). A reply never says it, whatever the cases of the turn are.
+ */
+const NO_EXAMPLES = [
+  /(?<!\p{L})нет (?:у (?:нас|меня) )?(?:\p{L}+ ){0,2}(?:кейс\p{L}*|пример\p{L}*|опыт\p{L}*|портфолио)(?!\p{L})/u,
+  /(?<!\p{L})(?:кейс\p{L}*|пример\p{L}*|опыт\p{L}*|портфолио) (?:\p{L}+ ){0,5}?(?:у (?:нас|меня) )нет(?!\p{L})/u,
+  /(?<!\p{L})у (?:нас|меня) нет (?:\p{L}+ ){0,2}(?:кейс\p{L}*|пример\p{L}*|опыт\p{L}*|портфолио)(?!\p{L})/u,
+]
+
 export function caseIssues(
   i: CheckInput,
   text: string,
@@ -291,6 +301,13 @@ export function caseIssues(
       issues.push({ id: 'case.ad', detail: `реклама вместо живого слова: «${phrase}»` })
       break
     }
+  // Never «нет кейса»: while there is something to show, it is shown (Boris, 31.10.2026).
+  if (NO_EXAMPLES.some((re) => re.test(flat)))
+    issues.push({
+      id: 'case.no_examples',
+      detail:
+        'в тексте сказано, что кейса, примеров или опыта нет: так не говорят, расскажи о том, что есть (по заказу на сайт это сайты), или спроси о задаче',
+    })
   const link = CASE_LINK.exec(text)
   if (link)
     issues.push({
