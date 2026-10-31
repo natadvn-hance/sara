@@ -151,7 +151,7 @@ function Act({ item, a, onDone }: { item: InboxItem; a: InboxAction; onDone?: ()
             disabled={busy !== null || !text.trim()}
             onClick={() => go({ reason: text.trim() })}
           >
-            Пропустить
+            Закрыть заявку
           </Btn>
           <Btn size="sm" onClick={() => setOpen(false)}>
             Отмена
