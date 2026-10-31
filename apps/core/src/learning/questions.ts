@@ -115,7 +115,9 @@ async function send(
       : q.kind === 'why_decline'
         ? null
         : q.entityId
+    // A question about a lead stands by its card in the topic of new orders; a rule's «почему?» in the general one.
     m = await d.notifier.sendText(text, {
+      ...(q.kind !== 'why_decline' && { place: 'leads' as const }),
       notice: {
         kind: 'lead',
         questionId: id,

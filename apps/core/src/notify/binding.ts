@@ -20,3 +20,12 @@ export async function bindChat(db: DbOrTx, chatId: number, userId: number): Prom
       set: { telegramChatId: chatId, telegramUserId: userId, updatedAt: now },
     })
 }
+
+/** Boris's own Telegram user: in his forum only his updates count (T9). */
+export async function boundUser(db: DbOrTx): Promise<number | null> {
+  const [row] = await db
+    .select({ user: ownerAuth.telegramUserId })
+    .from(ownerAuth)
+    .where(eq(ownerAuth.id, 1))
+  return row?.user ?? null
+}
