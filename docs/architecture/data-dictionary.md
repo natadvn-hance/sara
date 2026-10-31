@@ -114,6 +114,8 @@
 | `bid_hold` (пульт v2) | `task_id` (ключ), `request_id` (уникален), `state` (`held`, `cancelled`, `fired`), `expected_fee_rub`, `execute_at`, `created_at`, `updated_at` | Н | отклик из пульта ждёт 10 секунд в ядре; процесс DBOS `held-bid:<request_id>` нажимает его тем же диспетчером, «Отменить» с любого устройства говорит правду |
 | `push_subscription` (пульт v2) | `endpoint` (ключ), `p256dh`, `auth`, `label` (браузер), `created_at`, `failed_at` | Н | браузеры, которые звонят (Web Push); push пустой, без данных, сервис-воркер сам берёт последнее уведомление у ядра |
 | `notice` (пульт v2) | `id`, `kind` (`lead`, `draft`, `client`, `meeting`, `urgent`, `summary`, `system`), `title`, `body` (до 400 знаков), `link` (путь в пульте), `task_id`, `question_id`, `telegram_message_id`, `seen_at`, `done_at` (только «Убрать» у уведомления без задачи), `created_at` | П (заголовок заявки, имя клиента, как в Telegram) | колокольчик пульта: каждое сообщение Сары Борису; «решено» не хранится, а читается по задаче или вопросу |
+| `sheet_row` (таблица Бориса) | `order_id` (ключ), `account_id`, `state` (`new`, `active`, `gone`: Борис удалил строку), `written` (что Сара писала в каждую колонку в прошлый раз), `boris` (колонки, которые Борис поправил руками), `pending_since`, `created_at`, `updated_at` | П (имя клиента в `written`) | строка отклика в Google Таблице Бориса, `docs/ops/google-sheet.md`; очередь записи это разница между `logRows` и `written` |
+| `sheet_sync` (таблица Бориса) | `id` (одна строка), `since` (отклики с этого момента идут в таблицу), `last_ok_at`, `last_write_at`, `last_error`, `last_error_at`, `failures`, `next_try_at` | Н | связь с таблицей для «Состояния»: отстала ли и почему |
 
 ### 3.4 Разум и учёба
 

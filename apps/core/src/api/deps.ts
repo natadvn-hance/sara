@@ -55,6 +55,8 @@ export type AppDeps = {
   mindWriter?: MindWriter
   /** The host's backup log for the health screen (config.backupLog). */
   backupLog?: string
+  /** A Google Sheet is linked (config.sheet): «Состояние» shows whether it keeps up. */
+  sheetLinked?: boolean
 }
 
 export type AccountConfig = { id: string; title: string; egressIp: string }
