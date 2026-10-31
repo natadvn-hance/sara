@@ -439,6 +439,7 @@ export function createBidTools(o: {
       // «Продолжить» is pressed only beside the order's own fee, checked above against max_fee_rub.
       const form = await openForm(page, { words: s.openerText, feeRub: s.feeRub }, undefined, {
         may: () => t.can() && !late(),
+        card: true,
       })
       openerPressed = form.pressed
       trace.opener = { why: form.why ?? null, shownRub: form.shownRub ?? null }

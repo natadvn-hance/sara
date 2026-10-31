@@ -759,6 +759,25 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     })
   }, 90000)
 
+  it("FR-LEAD-8: a page without a tariff block opens its form by the order card's «Откликнуться» (31.10.2026)", async () => {
+    // Order 95590077: «Цена отклика» and one «Откликнуться», no «Продолжить», no «Написать клиенту».
+    site.bidSettings.opener = 'card'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    expect(await tools().submitBid(input)).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(site.openerClicks).toBe(1)
+    expect(site.bids).toEqual([{ orderId: id, price: '15000', priceTo: '23000', text: input.text }])
+  }, 60000)
+
+  it('FR-LEAD-8: two such «Откликнуться» on the card press nothing', async () => {
+    site.bidSettings.opener = 'card'
+    site.bidSettings.openers = 2
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id)))).toBe('LAYOUT_CHANGED')
+    expect(site.openerClicks).toBe(0)
+    expect(await pressesWritten()).toBe(0)
+  }, 60000)
+
   it('FR-LEAD-8: a form open from the start is filled without pressing its opener', async () => {
     site.bidSettings.behindOpener = false
     const id = site.addOrder({ price: 71 })

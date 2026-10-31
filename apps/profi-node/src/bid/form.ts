@@ -32,12 +32,16 @@ export type OpenerMiss =
 
 // «Продолжить» with the fee beside it (the live opener: a div of two divs, so no space in its text).
 const CONTINUE_PRICED = /^\s*Продолжить\s*\d[\d\s]*₽\s*$/
+// The order card's button of the page without a tariff block (live 31.10.2026, order 95590077: «Цена отклика» and
+// this one button, no field until it is pressed).
+const CARD_OPENER = 'Откликнуться'
 
 /**
  * The text field is on screen, after pressing what opens the form. On the live page (maps of 24.10.2026) that is no
  * button but a div in the tariff block: «Продолжить» with the fee beside it, pressed only when the fee is the order's
  * own. Then the answer's opener words (tariffsBlock.scrollButtonText), one in the tariff block or the only one on the
- * page, and the September button «Продолжить». Two of a kind, or another fee, presses nothing.
+ * page, the September button «Продолжить», and for a bid the order card's «Откликнуться» of a page with no tariff
+ * block. Two of a kind, or another fee, presses nothing.
  */
 export async function openForm(
   page: Page,
@@ -48,6 +52,11 @@ export async function openForm(
     may?: () => boolean
     /** «Продолжить» as the September button; the node's own calibration never uses it. */
     september?: boolean
+    /**
+     * The order card's «Откликнуться», the last one tried and only when it is the one such button on the page, outside
+     * any form. A bid takes it; the calibration never does, since its words are the send's too.
+     */
+    card?: boolean
   } = {},
 ): Promise<{
   open: boolean
@@ -74,7 +83,10 @@ export async function openForm(
     o.september === false
       ? null
       : page.getByRole('button', { name: CONTINUE, exact: true }).filter({ visible: true })
-  const anyOpener = [priced, byWords(page), september].reduce<Locator | null>(
+  const card = o.card
+    ? page.getByRole('button', { name: CARD_OPENER, exact: true }).filter({ visible: true })
+    : null
+  const anyOpener = [priced, byWords(page), september, card].reduce<Locator | null>(
     (a, b) => (a && b ? a.or(b) : (a ?? b)),
     null,
   )
@@ -108,6 +120,7 @@ export async function openForm(
       [byWords(tariffs), opener.words],
       [byWords(page), opener.words],
       [september, CONTINUE],
+      [card, CARD_OPENER],
     ] as const) {
       if (c && (await c.count()) === 1) {
         press = c
