@@ -10,6 +10,7 @@ import {
   newEventId,
   type OrderAttachment,
   ProfiOrder,
+  type ScreenMark,
   type SorterOutput,
   type TaskAction,
 } from '@sara/shared'
@@ -534,15 +535,18 @@ async function screenByPage(
   const at = new Date(o.published_at ?? o.seen_at)
   const checks: Check[] = [newAccount(o.client_info, at), negativeReviews(o.client_info)]
   let words = before.own_words
+  const soft: ScreenMark[] = []
   if (before.no_data.includes('short_text') && o.text.trim()) {
     const form = await loadFormParts(db)
     checks.push(shortText(o, form, await getSetting(db, 'screen.min_own_words')))
     checks.push(vacancy(o))
+    const v = vacancySoft(o)
+    if (v) soft.push(v)
     words = ownWords(o, form).length
   }
   return mergeScreens(
     before,
-    screenOf(checks, {}, { stops: before.stops, ownWords: words, at: new Date() }),
+    screenOf(checks, { soft }, { stops: before.stops, ownWords: words, at: new Date() }),
     checkedOf(checks),
   )
 }
@@ -663,7 +667,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           byText,
           screenOf([], sense, { stops: byText.stops, ownWords: byText.own_words, at: new Date() }),
         )
-        const news = s.hits.length > 0 || s.clarify.length > 0
+        const news = s.hits.length > 0 || s.clarify.length > 0 || s.soft.length > 0
         return {
           screen: s,
           stop: await storeScreen({ id: order.order_id, correlationId }, s, news, sorted),
@@ -715,7 +719,11 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             ...s,
             score,
             decision: !s.stopFactor && score >= rules.threshold ? 'show' : 'drop',
-            reason: `${s.reason} (минус ${cut}: похоже на вакансию)`.slice(0, 300),
+            reason:
+              `${s.reason} (минус ${cut}: ${screen.soft.map((m) => (m.criterion === 'vacancy' ? 'похоже на вакансию' : 'мало слов клиента')).join(', ')})`.slice(
+                0,
+                300,
+              ),
             version,
           }
         }
