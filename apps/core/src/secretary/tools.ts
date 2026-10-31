@@ -45,6 +45,8 @@ export type SecretaryDeps = {
   ): Promise<BorisReply>
   /** The health screen. */
   system(): Promise<SystemView>
+  /** Boris's /test with the words after it, the same function as the bot's command (docs/ops/test-leads.md). */
+  test(args: string): Promise<string>
 }
 
 /** One turn as its tools see it. */
@@ -89,6 +91,20 @@ const TOOL_TEXTS = {
     `Откликнуться на «${title}»${fee > 0 ? ` за ${fee} ₽` : ''}?\n${url}`,
   draftCard: (name: string, text: string) => `Черновик для ${name}:\n\n${text}`,
 } as const
+
+/** The words after /test for each scenario of test orders: the bot's own words. */
+const TEST_SCENARIOS = {
+  copy: '',
+  invented: 'выдуманный',
+  answers: 'отвечает',
+  price: 'цена',
+  call: 'созвон',
+  silent: 'молчит',
+  leaves: 'уходит',
+  manual: 'сам',
+  day: 'день',
+} as const
+const TEST_MAX = 5
 
 const uuid = z.uuid()
 
@@ -316,6 +332,30 @@ export const SECRETARY_TOOLS = {
       ])
       return done(true, TOOL_TEXTS.draftOffered)
     },
+  }),
+  start_test_leads: tool({
+    description:
+      'Подкинуть тестовые заявки: бесплатные выдуманные заказы с клиентами-симуляторами, как команда /test. Настоящих клиентов и денег они не касаются. scenario: copy (копия реального заказа, по умолчанию), invented (выдуманный), answers, price, call, silent, leaves, manual (как ведёт себя клиент), day (пять заказов за пять минут, count не нужен). count: сколько заявок, до 5.',
+    input: z.object({
+      scenario: z.enum(Object.keys(TEST_SCENARIOS) as [keyof typeof TEST_SCENARIOS]).optional(),
+      count: z.number().int().min(1).max(TEST_MAX).optional(),
+      invented: z.boolean().optional(),
+    }),
+    run: async (d, _t, i) => {
+      const scenario = i.scenario ?? 'copy'
+      const words = [TEST_SCENARIOS[scenario], i.invented && scenario !== 'day' ? 'выдуманный' : '']
+      const args = [...new Set(words.filter(Boolean))].join(' ')
+      const n = scenario === 'day' ? 1 : (i.count ?? 1)
+      const said: string[] = []
+      for (let k = 0; k < n; k++) said.push(await d.test(args))
+      return done(true, said.join('\n'))
+    },
+  }),
+  clear_test_leads: tool({
+    description:
+      'Стереть все тестовые заявки, как команда /test_clear. Настоящие заявки и клиентов не трогает.',
+    input: z.object({}),
+    run: async (d) => done(true, await d.test('стереть')),
   }),
   answer_question: tool({
     description:
