@@ -36,8 +36,10 @@ import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { leadSiteOf, studyLeadSite } from '../site'
 import type { Fetched } from '../site/fetch'
+import { seriesWithoutBlocked } from '../text/blockedLinks'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { casesForBid } from './bidCases'
+import { callOfferTemplate } from './callSlots'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import { namesToHide } from './clientName'
 import {
@@ -74,6 +76,7 @@ import {
   vacancy,
   vacancySoft,
 } from './screen'
+import { sitesForBid } from './siteOrder'
 import { sortOrder } from './sorter'
 
 export type LeadPipelineDeps = {
@@ -87,8 +90,11 @@ export type LeadPipelineDeps = {
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** The clock of the greeting a bid text carries (Moscow time of day); tests fix it. */
   now?: () => Date
-  /** The case search of the mind: a bid may tell a case that fits the order (Boris, 28.10.2026). */
-  mind?: Pick<MindSearch, 'cases'>
+  /**
+   * The mind: its case search (a bid may tell a case that fits the order, Boris 28.10.2026) and its records by id (the
+   * sites of Hance for an order of a site, Boris 30.10.2026).
+   */
+  mind?: Pick<MindSearch, 'cases' | 'byIds'>
   /** How a page of the client's site is fetched; tests give a made-up site, the default is the safe fetch from the server. */
   siteFetch?: (url: string) => Promise<Fetched>
   /** How a file attached to the order is downloaded; tests give bytes, the default is the safe fetch from Profi.ru's hosts. */
@@ -335,18 +341,31 @@ async function draftFor(
     const mindCases =
       profile && profile.cases.length > 0 ? [] : await casesForBid(d().mind, o, opts.accountId)
     const { accountId: _account, site: _site, ...rest } = opts
-    return await writeDraft(d().gateway, o, {
+    const blocked = await getSetting(d().db, 'links.blocked')
+    const dr = await writeDraft(d().gateway, o, {
       ...rest,
       ...(profile ? { profile } : {}),
       mindCases,
       recentBids: await recentBids(opts.accountId),
+      sites: await sitesForBid(d().mind, o, blocked),
+      blockedLinks: blocked,
       site: opts.site ?? null,
       now: greetingMoment(),
     })
+    // The series ends with an offer to talk for half an hour (Boris, 30.10.2026); its times go in when it is sent.
+    return dr.text !== null && (await getSetting(d().db, 'calls.offer'))
+      ? { ...dr, callOffer: callOfferTemplate(`${o.title}\n${o.text}`) }
+      : dr
   } catch (err) {
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
     return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
   }
+}
+
+/** The whole series a draft brings: the Analyst's messages, then the call offer; null when there are none. */
+function seriesOf(dr: Draft): string[] | null {
+  const all = [...(dr.followUps ?? []), ...(dr.callOffer ? [dr.callOffer] : [])]
+  return all.length > 0 ? all : null
 }
 
 /** The texts of the account's latest drafts, newest first: the Analyst opens the next bid differently. */
@@ -404,7 +423,7 @@ function storeDraft(
         .set({
           draftText: dr.text,
           draftPriceRub: dr.priceRub,
-          draftFollowUps: dr.followUps && dr.followUps.length > 0 ? dr.followUps : null,
+          draftFollowUps: seriesOf(dr),
         })
         .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
     }
@@ -438,6 +457,7 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
           follow_ups: dr.followUps?.length ?? 0,
           follow_up_cases: dr.followUpCases ?? [],
           follow_ups_dropped: dr.followUpsDropped ?? [],
+          ...(dr.followUpSites && { follow_up_sites: dr.followUpSites }),
         }),
       }
     : {
@@ -906,7 +926,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       ? {
           text: bidTextAt(draft.text, withPage.client_name, greetingMoment()),
           priceRub: draft.priceRub,
-          followUps: draft.followUps ?? [],
+          followUps: seriesOf(draft) ?? [],
         }
       : null,
     analysis: cardAnalysis(draft?.analysis),
@@ -1009,7 +1029,10 @@ async function cardOfFound(
     draft: l.draftText
       ? {
           ...draftOnCard(l.draftText, l.clientName, l.draftPriceRub),
-          followUps: l.draftFollowUps ?? [],
+          followUps: seriesWithoutBlocked(
+            l.draftFollowUps ?? [],
+            await getSetting(d().db, 'links.blocked'),
+          ),
         }
       : null,
     analysis: cardAnalysis(l.draftAnalysis),
@@ -1651,8 +1674,12 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
               title: l.title,
               priceRub: now.bidPriceRub,
               servicePriceRub: now.draftPriceRub,
-              // The same press approves the series as it stands now (Boris, 29.10.2026).
-              followUps: now.draftFollowUps ?? [],
+              // The same press approves the series as it stands now (Boris, 29.10.2026), without the links a client
+              // is never given (30.10.2026: a draft made before a site was put on the list may still hold one).
+              followUps: seriesWithoutBlocked(
+                now.draftFollowUps ?? [],
+                await getSetting(tx, 'links.blocked'),
+              ),
               taskId,
             })
             // The order went to another direction after all: rolled back like a refused spend, the task stays open.

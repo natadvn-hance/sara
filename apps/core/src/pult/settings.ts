@@ -90,6 +90,32 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'count',
   },
+  'calls.offer': {
+    title: 'Предлагает созвон после отклика',
+    hint: 'Последнее сообщение серии: созвониться на полчаса, три времени на выбор.',
+    edit: 'free',
+    kind: 'flag',
+  },
+  'calls.work_hours': {
+    title: 'Рабочие часы для созвонов',
+    hint: 'По Москве. Выходные и время ближе двух часов не предлагаются.',
+    edit: 'locked',
+    kind: 'hours',
+  },
+  'calls.preferred': {
+    title: 'Любимое время для созвонов',
+    hint: 'По Москве, предлагается первым, если подходит.',
+    edit: 'locked',
+    kind: 'other',
+  },
+  'links.blocked': {
+    title: 'Ссылки, которые клиентам не даём',
+    hint: 'Сайты, которые не работают или не для показа. Сара их не покажет нигде. Добавляет разработчик по твоему слову.',
+    edit: 'locked',
+    kind: 'other',
+  },
+  'calls.slot_min': { title: 'Длина созвона, мин', edit: 'free', kind: 'count' },
+  'calls.min_ahead_min': { title: 'Созвон не раньше чем через, мин', edit: 'free', kind: 'count' },
 }
 
 const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
@@ -128,6 +154,18 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'conv.night',
       'conv.reminder_quiet',
       'secretary.turns_per_day',
+    ],
+  },
+  {
+    id: 'calls',
+    title: 'Созвоны и ссылки',
+    keys: [
+      'calls.offer',
+      'calls.work_hours',
+      'calls.preferred',
+      'calls.slot_min',
+      'calls.min_ahead_min',
+      'links.blocked',
     ],
   },
 ]
