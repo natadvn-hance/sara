@@ -1,3 +1,4 @@
+import { isTestOrder } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account } from '../db/schema'
@@ -16,6 +17,8 @@ export async function sendHold(
 ): Promise<string | null> {
   const conv = await getConversation(db, conversationId)
   if (!conv) return null
+  // A test chat's client is made up and lives inside the core: no pause or account state holds it.
+  if (isTestOrder(conv.chatId)) return null
   if (author === 'sara' && !(await getSetting(db, 'outbound.messages')))
     return 'пауза «Пишет клиентам»'
   const [a] = await db.select().from(account).where(eq(account.id, conv.accountId))

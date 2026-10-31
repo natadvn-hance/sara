@@ -1,0 +1,6 @@
+{
+  "title": "Клиент просит цену",
+  "orders": [
+    { "order": "sample:90000004", "client": { "behaviour": "price", "persona": "p-stand-factory" } }
+  ]
+}

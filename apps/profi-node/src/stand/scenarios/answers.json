@@ -1,0 +1,6 @@
+{
+  "title": "Клиент отвечает",
+  "orders": [
+    { "order": "sample:90000015", "client": { "behaviour": "answers", "persona": "p-stand-salon" } }
+  ]
+}

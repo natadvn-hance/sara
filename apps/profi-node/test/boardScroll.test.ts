@@ -287,4 +287,27 @@ describe('the ways to make the board load more', () => {
     })
     expect(Date.now() - started).toBeLessThan(25000)
   }, 60000)
+
+  it('FR-LEAD-1: a pass still running is not queued again by its timer, so the 30-second passes never stack', async () => {
+    pagedBoard()
+    const before = site.feedRequests
+    // Here a pass of a few slow scrolls takes about a second, its timer 50 ms.
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 50,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+      board: { pages: 3, fullEvery: 1000, pauseMs: 300 },
+    })
+    await new Promise((r) => setTimeout(r, 2000))
+    ins.stop()
+    // Whatever the timer queued still runs before this.
+    await ins.inTab(async () => null)
+    const passes = (site.feedRequests - before) / 3
+    expect(passes).toBeGreaterThanOrEqual(1)
+    expect(passes).toBeLessThanOrEqual(4)
+  }, 60000)
 })

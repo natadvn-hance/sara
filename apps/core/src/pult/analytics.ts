@@ -1,6 +1,7 @@
 import { type AnalyticsView, FUNNEL_STAGES, type FunnelStage } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
+import { NOT_TEST } from '../testLeads/sql'
 import { stageOf } from './clients'
 
 /**
@@ -75,10 +76,10 @@ export async function analyticsView(db: DbOrTx, year: number): Promise<Analytics
   const r = await db.execute<BidRow>(sql`
     with b as (
       select entity_id as lead_id, min(occurred_at) as bid_at from core.event
-      where type = 'bid.sent' group by entity_id
+      where type = 'bid.sent' and ${NOT_TEST('entity_id')} group by entity_id
     ), s as (
       select entity_id as lead_id, sum((payload->>'amount_rub')::int)::int as spend from core.event
-      where type = 'spend.recorded' group by entity_id
+      where type = 'spend.recorded' and ${NOT_TEST('entity_id')} group by entity_id
     )
     select b.lead_id, l.account_id, l.client_name as client, l.category, b.bid_at,
       extract(month from b.bid_at at time zone 'Europe/Moscow')::int as month,

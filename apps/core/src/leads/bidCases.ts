@@ -43,13 +43,13 @@ export async function casesForBid(
  * The cases as the Analyst reads them, with the rules of showing each one and whether it has a public link for the
  * series (the program puts the link in, the model never sees it); nothing when there are none.
  */
-export function bidCasesText(cases: CaseHit[]): string {
+export function bidCasesText(cases: CaseHit[], blocked: readonly string[] = []): string {
   if (cases.length === 0) return ''
   return [
     'Кейсы Hance, которые могут подойти к заказу (разделы «Кейс в отклике» и «Серия» твоих правил):',
     ...cases.map(
       (c) =>
-        `${formatCase(c)}\nПубличная ссылка: ${publicLink(c) ? 'есть, её можно показать в серии' : 'нет'}`,
+        `${formatCase(c)}\nПубличная ссылка: ${publicLink(c, blocked) ? 'есть, её можно показать в серии' : 'нет'}`,
     ),
   ].join('\n\n')
 }

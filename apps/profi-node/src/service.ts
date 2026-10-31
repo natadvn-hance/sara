@@ -18,6 +18,7 @@ import { attachRecorder } from './eyes/recorder'
 import { startWatchedMaps } from './eyes/watchedMaps'
 import { serveMcp } from './mcp/http'
 import { createProfiMcpServer } from './mcp/server'
+import { refuseTestOrders } from './mcp/testOrders'
 import { registerScreenRoute } from './screen/screenRoute'
 import { createShipper } from './ship/shipper'
 import { purgeOld } from './store/purge'
@@ -33,9 +34,16 @@ export type ServiceTimings = {
   egressEveryMs: number
 }
 
+/**
+ * Boris, 31.10.2026: «Давай чаще просматривать страницы». The feed every 30 s (was 60): new orders and the chats the
+ * event stream named are read twice as soon, about 120 page loads an hour. The chat check stays at 10 minutes: the live
+ * list shows no unread marks, so each check reads the 8 newest chats in full (10 loads); every 2 minutes that alone
+ * would be about 300 loads an hour, more than the ~270 at which Profi.ru shut old Sara out for 48 minutes on 08.10.2026
+ * (nine escalations every 3 minutes, two thirds of its loads). Together about 190 an hour, from about 130.
+ */
 const DEFAULT_TIMINGS: ServiceTimings = {
   tickMs: 30000,
-  feedEveryMs: 60000,
+  feedEveryMs: 30000,
   chatsEveryMs: 600000,
   shipPollMs: 500,
   egressEveryMs: 600000,
@@ -268,7 +276,12 @@ export async function startProfiService(
     }),
   }
   const host = c.production ? '0.0.0.0' : '127.0.0.1'
-  const svc = await serveMcp(() => createProfiMcpServer(tools), c.port, undefined, host)
+  const svc = await serveMcp(
+    () => createProfiMcpServer(refuseTestOrders(tools)),
+    c.port,
+    undefined,
+    host,
+  )
   registerScreenRoute(svc.http, {
     nodeToken: c.nodeToken,
     browsers,

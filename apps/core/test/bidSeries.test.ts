@@ -110,6 +110,7 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
         'Сделаем быстро, качественно и без лишних трат)',
       ],
       caseIds: ['k-case-01'],
+      siteIds: [],
       dropped: [],
     })
   })
@@ -130,7 +131,12 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
       ],
       CASES,
     )
-    expect(r).toEqual({ texts: [], caseIds: [], dropped: ['link', 'no_link'] })
+    expect(r).toEqual({
+      texts: [],
+      caseIds: [],
+      siteIds: [],
+      dropped: ['link', 'no_link'],
+    })
     expect(
       followUpsOf([{ text: 'Добрый день! Из недавнего)', case_id: null }], []).dropped,
     ).toEqual(['greeting'])
@@ -195,7 +201,7 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
     })
   })
 
-  it('FR-LEAD-6: Boris edits the series on the pult: the voice rules, empty messages gone, three at most', () => {
+  it('FR-LEAD-6: Boris edits the series on the pult: the voice rules, empty messages gone, four at most', () => {
     expect(followUpsEdit([`Сделаем ${DASH} быстро.`, '  '])).toEqual(['Сделаем быстро'])
     // A link stays as it is.
     expect(followUpsEdit(['https://lisa-clinic.ru/some-page', 'Из недавнего)'])).toEqual([
@@ -203,7 +209,10 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
       'Из недавнего)',
     ])
     expect(followUpsEdit(['Раз', 'Два', 'Три'])).toEqual(['Раз', 'Два', 'Три'])
-    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре'])).toBeNull()
+    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре'])).toHaveLength(4)
+    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре', 'Пять'])).toBeNull()
+    // The call offer keeps its mark for the times.
+    expect(followUpsEdit(['Созвонимся? Могу {слоты}'])).toEqual(['Созвонимся? Могу {слоты}'])
     expect(followUpsEdit(['а'.repeat(501)])).toBeNull()
     expect(followUpsEdit([])).toEqual([])
   })
@@ -271,7 +280,11 @@ describe('the series on the card and in time', () => {
 
   it('FR-LEAD-6: the first message waits a minute or two, the next half a minute, the same moment on a resume', () => {
     // Boris's own (growth-points, 29.10.2026): about 1.6 minutes after the bid, then 0.3-0.6 minutes apart.
-    expect(SERIES_DELAYS).toEqual({ first: [60_000, 120_000], next: [20_000, 40_000] })
+    expect(SERIES_DELAYS).toEqual({
+      first: [60_000, 120_000],
+      next: [20_000, 40_000],
+      call: [60_000, 120_000],
+    })
     for (const [n, [from, to]] of [
       [0, SERIES_DELAYS.first],
       [1, SERIES_DELAYS.next],

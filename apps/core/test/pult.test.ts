@@ -523,6 +523,46 @@ describe('the pult on the live data (28.10.2026)', () => {
     expect(v.parts.find((p) => p.id === 'claude')).toMatchObject({ tone: 'ok', fix: null })
   })
 
+  // 29.10.2026: node restarts lost the «back», and «Нет связи» stayed for days while orders came every few minutes.
+  it('FR-UI-1, FR-SET-5: a «lost» with orders seen after it no longer says «Нет связи»', async () => {
+    await db
+      .insert(event)
+      .values([
+        ev(
+          'profi.connection_lost',
+          'account',
+          'hance-marketing',
+          { since: minutesAgo(2900) },
+          2870,
+        ),
+        ev('profi.order_seen', 'order', '95000003', {}, 2860),
+        ev('profi.order_seen', 'order', '95000004', {}, 3),
+      ])
+    const today = TodayView.parse((await get('/api/today')).body)
+    expect([today.state.text, today.state.detail].join(' ')).not.toContain('Нет связи')
+    const v = SystemView.parse((await get('/api/system')).body)
+    const link = v.parts.find((p) => p.id === 'link')
+    expect(link).toMatchObject({ tone: 'ok', text: 'Связь есть, последний перерыв закончился' })
+    // The break ended with the first order seen after it.
+    expect(new Date(link?.at ?? '').getTime()).toBeCloseTo(Date.parse(minutesAgo(2860)), -5)
+  })
+
+  it('FR-UI-1, FR-SET-5: a «lost» with nothing from the site after it still says «Нет связи»', async () => {
+    await db.insert(event).values([
+      ev('profi.order_seen', 'order', '95000003', {}, 50),
+      ev('profi.connection_lost', 'account', 'hance-marketing', { since: minutesAgo(70) }, 40),
+      // A test order comes from the made-up site in the core, not from Profi.ru.
+      ev('profi.order_seen', 'order', '99000000001', {}, 10),
+    ])
+    const today = TodayView.parse((await get('/api/today')).body)
+    expect(today.state).toMatchObject({ tone: 'bad', text: 'Нет связи с Профи.ру' })
+    const v = SystemView.parse((await get('/api/system')).body)
+    expect(v.parts.find((p) => p.id === 'link')).toMatchObject({
+      tone: 'bad',
+      text: 'Профи.ру не открывается с сервера',
+    })
+  })
+
   it('FR-LEAD-7: the bid text is edited from the pult only while the decision is open', async () => {
     expect((await post(`/api/leads/${LEAD}/text`, {})).status).toBe(400)
     const r = await post(`/api/leads/${LEAD}/text`, { text: 'Новый текст', priceRub: 50000 })
