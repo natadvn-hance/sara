@@ -3,6 +3,7 @@ import { and, asc, eq, ne } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, convTurn, deal, lead } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
+import { leadSiteOf } from '../site'
 import { isNewMoscowDay } from './check/codeChecks'
 import { NOT_NAMES } from './check/phrases'
 import { getConversation } from './store'
@@ -150,6 +151,7 @@ export async function buildDossier(
     order,
     clientName,
     clientInfo,
+    site: leadSiteOf(l?.clientSite),
     bid,
     messages,
     turnMessageIds: turnMessageIds(messages, conv.handledThrough),

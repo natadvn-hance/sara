@@ -6,7 +6,9 @@ import {
   type GetOrderOutput,
   isTestOrder,
   LeadScreen,
+  type LeadSite,
   newEventId,
+  type OrderAttachment,
   ProfiOrder,
   type SorterOutput,
   type TaskAction,
@@ -33,9 +35,12 @@ import { analysisMessages, type ClosedWhen, type LeadCard, TEXTS } from '../noti
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { leadSiteOf, studyLeadSite } from '../site'
+import type { Fetched } from '../site/fetch'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { casesForBid } from './bidCases'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
+import { namesToHide } from './clientName'
 import {
   BID_TEXT_MAX,
   bidLengthMax,
@@ -85,6 +90,10 @@ export type LeadPipelineDeps = {
   now?: () => Date
   /** The case search of the mind: a bid may tell a case that fits the order (Boris, 28.10.2026). */
   mind?: Pick<MindSearch, 'cases'>
+  /** How a page of the client's site is fetched; tests give a made-up site, the default is the safe fetch from the server. */
+  siteFetch?: (url: string) => Promise<Fetched>
+  /** How a file attached to the order is downloaded; tests give bytes, the default is the safe fetch from Profi.ru's hosts. */
+  fileFetch?: (url: string) => Promise<Fetched>
 }
 
 export type LeadPipeline = {
@@ -225,8 +234,8 @@ async function readPage(accountId: string, orderId: string): Promise<PageRead> {
 function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'>>(
   o: T,
   r: PageRead,
-): T & { client_info: ClientInfo | null } {
-  if (!r.ok) return { ...o, client_info: null }
+): T & { client_info: ClientInfo | null; attachments: OrderAttachment[] } {
+  if (!r.ok) return { ...o, client_info: null, attachments: [] }
   const p = r.page
   return {
     ...o,
@@ -234,6 +243,7 @@ function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'te
     client_name: o.client_name || p.client_name,
     text: o.text || p.text,
     client_info: p.client_info ?? null,
+    attachments: p.attachments ?? [],
   }
 }
 
@@ -311,7 +321,13 @@ async function storePage(
 /** The Analyst's draft, or why there is none; any failure is «no answer», the card comes anyway. */
 async function draftFor(
   o: DraftSource,
-  opts: { correlationId: string; causationId?: string; accountId: string },
+  opts: {
+    correlationId: string
+    causationId?: string
+    accountId: string
+    /** The client's own site as read for this order (Boris, 30.10.2026). */
+    site?: LeadSite | null
+  },
 ): Promise<Draft | DraftMiss> {
   try {
     // The direction's format and cases for the Analyst; a profile that cannot be read leaves the draft as it was.
@@ -319,12 +335,13 @@ async function draftFor(
     // A direction with its own case library keeps it; otherwise the cases of the mind that fit the order.
     const mindCases =
       profile && profile.cases.length > 0 ? [] : await casesForBid(d().mind, o, opts.accountId)
-    const { accountId: _account, ...rest } = opts
+    const { accountId: _account, site: _site, ...rest } = opts
     return await writeDraft(d().gateway, o, {
       ...rest,
       ...(profile ? { profile } : {}),
       mindCases,
       recentBids: await recentBids(opts.accountId),
+      site: opts.site ?? null,
       now: greetingMoment(),
     })
   } catch (err) {
@@ -342,6 +359,33 @@ async function recentBids(accountId: string): Promise<string[]> {
     .orderBy(desc(lead.createdAt))
     .limit(5)
   return rows.map((r) => r.text).filter((t): t is string => t !== null)
+}
+
+/**
+ * The client's own site, when the order names one (Boris, 30.10.2026): read from the server's own exit, summed up against
+ * the order and kept on the lead. An order the day's cap holds for the summary is not read now («Показать» reads it with
+ * its draft). Never throws: a site that did not open is a note on the card, and the bid is written as it always was.
+ */
+async function readClientSite(
+  l: { id: string; correlationId: string },
+  o: Pick<DraftSource, 'title' | 'category' | 'text' | 'client_name' | 'client_info'> & {
+    attachments?: OrderAttachment[]
+  },
+  causationId?: string,
+): Promise<LeadSite | null> {
+  return studyLeadSite(
+    { db: d().db, gateway: d().gateway, fetchPage: d().siteFetch, fileFetch: d().fileFetch },
+    {
+      leadId: l.id,
+      correlationId: l.correlationId,
+      causationId,
+      text: o.text,
+      source: 'order',
+      order: { title: o.title, category: o.category, text: o.text },
+      names: namesToHide(o.client_name, o.client_info?.name),
+      attachments: o.attachments,
+    },
+  )
 }
 
 /** The day's card cap is spent: a shown order is held for the summary (the decision itself is taken under a lock). */
@@ -735,7 +779,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   // recorded before this step existed resumes along its old steps and keeps the board's data.
   let withPage: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
     client_info: ClientInfo | null
-  } = { ...order, client_info: null }
+    attachments: OrderAttachment[]
+  } = { ...order, client_info: null, attachments: [] }
   if (await DBOS.patch('order-page')) {
     // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
     // (with its draft, draftThenCard).
@@ -772,6 +817,22 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     }
   }
 
+  // The client's own site, when the order names one (Boris, 30.10.2026): read before the Analyst, who builds the bid on
+  // it. A run recorded before this step resumes along its old steps and has no site.
+  const site = (await DBOS.patch('client-site'))
+    ? await DBOS.runStep(
+        async (): Promise<LeadSite | null> =>
+          (await capSpent().catch(() => false))
+            ? null
+            : readClientSite(
+                { id: order.order_id, correlationId },
+                { ...order, ...withPage },
+                e.id,
+              ),
+        { name: 'clientSite' },
+      )
+    : null
+
   // A run recorded before the Analyst existed resumes along its old steps and brings its card without a draft.
   // An order the day's cap will hold goes to the summary undrafted: «Показать» writes its draft if Boris asks.
   const draft = (await DBOS.patch('analyst-draft'))
@@ -779,7 +840,10 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         async () =>
           !test && (await capSpent().catch(() => false))
             ? null
-            : draftFor({ ...order, ...withPage }, { correlationId, causationId: e.id, accountId }),
+            : draftFor(
+                { ...order, ...withPage },
+                { correlationId, causationId: e.id, accountId, site },
+              ),
         { name: 'draft' },
       )
     : null
@@ -866,6 +930,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       : null,
     analysis: cardAnalysis(draft?.analysis),
     ...(liveSkip.length > 0 && { liveSkip: liveSkip.join('; ') }),
+    site,
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
   try {
@@ -968,6 +1033,7 @@ async function cardOfFound(
         }
       : null,
     analysis: cardAnalysis(l.draftAnalysis),
+    site: leadSiteOf(l.clientSite),
   }
 }
 
@@ -1217,14 +1283,21 @@ async function draftThenCard(
     }
     return
   }
-  if (!l.draftText)
+  if (!l.draftText) {
+    const source = {
+      ...sourceOf(l),
+      ...full,
+      client_info: full.client_info ?? sourceOf(l).client_info,
+    }
     await storeDraft(
       l,
-      await draftFor(
-        { ...sourceOf(l), ...full, client_info: full.client_info ?? sourceOf(l).client_info },
-        { correlationId: l.correlationId, accountId: l.accountId },
-      ),
+      await draftFor(source, {
+        correlationId: l.correlationId,
+        accountId: l.accountId,
+        site: await readClientSite(l, source),
+      }),
     )
+  }
   await sendCard(taskId, 'summary')
 }
 

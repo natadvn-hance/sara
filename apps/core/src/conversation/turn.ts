@@ -9,6 +9,7 @@ import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { buildDossier, clientNames, turnMessageIds, untilOurs } from './dossier'
 import { planTurn } from './engine'
+import { readSiteOfTurn } from './siteTurn'
 import { applyOwnerRule, getConversation, updateConversation } from './store'
 import { storedOf, syncChat } from './sync'
 import { humanPauseMs, quietLeftSeconds } from './timing'
@@ -250,11 +251,17 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
   const conv = await getConversation(db, conversationId)
   if (!conv) return { action: 'nothing', holdUntil: null, text: null, covered: [] }
   // Even a turn that fails to plan covers the client turn it saw, or the conversation would never get another turn.
-  const seen = turnMessageIds(
-    untilOurs(await storedMessages(db, conversationId), anchor),
-    conv.handledThrough,
-  )
+  const stored = untilOurs(await storedMessages(db, conversationId), anchor)
+  const seen = turnMessageIds(stored, conv.handledThrough)
   try {
+    // A site the client names in these words is read first (Boris, 30.10.2026), so the reply can lean on it.
+    await readSiteOfTurn(
+      { db, gateway },
+      conv,
+      stored
+        .filter((m) => m.side === 'client' && seen.includes(m.platformMessageId))
+        .map((m) => m.text),
+    )
     const settings = await policySettings(db, conv.accountId, conv.chatId)
     const dossier = await buildDossier(db, conversationId, now, {
       night: settings.night,

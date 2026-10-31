@@ -1,3 +1,5 @@
+import type { OrderAttachment } from '@sara/shared'
+
 /** What the order page's own answer says about bidding on it now. */
 export type OrderScreen = {
   orderId: string
@@ -22,12 +24,16 @@ export type OrderScreen = {
   priceRequired: boolean
   /** A payment way the form asks for: null when it shows none (the wallet pays), 'other' for anything else. */
   payment: 'wallet' | 'other' | null
+  /** The files the client attached (documents and gallery): only addresses and names, nothing is downloaded here. */
+  attachments: OrderAttachment[]
 }
 
 type Button = { text?: unknown } | null | undefined
 type Element = { name?: unknown; required?: unknown }
 type Screen = {
   id?: unknown
+  documents?: unknown
+  gallery?: unknown
   hasBid?: unknown
   price?: { value?: unknown } | null
   disabledBidBlock?: unknown
@@ -85,7 +91,39 @@ export function orderScreenFromAnswer(
     openerText: text({ text: s.tariffsBlock?.scrollButtonText }),
     priceRequired: (slide?.elements ?? []).some((e) => e?.name === 'stavka' && e.required === true),
     payment: way === null || way === undefined ? null : paymentWay(JSON.stringify(way)),
+    attachments: [...attachmentsOf(s.documents, 'document'), ...attachmentsOf(s.gallery, 'image')],
   }
+}
+
+/**
+ * The files of an order page's answer, read defensively: the answer's shape for them was only described (documents as
+ * {url, name, preview}, the gallery as pictures on cdn.profi.ru), never recorded with a file in it. An item without an
+ * address is left out; a bare string is taken for the address.
+ */
+function attachmentsOf(list: unknown, kind: OrderAttachment['kind']): OrderAttachment[] {
+  if (!Array.isArray(list)) return []
+  const out: OrderAttachment[] = []
+  for (const item of list.slice(0, 12)) {
+    const o = (typeof item === 'string' ? { url: item } : item) as {
+      url?: unknown
+      src?: unknown
+      name?: unknown
+      title?: unknown
+      fileName?: unknown
+    } | null
+    const raw = o?.url ?? o?.src
+    if (typeof raw !== 'string' || raw.trim() === '') continue
+    const url = raw.startsWith('//') ? `https:${raw}` : raw
+    const named = [o?.name, o?.fileName, o?.title].find(
+      (x) => typeof x === 'string' && x.trim() !== '',
+    )
+    out.push({
+      kind,
+      url,
+      name: typeof named === 'string' ? named.trim() : (url.split('?')[0]?.split('/').pop() ?? ''),
+    })
+  }
+  return out
 }
 
 /**

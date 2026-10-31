@@ -31,6 +31,7 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
       openerText: 'Текст 18 Текст 1',
       priceRequired: true,
       payment: null,
+      attachments: [],
     })
   })
 
@@ -120,6 +121,7 @@ describe('the order page answer (boOrderScreen, recorded live 24.10.2026)', () =
     expect(orderScreenFromAnswer(r.url, r.body, '10000001')).toMatchObject({
       hasBid: true,
       payment: 'other',
+      attachments: [],
     })
   })
 
