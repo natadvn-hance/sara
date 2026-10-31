@@ -45,6 +45,13 @@ export const SETTINGS = {
   /** FR-NOTIF-3: lead cards a Moscow day; the rest wait for the 19:00 summary. */
   'cards.max_per_day': { schema: z.number().int().positive(), default: 10 },
   /**
+   * The screen (docs/product/lead-analysis.md): true, a criterion that fired stops the order (no card, seen in the
+   * pult and the summary); false, the shadow: the order is only marked and goes on as before.
+   */
+  'screen.stops': { schema: z.boolean(), default: false },
+  /** Criterion 3: fewer of the client's own words than this (form answers not counted) stop the order. */
+  'screen.min_own_words': { schema: z.number().int().positive(), default: 15 },
+  /**
    * FR-NOTIF-2: Moscow hours when cards come without sound, from `from`:00 to `to`:00 (past midnight when
    * from > to, all day when equal); null, never.
    */

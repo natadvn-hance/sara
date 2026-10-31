@@ -4,6 +4,9 @@ export const EVENT_TYPES = [
   'setting.changed',
   'security.foreign_chat',
   'telegram.bound',
+  'telegram.forum_bound',
+  'telegram.forum_unbound',
+  'telegram.forum_failed',
   'health.check_failed',
   'profi.order_seen',
   /** An order the last pass over the feed showed is not in this one: closed, most likely (its page tells). */
@@ -24,6 +27,8 @@ export const EVENT_TYPES = [
   'lead.labeled',
   'lead.stale',
   'lead.page_read',
+  /** Stage 1 «Отсев»: the criteria that fired, unclear or lacked data (no quotes: they stay on the lead). */
+  'lead.screened',
   /** The order of a waiting card closed on Profi.ru: its card was closed (via: a recheck or a press that failed). */
   'lead.closed_on_site',
   /** Too many waiting cards looked closed at once: none was closed, Boris was told (closed, checked). */

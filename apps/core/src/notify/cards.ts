@@ -48,6 +48,8 @@ export type LeadCard = {
   score?: { value: number; version: number; reason: string } | null
   /** The Scorer did not answer: the card comes anyway, marked. */
   unscored?: boolean
+  /** The screen could not tell core from background: «Уточнить в отклике: …» (docs/product/lead-analysis.md). */
+  clarify?: string[]
   /**
    * The layout with a line that the order waits for a decision. Sara sends no card as a reminder any more; only the
    * length check of the «Разбор» message still builds it.
@@ -100,6 +102,26 @@ const REFUSED: Record<string, string> = {
 /** Every text Sara sends Boris in Telegram (Russian, plain, no long dash). */
 export const TEXTS = {
   bound: 'Сара на связи',
+  forumHowTo: [
+    'Чтобы у каждого клиента была своя тема:',
+    '1. Создай группу и добавь в неё меня.',
+    '2. В настройках группы включи «Темы».',
+    '3. Сделай меня администратором с правом «Управление темами».',
+    '4. Напиши в группе /forum.',
+  ].join('\n'),
+  forumNotForum: 'Здесь ещё нет тем: включи в настройках группы «Темы» и напиши /forum снова.',
+  forumNoRights:
+    'Мне не хватает прав: сделай меня администратором группы с правом «Управление темами» и напиши /forum снова.',
+  forumBound:
+    'Форум привязан. Новые заявки пишу в тему «Заявки», каждого клиента в его тему, сводки и тревоги сюда.',
+  forumMoved: (title: string | null) =>
+    `Дальше пишу в группу${title ? ` «${title}»` : ''}: заявки, клиенты по темам, сводки и тревоги. Здесь можно говорить со мной, как раньше. Вернуть всё сюда: /forum_off`,
+  forumOff: 'Форум отвязан: снова пишу всё в личный чат.',
+  forumNone: 'Форум и так не привязан: пишу в личный чат.',
+  forumLost:
+    'Меня убрали из группы с темами: снова пишу всё сюда, в личный чат. Привязать заново: /forum в группе.',
+  leadsTopic: 'Заявки',
+  commandFailed: 'Не получилось ответить на команду. Попробуй ещё раз чуть позже.',
   alreadyDone: 'Уже сделано',
   skipped: 'Пропущено',
   bidQueued: 'Отправляю отклик',
@@ -388,6 +410,7 @@ function whyBlocks(c: LeadCard): string[][] {
       ]
     : [verdictLine(c)]
   if (c.unscored) why.push('Без оценки: Оценщик не ответил')
+  for (const l of c.clarify ?? []) why.push(`❓ ${esc(l)}`)
   const a = c.analysis
   if (!a) return [why]
   const who = a.reading?.who?.trim()

@@ -22,6 +22,8 @@ export function createBotControl(d: {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onMessage?(m: BorisMessage): Promise<BorisReply | null>
   voiceDir?: string
+  /** The pult's address, for /pult. */
+  publicUrl?: string
 }): BotControl {
   let runtime: TelegramRuntime | null = null
   const current = (): TelegramRuntime => {
@@ -38,6 +40,7 @@ export function createBotControl(d: {
         onPress: d.onPress,
         onMessage: d.onMessage,
         voiceDir: d.voiceDir,
+        publicUrl: d.publicUrl,
       })
       await runtime.start()
     },
@@ -58,6 +61,7 @@ export function createBotControl(d: {
         editText: async (id, t, rows) => current().notifier.editText?.(id, t, rows),
         typing: async () => current().notifier.typing?.(),
         markDone: async (id, note) => current().notifier.markDone?.(id, note),
+        closeTopic: async (place, outcome) => current().notifier.closeTopic?.(place, outcome),
       },
       d.db,
     ),

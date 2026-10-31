@@ -123,7 +123,9 @@ export async function sendTurnCard(
   const view = await cardView(d.db, t)
   const taskId = newEventId()
   // At quiet hours the Telegram layer sends it without sound (FR-NOTIF-2, cards.quiet_hours).
-  const m = await d.notifier.sendButtons(CONV_TEXTS.card(view), rowsFor(taskId, t, view.shadow))
+  const m = await d.notifier.sendButtons(CONV_TEXTS.card(view), rowsFor(taskId, t, view.shadow), {
+    place: { conversation: t.conversationId },
+  })
   await d.db.transaction(async (tx) => {
     await tx.insert(task).values({
       id: taskId,
@@ -199,6 +201,7 @@ export async function forwardTurn(
   const m = await d.notifier.sendButtons(
     CONV_TEXTS.forward(view.name, view.orderTitle, words, conv?.closedAt !== null),
     [[{ text: CONV_TEXTS.buttons.giveBack, callbackData: formatCallback(taskId, 'return') }]],
+    { place: { conversation: t.conversationId } },
   )
   await d.db.insert(task).values({
     id: taskId,

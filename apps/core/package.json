@@ -17,7 +17,8 @@
     "history:export": "tsx src/history/exportCli.ts",
     "report:school": "tsx src/school/reportCli.ts",
     "exam": "tsx src/exam/cli.ts",
-    "exam:build": "tsx src/exam/cli.ts build"
+    "exam:build": "tsx src/exam/cli.ts build",
+    "screen:dry": "tsx src/leads/screenDryCli.ts"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "5.3.0",

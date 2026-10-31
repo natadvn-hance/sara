@@ -1,4 +1,11 @@
-import type { LeadQueue, LeadRow, LeadView, QueueOrder, ScorePart } from '@sara/shared'
+import {
+  type LeadQueue,
+  type LeadRow,
+  type LeadView,
+  type QueueOrder,
+  SCREEN_RU,
+  type ScorePart,
+} from '@sara/shared'
 import { useState } from 'react'
 import { usePress, useScreen } from '../app/data'
 import { ago, count, rub, waited, waitTone } from '../app/format'
@@ -477,6 +484,37 @@ function Lead({ v }: { v: LeadView }) {
           {l.client?.reviews ? ` · ${l.client.reviews}` : ''}
         </p>
       </header>
+
+      {v.screen && (v.screen.hits.length > 0 || v.screen.clarify.length > 0) ? (
+        <Card
+          title={
+            v.screen.hits.length === 0
+              ? 'Отсев: уточнить в отклике'
+              : v.screen.stops
+                ? 'Отсеяна'
+                : 'Отсеяла бы'
+          }
+          icon="shield"
+          i={1}
+        >
+          {v.screen.hits.map((h) => (
+            <p className="callout tone-bad" key={h.criterion}>
+              ⛔ {SCREEN_RU[h.criterion]}: {h.basis}
+            </p>
+          ))}
+          {v.screen.clarify.map((c) => (
+            <p className="callout tone-warn" key={c.criterion}>
+              Уточнить в отклике: {SCREEN_RU[c.criterion]}
+              {c.basis ? `, ${c.basis}` : ''}
+            </p>
+          ))}
+          {v.screen.no_data.length ? (
+            <p className="muted">
+              Нет данных: {v.screen.no_data.map((c) => SCREEN_RU[c]).join(', ')}
+            </p>
+          ) : null}
+        </Card>
+      ) : null}
 
       <Card title="Заказ" icon="book" i={1}>
         <p className="prose">{l.text}</p>
