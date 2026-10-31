@@ -8,7 +8,7 @@ import { NOT_TEST } from '../testLeads/sql'
 import { draftsWaiting } from './conversations'
 import { clientNames, readFeed } from './feed'
 import { leadQueue } from './leads'
-import { claudeLimit } from './system'
+import { claudeLimit, profiLink } from './system'
 
 /** «Сегодня» (M7 design 5.1): the day in ten seconds. */
 
@@ -81,14 +81,7 @@ async function stateOf(db: Db, shortRub: number | null): Promise<PultState> {
   const accounts = await db.select().from(account)
   if (accounts.some((a) => a.loginState === 'dead' || a.loginState === 'banned'))
     said.push({ tone: 'bad', text: 'Профи.ру разлогинил аккаунт, нужен вход' })
-  const [link] = await db
-    .select({ type: event.type })
-    .from(event)
-    .where(inArray(event.type, ['profi.connection_lost', 'profi.connection_back']))
-    .orderBy(desc(event.occurredAt))
-    .limit(1)
-  if (link?.type === 'profi.connection_lost')
-    said.push({ tone: 'bad', text: 'Нет связи с Профи.ру' })
+  if ((await profiLink(db)).lost) said.push({ tone: 'bad', text: 'Нет связи с Профи.ру' })
   const limit = await claudeLimit(db)
   if (limit.limited)
     said.push({

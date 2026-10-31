@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import type { SystemPart, SystemView } from '@sara/shared'
-import { and, desc, eq, gt, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm'
 import type { AppDeps } from '../api/deps'
 import type { DbOrTx } from '../db/client'
 import { account, event, modelCall } from '../db/schema'
 import { runHealthChecks } from '../health/checks'
+import { notTest } from '../testLeads/sql'
 
 /** «Здоровье» (M7): the node of Profi.ru, the session, the link, the backups and the Claude limit, read only. */
 
@@ -50,29 +51,57 @@ export async function claudeLimit(db: DbOrTx): Promise<ClaudeLimit> {
   return out
 }
 
-/** The last «connection lost» or «back» of Profi.ru from the journal. */
-async function linkPart(db: DbOrTx): Promise<SystemPart> {
+export type ProfiLink = { lost: boolean; at: string | null }
+
+/** The node sends these only after a page of Profi.ru answered it; a test order's come from the made-up site. */
+const SITE_ANSWERED = ['profi.order_seen', 'profi.client_message', 'profi.balance_changed']
+
+/**
+ * The link to Profi.ru from the journal: the last «connection lost» or «back», where a «lost» with an order, a message
+ * or the wallet read after it is over too (at: when the first of them came). On 29.10.2026 node restarts lost the
+ * «back» and «Нет связи» stayed on the pult and in the secretary's words for days while orders came every few minutes.
+ */
+export async function profiLink(db: DbOrTx): Promise<ProfiLink> {
   const [last] = await db
     .select({ type: event.type, at: event.occurredAt })
     .from(event)
     .where(inArray(event.type, ['profi.connection_lost', 'profi.connection_back']))
     .orderBy(desc(event.occurredAt))
     .limit(1)
+  if (last?.type !== 'profi.connection_lost') return { lost: false, at: last?.at ?? null }
+  const [answered] = await db
+    .select({ at: event.occurredAt })
+    .from(event)
+    .where(
+      and(
+        inArray(event.type, SITE_ANSWERED),
+        gt(event.occurredAt, last.at),
+        notTest(event.entityId),
+      ),
+    )
+    .orderBy(asc(event.occurredAt))
+    .limit(1)
+  return answered ? { lost: false, at: answered.at } : { lost: true, at: last.at }
+}
+
+/** The line «Связь с Профи.ру» of «Здоровье». */
+async function linkPart(db: DbOrTx): Promise<SystemPart> {
+  const link = await profiLink(db)
   const base = { id: 'link', title: 'Связь с Профи.ру' }
-  if (last?.type === 'profi.connection_lost')
+  if (link.lost)
     return {
       ...base,
       tone: 'bad',
       text: 'Профи.ру не открывается с сервера',
       fix: 'Сара пробует сама раз в 5 минут и напишет «Связь вернулась».',
-      at: last.at,
+      at: link.at,
     }
   return {
     ...base,
     tone: 'ok',
-    text: last ? 'Связь есть, последний перерыв закончился' : 'Перерывов связи не было',
+    text: link.at ? 'Связь есть, последний перерыв закончился' : 'Перерывов связи не было',
     fix: null,
-    at: last?.at ?? null,
+    at: link.at,
   }
 }
 
