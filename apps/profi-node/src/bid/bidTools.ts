@@ -7,7 +7,7 @@ import type {
 } from '@sara/shared'
 import { verifyPermit } from '@sara/shared/permit'
 import { eq } from 'drizzle-orm'
-import type { Page, Response } from 'playwright'
+import type { Page, Request, Response } from 'playwright'
 import type { NodeDb } from '../db/client'
 import { bidAttempt } from '../db/schema'
 import { clientInfoFromAnswer } from '../eyes/clientInfo'
@@ -20,7 +20,7 @@ import { ProfiToolError, type ProfiToolsImpl } from '../mcp/server'
 import { findBidAttempt, markOrderBid, saveBidResult, savePress } from '../store/raw'
 import { storedOrder } from '../tools/readTools'
 import { requireAlive, type SessionState } from '../watch/sessionWatch'
-import { clickSubmit, closedNotice, fillForm, openForm, readPayment, waitFormClosed } from './form'
+import { clickSubmit, closedNotice, fillForm, formOnScreen, openForm, readPayment } from './form'
 import { type OrderScreen, orderScreenFromAnswer } from './screen'
 
 export type BidRuntime = {
@@ -36,6 +36,49 @@ export type BidRuntime = {
 type Go = (path: string) => Promise<boolean>
 const fail = (c: ConstructorParameters<typeof ProfiToolError>[0], m: string) =>
   new ProfiToolError(c, m)
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** What the form did after the press, before the order page was looked at. */
+type AfterPress = {
+  form: 'closed' | 'sent' | 'open'
+  /** The wallet before the press, when the press sent a request; null: only the order page can confirm. */
+  walletBefore: number | null
+}
+const FORM_WORDS: Record<AfterPress['form'], string> = {
+  closed: 'форма закрылась',
+  sent: 'сайт ответил на отправку, форма осталась',
+  open: 'форма не закрылась',
+}
+
+/**
+ * The requests the press sent: all but GET (the form's send and what it sets off). Settled once there were some and
+ * the site answered every one of them half a second ago or more; one that polls for long keeps it unsettled.
+ */
+function watchSend(page: Page) {
+  const open = new Set<Request>()
+  let seen = 0
+  let lastAt = 0
+  const onRequest = (q: Request) => {
+    if (q.method() === 'GET') return
+    open.add(q)
+    seen++
+  }
+  const onDone = (q: Request) => {
+    if (open.delete(q)) lastAt = Date.now()
+  }
+  page.on('request', onRequest)
+  page.on('requestfinished', onDone)
+  page.on('requestfailed', onDone)
+  return {
+    seen: () => seen > 0,
+    settled: () => seen > 0 && open.size === 0 && Date.now() - lastAt >= 500,
+    stop() {
+      page.off('request', onRequest)
+      page.off('requestfinished', onDone)
+      page.off('requestfailed', onDone)
+    },
+  }
+}
 
 /**
  * profi.get_order and profi.submit_bid on the site itself (FR-LEAD-5, FR-LEAD-8, NFR-REL-4, M2 design 5.B). The order
@@ -52,13 +95,18 @@ export function createBidTools(o: {
   closeMs?: number
   /** The pause before the order page is looked at once more after a press it did not show yet. */
   lookAgainMs?: number
+  /** How long after the press the order page is looked at again before the press is UNCERTAIN. */
+  confirmMs?: number
   /** How long get_order waits for the client answer once the page has loaded. */
   clientMs?: number
 }): Pick<ProfiToolsImpl, 'getOrder' | 'submitBid'> {
   // As long as a page load may take (30 s to load, 10 s to settle): a slow page is not a changed site.
   const answerMs = o.answerMs ?? 45000
   const closeMs = o.closeMs ?? 15000
-  const lookAgainMs = o.lookAgainMs ?? 10000
+  const lookAgainMs = o.lookAgainMs ?? 5000
+  // Boris, 31.10.2026: «Медленно этот процесс работает!» A bid taken at 09:17:53 was UNCERTAIN at 09:19:04 and found
+  // only by the core's later look: the order answer showed it minutes late. The page is looked at until this passes.
+  const confirmMs = o.confirmMs ?? 30000
   const clientMs = o.clientMs ?? 3000
   const orderPath = o.parsers.paths.order ?? profiParsers.paths.order ?? ((id) => id)
   const uncertain = () => fail('UNCERTAIN', 'Отклик нажат, но страница его не показала')
@@ -146,12 +194,37 @@ export function createBidTools(o: {
     }
   }
 
+  /** The wallet in the top bar of this page; null when the bar shows none. */
+  async function headerWallet(page: Page): Promise<number | null> {
+    const signals = await o.parsers.fromHeaderDom(page).catch(() => [])
+    const rub = signals.find((s) => s.t === 'balance')
+    return rub && rub.t === 'balance' ? rub.rub : null
+  }
+
   /** The wallet in the top bar of this page, told to the eyes too; null when the bar shows none. */
   async function walletOnPage(r: BidRuntime, page: Page): Promise<number | null> {
     const signals = await o.parsers.fromHeaderDom(page).catch(() => [])
     await r.eyes.onParsed({ recognized: false, signals }, 'dom')
     const rub = signals.find((s) => s.t === 'balance')
     return rub && rub.t === 'balance' ? rub.rub : null
+  }
+
+  /**
+   * After the press: the form closed, or the site answered all the press sent (31.10.2026 the form stayed open 30 s
+   * while the money was already gone). At most ms; 'open' when neither.
+   */
+  async function waitSent(
+    page: Page,
+    send: ReturnType<typeof watchSend>,
+    ms: number,
+  ): Promise<AfterPress['form']> {
+    const until = Date.now() + ms
+    while (Date.now() < until) {
+      if (!(await formOnScreen(page).catch(() => true))) return 'closed'
+      if (send.settled()) return 'sent'
+      await sleep(250)
+    }
+    return 'open'
   }
 
   async function keepFormMap(r: BidRuntime, page: Page) {
@@ -164,35 +237,49 @@ export function createBidTools(o: {
 
   /**
    * After a press only a look: the bid on the page is that press and its money; anything else is UNCERTAIN. The order
-   * answer may not show a bid the site has just taken, so a page without it is looked at once more after a pause.
-   * `closed` says whether the form closed after this press, for the log; null for a retry that only looks.
+   * answer may show a bid the site has just taken minutes late (28.10 and 31.10.2026), so the page is looked at again
+   * every lookAgainMs until confirmMs passed. Its top bar counts too: the wallet down by the amount due since before
+   * the press is the site taking this press (found_on_page then stays false). `after` is null for a retry that only
+   * looks: it knows no wallet from before.
    */
   async function confirm(
     r: BidRuntime,
     i: SubmitBidInput,
     dueRub: number,
     t: { go: Go; can(): boolean },
-    closed: boolean | null = null,
+    after: AfterPress | null = null,
   ): Promise<SubmitBidOutput> {
-    const form =
-      closed === null ? 'повтор после нажатия' : closed ? 'форма закрылась' : 'форма не закрылась'
+    const form = after ? FORM_WORDS[after.form] : 'повтор после нажатия'
+    const before = after?.walletBefore ?? null
+    const paid = (rub: number | null) =>
+      before !== null && dueRub > 0 && rub !== null && rub <= before - dueRub
+    const started = Date.now()
+    const took = () => Math.round((Date.now() - started) / 1000)
     try {
       const page = r.page()
-      let seen = false
-      for (const pause of [0, lookAgainMs]) {
-        if (pause > 0) await new Promise((res) => setTimeout(res, pause))
+      let by: 'page' | 'wallet' | null = null
+      for (let look = 0; by === null; look++) {
+        if (look > 0) {
+          if (Date.now() - started + lookAgainMs > confirmMs) break
+          await sleep(lookAgainMs)
+        }
         const s = r.watch.state()
         if (s === 'dead' || s === 'banned' || !t.can()) break
         const again = await openOrder(page, t.go, i.order_id)
-        if (again.screen?.hasBid === true) {
-          seen = true
-          break
-        }
+        if (again.screen?.hasBid === true) by = 'page'
+        else if (again.ok && paid(await headerWallet(page))) by = 'wallet'
       }
-      if (!seen) throw unsure(i.order_id, `${form}, на странице заказа отклика нет`)
+      if (!by)
+        throw unsure(
+          i.order_id,
+          `${form}, за ${took()} с на странице заказа отклика нет${before === null ? '' : ', кошелёк тот же'}`,
+        )
+      console.error(
+        `BID ${i.order_id}: подтверждён ${by === 'page' ? 'на странице заказа' : 'по кошельку'} через ${took()} с, ${form}`,
+      )
       await markOrderBid(o.db, i.account_id, i.order_id)
       const out = {
-        found_on_page: true,
+        found_on_page: by === 'page',
         spent_rub: dueRub,
         balance_after_rub: (await walletOnPage(r, page)) ?? r.eyes.balance(),
       }
@@ -319,21 +406,29 @@ export function createBidTools(o: {
     }
 
     // From here the bid may be on the site: anything not confirmed is UNCERTAIN, never a failure.
-    let closed: boolean
+    let after: AfterPress
+    // The wallet the press is measured against: the lower of the one before the opener and the one the bar shows
+    // now, so money an opener took is never this press's.
+    const walletNow = await headerWallet(page)
+    const before = walletNow === null ? wallet : Math.min(wallet, walletNow)
+    const send = watchSend(page)
     try {
       const clicked = await clickSubmit(page, s.submitText)
       // Nothing was pressed after all.
       if (clicked === 'no_button')
         return await refuse(fail('LAYOUT_CHANGED', 'Кнопки отправки отклика нет'))
       if (clicked === 'unsure') throw unsure(id, 'нажатие на кнопку не подтвердилось')
-      // A slow send keeps the form open longer than its wait: it is given the wait once more, and then the order page
-      // is looked at whatever the form did (a bid there is this press; the page before the press had none).
-      closed = (await waitFormClosed(page, closeMs)) || (await waitFormClosed(page, closeMs))
+      // The page is left only once the form closed or the site answered the send, so a slow send is never cut off;
+      // then it is looked at whatever the form did (a bid there is this press; the page before the press had none).
+      const form = await waitSent(page, send, 2 * closeMs)
+      after = { form, walletBefore: send.seen() ? before : null }
     } catch (e) {
       if (e instanceof ProfiToolError) throw e
       throw unsure(id, 'сбой после нажатия')
+    } finally {
+      send.stop()
     }
-    return confirm(r, i, due, t, closed)
+    return confirm(r, i, due, t, after)
   }
 
   return {

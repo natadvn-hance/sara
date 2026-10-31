@@ -92,6 +92,13 @@ Code, и единственное, что их связывает, это кон
 | `send_message` | номер чата, текст, последнее сообщение, которое видело ядро, ключ, разрешение | сообщение найдено на странице: да, и его номер площадки | да |
 | `backfill_chats` | период | выгрузка истории порциями | нет |
 
+С 31.10.2026 `submit_bid` после нажатия ждёт, пока форма закроется или сайт
+ответит на отправку, и до 30 секунд смотрит страницу заказа. Отклик
+подтверждён, если ответ страницы показывает наш отклик (`found_on_page:
+true`) или кошелёк в шапке стал меньше на сумму к оплате с момента до
+нажатия (`found_on_page: false`, трата та же). Иначе `UNCERTAIN`, и ядро
+ищет отклик позже.
+
 **Уведомления** (Профи-MCP → ядро): `order_seen`, `order_changed`,
 `client_message`, `client_typing`, `client_read`, `chat_closed`,
 `session_dead`, `profile_banned`, `layout_changed`, `balance_changed`.
@@ -273,7 +280,10 @@ Code, и единственное, что их связывает, это кон
 - Настройки (пульт v2): `POST /api/settings/{key} {value, confirm?}`; паузы и
   исходящие (`outbound.bids`, `outbound.messages`, `conv.reminders`) выключаются
   сразу, включаются только с `confirm: true` (второе нажатие); автопилот только
-  выключается. Порог: `GET /api/settings/threshold/{accountId}?value=` (подсказка
+  выключается. Разум: `POST /api/mind/proposals/{id}/decide {decision:
+  yes|no, reason?}` («да» идёт к писателю M5, пока он не записал, состояние
+  `accepted`, «ждёт записи»). Состояние отдаёт `deploy {version, startedAt}`.
+  Порог: `GET /api/settings/threshold/{accountId}?value=` (подсказка
   по оценкам 7 дней), `POST /api/settings/threshold/{accountId} {value,
   expectedVersion}` создаёт новую версию правил.
 - Схема: `GET /api/openapi.json`, строится из схем zod пульта

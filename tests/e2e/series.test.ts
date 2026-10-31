@@ -34,6 +34,8 @@ let series: { text: string; case_id: string | null }[] = [
 ]
 /** The client writes as soon as the bid is in the chat. */
 let clientFirst = false
+/** The client wrote before the bid (an invitation of a specialist); the series still follows it. */
+let clientBeforeBid = false
 const orderId = () => `${Date.now()}${n++}`
 
 async function until(cond: () => boolean | Promise<boolean>, ms = 10000) {
@@ -127,6 +129,7 @@ beforeEach(async () => {
     { text: SECOND, case_id: null },
   ]
   clientFirst = false
+  clientBeforeBid = false
   await resetDb(db)
   tg.sent.length = 0
   tg.edited.length = 0
@@ -140,6 +143,8 @@ beforeEach(async () => {
   fake.onSubmit(async (i) => {
     if (inChat.has(i.order_id)) return
     inChat.add(i.order_id)
+    if (clientBeforeBid)
+      await fake.addChatMessage({ chatId: i.order_id, author: 'client', text: 'Нужен специалист' })
     await fake.addChatMessage({
       chatId: i.order_id,
       orderId: i.order_id,
@@ -201,10 +206,19 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
       expect.objectContaining({
         n: 0,
         why: 'client_replied',
-        detail: expect.objectContaining({ rule: 'client_message' }),
+        detail: expect.objectContaining({ rule: 'client_message_after_bid' }),
       }),
     ])
     expect(sentTo(id)).toEqual([])
+  })
+
+  it('FR-CONV-9: a client who wrote before our bid does not stop the series, only a word after the bid does (31.10.2026)', async () => {
+    clientBeforeBid = true
+    const id = await cardFor()
+    press()
+    await until(() => sentTo(id).length === 2)
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    expect(await events('bid.series_stopped', id)).toEqual([])
   })
 
   it('FR-CONV-9: a client who answers after the first message stops the second', async () => {
@@ -378,7 +392,7 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     const texts = sentTo(id).map((m) => m.text)
     expect(texts.slice(0, 2)).toEqual([FIRST, SECOND])
     expect(texts[3]).toBe('Если удобнее, пишите в тг @bmnoian)')
-    expect(texts[3]).not.toMatch(/[ёЁ—–]/)
+    expect(texts[3]).not.toMatch(new RegExp(`[\u0451\u0401${String.fromCharCode(0x2014, 0x2013)}]`))
     await settle()
     expect(sentTo(id)).toHaveLength(4)
     expect(

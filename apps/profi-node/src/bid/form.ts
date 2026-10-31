@@ -255,16 +255,6 @@ export async function formOnScreen(page: Page): Promise<boolean> {
   return (await shown(page, TEXT).count()) > 0
 }
 
-/** The form closed: its text field left the screen within ms (old Sara's one sign of a bid taken). */
-export async function waitFormClosed(page: Page, ms: number): Promise<boolean> {
-  const until = Date.now() + ms
-  while (Date.now() < until) {
-    if ((await shown(page, TEXT).count()) === 0) return true
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  return false
-}
-
 // Notices of orders that take no more bids, seen live (old Sara, orderAvailability.js, 29.09.2026).
 const CLOSED = [
   /Заказ скрыт|не готов получать новые отклики/,
