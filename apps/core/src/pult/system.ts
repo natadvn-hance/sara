@@ -5,6 +5,7 @@ import type { AppDeps } from '../api/deps'
 import type { DbOrTx } from '../db/client'
 import { account, event, modelCall } from '../db/schema'
 import { runHealthChecks } from '../health/checks'
+import { notTest } from '../testLeads/sql'
 
 /** «Здоровье» (M7): the node of Profi.ru, the session, the link, the backups and the Claude limit, read only. */
 
@@ -52,7 +53,7 @@ export async function claudeLimit(db: DbOrTx): Promise<ClaudeLimit> {
 
 export type ProfiLink = { lost: boolean; at: string | null }
 
-/** The node sends these only after a page of Profi.ru answered it. */
+/** The node sends these only after a page of Profi.ru answered it; a test order's come from the made-up site. */
 const SITE_ANSWERED = ['profi.order_seen', 'profi.client_message', 'profi.balance_changed']
 
 /**
@@ -71,7 +72,13 @@ export async function profiLink(db: DbOrTx): Promise<ProfiLink> {
   const [answered] = await db
     .select({ at: event.occurredAt })
     .from(event)
-    .where(and(inArray(event.type, SITE_ANSWERED), gt(event.occurredAt, last.at)))
+    .where(
+      and(
+        inArray(event.type, SITE_ANSWERED),
+        gt(event.occurredAt, last.at),
+        notTest(event.entityId),
+      ),
+    )
     .orderBy(asc(event.occurredAt))
     .limit(1)
   return answered ? { lost: false, at: answered.at } : { lost: true, at: last.at }

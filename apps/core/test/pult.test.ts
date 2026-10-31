@@ -535,8 +535,8 @@ describe('the pult on the live data (28.10.2026)', () => {
           { since: minutesAgo(2900) },
           2870,
         ),
-        ev('profi.order_seen', 'lead', '95000003', {}, 2860),
-        ev('profi.order_seen', 'lead', '95000004', {}, 3),
+        ev('profi.order_seen', 'order', '95000003', {}, 2860),
+        ev('profi.order_seen', 'order', '95000004', {}, 3),
       ])
     const today = TodayView.parse((await get('/api/today')).body)
     expect([today.state.text, today.state.detail].join(' ')).not.toContain('Нет связи')
@@ -548,12 +548,12 @@ describe('the pult on the live data (28.10.2026)', () => {
   })
 
   it('FR-UI-1, FR-SET-5: a «lost» with nothing from the site after it still says «Нет связи»', async () => {
-    await db
-      .insert(event)
-      .values([
-        ev('profi.order_seen', 'lead', '95000003', {}, 50),
-        ev('profi.connection_lost', 'account', 'hance-marketing', { since: minutesAgo(70) }, 40),
-      ])
+    await db.insert(event).values([
+      ev('profi.order_seen', 'order', '95000003', {}, 50),
+      ev('profi.connection_lost', 'account', 'hance-marketing', { since: minutesAgo(70) }, 40),
+      // A test order comes from the made-up site in the core, not from Profi.ru.
+      ev('profi.order_seen', 'order', '99000000001', {}, 10),
+    ])
     const today = TodayView.parse((await get('/api/today')).body)
     expect(today.state).toMatchObject({ tone: 'bad', text: 'Нет связи с Профи.ру' })
     const v = SystemView.parse((await get('/api/system')).body)
