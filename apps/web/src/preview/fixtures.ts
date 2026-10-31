@@ -122,7 +122,7 @@ const feed: FeedItem[] = [
     area: 'conv',
     tone: 'wait',
     text: 'Подготовила ответ: Вероника',
-    link: '/conversations/c-veronika',
+    link: '/clients/c-veronika',
   },
   {
     id: 'f2',
@@ -130,7 +130,7 @@ const feed: FeedItem[] = [
     area: 'conv',
     tone: 'wait',
     text: 'Вероника написал в чат',
-    link: '/conversations/c-veronika',
+    link: '/clients/c-veronika',
   },
   {
     id: 'f3',
@@ -186,7 +186,7 @@ const feed: FeedItem[] = [
     area: 'conv',
     tone: 'ok',
     text: 'Отправила твой текст: Арина',
-    link: '/conversations/c-arina',
+    link: '/clients/c-arina',
   },
   { id: 'f10', at: ago(190), area: 'money', tone: 'ok', text: 'На кошельке 1 840 ₽', link: null },
   {
@@ -235,7 +235,7 @@ export function today(period: number): TodayView {
           title: 'Вероника: черновик ждёт «Отправить»',
           sub: null,
           at: ago(2),
-          link: '/conversations/c-veronika',
+          link: '/clients/c-veronika',
         },
         {
           id: 'q1',

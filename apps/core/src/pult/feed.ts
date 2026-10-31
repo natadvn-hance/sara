@@ -194,7 +194,7 @@ function linkOf(e: Row, n: Names): string | null {
   const card = e.type === 'card.sent' ? n.card.get(e.entityId) : undefined
   if (card) return card.link
   if (e.entityKind === 'lead') return `/leads/${encodeURIComponent(e.entityId)}`
-  if (e.entityKind === 'conversation') return `/conversations/${e.entityId}`
+  if (e.entityKind === 'conversation') return `/clients/${e.entityId}`
   if (e.type.startsWith('profi.')) return '/health'
   if (e.type.startsWith('mind.') || e.type.startsWith('school.')) return '/mind'
   return null
@@ -265,7 +265,7 @@ async function cardsOf(db: DbOrTx, taskIds: string[]): Promise<Map<string, Card>
     out.set(c.id, {
       area: 'conv',
       text: `Прислала тебе черновик ответа: ${who.get(c.conversationId) ?? 'клиент'}`,
-      link: `/conversations/${c.conversationId}`,
+      link: `/clients/${c.conversationId}`,
     })
   return out
 }
