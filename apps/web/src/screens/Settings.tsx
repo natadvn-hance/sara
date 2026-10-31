@@ -35,7 +35,7 @@ function Flag({ r }: { r: SettingRow }) {
   const { press, busy } = usePress()
   const [sure, setSure] = useState(false)
   const on = r.value === true
-  const can = r.edit === 'free' || (r.edit === 'stop_only' && on)
+  const can = r.edit === 'free' || r.edit === 'confirm' || (r.edit === 'stop_only' && on)
   if (!can)
     return (
       <span className="actions">
@@ -325,49 +325,8 @@ function Push({ r }: { r: SettingRow }) {
             Сохранить
           </Btn>
         ) : null}
-        <PushSubscribe />
       </div>
     </div>
-  )
-}
-
-/** This browser: allowed to ring or not. */
-function PushSubscribe() {
-  const [state, setState] = useState<'idle' | 'busy' | 'on' | 'no'>('idle')
-  if (typeof window !== 'undefined' && !('Notification' in window))
-    return <span className="muted">Этот браузер без уведомлений</span>
-  return (
-    <Btn
-      size="sm"
-      icon="bell"
-      disabled={state === 'busy'}
-      onClick={async () => {
-        setState('busy')
-        try {
-          const perm = await Notification.requestPermission()
-          if (perm !== 'granted') return setState('no')
-          const reg = await navigator.serviceWorker.register('/sw.js')
-          const { key } = await api<{ key: string }>('/api/push/key')
-          const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: key,
-          })
-          await api('/api/push/subscribe', {
-            subscription: sub.toJSON(),
-            label: navigator.userAgent.slice(0, 80),
-          })
-          setState('on')
-        } catch {
-          setState('no')
-        }
-      }}
-    >
-      {state === 'on'
-        ? 'Это устройство звонит'
-        : state === 'no'
-          ? 'Не разрешено'
-          : 'Звонить на этом устройстве'}
-    </Btn>
   )
 }
 

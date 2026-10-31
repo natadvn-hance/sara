@@ -380,8 +380,11 @@ export const MindRecordView = z.object({
 })
 export type MindRecordView = z.infer<typeof MindRecordView>
 
-/** How the pult may change a setting: freely, only toward the pause, or not at all (a deploy or the switch). */
-export const SettingEdit = z.enum(['free', 'stop_only', 'locked'])
+/**
+ * How the pult may change a setting: freely; on and off with a second press for turning on (`confirm`); only toward
+ * the pause; or not at all (a deploy or the switch).
+ */
+export const SettingEdit = z.enum(['free', 'confirm', 'stop_only', 'locked'])
 
 export const SettingRow = z.object({
   key: z.string(),
