@@ -47,6 +47,8 @@ export type LeadCard = {
   score?: { value: number; version: number; reason: string } | null
   /** The Scorer did not answer: the card comes anyway, marked. */
   unscored?: boolean
+  /** The screen could not tell core from background: «Уточнить в отклике: …» (docs/product/lead-analysis.md). */
+  clarify?: string[]
   /**
    * The layout with a line that the order waits for a decision. Sara sends no card as a reminder any more; only the
    * length check of the «Разбор» message still builds it.
@@ -407,6 +409,7 @@ function whyBlocks(c: LeadCard): string[][] {
       ]
     : [verdictLine(c)]
   if (c.unscored) why.push('Без оценки: Оценщик не ответил')
+  for (const l of c.clarify ?? []) why.push(`❓ ${esc(l)}`)
   const a = c.analysis
   if (!a) return [why]
   const who = a.reading?.who?.trim()

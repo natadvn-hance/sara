@@ -37,7 +37,8 @@
     "history:export": "pnpm --filter @sara/core history:export",
     "report:school": "pnpm --filter @sara/core report:school",
     "exam": "pnpm --filter @sara/core exam",
-    "exam:build": "pnpm --filter @sara/core exam:build"
+    "exam:build": "pnpm --filter @sara/core exam:build",
+    "screen:dry": "pnpm --filter @sara/core screen:dry"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",

@@ -74,6 +74,11 @@ export const lead = core.table('lead', {
    * order's chat, a case's link already in; null: none written (a lead from before the series, or none fitted).
    */
   draftFollowUps: jsonb('draft_follow_ups').$type<string[]>(),
+  /**
+   * Stage 1 «Отсев» (contract LeadScreen, docs/product/lead-analysis.md): the criteria that fired with their quotes,
+   * the unclear ones and those without data; null: an order not screened (before the screen, or the screen off).
+   */
+  screen: jsonb('screen'),
 })
 
 export const account = core.table('account', {

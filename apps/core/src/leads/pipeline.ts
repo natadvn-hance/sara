@@ -4,8 +4,10 @@ import {
   ClientInfo,
   type EventEnvelope,
   type GetOrderOutput,
+  LeadScreen,
   newEventId,
   ProfiOrder,
+  type SorterOutput,
   type TaskAction,
 } from '@sara/shared'
 import { and, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
@@ -51,6 +53,22 @@ import {
 import { readWallet, refuseSpend } from './money'
 import { recordBid, startOutboxDelivery } from './outbox'
 import { type Scored, scoreOrder } from './scorer'
+import {
+  type Check,
+  checkedOf,
+  clarifyLines,
+  loadFormParts,
+  mergeScreens,
+  negativeReviews,
+  newAccount,
+  ownWords,
+  screenEvent,
+  screenOf,
+  senseMarks,
+  shortText,
+  vacancy,
+  vacancySoft,
+} from './screen'
 import { sortOrder } from './sorter'
 
 export type LeadPipelineDeps = {
@@ -135,6 +153,7 @@ const ev = (
     | 'lead.skipped'
     | 'lead.stale'
     | 'lead.page_read'
+    | 'lead.screened'
     | 'lead.closed_on_site'
     | 'lead.held'
     | 'lead.drafted'
@@ -161,8 +180,16 @@ const ev = (
   payload,
 })
 
-type Sorted = { verdict: 'fit' | 'maybe' | 'reject' | null; reason: string | null }
+type Sorted = {
+  verdict: 'fit' | 'maybe' | 'reject' | null
+  reason: string | null
+  /** The screen's criteria 4-6 as the Sorter saw them; absent in a run recorded before the screen. */
+  screen?: SorterOutput['screen']
+}
 type LeadRow = typeof lead.$inferSelect
+
+/** The Sorter's verdict for the journal: the screen's quotes are the client's words and stay on the lead (ADR-016). */
+const sortedEvent = (s: Sorted) => ({ verdict: s.verdict, reason: s.reason })
 
 const sourceOf = (l: LeadRow): DraftSource => ({
   title: l.title,
@@ -273,7 +300,7 @@ async function storePage(
     if (verdict !== 'go' && sorted.verdict) {
       await appendEvent(
         tx,
-        ev('lead.sorted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', sorted),
+        ev('lead.sorted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', sortedEvent(sorted)),
       )
     }
   })
@@ -403,6 +430,89 @@ function clientInfoOf(stored: unknown): ClientInfo | null {
   return r.success ? r.data : null
 }
 
+/** Criterion 3 on the board's text, before any model call; the profile (1-2) is not read yet. */
+async function screenByText(o: Pick<ProfiOrder, 'title' | 'text'>): Promise<LeadScreen> {
+  const db = d().db
+  const [form, stops, min] = await Promise.all([
+    loadFormParts(db),
+    getSetting(db, 'screen.stops'),
+    getSetting(db, 'screen.min_own_words'),
+  ])
+  return screenOf(
+    [
+      { noData: 'new_account' },
+      { noData: 'negative_reviews' },
+      shortText(o, form, min),
+      vacancy(o),
+    ],
+    { soft: [vacancySoft(o)].filter((x): x is NonNullable<typeof x> => x !== null) },
+    {
+      stops,
+      ownWords: o.text.trim() ? ownWords(o, form).length : null,
+      at: new Date(),
+    },
+  )
+}
+
+/**
+ * The profile's criteria (1-2) once the order page was read, and criterion 3 again when only the page gave the text.
+ * What the earlier checks found stays.
+ */
+async function screenByPage(
+  before: LeadScreen,
+  o: Pick<ProfiOrder, 'title' | 'text' | 'seen_at'> & {
+    published_at?: string | null
+    client_info: ClientInfo | null
+  },
+): Promise<LeadScreen> {
+  const db = d().db
+  const at = new Date(o.published_at ?? o.seen_at)
+  const checks: Check[] = [newAccount(o.client_info, at), negativeReviews(o.client_info)]
+  let words = before.own_words
+  if (before.no_data.includes('short_text') && o.text.trim()) {
+    const form = await loadFormParts(db)
+    checks.push(shortText(o, form, await getSetting(db, 'screen.min_own_words')))
+    checks.push(vacancy(o))
+    words = ownWords(o, form).length
+  }
+  return mergeScreens(
+    before,
+    screenOf(checks, {}, { stops: before.stops, ownWords: words, at: new Date() }),
+    checkedOf(checks),
+  )
+}
+
+/**
+ * The screen goes on the lead; with the screen on, a criterion that fired stops the order (screened_out). The journal
+ * gets the criteria without the quotes (ADR-016) when `journal` says something new was found.
+ */
+async function storeScreen(
+  l: { id: string; correlationId: string },
+  s: LeadScreen,
+  journal: boolean,
+  sorted?: Sorted,
+): Promise<boolean> {
+  const stop = s.stops && s.hits.length > 0
+  await d().db.transaction(async (tx) => {
+    await tx
+      .update(lead)
+      .set({ screen: s, ...(stop && { status: 'screened_out' }) })
+      .where(eq(lead.id, l.id))
+    if (journal)
+      await appendEvent(
+        tx,
+        ev('lead.screened', { kind: 'lead', id: l.id }, l.correlationId, 'sara', screenEvent(s)),
+      )
+    // A stopped order never reaches the task step, which journals the Sorter's verdict.
+    if (stop && sorted?.verdict)
+      await appendEvent(
+        tx,
+        ev('lead.sorted', { kind: 'lead', id: l.id }, l.correlationId, 'sara', sortedEvent(sorted)),
+      )
+  })
+  return stop
+}
+
 /** One order, one durable run (workflow id lead:<order>): record, sort, card, wait for Boris. */
 async function processOrder(e: EventEnvelope): Promise<void> {
   const order = ProfiOrder.parse(e.payload)
@@ -449,15 +559,52 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   )
   if (isNew !== true) return
 
+  // Stage 1 «Отсев» (docs/product/lead-analysis.md): facts only, before any reading of the order. A run recorded before
+  // the screen resumes along its old steps.
+  let screen: LeadScreen | null = null
+  if (await DBOS.patch('lead-screen')) {
+    const byText = await DBOS.runStep(() => screenByText(order), { name: 'screenText', ...DB_STEP })
+    screen = byText
+    // A criterion that fired stops the order before the Sorter: no model call for it.
+    if (byText.stops && byText.hits.length > 0) {
+      await DBOS.runStep(() => storeScreen({ id: order.order_id, correlationId }, byText, true), {
+        name: 'screenedText',
+        ...DB_STEP,
+      })
+      return
+    }
+  }
+
   const sorted = await DBOS.runStep(
     async (): Promise<Sorted> => {
       const r = await sortOrder(d().gateway, order, { correlationId, causationId: e.id })
       return r.ok
-        ? { verdict: r.output.verdict, reason: r.output.reason }
+        ? { verdict: r.output.verdict, reason: r.output.reason, screen: r.output.screen }
         : { verdict: null, reason: null }
     },
     { name: 'sort' },
   )
+
+  if (screen) {
+    const byText = screen
+    const bySense = await DBOS.runStep(
+      async () => {
+        const sense = senseMarks(order, sorted.screen)
+        const s = mergeScreens(
+          byText,
+          screenOf([], sense, { stops: byText.stops, ownWords: byText.own_words, at: new Date() }),
+        )
+        const news = s.hits.length > 0 || s.clarify.length > 0
+        return {
+          screen: s,
+          stop: await storeScreen({ id: order.order_id, correlationId }, s, news, sorted),
+        }
+      },
+      { name: 'screenSense', ...DB_STEP },
+    )
+    screen = bySense.screen
+    if (bySense.stop) return
+  }
 
   if (sorted.verdict === 'reject') {
     await DBOS.runStep(
@@ -466,7 +613,13 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           await tx.update(lead).set({ status: 'sorted_out' }).where(eq(lead.id, order.order_id))
           await appendEvent(
             tx,
-            ev('lead.sorted', { kind: 'lead', id: order.order_id }, correlationId, 'sara', sorted),
+            ev(
+              'lead.sorted',
+              { kind: 'lead', id: order.order_id },
+              correlationId,
+              'sara',
+              sortedEvent(sorted),
+            ),
           )
         }),
       { name: 'sortedOut', ...DB_STEP },
@@ -481,7 +634,21 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       try {
         const { version, rules } = await activeRules(d().db, accountId)
         const s = await scoreOrder(d().gateway, order, rules, { correlationId, causationId: e.id })
-        return s ? { ...s, version } : null
+        if (!s) return null
+        // A text that looks like a vacancy loses points; the stop `vacancy` of the rules stays the Scorer's own
+        // insurance, the screen stops the clear ones earlier and with a quote.
+        const cut = screen?.penalty ?? 0
+        if (cut > 0 && screen) {
+          const score = Math.max(0, s.score - cut)
+          return {
+            ...s,
+            score,
+            decision: !s.stopFactor && score >= rules.threshold ? 'show' : 'drop',
+            reason: `${s.reason} (минус ${cut}: похоже на вакансию)`.slice(0, 300),
+            version,
+          }
+        }
+        return { ...s, version }
       } catch (err) {
         console.error('scoring failed', err instanceof Error ? err.message.slice(0, 200) : err)
         return null
@@ -517,7 +684,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
                   { kind: 'lead', id: order.order_id },
                   correlationId,
                   'sara',
-                  sorted,
+                  sortedEvent(sorted),
                 ),
               )
             }
@@ -569,6 +736,22 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       )
       // Closed, or already bid on: nothing to offer, no card and no model call.
       if (verdict !== 'go') return
+      if (screen) {
+        const before = screen
+        const byPage = await DBOS.runStep(
+          async () => {
+            const s = await screenByPage(before, { ...order, ...withPage })
+            const news = s.hits.length > before.hits.length
+            return {
+              screen: s,
+              stop: await storeScreen({ id: order.order_id, correlationId }, s, news, sorted),
+            }
+          },
+          { name: 'screenPage', ...DB_STEP },
+        )
+        screen = byPage.screen
+        if (byPage.stop) return
+      }
     }
   }
 
@@ -601,7 +784,13 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         if (sorted.verdict) {
           await appendEvent(
             tx,
-            ev('lead.sorted', { kind: 'lead', id: order.order_id }, correlationId, 'sara', sorted),
+            ev(
+              'lead.sorted',
+              { kind: 'lead', id: order.order_id },
+              correlationId,
+              'sara',
+              sortedEvent(sorted),
+            ),
           )
         }
         if (full) {
@@ -673,11 +862,16 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         // What the order page said about the client is read here, inside the step, so a run recorded before this
         // card kept its steps; an order whose page was not opened has none.
         const [stored] = await d()
-          .db.select({ clientInfo: lead.clientInfo })
+          .db.select({ clientInfo: lead.clientInfo, screen: lead.screen })
           .from(lead)
           .where(eq(lead.id, order.order_id))
+        const screened = LeadScreen.safeParse(stored?.screen)
         const m = await d().notifier.sendLeadCard(
-          { ...card, clientInfo: clientInfoOf(stored?.clientInfo) },
+          {
+            ...card,
+            clientInfo: clientInfoOf(stored?.clientInfo),
+            clarify: screened.success ? clarifyLines(screened.data) : [],
+          },
           { silent },
         )
         await cardSent(taskId, correlationId, m.messageId, 'order')
