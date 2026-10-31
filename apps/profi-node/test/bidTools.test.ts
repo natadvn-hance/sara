@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProfiOrder, SubmitBidInput } from '@sara/shared'
 import { signPermit } from '@sara/shared/permit'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type BidRuntime, createBidTools } from '../src/bid/bidTools'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
@@ -759,6 +759,25 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     })
   }, 90000)
 
+  it("FR-LEAD-8: a page without a tariff block opens its form by the order card's «Откликнуться» (31.10.2026)", async () => {
+    // Order 95590077: «Цена отклика» and one «Откликнуться», no «Продолжить», no «Написать клиенту».
+    site.bidSettings.opener = 'card'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    expect(await tools().submitBid(input)).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(site.openerClicks).toBe(1)
+    expect(site.bids).toEqual([{ orderId: id, price: '15000', priceTo: '23000', text: input.text }])
+  }, 60000)
+
+  it('FR-LEAD-8: two such «Откликнуться» on the card press nothing', async () => {
+    site.bidSettings.opener = 'card'
+    site.bidSettings.openers = 2
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id)))).toBe('LAYOUT_CHANGED')
+    expect(site.openerClicks).toBe(0)
+    expect(await pressesWritten()).toBe(0)
+  }, 60000)
+
   it('FR-LEAD-8: a form open from the start is filled without pressing its opener', async () => {
     site.bidSettings.behindOpener = false
     const id = site.addOrder({ price: 71 })
@@ -801,4 +820,81 @@ describe('get_order of an order the eyes never stored (FR-LEAD-5)', () => {
     const o = await tools({ parsers: withPage }).getOrder({ account_id: ACCOUNT, order_id: id })
     expect(o).toMatchObject({ title: 'Лендинг для школы', open: true, bid_price_rub: 71 })
   }, 60000)
+})
+
+describe('a failed bid says which step said no (31.10.2026, order 95590077)', () => {
+  /** The node's log lines a call left, while it runs. */
+  async function logged(p: () => Promise<unknown>): Promise<string[]> {
+    const lines: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      lines.push(a.map(String).join(' '))
+    })
+    try {
+      await p().catch(() => {})
+    } finally {
+      spy.mockRestore()
+    }
+    return lines
+  }
+  const bidLines = (lines: string[]) => lines.filter((l) => /^(BID|UNCERTAIN) /.test(l))
+
+  it('FR-OPS-4: a refusal leaves one log line with the class, the step, the message and what the page showed', async () => {
+    site.bidSettings.openerAmount = 70
+    const id = site.addOrder({ price: 71 })
+    const lines = bidLines(await logged(() => tools().submitBid(bid(id, { max_fee_rub: 71 }))))
+    expect(lines).toEqual([
+      `BID ${id} LAYOUT_CHANGED на шаге «кнопка открытия формы»: Форма отклика не открылась: на «Продолжить» 70 ₽, а в заказе 71 ₽, отклик не нажат (цена 71 ₽, кошелёк 5000 ₽)`,
+    ])
+  }, 60000)
+
+  it('FR-OPS-4: a page the node could not read leaves its outline and what the node saw, without any text', async () => {
+    site.bidSettings.openerAmount = 70
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id, { max_fee_rub: 71 })
+    await logged(() => tools().submitBid(input))
+    const kept = (await db.select().from(rawEvent))
+      .map((r) => r.body as { what?: string; [k: string]: unknown })
+      .filter((b) => b.what === 'bid_refused')
+    expect(kept).toEqual([
+      expect.objectContaining({
+        orderId: id,
+        step: 'кнопка открытия формы',
+        feeRub: 71,
+        walletRub: 5000,
+        opener: { why: 'opener_fee', shownRub: 70 },
+      }),
+    ])
+    expect(kept[0]?.shape).toEqual(expect.arrayContaining([expect.any(Object)]))
+    expect(JSON.stringify(kept)).not.toContain(input.text.slice(0, 20))
+  }, 60000)
+
+  it('FR-OPS-4: a wallet the top bar does not show is named so, at its step', async () => {
+    site.bidSettings.showWallet = false
+    const id = site.addOrder({ price: 71 })
+    const lines = bidLines(await logged(() => tools().submitBid(bid(id))))
+    expect(lines).toEqual([
+      `BID ${id} LAYOUT_CHANGED на шаге «ответ страницы заказа»: Не прочитал кошелёк в шапке страницы, отклик не нажат (цена 71 ₽)`,
+    ])
+  }, 60000)
+
+  it('FR-OPS-4: every failure is one line: money short, a refused send, a permit that does not fit', async () => {
+    site.setBalance(50)
+    const poor = site.addOrder({ price: 71 })
+    expect(bidLines(await logged(() => tools().submitBid(bid(poor))))).toEqual([
+      `BID ${poor} NO_MONEY на шаге «ответ страницы заказа»: В кошельке 50 ₽, а отклик стоит 71 ₽ (цена 71 ₽, кошелёк 50 ₽)`,
+    ])
+    site.resetBids()
+    site.bidSettings.mode = 'silent'
+    const silent = site.addOrder({ price: 71 })
+    const unsure = bidLines(await logged(() => tools().submitBid(bid(silent))))
+    expect(unsure).toHaveLength(1)
+    expect(unsure[0]).toMatch(new RegExp(`^UNCERTAIN ${silent}: `))
+    site.resetBids()
+    const id = site.addOrder({ price: 71 })
+    expect(
+      bidLines(await logged(() => tools().submitBid(bid(id, { permit: 'ab'.repeat(32) })))),
+    ).toEqual([
+      `BID ${id} INTERNAL на шаге «разрешение ядра»: Разрешение ядра не подходит к отклику`,
+    ])
+  }, 90000)
 })
