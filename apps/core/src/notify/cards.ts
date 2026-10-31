@@ -5,6 +5,7 @@ import {
   isTestOrder,
   type LeadSite,
   plural,
+  priceRange,
   TEST_MARK,
 } from '@sara/shared'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
@@ -72,6 +73,8 @@ export type LeadCard = {
   draft?: {
     text: string
     priceRub: number | null
+    /** The «до» of the range (31.10.2026); absent: half again over «от». */
+    priceToRub?: number | null
     note?: string | null
     followUps?: string[]
   } | null
@@ -522,7 +525,9 @@ function followUpLines(c: LeadCard): string[] {
 
 function draftLines(c: LeadCard): string[] {
   if (!c.draft) return [NO_DRAFT]
-  const price = c.draft.priceRub ? `  ·  услуга ${formatRub(c.draft.priceRub)}` : ''
+  const price = c.draft.priceRub
+    ? `  ·  услуга от ${formatRub(c.draft.priceRub)} до ${formatRub(priceRange(c.draft.priceRub, c.draft.priceToRub).to)}`
+    : ''
   return [
     `<b>✍️ Отклик</b>${price}`,
     `<blockquote>${clean(c.draft.text, CAP.draft)}</blockquote>`,

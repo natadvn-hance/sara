@@ -3,6 +3,7 @@ import {
   type ClientInfo,
   type LeadSite,
   type ProfiOrder,
+  parsePriceRange,
   plural,
 } from '@sara/shared'
 import { publicLink } from '../conversation/caseLink'
@@ -43,6 +44,8 @@ export type Analysis = Pick<AnalystOutput, 'reading' | 'hidden_need' | 'risk' | 
 export type Draft = {
   text: string
   priceRub: number | null
+  /** The top of the range, «до» (31.10.2026); null: the program puts half again over «от». */
+  priceToRub?: number | null
   attempts: number
   analysis: Analysis
   /** The ids of the cases that went into the text: the direction's (their links are the library's) and the mind's. */
@@ -322,6 +325,24 @@ export function priceWithin(price: number | null, budgetText: string | null): nu
   return sums && sums.length > 0 && price > Math.max(...sums) ? null : price
 }
 
+/**
+ * The «до» of the range (Boris, 31.10.2026): the Analyst's own, not above the client's budget (the top of it when the
+ * budget is a range), and above «от»; null when it is not (the program then puts half again over «от»).
+ */
+export function priceToWithin(
+  from: number | null,
+  to: number | null | undefined,
+  budgetText: string | null,
+): number | null {
+  if (!from || !to) return null
+  const sums = (budgetText ?? '')
+    .match(/\d[\d\s\u00a0]*/g)
+    ?.map((s) => Number(s.replace(/\D/g, '')))
+  const top = sums && sums.length > 0 ? Math.max(...sums) : Number.POSITIVE_INFINITY
+  const capped = Math.min(to, top)
+  return capped > from ? capped : null
+}
+
 const PRICE_MAX = 10_000_000
 const SUM = String.raw`(\d[\d  ]*)`
 const RUB = String.raw`(?:₽|р\.?|руб\.?|рубл(?:ей|я|ь))`
@@ -332,6 +353,14 @@ const PRICE_LINE = new RegExp(
 )
 /** «5000 ₽» on a line of its own. */
 const SUM_LINE = new RegExp(String.raw`^\s*${SUM}\s*${RUB}\s*\.?\s*$`, 'iu')
+/** «30 000 - 60 000 ₽», «от 30 до 60 тыс.», «цена 30-60к» on a line of its own. */
+const NUMBER = String.raw`\d[\d\s\u00a0]*(?:[.,]\d+)?`
+const RANGE_LINE = new RegExp(
+  String.raw`^\s*(?:(?:цена|стоимость(?:\s+услуги)?)\s*[:\-]?\s*)?(?:от\s+)?${NUMBER}\s*(?:-|–|до)\s*${NUMBER}\s*(?:(?:тыс(?:яч[а-я]*)?\.?|т\.?\s?р\.?|[кk])\s*)?(?:${RUB})?\s*\.?\s*$`,
+  'iu',
+)
+/** A range line is a price only with a price word, a thousands mark or a currency: «10-12» alone is a date. */
+const RANGE_MARK = /(цена|стоимост|тыс|₽|руб|р\.|\sр$|\d\s?[кk]\s*$)/iu
 /** A bare «5000», only where the price was asked for. */
 const BARE_LINE = new RegExp(String.raw`^\s*${SUM}\s*\.?\s*$`, 'u')
 
@@ -343,19 +372,26 @@ const BARE_LINE = new RegExp(String.raw`^\s*${SUM}\s*\.?\s*$`, 'u')
 export function priceOf(
   answer: string,
   o: { bare?: boolean } = {},
-): { text: string | null; priceRub: number | null } {
+): { text: string | null; priceRub: number | null; priceToRub: number | null } {
   const lines = answer.split('\n')
   const shapes = o.bare ? [PRICE_LINE, SUM_LINE, BARE_LINE] : [PRICE_LINE, SUM_LINE]
   for (let i = lines.length - 1; i >= 0; i--) {
-    const sum = shapes.map((re) => re.exec(lines[i] ?? '')?.[1]).find((m) => m !== undefined)
-    if (sum === undefined) continue
-    const rub = Number(sum.replace(/\D/g, ''))
+    const line = lines[i] ?? ''
+    // A range («30 000 - 60 000», «от 30 до 60 тыс.») on a line of its own, with a price word or a currency mark.
+    const range =
+      RANGE_LINE.test(line) && (o.bare || RANGE_MARK.test(line)) ? parsePriceRange(line) : null
+    const sum = range
+      ? undefined
+      : shapes.map((re) => re.exec(line)?.[1]).find((m) => m !== undefined)
+    if (!range && sum === undefined) continue
+    const rub = range ? range.from : Number((sum ?? '').replace(/\D/g, ''))
     // The price column is an int: a price past ten million is a slip, not a price.
     if (!Number.isSafeInteger(rub) || rub <= 0 || rub > PRICE_MAX) break
+    const to = range?.to && range.to <= PRICE_MAX ? range.to : null
     const rest = [...lines.slice(0, i), ...lines.slice(i + 1)].join('\n').trim()
-    return { text: rest === '' ? null : rest, priceRub: rub }
+    return { text: rest === '' ? null : rest, priceRub: rub, priceToRub: to }
   }
-  return { text: answer.trim(), priceRub: null }
+  return { text: answer.trim(), priceRub: null, priceToRub: null }
 }
 
 /** A message of the series is short: Boris's own were a line or three (growth-points, 29.10.2026). */
@@ -575,6 +611,11 @@ export async function writeDraft(
     return {
       text: `${hello}${placed.text.slice(longest.length)}`,
       priceRub: priceWithin(out.price_rub, o.budget_text),
+      priceToRub: priceToWithin(
+        priceWithin(out.price_rub, o.budget_text),
+        out.price_to_rub,
+        o.budget_text,
+      ),
       attempts,
       analysis: analysisOf(out),
       cases: told ? [...placed.shown, told.id] : placed.shown,

@@ -65,6 +65,8 @@ export const lead = core.table('lead', {
   draftText: text('draft_text'),
   /** The «Стоимость услуги» for the bid form; null leaves the field empty. */
   draftPriceRub: integer('draft_price_rub'),
+  /** The top of the price range of the draft, «до»; null: half again over «от» (31.10.2026). */
+  draftPriceToRub: integer('draft_price_to_rub'),
   /** The Analyst's reading of the order and its short разбор (hidden need, risk, condition); null: none. */
   draftAnalysis: jsonb('draft_analysis'),
   /** What the order page says about the client (contract ClientInfo), read when the order page is opened. */

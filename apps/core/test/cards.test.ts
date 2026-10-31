@@ -74,7 +74,7 @@ describe('the lead card layout', () => {
       '<b>Риск:</b> Объём больше, чем звучит',
       '<b>Брать, если:</b> сроки понятны',
       '',
-      `<b>✍️ Отклик</b>  ·  услуга 90${NBSP}000${NBSP}₽`,
+      `<b>✍️ Отклик</b>  ·  услуга от 90${NBSP}000${NBSP}₽ до 135${NBSP}000${NBSP}₽`,
       '<blockquote>Ирина, добрый день!',
       '',
       'Понимаю задачу.</blockquote>',
@@ -243,7 +243,7 @@ describe('the plain text fallback', () => {
     expect(plain.length).toBeLessThanOrEqual(4096)
     expect(plain.endsWith('https://profi.ru/backoffice/n.php?o=90001')).toBe(true)
     expect(plain).not.toMatch(/<\/?[a-z]/)
-    expect(plain).toContain('услуга 90')
+    expect(plain).toContain('услуга от 90')
   })
 
   it('FR-LEAD-7: a short card is just its text without markup, entities decoded, the link written out', () => {
@@ -322,7 +322,7 @@ describe('the lead card length', () => {
     expect(r.html).toMatch(/…<\/blockquote>/)
     // Everything after the order text is still on the card.
     expect(r.html).toContain('<b>балл 68</b>')
-    expect(r.html).toContain('услуга 90')
+    expect(r.html).toContain('услуга от 90')
     expect(r.html.endsWith(LINK)).toBe(true)
   })
 
