@@ -392,7 +392,7 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     const texts = sentTo(id).map((m) => m.text)
     expect(texts.slice(0, 2)).toEqual([FIRST, SECOND])
     expect(texts[3]).toBe('Если удобнее, пишите в тг @bmnoian)')
-    expect(texts[3]).not.toMatch(/[ёЁ—–]/)
+    expect(texts[3]).not.toMatch(new RegExp(`[\u0451\u0401${String.fromCharCode(0x2014, 0x2013)}]`))
     await settle()
     expect(sentTo(id)).toHaveLength(4)
     expect(
