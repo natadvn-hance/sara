@@ -20,7 +20,7 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 const M4_ROLES = {
   interlocutor: {
     meta: {
-      version: 12,
+      version: 13,
       model: 'opus',
       fallbackModel: 'sonnet',
       priority: 'P0',

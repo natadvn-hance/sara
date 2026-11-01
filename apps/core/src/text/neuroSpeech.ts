@@ -35,10 +35,35 @@ const PATTERNS: { re: RegExp; kind: string }[] = [
   },
 ]
 
+/**
+ * Stock phrases of a chatbot, from the lists of smixs/humanizer-ru and codemistake/human-writing (both MIT), cut to
+ * what a short business letter shows and what none of the 35 examples of Boris has: a ritual opening, a chatbot tail,
+ * depth that adds no fact, a «summary», a therapy line. Words Boris uses himself («важно понимать», «широкий спектр»,
+ * «уникальные») are left out on purpose.
+ */
+const STAMPS = [
+  /давайте (?:разберем|разберемся|погрузимся|рассмотрим)/u,
+  /(?:важно|стоит) отметить/u,
+  /следует учитывать/u,
+  /вот в чем (?:дело|штука)/u,
+  /если говорить (?:честно|прямо)|честно говоря|(?:^|[.!?]\s)честно\?/u,
+  /(?:хороший|отличный|отличная|интересный) (?:вопрос|идея|мысль)/u,
+  /надеюсь,? (?:это|я) (?:поможет|помог)|дайте знать,? если|рад(?:ы|а)? помочь|не стесняйтесь/u,
+  /на самом деле вопрос глубже|истинная проблема|в своей основе/u,
+  /не поймите (?:меня )?неправильно|я не говорю,? что/u,
+  /подводя итог|в заключение/u,
+  /(?:^|[.!?]\s)(?:и )?это нормально[.!]|вы не одиноки/u,
+]
+/** «Без X. Без Y. Только Z.»: chopped drama. */
+const CHOPPED = /(?:^|[.!?]\s)без [^.!?]{2,30}[.!?]\s+без [^.!?]{2,30}[.!?]/u
+
 export type NeuroHit = { kind: string; quote: string }
 
 export function neuroSpeech(text: string): NeuroHit | null {
+  const chopped = CHOPPED.exec(fold(text))
   for (const sentence of fold(text).split(/(?<=[.!?\n])/u)) {
+    const stamp = STAMPS.map((re) => re.exec(sentence)).find((m) => m !== null)
+    if (stamp) return { kind: 'штамп', quote: stamp[0].trim().slice(0, 100) }
     for (const { re, kind } of PATTERNS) {
       const m = re.exec(sentence)
       if (!m) continue
@@ -47,10 +72,12 @@ export function neuroSpeech(text: string): NeuroHit | null {
       return { kind, quote: m[0].trim().slice(0, 100) }
     }
   }
-  return null
+  return chopped ? { kind: 'штамп', quote: chopped[0].trim().slice(0, 100) } : null
 }
 
 /** What a rewrite is told about it. */
 export function neuroSpeechReason(hit: NeuroHit): string {
+  if (hit.kind === 'штамп')
+    return `фраза «${hit.quote}»: так пишет чат-бот, человек так не говорит. Убери ее и начни с сути`
   return `оборот «${hit.kind}» («${hit.quote}»): так пишет нейросеть, человек так не говорит. Скажи про то, что есть, одной фразой, без противопоставления: не «нужен не подрядчик, а человек», а «нужен человек, который…»`
 }

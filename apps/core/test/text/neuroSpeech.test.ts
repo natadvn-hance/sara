@@ -15,6 +15,27 @@ describe('FR-CONV-15: the «не X, а Y» turn is found', () => {
       expect(neuroSpeech(text), text).not.toBeNull()
   })
 
+  it('FR-CONV-15: finds the chatbot stamps, and not the words Boris uses himself', () => {
+    for (const text of [
+      'Давайте разберемся, что вам нужно.',
+      'Важно отметить, что сроки зависят от задачи.',
+      'Отличный вопрос! Сейчас отвечу.',
+      'Надеюсь, это поможет.',
+      'Дайте знать, если нужны детали.',
+      'На самом деле вопрос глубже.',
+      'Без шаблонов. Без воды. Только результат.',
+      'Подводя итог, начнем с анализа.',
+    ])
+      expect(neuroSpeech(text), text).not.toBeNull()
+    for (const text of [
+      'Важно понимать, есть ли у вас отдел продаж.',
+      'Вижу широкий спектр услуг, и блоки уникальные.',
+      'Давайте созвонимся и разберем задачу на встрече.',
+      'Честно скажу: химию не преподаю.',
+    ])
+      expect(neuroSpeech(text), text).toBeNull()
+  })
+
   it('leaves plain talk alone', () => {
     for (const text of [
       'Давайте не во вторник, а в среду.',
