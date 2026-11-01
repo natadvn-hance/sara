@@ -568,6 +568,57 @@ describe('insurance and the account tab', () => {
     expect(g.online()).toBe(true)
   }, 90000)
 
+  it('FR-LEAD-8: a quick look that misses after a press is no lost connection: the tab keeps moving', async () => {
+    await loginStandIn(ab.page, site)
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const g = createConnectionGuard({ db, accountId: 'hance-marketing', onBack: async () => {} })
+    const reports: boolean[] = []
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      canNavigate: () => g.mayNavigate(),
+      onNavigate: async (ok) => {
+        reports.push(ok)
+        await g.report(ok)
+      },
+    })
+    // Both tries of the look are cut off, as when the page moves on by itself right after a press.
+    site.dropNext(2)
+    const ok = await ins.inTab(({ go }) => go('/chats', { quick: true }))
+    ins.stop()
+    expect(ok).toBe(false)
+    expect(reports).not.toContain(false)
+    expect(g.online()).toBe(true)
+    expect(g.mayNavigate()).toBe(true)
+  }, 60000)
+
+  it('FR-LEAD-8: a quick page read does not wait for a page whose network never goes quiet', async () => {
+    await loginStandIn(ab.page, site)
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+    })
+    site.hangLoad(true)
+    try {
+      const t0 = Date.now()
+      const ok = await ins.inTab(({ go }) => go('/chats', { quick: true }))
+      expect(ok).toBe(true)
+      expect(Date.now() - t0).toBeLessThan(10_000)
+    } finally {
+      site.hangLoad(false)
+      ins.stop()
+    }
+  }, 60000)
+
   it('FR-LEAD-1: a page that never fires «load» is open once its document answered, and the guard stays online', async () => {
     await loginStandIn(ab.page, site)
     const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })

@@ -1,7 +1,7 @@
 import { type NoticeKind, type NoticeList, type NoticeRow, newEventId } from '@sara/shared'
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { notice, question, task } from '../db/schema'
+import { convTurn, notice, question, task } from '../db/schema'
 import { htmlToPlain } from './cards'
 import type { Notifier } from './notifier'
 
@@ -60,12 +60,19 @@ export function taskOfRows(rows: { callbackData: string }[][] | undefined): stri
   return null
 }
 
-const taskPath = (kind: string, entityKind: string, entityId: string) =>
-  kind.startsWith('lead')
-    ? `/leads/${encodeURIComponent(entityId)}`
-    : entityKind === 'conv_turn'
-      ? null
-      : null
+/** The page of a task's thing: a lead's own page, or the client of a draft card. */
+async function taskPath(db: DbOrTx, t: typeof task.$inferSelect): Promise<string | null> {
+  if (t.entityKind === 'lead') return `/leads/${encodeURIComponent(t.entityId)}`
+  if (t.entityKind === 'conv_turn') {
+    const [turn] = await db
+      .select({ c: convTurn.conversationId })
+      .from(convTurn)
+      .where(eq(convTurn.id, t.entityId))
+    return turn ? `/clients/${turn.c}` : null
+  }
+  if (t.kind === 'rule_proposal') return '/settings'
+  return null
+}
 
 export async function recordNotice(
   db: DbOrTx,
@@ -115,7 +122,7 @@ export async function noticeOfMessage(
     const [t] = await db.select().from(task).where(eq(task.id, taskId))
     if (t) {
       kind ??= t.kind.startsWith('conv_') ? 'draft' : t.kind === 'rule_proposal' ? 'system' : 'lead'
-      link ??= taskPath(t.kind, t.entityKind, t.entityId)
+      link ??= await taskPath(db, t)
     }
   }
   const { title, body } = split(text)

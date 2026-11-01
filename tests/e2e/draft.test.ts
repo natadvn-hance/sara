@@ -279,7 +279,7 @@ describe('the draft on the card', () => {
     await fake.emitOrder({
       order_id: orderId(),
       client_name: 'Ирина',
-      text: 'Меня зовут Ирина, нужен сайт для клиники.',
+      text: 'Меня зовут Ирина, нужен сайт для клиники. Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.',
     })
     await until(() => cards().length === 1)
     const stdins = (await readFile(claudeLog, 'utf8'))
@@ -365,7 +365,7 @@ describe('the order page name', () => {
     await fake.emitOrder({
       order_id: id,
       client_name: '',
-      text: 'Меня зовут Ольга Петрова, нужен сайт для клиники.',
+      text: 'Меня зовут Ольга Петрова, нужен сайт для клиники. Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.',
     })
     await until(async () => (await leadOf(id))?.status === 'scored_out')
     await db

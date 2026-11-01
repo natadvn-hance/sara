@@ -41,6 +41,7 @@ export type ServiceTimings = {
  * 10-minute check read the 8 newest chats blind (10 loads, 60 an hour). A chat the event stream names is read at once
  * (its page and the way back to the feed, 2 loads a message). Together about 150 an hour and 2 a client message, well
  * under the ~270 at which Profi.ru shut old Sara out for 48 minutes on 08.10.2026 (nine escalations every 3 minutes).
+ * Reading the whole board (src/eyes/insurance.ts) adds no page load, only the board's own answers while it scrolls.
  */
 const DEFAULT_TIMINGS: ServiceTimings = {
   tickMs: 30000,
@@ -216,7 +217,8 @@ export async function startProfiService(
         onNavigate: (ok) => guard.report(ok),
         afterOrderPage: (id, may) => calibration.afterOrderPage(id, may),
       })
-      await a.insurance.feedOnce()
+      // The first look reads the whole board: whatever came while the node was away.
+      await a.insurance.feedOnce({ deep: true })
       await a.watch.tick()
     }
     await start()

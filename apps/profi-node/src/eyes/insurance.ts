@@ -1,14 +1,16 @@
-import type { Response } from 'playwright'
+import type { Request, Response } from 'playwright'
 import type { AccountBrowser } from '../browser/accountBrowser'
 import { anonymousChatUrl, readChatFormMap } from './chatFormMap'
 import type { Eyes } from './eyes'
 import { readFormMap } from './formMap'
 import { BUBBLE, bubbleShapes, pageShape } from './pageShape'
 import type { ChatListItem, Parsers } from './parsers'
+import { redactSecrets } from './recorder'
 
 export type Insurance = {
   stop(): void
-  feedOnce(): Promise<void>
+  /** `deep`: reads the whole board, whatever it looks like (after a start or an outage). */
+  feedOnce(o?: { deep?: boolean }): Promise<void>
   chatsOnce(onlyUnread?: boolean): Promise<void>
   reconcile(since: string): Promise<void>
   /**
@@ -21,7 +23,11 @@ export type Insurance = {
    */
   inTab<T>(
     f: (t: {
-      go(path: string): Promise<boolean>
+      /**
+       * `quick`: back as soon as the document answered, without the wait for the page to settle (up to 15 s). A quick
+       * look that misses says nothing of the site: right after a press the page may be moving on by itself.
+       */
+      go(path: string, o?: { quick?: boolean }): Promise<boolean>
       can(): boolean
       later(errand: () => Promise<void>): void
     }) => Promise<T>,
@@ -40,14 +46,18 @@ const NEWS_MAX = 8
 export type BoardScroll = {
   /** Pages of the board a pass loads, the one the page opens with included. */
   pages?: number
-  /** Every Nth pass reads far more of the board... */
-  fullEvery?: number
-  /** ...up to this many pages. */
+  /** A pass over the whole board at least this often, whatever the board's count says... */
+  deepEveryMs?: number
+  /** ...and when the count moved, but not this soon after the last one. */
+  deepGapMs?: number
+  /** Up to this many pages. */
   fullPages?: number
   /** Between two scrolls a person looks at the page (milliseconds, a little random). */
   pauseMs?: number
   /** A pass stops scrolling after this long, so the one tab is not held from the checks and bids behind it. */
   budgetMs?: number
+  /** The same for a pass over the whole board. */
+  deepBudgetMs?: number
   /** The ways to make the board load more, in the order tried (the one that worked last time goes first). */
   ways?: BoardWay[]
 }
@@ -61,14 +71,22 @@ export type BoardWay = 'wheel' | 'last_card' | 'container' | 'button'
 const BOARD_WAYS: BoardWay[] = ['wheel', 'last_card', 'container', 'button']
 const MORE_BUTTON =
   /^\s*(показать\s+ещ[её]|ещ[её]\s+заказ|показать\s+больше|загрузить\s+ещ[её]|больше\s+заказов)/i
-// The board answers about 17 orders at a time, by relevance and not by time (346 on 24.10.2026): a new order of low
-// relevance sits far down. The first pages every 30 seconds, the whole board about every 10 minutes, as before.
+// The board answers about 17 orders at a time, by relevance score and not by time (346 on 24.10.2026; its cursor reads
+// [score, date, order, n]): a new order of low relevance lands far down, where only a pass over the whole board finds
+// it. On 01.11.2026 a quarter of the orders were seen over 5 minutes late (95612005: 16 minutes, closed 11 seconds after
+// its card). Every answer says how many orders the whole board holds, so the whole board is read as soon as that number
+// moves. It is also read on a clock, for a new order and a closed one cancelling out; otherwise the first pages are
+// enough. About as many requests to the board as the 4 pages of every pass before this, and a press still goes first.
 const BOARD_SCROLL = {
-  pages: 4,
-  fullEvery: 20,
+  pages: 2,
+  deepEveryMs: 300000,
+  /** The number moving this soon after a whole pass waits: a board whose count jitters must not be read all the time. */
+  deepGapMs: 60000,
   fullPages: 30,
   pauseMs: 1200,
   budgetMs: 50000,
+  /** About 20 pages through the slow proxy: a whole pass must reach the bottom, where the late orders are. */
+  deepBudgetMs: 120000,
   ways: BOARD_WAYS,
 }
 
@@ -101,7 +119,10 @@ export function startInsurance(o: {
   const can = o.canNavigate ?? (() => true)
   const pause = o.chatPauseMs ?? 2000
   const scroll = { ...BOARD_SCROLL, ...o.board }
-  let passes = 0
+  const startedAt = Date.now()
+  // When the whole board was last read to where it could be, and the board's count that pass answered to.
+  let deepAt = Number.NEGATIVE_INFINITY
+  let deepTotal: number | null = null
   // The tab does one piece of work at a time, in turn: a press goes before all that waits (on 29.10.2026 a bid waited 2
   // minutes behind the chat check, the feed and another order's page), then a chat the event stream named, then the rest.
   const PRESS = 2
@@ -130,7 +151,7 @@ export function startInsurance(o: {
    * its next turn.
    */
   const pressWaits = () => queue.some((j) => j.prio > 0)
-  async function go(path: string): Promise<boolean> {
+  async function go(path: string, opt?: { quick?: boolean }): Promise<boolean> {
     let ok = false
     // One miss is tried again once the page has settled: the page's own navigation (a form that sent) or one stuck
     // request must not take the site for lost and stop every page for 5 minutes, as after a bid on 29.10.2026. A site
@@ -138,13 +159,13 @@ export function startInsurance(o: {
     for (let tries = 0; tries < 2 && !ok; tries++) {
       if (tries > 0)
         await o.ab.page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {})
-      ok = await goOnce(path)
+      ok = await goOnce(path, opt?.quick === true)
     }
     // Not awaited: what the guard does next (a reconcile) queues behind this check instead of deadlocking it.
-    void Promise.resolve(o.onNavigate?.(ok)).catch(() => {})
+    if (ok || !opt?.quick) void Promise.resolve(o.onNavigate?.(ok)).catch(() => {})
     return ok
   }
-  async function goOnce(path: string): Promise<boolean> {
+  async function goOnce(path: string, quick: boolean): Promise<boolean> {
     let ok = false
     try {
       // A page whose document answered is open. Profi.ru's messenger keeps polling, so its network never goes quiet,
@@ -156,7 +177,8 @@ export function startInsurance(o: {
         timeout: 30000,
       })
       ok = (res?.status() ?? 0) > 0 && (res?.status() ?? 0) < 500
-      await o.ab.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+      if (!quick)
+        await o.ab.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
     } catch {
       ok = false
     }
@@ -404,7 +426,7 @@ export function startInsurance(o: {
    * passes the eyes, so nothing is called by hand. Stops at the page count, the end of the board, the time budget, or
    * when the tab may not move or no way makes the page load more.
    */
-  async function scrollBoard(pages: number) {
+  async function scrollBoard(pages: number, budgetMs: number) {
     const t0 = Date.now()
     let loaded = 1
     let stoppedBy: 'pages' | 'end' | 'quiet' | 'time' | 'gate' | 'press' = 'pages'
@@ -415,7 +437,7 @@ export function startInsurance(o: {
         stoppedBy = 'gate'
         break
       }
-      if (Date.now() - t0 >= scroll.budgetMs) {
+      if (Date.now() - t0 >= budgetMs) {
         stoppedBy = 'time'
         break
       }
@@ -453,18 +475,40 @@ export function startInsurance(o: {
       tried,
       ...(probe && { probe }),
     })
+    return stoppedBy
   }
 
-  async function feedOnce() {
+  /** The whole board when asked, when the board's count moved or when its time came; else the first pages. */
+  async function readBoard(asked: boolean) {
+    const now = Date.now()
+    const total = o.eyes.board()?.total ?? null
+    const moved =
+      total !== null &&
+      deepTotal !== null &&
+      total !== deepTotal &&
+      now - deepAt >= scroll.deepGapMs
+    if (deepTotal === null) deepTotal = total
+    const due = now - Math.max(deepAt, startedAt) >= scroll.deepEveryMs
+    if (!asked && !moved && !due) {
+      await scrollBoard(scroll.pages, scroll.budgetMs)
+      return
+    }
+    const stoppedBy = await scrollBoard(scroll.fullPages, scroll.deepBudgetMs)
+    // Given way to a press, or the tab stopped: the next pass reads it again. Otherwise this is as far as it goes.
+    if (stoppedBy === 'press' || stoppedBy === 'gate') return
+    deepAt = Date.now()
+    deepTotal = total
+  }
+
+  async function feedOnce(opt?: { deep?: boolean }) {
     await serial(async () => {
       if (!can()) return
       o.eyes.boardPassStart()
       if (!(await go(o.parsers.paths.feed))) return
       await readNewOrders()
-      passes++
       // Only on the feed page itself (the page links fallback leaves it) and only a board the eyes know.
       if (onFeed && can() && !pressWaits() && o.eyes.boardWorks() && o.eyes.board()?.more)
-        await scrollBoard(passes % scroll.fullEvery === 0 ? scroll.fullPages : scroll.pages)
+        await readBoard(opt?.deep === true)
       // Before the chats: the way back to the feed brings its first page again, which is not this pass's.
       await o.eyes.boardPassEnd()
       await readTouchedChats()
@@ -638,8 +682,24 @@ export function startInsurance(o: {
         })
     }
   }
+  // How the page asks for the board, once a run: whether it can be sorted by date or read by itself is judged on this.
+  let boardAsked = false
+  const onRequest = (q: Request) => {
+    const body = q.postData()
+    if (boardAsked || !o.parsers.isBoardRequest?.(q.url(), body)) return
+    boardAsked = true
+    let asked: unknown = null
+    try {
+      asked = redactSecrets(JSON.parse(body ?? 'null'))
+    } catch {}
+    void keep({ what: 'board_request', url: q.url(), body: asked })
+  }
+  o.ab.page.on('request', onRequest)
   const timers = [
-    setInterval(unlessBusy(feedOnce), o.feedEveryMs ?? 30000),
+    setInterval(
+      unlessBusy(() => feedOnce()),
+      o.feedEveryMs ?? 30000,
+    ),
     setInterval(unlessBusy(newsCheck), o.chatsEveryMs ?? 120000),
     setInterval(unlessBusy(readNews), o.newsEveryMs ?? 1000),
   ]
@@ -647,12 +707,13 @@ export function startInsurance(o: {
   return {
     stop: () => {
       for (const t of timers) clearInterval(t)
+      o.ab.page.off('request', onRequest)
     },
     feedOnce,
     chatsOnce: (onlyUnread = true) => chats((c) => !onlyUnread || c.unread > 0),
     inTab<T>(
       f: (t: {
-        go(path: string): Promise<boolean>
+        go(path: string, o?: { quick?: boolean }): Promise<boolean>
         can(): boolean
         later(errand: () => Promise<void>): void
       }) => Promise<T>,
@@ -666,10 +727,10 @@ export function startInsurance(o: {
               resolve(
                 await f({
                   // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
-                  go: async (path) => {
+                  go: async (path, goOpt) => {
                     if (!can()) return false
                     onFeed = false
-                    return go(path)
+                    return go(path, goOpt)
                   },
                   can,
                   later: (errand) => void errands.push(errand),
@@ -688,7 +749,7 @@ export function startInsurance(o: {
     },
     // After a logout or an outage: the feed and the chats with messages since then, one by one (F8).
     async reconcile(since) {
-      await feedOnce()
+      await feedOnce({ deep: true })
       // A chat without a known last time is read too: missing a message is worse than one more page.
       await chats((c) => c.lastAt === null || c.lastAt >= since)
     },

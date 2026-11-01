@@ -1,7 +1,7 @@
 import type { MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
 import { clientInfoFromAnswer } from './clientInfo'
-import { listedChats } from './history'
+import { chatHistory, listedChats } from './history'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
@@ -164,7 +164,10 @@ export function fromSiteAnswer(url: string, body: unknown): ParseResult {
   }
   const data = (
     body as {
-      data?: { boSearchBoardItems?: { items?: unknown; nextCursor?: unknown }; orders?: unknown }
+      data?: {
+        boSearchBoardItems?: { items?: unknown; nextCursor?: unknown; totalCount?: unknown }
+        orders?: unknown
+      }
     } | null
   )?.data
   if (/\/graphql/.test(url) && Array.isArray(data?.orders)) return fromOrderAnswer(data.orders)
@@ -183,7 +186,8 @@ export function fromSiteAnswer(url: string, body: unknown): ParseResult {
     .filter((x): x is OrderSignal => x !== null)
   // The board holds the first ~17 of its orders in an answer, by relevance, not by time: the next pages come by cursor.
   const more = typeof board.nextCursor === 'string' && board.nextCursor !== ''
-  return { recognized: true, what: 'feed', signals, more }
+  const total = typeof board.totalCount === 'number' ? { total: board.totalCount } : {}
+  return { recognized: true, what: 'feed', signals, more, ...total }
 }
 
 const CHAT_NOTICE = new Set(['MSG_CHAT_ORDER_NOTIFY', 'MSG_MESSENGER_UNREAD_NOTIFY'])
@@ -231,6 +235,7 @@ export const profiParsers: Parsers = {
   banMarkers: ['Профиль заблокирован', 'Ваш профиль заблокирован'],
   fromRtp: fromStreamFrame,
   fromResponse: fromSiteAnswer,
+  isBoardRequest: (url, postData) => /\/graphql/.test(url) && /boSearchBoard/i.test(postData ?? ''),
 
   async fromFeedDom(page) {
     // Cards render after load; an empty feed simply times out here.
@@ -303,6 +308,13 @@ export const profiParsers: Parsers = {
     // Kept as a path on the site, whatever form the menu uses.
     const u = new URL(href, 'https://profi.ru')
     return `${u.pathname}${u.search}`
+  },
+
+  // The chat's answer (messengerChatMessages), read live by the archive reader on 28.10.2026, 86 messages of 86.
+  chatTextsFromAnswer(_url, body) {
+    const m = (body as { data?: { messengerChatMessages?: unknown } } | null)?.data
+      ?.messengerChatMessages
+    return m ? chatHistory([body], '').messages.map((x) => x.text) : null
   },
 
   // Told by its shape alone, as the archive reader read it live (28.10.2026), whatever address it came from.

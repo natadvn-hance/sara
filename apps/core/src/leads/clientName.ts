@@ -1,10 +1,20 @@
+import { formalName } from './russianNames'
+
 /** What Profi.ru shows instead of a name while it hides one. */
 const PLACEHOLDER = /^(клиент|заказчик|пользовател|имя|аноним|скры)/iu
 
-/** The leading letters of the name («Анна(Юля)» gives «Анна»), so only letters and hyphens ever reach a pattern. */
+/**
+ * The name Sara calls a client by, from what his profile says (Boris, 01.11.2026): the first word of it as a formal
+ * Russian first name, «alexander» as «Александр», «Таня» as «Татьяна». A profession («Психотерапевт»), a company
+ * («ООО Ромашка»), a nick, a stand-in of the site or a name Sara does not know gives null: the greeting then goes
+ * without a name, «Добрый день!». Only letters and hyphens ever reach a pattern.
+ */
 export function firstName(clientName: string): string | null {
   const word = /^\p{L}[\p{L}-]*/u.exec(clientName.trim())?.[0] ?? ''
-  return word && !PLACEHOLDER.test(word) ? word : null
+  if (!word || PLACEHOLDER.test(word)) return null
+  const parts = word.split('-').filter(Boolean)
+  const formal = parts.map(formalName)
+  return formal.length > 0 && formal.every((p): p is string => p !== null) ? formal.join('-') : null
 }
 
 /** «ИП», «ООО»: a company form in capitals is no part of a person's name, and hiding it would mangle the text. */

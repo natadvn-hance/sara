@@ -82,6 +82,25 @@ describe('conversation events', () => {
     expect(c?.lastClientHeardAt).not.toBeNull()
   })
 
+  it('FR-CONV-1: the site’s own line right behind the client’s word does not hide it: the turn starts', async () => {
+    await setSetting(db, 'pipeline.conversations', true, 'system')
+    const { onEvent, chat } = setup()
+    chat.chat.push(chatMsg('m-1', 'specialist', 'Отклик', '2026-10-20T09:00:00.000Z'))
+    chat.chat.push(
+      chatMsg('m-2', 'client', 'Да, интересно', new Date(Date.now() - 2000).toISOString()),
+    )
+    chat.chat.push(
+      chatMsg(
+        'm-3',
+        'system',
+        'Сообщите, если договоритесь работать с клиентом',
+        new Date().toISOString(),
+      ),
+    )
+    await onEvent(envelope('profi.client_message', ref('m-2')))
+    expect(turns).toEqual([CHAT])
+  })
+
   it('FR-CONV-1: with conversations off the message is stored and no turn starts', async () => {
     const { onEvent, chat } = setup()
     chat.chat.push(chatMsg('m-2', 'client', 'Сколько стоит?', new Date().toISOString()))

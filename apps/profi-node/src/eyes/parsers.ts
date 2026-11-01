@@ -26,6 +26,8 @@ export type ParseResult = {
   signals: Signal[]
   /** A board answer: the board has more pages, which the page loads when scrolled (nextCursor). */
   more?: boolean
+  /** A board answer: how many orders the whole board holds (totalCount); a new order moves it, wherever it landed. */
+  total?: number
 }
 
 export type FeedRef = { orderId: string; snippet: string }
@@ -46,6 +48,8 @@ export type Parsers = {
   banMarkers: string[]
   fromRtp(body: unknown): ParseResult
   fromResponse(url: string, body: unknown): ParseResult
+  /** The page's request for the board, kept once a run: how it asks tells whether it can be sorted or read by itself. */
+  isBoardRequest?(url: string, postData: string | null): boolean
   fromHeaderDom(page: Page): Promise<Signal[]>
   fromChatsDom(page: Page): Promise<ChatListItem[]>
   /**
@@ -53,6 +57,8 @@ export type Parsers = {
    * nor marks (24.10.2026), its answer carries both. Null for any other answer.
    */
   chatsFromAnswer?(url: string, body: unknown): ChatListItem[] | null
+  /** The texts of a chat from the chat's own answer, for finding our bid there. Null for any other answer. */
+  chatTextsFromAnswer?(url: string, body: unknown): string[] | null
   /** `waitMs`: how long to wait for the first bubble (a sender that knows the chat may be empty does not wait long). */
   fromChatDom(page: Page, chatId: string, o?: { waitMs?: number }): Promise<ParseResult>
 }
@@ -151,6 +157,7 @@ export const standInParsers: Parsers = {
         what: 'feed',
         signals: (body.items as StandInOrder[]).map(order),
         more: typeof body.nextCursor === 'string',
+        ...(typeof body.totalCount === 'number' && { total: body.totalCount }),
       }
     }
     if (path.startsWith('/api/order/') && isObj(body) && typeof body.id === 'string') {
@@ -180,6 +187,11 @@ export const standInParsers: Parsers = {
       .catch(() => null)
     if (presence) out.push({ t: 'presence', on: presence.split(/\s+/).includes('on') })
     return out
+  },
+  chatTextsFromAnswer(url, body) {
+    if (!/^\/api\/chat\//.test(new URL(url).pathname)) return null
+    if (!isObj(body) || !Array.isArray(body.messages)) return null
+    return (body.messages as { text?: unknown }[]).map((m) => String(m?.text ?? ''))
   },
   chatsFromAnswer(url, body) {
     if (new URL(url).pathname !== '/api/chats' || !isObj(body) || !Array.isArray(body.chats))

@@ -3,6 +3,7 @@ import { and, desc, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, convTurn, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { firstName } from '../leads/clientName'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { getConversation } from './store'
@@ -46,7 +47,7 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
     } | null) ?? null
   const told = understanding?.case
   return {
-    name: l?.clientName || null,
+    name: l?.clientName ? firstName(l.clientName) : null,
     orderTitle: l ? shownTitle(l.id, l.title) : null,
     clientWords: ids
       .map((id) => byId.get(id) ?? '')

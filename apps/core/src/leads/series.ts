@@ -204,9 +204,9 @@ const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 
 /** One message: the chat read, the outbox, the delivery; once more after the chat moved under it (CHAT_CHANGED). */
 /** Step: the call offer with its times picked now, or null when there are none to give. */
-async function callText(template: string): Promise<string | null> {
+async function callText(template: string, leadId: string): Promise<string | null> {
   const now = new Date()
-  const slots = await d().slots.slots(now)
+  const slots = await d().slots.slots(now, { leadId })
   return slots.length > 0 ? fillCallOffer(template, slots, now) : null
 }
 
@@ -252,7 +252,7 @@ async function runSeries(job: SeriesJob): Promise<void> {
     )
     // Only the call offer has a step of its own here: a series of before it resumes along the steps it took.
     const text = call
-      ? await DBOS.runStep(() => callText(approved), { name: `times-${n}`, ...DB_STEP })
+      ? await DBOS.runStep(() => callText(approved, job.leadId), { name: `times-${n}`, ...DB_STEP })
       : approved
     const stop = text === null ? { why: 'no_slots' as const } : await sendOne(job, n, text, sent)
     if (stop) {

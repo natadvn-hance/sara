@@ -313,6 +313,29 @@ describe('the chats list of the live site', () => {
     ])
   })
 
+  it('FR-LEAD-8: the chat answer gives its texts, for finding our bid; any other answer gives none', () => {
+    const body = {
+      data: {
+        messengerChatMessages: {
+          hasPrev: false,
+          messages: [
+            {
+              _id: '1',
+              dateCreated: 'Fri Oct 31 2026 17:08:12 GMT+0300 (MSK)',
+              text: 'наш отклик',
+              whoRead: [{ extUserType: 'CLIENT' }],
+            },
+          ],
+        },
+      },
+    }
+    expect(profiParsers.chatTextsFromAnswer?.('https://profi.ru/graphql', body)).toEqual([
+      'наш отклик',
+    ])
+    expect(profiParsers.chatTextsFromAnswer?.('https://profi.ru/graphql', { data: {} })).toBe(null)
+    expect(profiParsers.chatTextsFromAnswer?.('https://profi.ru/graphql', null)).toBe(null)
+  })
+
   it('FR-CONV-1: an answer without the list is not a chats list', () => {
     const url = 'https://profi.ru/graphql'
     expect(profiParsers.chatsFromAnswer?.(url, { data: { orders: [] } })).toBe(null)
