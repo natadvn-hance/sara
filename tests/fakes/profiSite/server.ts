@@ -325,13 +325,14 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.feedRequests++
       const open = orders.filter((x) => x.open)
       const size = state.boardPageSize
-      if (size <= 0) return json(res, { [layout.feedKey]: open })
+      if (size <= 0) return json(res, { [layout.feedKey]: open, totalCount: open.length })
       // Paged like the live board: a page and the cursor of the next one (here the index of its first order).
       const from = Number(url.searchParams.get('cursor') ?? 0) || 0
       const next = from + size
       return json(res, {
         [layout.feedKey]: open.slice(from, next),
         nextCursor: next < open.length ? String(next) : null,
+        totalCount: open.length,
       })
     }
     if (p.startsWith('/api/order/')) {
