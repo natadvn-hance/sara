@@ -47,20 +47,48 @@ export async function markOrderBid(db: NodeDbOrTx, accountId: string, orderId: s
     .where(and(eq(rawOrder.accountId, accountId), eq(rawOrder.orderId, orderId)))
 }
 
-export type BidAttempt = { dueRub: number; result: unknown }
+export type BidAttempt = {
+  dueRub: number
+  result: unknown
+  walletRub: number | null
+  pressedAt: string
+}
 
 export async function findBidAttempt(db: NodeDbOrTx, key: string): Promise<BidAttempt | null> {
   const [r] = await db
-    .select({ dueRub: bidAttempt.dueRub, result: bidAttempt.result })
+    .select({
+      dueRub: bidAttempt.dueRub,
+      result: bidAttempt.result,
+      walletRub: bidAttempt.walletRub,
+      pressedAt: bidAttempt.pressedAt,
+    })
     .from(bidAttempt)
     .where(eq(bidAttempt.idempotencyKey, key))
   return r ?? null
 }
 
+/** What the presses of this account after this one may have taken from the wallet: their money is not this press's. */
+export async function duesPressedAfter(
+  db: NodeDbOrTx,
+  accountId: string,
+  key: string,
+): Promise<number> {
+  const [r] = await db
+    .select({ rub: sql<string | null>`sum(${bidAttempt.dueRub})` })
+    .from(bidAttempt)
+    .where(
+      and(
+        eq(bidAttempt.accountId, accountId),
+        sql`${bidAttempt.pressedAt} > (select pressed_at from node.bid_attempt where idempotency_key = ${key})`,
+      ),
+    )
+  return Number(r?.rub ?? 0)
+}
+
 /** Written before the send button is pressed: false when a press with this key was already written. */
 export async function savePress(
   db: NodeDbOrTx,
-  p: { key: string; accountId: string; orderId: string; dueRub: number },
+  p: { key: string; accountId: string; orderId: string; dueRub: number; walletRub?: number | null },
 ): Promise<boolean> {
   const rows = await db
     .insert(bidAttempt)
@@ -69,6 +97,7 @@ export async function savePress(
       accountId: p.accountId,
       orderId: p.orderId,
       dueRub: p.dueRub,
+      walletRub: p.walletRub ?? null,
       pressedAt: new Date().toISOString(),
     })
     .onConflictDoNothing()

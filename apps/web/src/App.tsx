@@ -55,8 +55,8 @@ const SCREENS: Record<string, (path: string) => ReactNode> = {
   today: () => <TodayScreen />,
   meetings: () => <MeetingsScreen />,
   mind: () => <MindScreen />,
-  settings: (path) =>
-    path.startsWith('/accounts') ? <Accounts path={path} /> : <SettingsScreen />,
+  settings: () => <SettingsScreen />,
+  accounts: (path) => <Accounts path={path} />,
   health: () => <HealthScreen />,
   journal: () => <JournalScreen />,
   notices: () => <NoticesScreen />,

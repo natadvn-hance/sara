@@ -7,6 +7,7 @@ import { requireSession } from '../auth/session'
 import { question, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { markSeen, noticeList, putAway } from '../notify/center'
+import { latestForPush, pushPublicKey, subscribe, unsubscribe } from '../notify/push'
 import { setSetting } from '../settings/store'
 import { analyticsView } from './analytics'
 import {
@@ -88,6 +89,13 @@ const JournalQuery = z.object({
   before: z.string().max(40).optional(),
 })
 const SearchQuery = z.object({ q: z.string().max(200).default('') })
+const SubscribeBody = z.object({
+  subscription: z.object({
+    endpoint: z.url().startsWith('https://'),
+    keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100) }),
+  }),
+  label: z.string().max(120).nullable().optional(),
+})
 const DecideBody = z.object({
   decision: z.enum(['yes', 'no']),
   reason: z.string().trim().min(1).max(500).nullable().default(null),
@@ -394,6 +402,31 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       if (!parsed.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
       await setSetting(d.db, key, parsed.data as never, 'boris')
       return { message: 'Сохранила.' }
+    })
+
+    // Web Push (pult v2 design 6): the key, the subscriptions and what a waking service worker shows.
+    scoped.get('/api/push/key', async () => ({ key: await pushPublicKey(d.secrets) }))
+    scoped.post('/api/push/subscribe', async (req, reply) => {
+      const body = SubscribeBody.safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      const { endpoint, keys } = body.data.subscription
+      await subscribe(d.db, {
+        endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        label: body.data.label ?? null,
+      })
+      return { message: 'Это устройство будет звонить.' }
+    })
+    scoped.post('/api/push/unsubscribe', async (req, reply) => {
+      const body = z.object({ endpoint: z.url() }).safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
+      await unsubscribe(d.db, body.data.endpoint)
+      return { message: 'Это устройство больше не звонит.' }
+    })
+    scoped.get('/api/push/latest', async (_req, reply) => {
+      const n = await latestForPush(d.db)
+      return n ?? reply.code(204).send()
     })
 
     registerStreamRoute(scoped)

@@ -1,5 +1,5 @@
 {
-  "id": "e0a64d06-23d5-4a30-8f82-c63b142a3a14",
+  "id": "629fa682-93c6-4ce3-8260-5e4216a27b97",
   "prevId": "a4d074f5-b47f-4d1a-a72a-8fd199e460e7",
   "version": "7",
   "dialect": "postgresql",
@@ -1915,12 +1915,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "draft_price_to_rub": {
-          "name": "draft_price_to_rub",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "draft_analysis": {
           "name": "draft_analysis",
           "type": "jsonb",
@@ -3452,6 +3446,56 @@
           "value": "jsonb_array_length(\"core\".\"persona\".\"source_refs\") > 0"
         }
       },
+      "isRLSEnabled": false
+    },
+    "core.push_subscription": {
+      "name": "push_subscription",
+      "schema": "core",
+      "columns": {
+        "endpoint": {
+          "name": "endpoint",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "p256dh": {
+          "name": "p256dh",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "auth": {
+          "name": "auth",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "failed_at": {
+          "name": "failed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "core.question": {

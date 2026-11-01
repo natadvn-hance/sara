@@ -16,6 +16,7 @@ const ICON: Record<string, string> = {
   session: 'user',
   link: 'link',
   backup: 'shield',
+  sheet: 'list',
 }
 const LOGIN: Record<string, string> = {
   alive: 'вход жив',

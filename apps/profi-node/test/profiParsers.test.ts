@@ -286,3 +286,60 @@ describe('Profi.ru page readers', () => {
     expect(profiParsers.fromRtp({ some: 'thing' }).recognized).toBe(false)
   })
 })
+
+describe('the chats list of the live site', () => {
+  // The list answer's shape as the archive reader read it live on 28.10.2026, without names or texts of clients.
+  const edge = (id: string | number, unread: number, last: string) => ({
+    node: {
+      messengerType: 'ORDER',
+      messengerExtId: id,
+      order: { rboFilterId: 'open' },
+      chats: [{ unreadMessageCount: unread, messagesCount: 4, lastMessage: { dateCreated: last } }],
+    },
+  })
+  const answer = (...edges: unknown[]) => ({
+    data: { me: { rboMessengersByFilter: { totalCount: edges.length, edges } } },
+  })
+
+  it('FR-CONV-1: the list answer gives each order chat its unread count and the time of its last message', () => {
+    const body = answer(
+      edge(95300001, 2, 'Fri Oct 31 2026 12:51:07 GMT+0300 (MSK)'),
+      edge('95300002', 0, 'Wed Sep 16 2026 12:51:00 GMT+0300 (MSK)'),
+      { node: { messengerType: 'SUPPORT', messengerExtId: 1, chats: [] } },
+    )
+    expect(profiParsers.chatsFromAnswer?.('https://profi.ru/graphql?op=list', body)).toEqual([
+      { chatId: '95300001', unread: 2, lastAt: '2026-10-31T09:51:07.000Z' },
+      { chatId: '95300002', unread: 0, lastAt: '2026-09-16T09:51:00.000Z' },
+    ])
+  })
+
+  it('FR-LEAD-8: the chat answer gives its texts, for finding our bid; any other answer gives none', () => {
+    const body = {
+      data: {
+        messengerChatMessages: {
+          hasPrev: false,
+          messages: [
+            {
+              _id: '1',
+              dateCreated: 'Fri Oct 31 2026 17:08:12 GMT+0300 (MSK)',
+              text: 'наш отклик',
+              whoRead: [{ extUserType: 'CLIENT' }],
+            },
+          ],
+        },
+      },
+    }
+    expect(profiParsers.chatTextsFromAnswer?.('https://profi.ru/graphql', body)).toEqual([
+      'наш отклик',
+    ])
+    expect(profiParsers.chatTextsFromAnswer?.('https://profi.ru/graphql', { data: {} })).toBe(null)
+    expect(profiParsers.chatTextsFromAnswer?.('https://profi.ru/graphql', null)).toBe(null)
+  })
+
+  it('FR-CONV-1: an answer without the list is not a chats list', () => {
+    const url = 'https://profi.ru/graphql'
+    expect(profiParsers.chatsFromAnswer?.(url, { data: { orders: [] } })).toBe(null)
+    expect(profiParsers.chatsFromAnswer?.(url, { data: { me: { profile: {} } } })).toBe(null)
+    expect(profiParsers.chatsFromAnswer?.(url, null)).toBe(null)
+  })
+})

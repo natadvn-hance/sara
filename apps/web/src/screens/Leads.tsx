@@ -18,7 +18,7 @@ import { HoldBar, SKIP_REASONS } from '../ui/task'
 
 const DECIDED: Record<LeadQueue['decided'][number]['decision'], string> = {
   bid: 'отклик',
-  skip: 'пропущена',
+  skip: 'закрыта',
   closed: 'закрылась',
   other: 'решена',
 }
@@ -167,7 +167,7 @@ function Queue({
 }
 
 /**
- * The decision: «Откликнуться» waits ten seconds in the core and can be cancelled; «Пропустить» asks why here, one
+ * The decision: «Откликнуться» waits ten seconds in the core and can be cancelled; «Закрыть заявку» asks why here, one
  * tap on a reason or none; «Перепроверить» reads the order page now.
  */
 function Decide({ v }: { v: LeadView }) {
@@ -183,7 +183,7 @@ function Decide({ v }: { v: LeadView }) {
         {t.resolution === 'bid'
           ? 'отклик'
           : t.resolution === 'skip'
-            ? `пропущена${v.label?.reason ? `, ${v.label.reason}` : ''}`
+            ? `закрыта${v.label?.reason ? `, ${v.label.reason}` : ''}`
             : (t.resolution ?? 'закрыта')}
         .
       </p>
@@ -241,7 +241,7 @@ function Decide({ v }: { v: LeadView }) {
               disabled={busy !== null || !reason.trim()}
               onClick={() => skip(reason.trim())}
             >
-              Пропустить
+              Закрыть заявку
             </Btn>
             <Btn size="sm" onClick={() => setSkipping(false)}>
               Отмена
@@ -259,7 +259,7 @@ function Decide({ v }: { v: LeadView }) {
             {fee > 0 ? `Откликнуться за ${rub(fee)}` : 'Цена отклика неизвестна'}
           </Btn>
           <Btn disabled={busy !== null} onClick={() => setSkipping(true)}>
-            Пропустить
+            Закрыть заявку
           </Btn>
           <Btn
             size="sm"

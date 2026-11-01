@@ -288,10 +288,13 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
   }, 60000)
 
-  it('FR-LEAD-5: a task Boris already decided is never read, and its card is left as it is', async () => {
+  it('FR-LEAD-5: a task Boris already decided is never read, and its card is left as his close made it', async () => {
     const decided = await shownCard()
     press('skip')
     await until(async () => (await taskOf(decided.id))?.state === 'resolved')
+    // His own close edited that card into «📁 Заявка закрыта»; the recheck must not touch it again.
+    await until(() => tg.edited.some((e) => e.message_id === decided.messageId))
+    tg.edited.length = 0
     const open = await shownCard()
     fake.setOrderPage(decided.id, { open: false })
     fake.setOrderPage(open.id, { open: false })
@@ -303,7 +306,7 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     expect((await leadOf(decided.id))?.status).toBe('skipped')
   }, 60000)
 
-  it('FR-LEAD-5: Boris deciding while the page is being read keeps his decision: the card is not touched', async () => {
+  it('FR-LEAD-5: Boris deciding while the page is being read keeps his decision: the recheck does not touch the card', async () => {
     const { id } = await shownCard()
     // The read is slow, so Boris's press lands in the middle of it.
     fake.setOrderPage(id, { open: false, delayMs: 2500 })
@@ -315,7 +318,8 @@ describe('a card whose order closed (FR-LEAD-5)', () => {
     await pass
     expect(await actorsOf('task.resolved', (await taskOf(id))?.id ?? '')).toEqual(['boris'])
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })
-    expect(tg.edited).toHaveLength(0)
+    // The only edit is his own close: the short «📁» card, never the site-closed «🔒» one.
+    expect(tg.edited.map((e) => e.text.includes('📁 Заявка закрыта'))).toEqual([true])
     expect(await payloads('lead.closed_on_site', id)).toEqual([])
     expect((await leadOf(id))?.status).toBe('skipped')
   }, 60000)
