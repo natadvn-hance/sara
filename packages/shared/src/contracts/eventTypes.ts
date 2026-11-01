@@ -110,6 +110,7 @@ export const EVENT_TYPES = [
   'conv.dormant',
   'conv.day_summary',
   'conv.owed_reminded',
+  'conv.topic_restored',
   'mind.indexed',
   'mind.gap_recorded',
   'mind.proposed',

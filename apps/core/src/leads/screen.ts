@@ -386,6 +386,13 @@ const byOrder = <T extends { criterion: ScreenCriterion }>(xs: T[]) =>
   [...xs].sort((a, b) => order(a.criterion) - order(b.criterion))
 
 /** One screen from its checks, the criteria in Boris's order. */
+/**
+ * The criteria that stop an order with the screen's switch off too. Boris, 01.11.2026, on an account made on the day
+ * of the order: «Мы не берем таких, отсекаем сразу».
+ */
+const ALWAYS_STOPS: ReadonlySet<ScreenCriterion> = new Set<ScreenCriterion>(['new_account'])
+const stopsAnyway = (hits: readonly ScreenMark[]) => hits.some((h) => ALWAYS_STOPS.has(h.criterion))
+
 export function screenOf(
   checks: Check[],
   extra: { hits?: ScreenMark[]; clarify?: ScreenMark[]; soft?: ScreenMark[] },
@@ -395,7 +402,7 @@ export function screenOf(
   const soft = [...checks.flatMap((c) => ('soft' in c ? [c.soft] : [])), ...(extra.soft ?? [])]
   const noData = checks.flatMap((c) => ('noData' in c ? [c.noData] : []))
   return {
-    stops: p.stops,
+    stops: p.stops || stopsAnyway(hits),
     hits: byOrder(hits),
     clarify: byOrder(extra.clarify ?? []),
     no_data: [...new Set(noData)].sort((a, b) => order(a) - order(b)),
@@ -425,9 +432,10 @@ export function mergeScreens(
   ])
   const keep = <T extends { criterion: ScreenCriterion }>(xs: T[]) =>
     xs.filter((x) => !again.has(x.criterion))
+  const hits = byOrder([...keep(before.hits), ...after.hits])
   return {
-    stops: after.stops,
-    hits: byOrder([...keep(before.hits), ...after.hits]),
+    stops: after.stops || stopsAnyway(hits),
+    hits,
     clarify: byOrder([...keep(before.clarify), ...after.clarify]),
     soft: byOrder([...keep(before.soft), ...after.soft]),
     penalty: penaltyOf([...keep(before.soft), ...after.soft]),
@@ -478,15 +486,20 @@ export function screenEvent(s: LeadScreen): Record<string, unknown> {
 export function screenSummary(rows: Pick<LeadScreen, 'hits' | 'stops'>[]): string | null {
   const out = rows.filter((r) => r.hits.length > 0)
   if (out.length === 0) return null
-  const counts = new Map<ScreenCriterion, number>()
-  for (const r of out)
-    for (const h of r.hits) counts.set(h.criterion, (counts.get(h.criterion) ?? 0) + 1)
-  const by = [...counts]
-    .sort((a, b) => order(a[0]) - order(b[0]))
-    .map(([c, n]) => `${SCREEN_RU[c]} ${n}`)
-    .join(', ')
-  const shadow = out.every((r) => !r.stops)
-  return shadow
-    ? `Отсеяла бы ${out.length} (отсев пока только отмечает): ${by}`
-    : `Отсеяно ${out.length}: ${by}`
+  const by = (some: typeof out) => {
+    const counts = new Map<ScreenCriterion, number>()
+    for (const r of some)
+      for (const h of r.hits) counts.set(h.criterion, (counts.get(h.criterion) ?? 0) + 1)
+    return [...counts]
+      .sort((a, b) => order(a[0]) - order(b[0]))
+      .map(([c, n]) => `${SCREEN_RU[c]} ${n}`)
+      .join(', ')
+  }
+  const stopped = out.filter((r) => r.stops)
+  const shadow = out.filter((r) => !r.stops)
+  const would = (more: string) =>
+    `Отсеяла бы${more} ${shadow.length} (отсев пока только отмечает): ${by(shadow)}`
+  if (stopped.length === 0) return would('')
+  const line = `Отсеяно ${stopped.length}: ${by(stopped)}`
+  return shadow.length === 0 ? line : `${line}. ${would(' ещё')}`
 }

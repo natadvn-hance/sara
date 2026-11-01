@@ -474,6 +474,17 @@ export const topicStep = core.table(
   (t) => [primaryKey({ columns: [t.key, t.step] })],
 )
 
+/**
+ * What a client's topic already shows (Boris, 01.11: the topic is the chat with the client, every message once): the
+ * intro, the bid, the messages after it and the chat messages, by the topic's key and a reference (`bid`, `series:2`,
+ * `msg:<platform id>`, `restored`). The restore of old history reads it so that nothing is shown twice.
+ */
+export const topicShown = core.table(
+  'topic_shown',
+  { key: text('key').notNull(), ref: text('ref').notNull() },
+  (t) => [primaryKey({ columns: [t.key, t.ref] })],
+)
+
 /** Every chat message Sara knows, live or exported from history, with whose voice it is (FR-CONV-2, FR-TRAIN-1). */
 export const chatMessage = core.table(
   'chat_message',

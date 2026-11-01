@@ -3,7 +3,11 @@ import { and, eq, lte, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, conversation, lead } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { isApprovedText } from '../leads/callSlots'
+import { firstName } from '../leads/clientName'
+import { markShown, unmarkShown } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
+import { clientPost, ourPost } from '../notify/topicPosts'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { applyOwnerRule, ensureConversation, rowOf, updateConversation } from './store'
@@ -69,19 +73,36 @@ export async function showClientWords(
   conv: ConversationRow,
   added: StoredMessage[],
 ) {
-  const words = added.filter((m) => m.side === 'client' && m.text.trim() !== '')
-  if (words.length === 0 || !(await getSetting(d.db, 'pipeline.conversations'))) return
-  const [l] = conv.orderId
-    ? await d.db.select({ name: lead.clientName }).from(lead).where(eq(lead.id, conv.orderId))
-    : []
-  for (const m of words)
+  if (added.length === 0 || !(await getSetting(d.db, 'pipeline.conversations'))) return
+  const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
+  const key = conv.orderId ?? `conv:${conv.id}`
+  const name = l?.clientName ? firstName(l.clientName) : null
+  // What the topic shows already (the bid and the series are posted when they go, not read back from the chat).
+  const posted = (l?.draftFollowUps ?? []) as string[]
+  for (const m of added) {
+    if (m.text.trim() === '') continue
+    const mine =
+      m.side === 'specialist' &&
+      (m.authorBasis === 'outbox' || m.authorBasis === 'say') &&
+      !posted.some((f) => isApprovedText(f, m.text))
+    if (m.side !== 'client' && !mine) continue
     try {
-      await d.notifier.sendText(CONV_TEXTS.clientSaid(l?.name || null, m.text), {
-        place: { conversation: conv.id },
-      })
+      if (!(await markShown(d.db, key, `msg:${m.platformMessageId}`))) continue
+      await d.notifier.sendText(
+        m.side === 'client'
+          ? clientPost({ name, at: m.sentAt, text: m.text })
+          : ourPost({ at: m.sentAt, text: m.text }),
+        {
+          html: true,
+          place: { conversation: conv.id },
+          ...(m.side === 'client' ? {} : { quiet: true }),
+        },
+      )
     } catch (e) {
-      console.error('client words not shown', e instanceof Error ? e.message : e)
+      await unmarkShown(d.db, key, `msg:${m.platformMessageId}`).catch(() => {})
+      console.error('chat message not shown', e instanceof Error ? e.message : e)
     }
+  }
 }
 
 /**

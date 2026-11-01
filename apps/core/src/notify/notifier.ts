@@ -65,6 +65,8 @@ export type Notifier = {
    * so the colour is in the name). Nothing without a forum or a topic, or when the circle is already that; it never throws.
    */
   setTopicStage?(place: { conversation: string } | { order: string }, dot: string): Promise<void>
+  /** The references of the bot's posts in the client's topic, the oldest first (the intro is the first); empty without one. */
+  topicPosts?(place: { conversation: string } | { order: string }): Promise<number[]>
   /** Whether Boris's forum is bound: a message for a client's topic is worth sending only then. It never throws. */
   forumOn?(): Promise<boolean>
   /**

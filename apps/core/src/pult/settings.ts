@@ -55,7 +55,7 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
   'cards.max_per_day': { title: 'Карточек заявок в день', edit: 'free', kind: 'count' },
   'screen.stops': {
     title: 'Отсев останавливает заявки',
-    hint: 'Выключен: отсев только отмечает заявки, карточки идут как раньше.',
+    hint: 'Выключен: отсев только отмечает заявки, карточки идут как раньше. Аккаунт, созданный в день заявки, отсекается всегда.',
     edit: 'free',
     kind: 'flag',
   },

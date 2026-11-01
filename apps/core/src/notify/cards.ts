@@ -159,20 +159,6 @@ export const TEXTS = {
   bidSending: (title: string) => `⏳ Отправляю отклик: ${title}…`,
   bidSent: (title: string, spentRub: number) =>
     `✅ Отклик отправлен: ${title}, ${formatRub(spentRub)}`,
-  /** The bid in the client's topic (Boris, 01.11: a chat with the client from the first message on). */
-  bidInTopic: (text: string | null, spentRub: number, servicePriceRub: number | null) =>
-    [
-      `📨 <b>Отклик отправлен</b>, ${formatRub(spentRub)}`,
-      text?.trim() ? `<blockquote>${esc(text.trim())}</blockquote>` : null,
-      servicePriceRub ? `Стоимость услуги в отклике: ${formatRub(servicePriceRub)}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n'),
-  /** One more message of the series that followed the bid, short, in the same topic. */
-  seriesInTopic: (text: string, n: number, total: number) => {
-    const t = text.trim().replace(/\s+/g, ' ')
-    return `✉️ <b>Ушло вдогонку: ${n} из ${total}</b>\n<blockquote>${esc(t.length > 300 ? `${t.slice(0, 299)}…` : t)}</blockquote>`
-  },
   bidRefused: (title: string, errorClass: string) =>
     `Отклик на «${title}» не ушёл: ${REFUSED[errorClass] ?? REFUSED.INTERNAL}`,
   bidDearer: (title: string, wasRub: number, nowRub: number | null) =>

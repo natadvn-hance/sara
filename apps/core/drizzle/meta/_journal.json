@@ -208,8 +208,15 @@
     {
       "idx": 29,
       "version": "7",
-      "when": 1793550123995,
-      "tag": "0029_analytics_insights",
+      "when": 1793548205567,
+      "tag": "0029_topic_shown",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793551076397,
+      "tag": "0030_analytics_insights",
       "breakpoints": true
     }
   ]
