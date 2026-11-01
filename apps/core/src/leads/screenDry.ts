@@ -4,6 +4,7 @@ import {
   type FormParts,
   negativeReviews,
   newAccount,
+  ownWords,
   shortText,
   vacancy,
   vacancySoft,
@@ -37,6 +38,12 @@ export type DryResult = {
   noData: Record<ScreenCriterion, number>
   /** Orders that look like a vacancy but are not stopped: they lose points. */
   soft: { n: number; shown: number; bid: number }
+  /** A thin text with a form that says something: loses points, is not stopped (31.10.2026). */
+  softText: Count
+  /** What the old short_text rule (own words below the threshold stop) would have stopped, for the comparison. */
+  legacyText: Count
+  /** The orders stopped with the old rule, counted with the other criteria as before. */
+  legacyOut: Count
   /** The shown or bid orders the screen would stop: Boris checks these by hand. */
   lost: { id: string; criteria: ScreenCriterion[]; shown: boolean; bid: boolean }[]
 }
@@ -57,6 +64,9 @@ export function dryScreen(rows: DryRow[], form: FormParts, minWords: number): Dr
     by: Object.fromEntries(SCREEN_CRITERIA.map((c) => [c, zero()])) as DryResult['by'],
     noData: Object.fromEntries(SCREEN_CRITERIA.map((c) => [c, 0])) as DryResult['noData'],
     soft: zero(),
+    softText: zero(),
+    legacyText: zero(),
+    legacyOut: zero(),
     lost: [],
   }
   for (const r of rows) {
@@ -70,6 +80,10 @@ export function dryScreen(rows: DryRow[], form: FormParts, minWords: number): Dr
     const hits = checks.flatMap((c) => ('hit' in c ? [c.hit.criterion] : []))
     for (const c of checks) if ('noData' in c) res.noData[c.noData]++
     for (const h of hits) add(res.by[h], r)
+    for (const c of checks) if ('soft' in c) add(res.softText, r)
+    const oldText = r.text.trim() !== '' && ownWords(r, form).length < minWords
+    if (oldText) add(res.legacyText, r)
+    if (oldText || hits.some((h) => h !== 'short_text')) add(res.legacyOut, r)
     if (hits.length === 0 && vacancySoft(r)) add(res.soft, r)
     if (hits.length === 0) continue
     add(res.out, r)
@@ -95,6 +109,9 @@ export function dryReport(r: DryResult, minWords: number): string {
   }
   lines.push(
     `- Похоже на вакансию, теряют баллы: ${r.soft.n}, показанных ${r.soft.shown}, с откликом ${r.soft.bid}`,
+    `- Мало слов клиента, но анкета заполнена, теряют 5 баллов: ${r.softText.n}, показанных ${r.softText.shown}, с откликом ${r.softText.bid}`,
+    '',
+    `До смягчения (короткий текст останавливал): остановил бы ${r.legacyOut.n} (${pct(r.legacyOut.n, r.orders)}), из них короткий текст ${r.legacyText.n}, показанных ${r.legacyOut.shown}, с откликом ${r.legacyOut.bid}`,
     '',
     'Критерии 4-6 (Директ, WordPress, точечные правки) решает Сортировщик, здесь их нет.',
   )

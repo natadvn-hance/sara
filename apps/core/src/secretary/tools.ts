@@ -23,6 +23,7 @@ import { PULT_TEXTS } from '../pult/routes'
 import { pultMay, SETTING_META, settingsView } from '../pult/settings'
 import { todayView } from '../pult/today'
 import { getSetting, setSetting } from '../settings/store'
+import { CountsInput, periodCounts } from './counts'
 
 /** What the Secretary's tools act with: the same functions as the buttons and the pult (ADR-027). */
 export type SecretaryDeps = {
@@ -35,6 +36,7 @@ export type SecretaryDeps = {
     taskId: string
     text: string | null
     priceRub: number | null
+    priceToRub?: number | null
   }): Promise<{ saved: boolean; message: string }>
   /** The commands of a conversation card (M4). */
   commands: CommandDeps
@@ -77,6 +79,8 @@ const TOOL_TEXTS = {
   noTask: 'Такой задачи нет: возьми taskId из leads или lead.',
   notWaiting: 'Эта заявка уже решена или не ждёт решения.',
   noConversation: 'Такого разговора нет: возьми id из conversations.',
+  badPeriod:
+    'Не поняла период. Нужен period (today, yesterday, week) или from и to датами ГГГГ-ММ-ДД, не длиннее года.',
   noCard:
     'У этого клиента сейчас нет открытой карточки. Свой текст без карточки можно отправить из пульта («Свой текст») или самому на Профи.ру.',
   noDraft: 'У этого клиента нет черновика, который ждёт отправки.',
@@ -205,6 +209,22 @@ export const SECRETARY_TOOLS = {
     input: z.object({}),
     run: (d) => d.system(),
   }),
+  counts: tool({
+    description:
+      'Точный счёт за период по журналу, по Москве, без тестовых заказов: найдено заявок, отсеяно, прошло отсев, получили балл, карточек, откликов ушло и не ушло, потрачено, сообщений клиентов, моих ответов. period: today (с 00:00 по сейчас), yesterday, week (7 дней по сегодня) или from и to датами ГГГГ-ММ-ДД. На любой вопрос «сколько … сегодня, вчера, за неделю» бери число отсюда.',
+    input: z.object({
+      period: z.enum(['today', 'yesterday', 'week']).optional(),
+      from: z.string().optional().describe('первый день, ГГГГ-ММ-ДД по Москве'),
+      to: z.string().optional().describe('последний день включительно, ГГГГ-ММ-ДД'),
+    }),
+    run: async (d, _t, i) => {
+      const parsed = CountsInput.safeParse(i)
+      return (
+        (parsed.success && (await periodCounts(d.db, parsed.data))) ||
+        done(false, TOOL_TEXTS.badPeriod)
+      )
+    },
+  }),
   analytics: tool({
     description: 'Аналитика за год: клиенты по месяцам, воронка, месяцы (отклики, выигрыши).',
     input: z.object({ year: z.number().int().min(2020).max(2100).optional() }),
@@ -225,7 +245,7 @@ export const SECRETARY_TOOLS = {
   }),
   skip_lead: tool({
     description:
-      'Пропустить заявку из очереди (как кнопка «Пропустить»). taskId из leads или lead.',
+      'Закрыть заявку из очереди (как кнопка «Закрыть заявку»). taskId из leads или lead.',
     input: z.object({ taskId: z.string() }),
     run: async (d, _t, i) => {
       const t = await openLeadTask(d.db, i.taskId)
@@ -260,11 +280,12 @@ export const SECRETARY_TOOLS = {
   }),
   set_bid_text: tool({
     description:
-      'Сохранить на карточке заявки новый текст отклика и или «Стоимость услуги» в рублях (priceRub). Только после «да» Бориса на этот текст. Отклик не отправляет.',
+      'Сохранить на карточке заявки новый текст отклика и или «Стоимость услуги» в рублях: priceRub («от») и priceToRub («до», по умолчанию в полтора раза выше). Только после «да» Бориса на этот текст. Отклик не отправляет.',
     input: z.object({
       taskId: z.string(),
       text: z.string().min(1).optional(),
       priceRub: z.number().int().positive().optional(),
+      priceToRub: z.number().int().positive().optional(),
     }),
     run: async (d, _t, i) => {
       if (i.text === undefined && i.priceRub === undefined)
@@ -274,6 +295,7 @@ export const SECRETARY_TOOLS = {
         taskId: i.taskId,
         text: i.text ?? null,
         priceRub: i.priceRub ?? null,
+        priceToRub: i.priceToRub ?? null,
       })
       return done(r.saved, r.message)
     },

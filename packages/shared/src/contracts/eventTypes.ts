@@ -57,6 +57,8 @@ export const EVENT_TYPES = [
   'bid.series_sent',
   /** The series after the bid stopped before its end (why: the client answered, Boris wrote, a pause, no delivery). */
   'bid.series_stopped',
+  /** The times of a call offered to a client (payload: the starts), so the next client is offered others (01.11.2026). */
+  'call.slots_offered',
   'spend.recorded',
   'deal.stage_changed',
   'task.created',

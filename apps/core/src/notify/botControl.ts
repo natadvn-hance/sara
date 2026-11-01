@@ -1,4 +1,4 @@
-import type { TaskAction } from '@sara/shared'
+import type { NoticeKind, TaskAction } from '@sara/shared'
 import type { Db } from '../db/client'
 import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { boundChat } from './binding'
@@ -24,6 +24,8 @@ export function createBotControl(d: {
   /** Boris's /test with the words after it (test orders, docs/ops/test-leads.md). */
   onTest?(args: string): Promise<string>
   voiceDir?: string
+  /** A new notice of the bell: the phone and the computer ring (Web Push). */
+  onNotice?: (kind: NoticeKind) => void
   /** The pult's address, for /pult. */
   publicUrl?: string
 }): BotControl {
@@ -70,6 +72,7 @@ export function createBotControl(d: {
         forumOn: async () => (await current().notifier.forumOn?.()) ?? false,
       },
       d.db,
+      d.onNotice,
     ),
   }
 }

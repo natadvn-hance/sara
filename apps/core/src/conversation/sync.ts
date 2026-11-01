@@ -125,7 +125,15 @@ export function liveAuthor(
  * and authors only, never the text (ADR-022).
  */
 export async function syncChat(
-  d: { db: Db; profi: ProfiClient },
+  d: {
+    db: Db
+    profi: ProfiClient
+    /**
+     * Told what is new in the chat the moment it is stored, whoever reads the chat (an event, a waiting turn, a check):
+     * a client's word reaches Boris once, by whichever read stored it first. Its failure never stops the reading.
+     */
+    show?: (conv: ConversationRow, added: StoredMessage[]) => Promise<void>
+  },
   conv: ConversationRow,
   heardAt: Date,
   o: { v1Writes: boolean },
@@ -218,6 +226,8 @@ export async function syncChat(
   const messages = chat
     .map((m) => byId.get(m.platform_message_id))
     .filter((m): m is StoredMessage => m !== undefined)
+  if (added.length > 0)
+    await d.show?.(conv, added).catch((e) => console.error('news of the chat not shown', e))
   return {
     added,
     specialistAfter: added.filter((m) => m.side === 'specialist'),

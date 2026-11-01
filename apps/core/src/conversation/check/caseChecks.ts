@@ -277,6 +277,44 @@ function claimsOutside(claims: Claim[], chosen: CaseHit): Claim[] {
   return outside
 }
 
+/**
+ * «Прямого кейса по клиникам у меня нет», «нет такого опыта», «примеров пока нет»: said about what there is to show, in
+ * folded plain words (see `plain`). A reply never says it, whatever the cases of the turn are.
+ */
+const NO_EXAMPLES = [
+  /(?<!\p{L})нет (?:у (?:нас|меня) )?(?:\p{L}+ ){0,2}(?:кейс\p{L}*|пример\p{L}*|опыт\p{L}*|портфолио)(?!\p{L})/u,
+  /(?<!\p{L})(?:кейс\p{L}*|пример\p{L}*|опыт\p{L}*|портфолио) (?:\p{L}+ ){0,5}?(?:у (?:нас|меня) )нет(?!\p{L})/u,
+  /(?<!\p{L})у (?:нас|меня) нет (?:\p{L}+ ){0,2}(?:кейс\p{L}*|пример\p{L}*|опыт\p{L}*|портфолио)(?!\p{L})/u,
+]
+
+/**
+ * Boris named in the third person, or a hand-over to someone else: «лично ответит Борис», «передам Борису», «созвон с
+ * Борисом», «коллега уточнит». The reply is written as Boris himself (Boris, 01.11.2026: «она должна делать это от
+ * моего лица»). In folded plain words; a signature («Борис» at the very end) and «меня зовут Борис» are cut out first.
+ */
+const THIRD_PERSON = [
+  /(?<!\p{L})бориса(?!\p{L})|(?<!\p{L})борис(?:у|ом|е)(?!\p{L})/u,
+  /(?<!\p{L})борис (?:лично |сам )?(?:ответит|свяжется|позвонит|наберет|расскажет|подключится|подскажет|посмотрит|назовет|обсудит|разберет|проконсультирует|скажет|напишет)(?!\p{L})/u,
+  /(?<!\p{L})(?:лично ответит|ответит лично|ответит вам лично|лично расскажет|лично подскажет)(?!\p{L})/u,
+  /(?<!\p{L})(?:передам|передаю|передала|передал|переадресую|перенаправлю) (?:\p{L}+ ){0,3}?(?:коллег\p{L}*|менеджер\p{L}*|специалист\p{L}*|руководител\p{L}*|основател\p{L}*|директор\p{L}*)(?!\p{L})/u,
+  /(?<!\p{L})(?:коллега|менеджер|специалист|руководитель|основатель) (?:\p{L}+ ){0,2}?(?:ответит|свяжется|позвонит|уточнит|расскажет|подскажет|подключится)(?!\p{L})/u,
+  /(?<!\p{L})уточню у (?:коллег|менеджер|специалист|руководител)\p{L}*(?!\p{L})/u,
+]
+const SIGNATURE = /(?:^|\s)(?:с уважением |всего доброго |хорошего дня )?борис(?: мноян)?\s*$/u
+const SELF_NAME = /меня зовут борис/gu
+
+export function voiceIssues(text: string): CheckIssue[] {
+  const flat = plain(text).replace(SELF_NAME, ' ').replace(SIGNATURE, ' ')
+  if (!THIRD_PERSON.some((re) => re.test(flat))) return []
+  return [
+    {
+      id: 'voice.third_person',
+      detail:
+        'в тексте Борис назван в третьем лице или клиента передают кому-то: ты пишешь от лица Бориса, ответь сам по сути (я, мы), а о созвоне пиши «созвонимся», «могу в…»',
+    },
+  ]
+}
+
 export function caseIssues(
   i: CheckInput,
   text: string,
@@ -291,6 +329,13 @@ export function caseIssues(
       issues.push({ id: 'case.ad', detail: `реклама вместо живого слова: «${phrase}»` })
       break
     }
+  // Never «нет кейса»: while there is something to show, it is shown (Boris, 31.10.2026).
+  if (NO_EXAMPLES.some((re) => re.test(flat)))
+    issues.push({
+      id: 'case.no_examples',
+      detail:
+        'в тексте сказано, что кейса, примеров или опыта нет: так не говорят, расскажи о том, что есть (по заказу на сайт это сайты), или спроси о задаче',
+    })
   const link = CASE_LINK.exec(text)
   if (link)
     issues.push({
@@ -308,7 +353,7 @@ export function caseIssues(
   if (choice?.case_id && !chosen && !toldIds.has(choice.case_id))
     issues.push({ id: 'case.unknown', detail: `кейс ${choice.case_id} не из кейсов этого хода` })
   else if (!choice?.case_id) {
-    const claim = claimsIn(text)[0]
+    const claim = c.sitesShown ? undefined : claimsIn(text)[0]
     if (claim)
       issues.push({
         id: 'case.unknown',

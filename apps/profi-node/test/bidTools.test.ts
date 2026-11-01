@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProfiOrder, SubmitBidInput } from '@sara/shared'
 import { signPermit } from '@sara/shared/permit'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
-import { type BidRuntime, createBidTools } from '../src/bid/bidTools'
+import { type BidRuntime, createBidTools, isOurBid } from '../src/bid/bidTools'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
 import { bidAttempt, rawEvent, rawOrder } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
@@ -87,6 +87,8 @@ const tools = (
     clientMs?: number
     closeMs?: number
     confirmMs?: number
+    chatLookMs?: number
+    retryLookMs?: number
   } = {},
 ) =>
   createBidTools({
@@ -97,6 +99,9 @@ const tools = (
     closeMs: o.closeMs ?? 3000,
     lookAgainMs: 300,
     confirmMs: o.confirmMs ?? 1500,
+    chatLookMs: o.chatLookMs ?? 300,
+    orderLookMs: 2000,
+    retryLookMs: o.retryLookMs ?? 0,
     clientMs: o.clientMs ?? 1500,
     accounts: new Map([
       [
@@ -166,6 +171,7 @@ async function seen(id: string, more: Partial<ProfiOrder> = {}) {
     'response',
   )
 }
+const chatVisits = (id: string) => visited.filter((u) => u.includes(`/chats/${id}`)).length
 const orderVisits = (id: string) => visited.filter((u) => u.includes(`n.php?o=${id}`)).length
 
 describe('get_order on the order page (FR-LEAD-5)', () => {
@@ -254,6 +260,32 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     negative: 1,
     tags: ['Перестала отвечать'],
   }
+
+  it("FR-LEAD-5: get_order gives the site's own lines about the client too (Profi Pro)", async () => {
+    const id = site.addOrder({
+      price: 71,
+      klient: {
+        ...KLIENT,
+        summaries: [
+          {
+            image: 'https://cdn.profi.ru/client-info/summaries/message-x-red.png',
+            colorTheme: 'RED',
+            description: 'Договаривается меньше, чем в 20% заказов',
+            renderInOrder: true,
+          },
+        ],
+      },
+    })
+    await seen(id)
+    const o = await tools().getOrder({ account_id: ACCOUNT, order_id: id })
+    expect(o.client_info?.summaries).toEqual([
+      {
+        description: 'Договаривается меньше, чем в 20% заказов',
+        color_theme: 'RED',
+        percent: 20,
+      },
+    ])
+  }, 60000)
 
   it('FR-LEAD-5: get_order gives the client of the order page: since when, the number, the reviews and their tags', async () => {
     const id = site.addOrder({ price: 71, klient: KLIENT })
@@ -492,11 +524,13 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
   }, 60000)
 
   it('FR-LEAD-8: a bid the order page shows only on the second look is confirmed, not unsure (30.10.2026)', async () => {
-    // The site took the bid, but its order answer right after still says there is none, and its bar is not refreshed.
+    // The site took the bid, but its order answer right after still says there is none, its bar is not refreshed, and
+    // the chat shows nothing: only the order answer can tell.
     site.bidSettings.hasBidLag = 1
     site.bidSettings.barBalance = 5000
+    site.bidSettings.chatBid = false
     const id = site.addOrder({ price: 71 })
-    const out = await tools().submitBid(bid(id))
+    const out = await tools({ confirmMs: 8000 }).submitBid(bid(id))
     expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
     expect(site.bids).toHaveLength(1)
   }, 60000)
@@ -509,28 +543,233 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     expect(site.bids).toHaveLength(1)
   }, 60000)
 
-  it('FR-LEAD-8: a bid taken while the form stays open and the order answer lags is confirmed by the wallet in seconds (31.10.2026)', async () => {
-    // Order 95583456: pressed 09:17:53, the money gone at once, the form open 30 s, UNCERTAIN at 09:19:04.
+  it('FR-LEAD-8: a bid is confirmed by its text in the order chat in seconds, while hasBid and the wallet lag (95592581, 95596098)', async () => {
+    // Live on 31.10.2026: the bid paid and in the chat at once, hasBid 3 to 8 minutes later, the bar not moved in 30 s.
     site.bidSettings.formStays = true
     site.bidSettings.hasBidLag = 100
+    site.bidSettings.barBalance = 5000
     const id = site.addOrder({ price: 71 })
     const t0 = Date.now()
     // A form wait of 2 × 20 s, as the old wait for the form would have taken.
     const out = await tools({ closeMs: 20_000 }).submitBid(bid(id))
     expect(Date.now() - t0).toBeLessThan(15_000)
-    expect(out).toEqual({ found_on_page: false, spent_rub: 71, balance_after_rub: 4929 })
+    // The bar says 5000, but the bid is there, so the money is gone.
+    expect(out).toEqual({ found_on_page: true, spent_rub: 71, balance_after_rub: 4929 })
     expect(site.bids).toHaveLength(1)
     const [row] = await db.select().from(bidAttempt)
     expect(row?.result).toEqual(out)
+    // One look at the chat was enough: the order page was opened only for the press.
+    expect(orderVisits(id)).toBe(1)
+    expect(chatVisits(id)).toBe(1)
   }, 60000)
 
-  it('FR-LEAD-8: a bid the order answer shows only after a few looks is still confirmed on the page (31.10.2026)', async () => {
-    site.bidSettings.hasBidLag = 3
+  it('FR-LEAD-8: a bid that reaches the chat a moment later is seen on the same page load', async () => {
+    site.bidSettings.chatBidDelayMs = 800
+    site.bidSettings.hasBidLag = 100
     site.bidSettings.barBalance = 5000
     const id = site.addOrder({ price: 71 })
-    const out = await tools({ confirmMs: 5000 }).submitBid(bid(id))
+    const out = await tools({ chatLookMs: 5000, confirmMs: 8000 }).submitBid(bid(id))
     expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(chatVisits(id)).toBe(1)
   }, 60000)
+
+  it('FR-LEAD-8: a chat that shows the bid only later is found on the next look at it', async () => {
+    site.muteRtp(true)
+    try {
+      site.bidSettings.chatBidDelayMs = 1000
+      site.bidSettings.hasBidLag = 100
+      site.bidSettings.barBalance = 5000
+      const id = site.addOrder({ price: 71 })
+      const out = await tools({ confirmMs: 8000 }).submitBid(bid(id))
+      expect(out).toMatchObject({ found_on_page: true, spent_rub: 71 })
+      expect(chatVisits(id)).toBe(2)
+    } finally {
+      site.muteRtp(false)
+    }
+  }, 60000)
+
+  it('FR-LEAD-8: with no text to read, the order fresh line in the chats list confirms it', async () => {
+    const id = site.addOrder({ price: 71 })
+    const out = await tools({
+      parsers: {
+        ...parsers,
+        fromChatDom: async () => ({ recognized: false, signals: [] }),
+        chatTextsFromAnswer: undefined,
+      },
+    }).submitBid(bid(id))
+    expect(out).toEqual({ found_on_page: false, spent_rub: 71, balance_after_rub: 4929 })
+  }, 60000)
+
+  it('FR-LEAD-8: a line in the chats list from before the press confirms nothing', async () => {
+    site.bidSettings.mode = 'lost'
+    const id = site.addOrder({ price: 71 })
+    const old = new Date(Date.now() - 3_600_000).toISOString()
+    const failed = await failure(
+      tools({
+        parsers: {
+          ...parsers,
+          chatsFromAnswer: (url) =>
+            url.endsWith('/api/chats') ? [{ chatId: id, unread: 0, lastAt: old }] : null,
+        },
+      }).submitBid(bid(id)),
+    )
+    expect(failed).toBe('UNCERTAIN')
+  }, 60000)
+
+  it('FR-LEAD-8: with the chat silent and the order answer late, the wallet down by the amount due confirms it', async () => {
+    site.bidSettings.chatBid = false
+    site.bidSettings.formStays = true
+    site.bidSettings.hasBidLag = 100
+    const id = site.addOrder({ price: 71 })
+    const out = await tools().submitBid(bid(id))
+    expect(out).toEqual({ found_on_page: false, spent_rub: 71, balance_after_rub: 4929 })
+    expect(site.bids).toHaveLength(1)
+  }, 60000)
+
+  it('FR-LEAD-8: an unsure bid costs at most four page reads, however long the looks may last', async () => {
+    site.bidSettings.mode = 'silent'
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools({ confirmMs: 60_000 }).submitBid(bid(id)))).toBe('UNCERTAIN')
+    expect(chatVisits(id)).toBe(2)
+    // The one for the press and two looks.
+    expect(orderVisits(id)).toBe(3)
+  }, 60000)
+
+  /** The eyes as the live recorder feeds them: they hear the wallet from the site's answers, here whatever is set. */
+  const hearing = (rub: () => number | null): BidRuntime['eyes'] => ({
+    onParsed: (...a) => eyes.onParsed(...a),
+    onRaw: (...a) => eyes.onRaw(...a),
+    balance: () => rub() ?? eyes.balance(),
+  })
+
+  it('FR-LEAD-8: the wallet the eyes hear go down confirms the bid at once, with no page opened (95611217)', async () => {
+    // Live on 01.11.2026: the eyes heard the wallet down 2 s after the press, hasBid still false on every look.
+    site.bidSettings.hasBidLag = 100
+    site.bidSettings.barBalance = 5000
+    site.bidSettings.formStays = true
+    const id = site.addOrder({ price: 71 })
+    const t = tools({ eyes: hearing(() => site.balance), closeMs: 20_000 })
+    const out = await t.submitBid(bid(id))
+    expect(out).toEqual({ found_on_page: false, spent_rub: 71, balance_after_rub: 4929 })
+    expect(orderVisits(id)).toBe(1)
+    expect(chatVisits(id)).toBe(0)
+    const [row] = await db.select().from(bidAttempt)
+    expect(row?.walletRub).toBe(5000)
+  }, 60000)
+
+  it('NFR-REL-4: a retry knows the wallet from before the press: the wallet down confirms it with the tab not moving', async () => {
+    site.bidSettings.chatBid = false
+    site.bidSettings.hasBidLag = 100
+    site.bidSettings.barBalance = 5000
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    let rub: number | null = null
+    const t = tools({ eyes: hearing(() => rub) })
+    expect(await failure(t.submitBid(input))).toBe('UNCERTAIN')
+    // The tab goes back to the feed after the answer.
+    await ins.inTab(async () => null)
+    visited = []
+    // The tab may not move any more; the eyes hear the money gone.
+    may = false
+    rub = 4929
+    expect(await t.submitBid(input)).toEqual({
+      found_on_page: false,
+      spent_rub: 71,
+      balance_after_rub: 4929,
+    })
+    expect(visited).toEqual([])
+    expect(site.bidPosts).toBe(1)
+  }, 60000)
+
+  it('FR-LEAD-8: a tab that may not move after the press still hears the wallet until the time is out', async () => {
+    site.bidSettings.chatBid = false
+    site.bidSettings.hasBidLag = 100
+    site.bidSettings.barBalance = 5000
+    // The send takes a moment, so the tab stops before the first look.
+    site.bidSettings.postDelayMs = 400
+    const id = site.addOrder({ price: 71 })
+    let rub: number | null = null
+    const stopTab = setInterval(() => {
+      if (site.bidPosts === 0) return
+      clearInterval(stopTab)
+      may = false
+      setTimeout(() => {
+        rub = 4929
+      }, 1000)
+    }, 10)
+    try {
+      const out = await tools({ eyes: hearing(() => rub), confirmMs: 8000 }).submitBid(bid(id))
+      expect(out).toMatchObject({ found_on_page: false, spent_rub: 71 })
+    } finally {
+      clearInterval(stopTab)
+    }
+    // The press's own order page, nothing after it.
+    expect(orderVisits(id)).toBe(1)
+    expect(chatVisits(id)).toBe(0)
+  }, 60000)
+
+  it('NFR-REL-4: the money of a later press does not confirm an earlier unsure one', async () => {
+    site.bidSettings.mode = 'lost'
+    const first = site.addOrder({ price: 71 })
+    const input = bid(first)
+    const t = tools({ eyes: hearing(() => site.balance) })
+    expect(await failure(t.submitBid(input))).toBe('UNCERTAIN')
+    // The next bid goes through: the wallet is down by its fee, the same as the first one's.
+    site.bidSettings.mode = 'ok'
+    const second = site.addOrder({ price: 71 })
+    expect(await t.submitBid(bid(second))).toMatchObject({ spent_rub: 71 })
+    expect(site.balance).toBe(4929)
+    expect(await failure(t.submitBid(input))).toBe('UNCERTAIN')
+  }, 60000)
+
+  it('FR-LEAD-8: a retry opens no page so soon after the last look, and one page later', async () => {
+    site.bidSettings.mode = 'silent'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    const t = tools({ retryLookMs: 60_000 })
+    expect(await failure(t.submitBid(input))).toBe('UNCERTAIN')
+    // The tab goes back to the feed after the answer.
+    await ins.inTab(async () => null)
+    const seen = visited.length
+    expect(await failure(t.submitBid(input))).toBe('UNCERTAIN')
+    await ins.inTab(async () => null)
+    expect(visited.length).toBe(seen)
+    const fresh = tools({ retryLookMs: 0 })
+    const chats = chatVisits(id)
+    expect(await failure(fresh.submitBid(input))).toBe('UNCERTAIN')
+    expect(chatVisits(id)).toBe(chats + 1)
+  }, 60000)
+
+  it('NFR-REL-4: a retry that only looks finds the bid in the chat and presses nothing', async () => {
+    site.bidSettings.chatBid = false
+    site.bidSettings.hasBidLag = 100
+    site.bidSettings.barBalance = 5000
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    const t = tools()
+    expect(await failure(t.submitBid(input))).toBe('UNCERTAIN')
+    site.addMessage(id, 'specialist', input.text)
+    expect(await t.submitBid(input)).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(site.bidPosts).toBe(1)
+  }, 60000)
+
+  it('FR-LEAD-8: our bid in a chat is told by its text, however the site writes it', () => {
+    const text =
+      'Ирина, добрый день! Сделаем сайт с онлайн-записью. Какие услуги клиники в приоритете?'
+    expect(isOurBid(text, text)).toBe(true)
+    expect(
+      isOurBid(
+        'ирина,  добрый день!\nСделаем сайт с онлайн-записью. Какие услуги клиники в приоритете',
+        text,
+      ),
+    ).toBe(true)
+    expect(isOurBid(`${text} Стоимость от 15000 руб.`, text)).toBe(true)
+    // A long one cut on the page.
+    expect(isOurBid('Ирина, добрый день! Сделаем сайт с онлайн-записью', text)).toBe(true)
+    expect(isOurBid('Ирина, добрый день!', text)).toBe(false)
+    expect(isOurBid('Стоимость от 15000 до 23000 руб. усл.', text)).toBe(false)
+    expect(isOurBid('', text)).toBe(false)
+  })
 
   it('NFR-REL-4: money the opener took is not taken for the press: a lost send stays UNCERTAIN', async () => {
     site.bidSettings.openerCharges = 71
@@ -759,6 +998,25 @@ describe('submit_bid through the site form (FR-LEAD-8, NFR-REL-4)', () => {
     })
   }, 90000)
 
+  it("FR-LEAD-8: a page without a tariff block opens its form by the order card's «Откликнуться» (31.10.2026)", async () => {
+    // Order 95590077: «Цена отклика» and one «Откликнуться», no «Продолжить», no «Написать клиенту».
+    site.bidSettings.opener = 'card'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    expect(await tools().submitBid(input)).toMatchObject({ found_on_page: true, spent_rub: 71 })
+    expect(site.openerClicks).toBe(1)
+    expect(site.bids).toEqual([{ orderId: id, price: '15000', priceTo: '23000', text: input.text }])
+  }, 60000)
+
+  it('FR-LEAD-8: two such «Откликнуться» on the card press nothing', async () => {
+    site.bidSettings.opener = 'card'
+    site.bidSettings.openers = 2
+    const id = site.addOrder({ price: 71 })
+    expect(await failure(tools().submitBid(bid(id)))).toBe('LAYOUT_CHANGED')
+    expect(site.openerClicks).toBe(0)
+    expect(await pressesWritten()).toBe(0)
+  }, 60000)
+
   it('FR-LEAD-8: a form open from the start is filled without pressing its opener', async () => {
     site.bidSettings.behindOpener = false
     const id = site.addOrder({ price: 71 })
@@ -801,4 +1059,117 @@ describe('get_order of an order the eyes never stored (FR-LEAD-5)', () => {
     const o = await tools({ parsers: withPage }).getOrder({ account_id: ACCOUNT, order_id: id })
     expect(o).toMatchObject({ title: 'Лендинг для школы', open: true, bid_price_rub: 71 })
   }, 60000)
+})
+
+describe('a failed bid says which step said no (31.10.2026, order 95590077)', () => {
+  /** The node's log lines a call left, while it runs. */
+  async function logged(p: () => Promise<unknown>): Promise<string[]> {
+    const lines: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      lines.push(a.map(String).join(' '))
+    })
+    try {
+      await p().catch(() => {})
+    } finally {
+      spy.mockRestore()
+    }
+    return lines
+  }
+  const bidLines = (lines: string[]) => lines.filter((l) => /^(BID|UNCERTAIN) /.test(l))
+
+  it('FR-OPS-4: a confirmed bid says what confirmed it and how many seconds after the press', async () => {
+    site.bidSettings.hasBidLag = 100
+    const id = site.addOrder({ price: 71 })
+    const lines = bidLines(await logged(() => tools().submitBid(bid(id))))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(
+      new RegExp(
+        `^BID ${id}: подтверждён в чате заказа через \\d+ с, форма закрылась; чат: отклик есть, `,
+      ),
+    )
+  }, 60000)
+
+  it('FR-OPS-4: an unsure bid says what each look saw: the chat, hasBid and the wallet, no words of a chat', async () => {
+    site.bidSettings.mode = 'silent'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    const lines = bidLines(await logged(() => tools({ confirmMs: 5000 }).submitBid(input)))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('чат: отклика нет, пузырей 0, в ответе 0')
+    expect(lines[0]).toContain('заказ: hasBid false, кошелёк 5000')
+    expect(lines[0]).not.toContain(input.text.slice(0, 20))
+  }, 60000)
+
+  it('FR-OPS-4: a retry that finds nothing is one line too, and says what it knows', async () => {
+    site.bidSettings.mode = 'silent'
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id)
+    const t = tools({ retryLookMs: 60_000 })
+    await failure(t.submitBid(input))
+    const lines = bidLines(await logged(() => t.submitBid(input)))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('повтор после нажатия')
+    expect(lines[0]).toContain('смотрели только что')
+    expect(lines[0]).toContain('кошелёк до нажатия 5000')
+  }, 60000)
+
+  it('FR-OPS-4: a refusal leaves one log line with the class, the step, the message and what the page showed', async () => {
+    site.bidSettings.openerAmount = 70
+    const id = site.addOrder({ price: 71 })
+    const lines = bidLines(await logged(() => tools().submitBid(bid(id, { max_fee_rub: 71 }))))
+    expect(lines).toEqual([
+      `BID ${id} LAYOUT_CHANGED на шаге «кнопка открытия формы»: Форма отклика не открылась: на «Продолжить» 70 ₽, а в заказе 71 ₽, отклик не нажат (цена 71 ₽, кошелёк 5000 ₽)`,
+    ])
+  }, 60000)
+
+  it('FR-OPS-4: a page the node could not read leaves its outline and what the node saw, without any text', async () => {
+    site.bidSettings.openerAmount = 70
+    const id = site.addOrder({ price: 71 })
+    const input = bid(id, { max_fee_rub: 71 })
+    await logged(() => tools().submitBid(input))
+    const kept = (await db.select().from(rawEvent))
+      .map((r) => r.body as { what?: string; [k: string]: unknown })
+      .filter((b) => b.what === 'bid_refused')
+    expect(kept).toEqual([
+      expect.objectContaining({
+        orderId: id,
+        step: 'кнопка открытия формы',
+        feeRub: 71,
+        walletRub: 5000,
+        opener: { why: 'opener_fee', shownRub: 70 },
+      }),
+    ])
+    expect(kept[0]?.shape).toEqual(expect.arrayContaining([expect.any(Object)]))
+    expect(JSON.stringify(kept)).not.toContain(input.text.slice(0, 20))
+  }, 60000)
+
+  it('FR-OPS-4: a wallet the top bar does not show is named so, at its step', async () => {
+    site.bidSettings.showWallet = false
+    const id = site.addOrder({ price: 71 })
+    const lines = bidLines(await logged(() => tools().submitBid(bid(id))))
+    expect(lines).toEqual([
+      `BID ${id} LAYOUT_CHANGED на шаге «ответ страницы заказа»: Не прочитал кошелёк в шапке страницы, отклик не нажат (цена 71 ₽)`,
+    ])
+  }, 60000)
+
+  it('FR-OPS-4: every failure is one line: money short, a refused send, a permit that does not fit', async () => {
+    site.setBalance(50)
+    const poor = site.addOrder({ price: 71 })
+    expect(bidLines(await logged(() => tools().submitBid(bid(poor))))).toEqual([
+      `BID ${poor} NO_MONEY на шаге «ответ страницы заказа»: В кошельке 50 ₽, а отклик стоит 71 ₽ (цена 71 ₽, кошелёк 50 ₽)`,
+    ])
+    site.resetBids()
+    site.bidSettings.mode = 'silent'
+    const silent = site.addOrder({ price: 71 })
+    const unsure = bidLines(await logged(() => tools().submitBid(bid(silent))))
+    expect(unsure).toHaveLength(1)
+    expect(unsure[0]).toMatch(new RegExp(`^UNCERTAIN ${silent}: `))
+    site.resetBids()
+    const id = site.addOrder({ price: 71 })
+    expect(
+      bidLines(await logged(() => tools().submitBid(bid(id, { permit: 'ab'.repeat(32) })))),
+    ).toEqual([
+      `BID ${id} INTERNAL на шаге «разрешение ядра»: Разрешение ядра не подходит к отклику`,
+    ])
+  }, 90000)
 })

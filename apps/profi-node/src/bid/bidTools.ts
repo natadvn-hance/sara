@@ -5,6 +5,7 @@ import type {
   SubmitBidInput,
   SubmitBidOutput,
 } from '@sara/shared'
+import { normalizeText } from '@sara/shared'
 import { verifyPermit } from '@sara/shared/permit'
 import { eq } from 'drizzle-orm'
 import type { Page, Request, Response } from 'playwright'
@@ -14,13 +15,29 @@ import { clientInfoFromAnswer } from '../eyes/clientInfo'
 import type { Eyes } from '../eyes/eyes'
 import { readFormMap } from '../eyes/formMap'
 import type { Insurance } from '../eyes/insurance'
-import type { Parsers } from '../eyes/parsers'
+import { pageShape } from '../eyes/pageShape'
+import type { MessageSignal, Parsers } from '../eyes/parsers'
 import { profiParsers } from '../eyes/profiParsers'
 import { ProfiToolError, type ProfiToolsImpl } from '../mcp/server'
-import { findBidAttempt, markOrderBid, saveBidResult, savePress } from '../store/raw'
+import {
+  type BidAttempt,
+  duesPressedAfter,
+  findBidAttempt,
+  markOrderBid,
+  saveBidResult,
+  savePress,
+} from '../store/raw'
 import { storedOrder } from '../tools/readTools'
 import { requireAlive, type SessionState } from '../watch/sessionWatch'
-import { clickSubmit, closedNotice, fillForm, formOnScreen, openForm, readPayment } from './form'
+import {
+  clickSubmit,
+  closedNotice,
+  fillForm,
+  formOnScreen,
+  type OpenerMiss,
+  openForm,
+  readPayment,
+} from './form'
 import { type OrderScreen, orderScreenFromAnswer } from './screen'
 
 export type BidRuntime = {
@@ -33,21 +50,80 @@ export type BidRuntime = {
   afterOrderPage?(orderId: string, may: () => boolean): Promise<void>
 }
 
-type Go = (path: string) => Promise<boolean>
+type Go = (path: string, o?: { quick?: boolean }) => Promise<boolean>
 const fail = (c: ConstructorParameters<typeof ProfiToolError>[0], m: string) =>
   new ProfiToolError(c, m)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** What the form did after the press, before the order page was looked at. */
+/** What the form did after the press, before the bid was looked for; `retry` is a later call that only looks. */
 type AfterPress = {
-  form: 'closed' | 'sent' | 'open'
-  /** The wallet before the press, when the press sent a request; null: only the order page can confirm. */
+  form: 'closed' | 'sent' | 'open' | 'paid' | 'unsure' | 'retry'
+  /** The wallet right before the press; null: the wallet cannot confirm. */
   walletBefore: number | null
+  /** Null: a retry whose press has no readable time. */
+  pressedAt: number | null
+}
+/** What confirmed a bid. */
+type BidSign = 'chat' | 'list' | 'page' | 'wallet'
+const SIGN_WORDS: Record<BidSign, string> = {
+  chat: 'в чате заказа',
+  list: 'в списке чатов',
+  page: 'на странице заказа',
+  wallet: 'по кошельку',
+}
+/**
+ * What is looked at after a press, in turn, while confirmMs lasts: about three pages at the live pace. The chat first:
+ * our text is there about 3 s after the press (31.10.2026), while the order answer's hasBid took 3 to 8 minutes on the
+ * first bids after #212. A retry looks at each once: the core calls it five times in half a minute.
+ */
+const LOOKS = ['chat', 'order', 'chat', 'order'] as const
+const RETRY_LOOKS = ['chat', 'order'] as const
+/** Site's clock against ours, for a chat's last message since the press. */
+const CLOCKS_MS = 60_000
+
+/** Our bid among a chat's texts: the whole text, or the first words of it when the page shows a long one cut. */
+export function isOurBid(seen: string, text: string): boolean {
+  const a = normalizeText(seen)
+  const b = normalizeText(text)
+  if (a === '' || b === '') return false
+  return a === b || a.includes(b) || (a.length >= 40 && b.startsWith(a.slice(0, 40)))
+}
+/**
+ * Where a bid call is and what it saw: the one line of the node's log a failure leaves, and the record of a page the
+ * node could not read (31.10.2026, order 95590077: two refusals left no word of which check said no).
+ */
+type BidTrace = {
+  step: string
+  feeRub?: number | null
+  walletRub?: number | null
+  opener?: { why: OpenerMiss | null; shownRub: number | null } | null
+}
+const OPENER_WORDS: Record<OpenerMiss, string> = {
+  no_opener: 'кнопки, которая открывает форму, на странице нет',
+  opener_fee: 'сумма на «Продолжить» не та, что в заказе',
+  two_openers: 'кнопок «Продолжить» несколько',
+  opener_sends: 'кнопка открытия похожа на отправку',
+  may_not: 'вкладке стало нельзя нажимать',
+  no_field: 'после нажатия поле текста не появилось',
 }
 const FORM_WORDS: Record<AfterPress['form'], string> = {
   closed: 'форма закрылась',
   sent: 'сайт ответил на отправку, форма осталась',
   open: 'форма не закрылась',
+  paid: 'кошелёк уже меньше',
+  unsure: 'нажатие не подтвердилось',
+  retry: 'повтор после нажатия',
+}
+/**
+ * The wallet down by exactly the amount due, and what later presses took, since before the press (95611217: 3277 → 3110
+ * at 167 ₽). Any other sum is someone else's money or a top-up: it proves nothing, and the chat is looked at instead.
+ */
+const moneyGone = (rub: number | null, before: number | null, due: number, later = 0) =>
+  before !== null && due > 0 && rub !== null && rub === before - due - later
+/** Waits ms without a page, stopping early when told. */
+async function watchFor(ms: number, stop: () => boolean) {
+  const until = Date.now() + ms
+  while (Date.now() < until && !stop()) await sleep(Math.min(250, ms))
 }
 
 /**
@@ -70,7 +146,6 @@ function watchSend(page: Page) {
   page.on('requestfinished', onDone)
   page.on('requestfailed', onDone)
   return {
-    seen: () => seen > 0,
     settled: () => seen > 0 && open.size === 0 && Date.now() - lastAt >= 500,
     stop() {
       page.off('request', onRequest)
@@ -95,8 +170,14 @@ export function createBidTools(o: {
   closeMs?: number
   /** The pause before the order page is looked at once more after a press it did not show yet. */
   lookAgainMs?: number
-  /** How long after the press the order page is looked at again before the press is UNCERTAIN. */
+  /** How long after the press the bid is looked for before the press is UNCERTAIN. */
   confirmMs?: number
+  /** How long one look stays on the chat page: the messenger brings new messages itself. */
+  chatLookMs?: number
+  /** How long one look at the order page waits for its answer. */
+  orderLookMs?: number
+  /** A retry opens no page this soon after the last look at the same bid: the core calls it five times in 30 s. */
+  retryLookMs?: number
   /** How long get_order waits for the client answer once the page has loaded. */
   clientMs?: number
 }): Pick<ProfiToolsImpl, 'getOrder' | 'submitBid'> {
@@ -107,6 +188,11 @@ export function createBidTools(o: {
   // Boris, 31.10.2026: «Медленно этот процесс работает!» A bid taken at 09:17:53 was UNCERTAIN at 09:19:04 and found
   // only by the core's later look: the order answer showed it minutes late. The page is looked at until this passes.
   const confirmMs = o.confirmMs ?? 30000
+  const chatLookMs = o.chatLookMs ?? 6000
+  const orderLookMs = o.orderLookMs ?? 8000
+  const retryLookMs = o.retryLookMs ?? 10000
+  // When each unsure bid was last looked at.
+  const lookedAt = new Map<string, number>()
   const clientMs = o.clientMs ?? 3000
   const orderPath = o.parsers.paths.order ?? profiParsers.paths.order ?? ((id) => id)
   const uncertain = () => fail('UNCERTAIN', 'Отклик нажат, но страница его не показала')
@@ -114,9 +200,50 @@ export function createBidTools(o: {
    * An unsure press, with why in the node's log (30.10.2026: three bids of five on 28.10 were unsure, and the log could
    * not tell a form that stayed open from an order page that did not show the bid yet).
    */
+  const told = new WeakSet<Error>()
   const unsure = (orderId: string, why: string) => {
     console.error(`UNCERTAIN ${orderId}: ${why}`)
-    return uncertain()
+    const e = uncertain()
+    told.add(e)
+    return e
+  }
+  /** One line of the node's log per failed bid: the class, the step and the message (an unsure one has its own). */
+  function logFailure(orderId: string, trace: BidTrace, e: unknown) {
+    if (e instanceof Error && told.has(e)) return
+    const cls = e instanceof ProfiToolError ? e.errorClass : 'INTERNAL'
+    const msg = e instanceof Error ? e.message.slice(0, 200) : String(e)
+    const saw = [
+      trace.feeRub != null ? `цена ${trace.feeRub} ₽` : null,
+      trace.walletRub != null ? `кошелёк ${trace.walletRub} ₽` : null,
+    ].filter(Boolean)
+    console.error(
+      `BID ${orderId} ${cls} на шаге «${trace.step}»: ${msg}${saw.length ? ` (${saw.join(', ')})` : ''}`,
+    )
+  }
+  /**
+   * A bid refused for a page the node could not read: what the node saw and the page's outline (tags and classes,
+   * never its text) are kept in node.raw_event, so the next look tells which part of the page changed.
+   */
+  async function keepRefusal(r: BidRuntime, orderId: string, trace: BidTrace, message: string) {
+    const page = r.page()
+    const shape = await pageShape(page).catch(() => [])
+    await r.eyes
+      .onRaw({
+        kind: 'dom',
+        url: page.url(),
+        body: {
+          what: 'bid_refused',
+          orderId,
+          step: trace.step,
+          message,
+          feeRub: trace.feeRub ?? null,
+          walletRub: trace.walletRub ?? null,
+          opener: trace.opener ?? null,
+          shape,
+        },
+        receivedAt: new Date().toISOString(),
+      })
+      .catch(() => {})
   }
   const tooLate = () =>
     fail('RATE_LIMITED', 'Срок нажатия прошёл или ядро перестало ждать, отклик не нажат')
@@ -173,20 +300,27 @@ export function createBidTools(o: {
    * Opens the order page and waits for its own answer about this order (null when none came). With `client` it
    * also takes the client answer of this visit.
    */
-  async function openOrder(page: Page, go: Go, orderId: string, client = false) {
+  async function openOrder(
+    page: Page,
+    go: Go,
+    orderId: string,
+    client = false,
+    look?: { answerMs: number },
+  ) {
     const answer = page
       .waitForResponse(
         // Only GraphQL bodies are read: images and scripts of the page pass by untouched.
         async (res) =>
           /\/graphql/.test(res.url()) &&
           orderScreenFromAnswer(res.url(), await res.json().catch(() => null), orderId) !== null,
-        { timeout: answerMs },
+        { timeout: look?.answerMs ?? answerMs },
       )
       .then(async (res) => orderScreenFromAnswer(res.url(), await res.json(), orderId))
       .catch(() => null)
     const watch = client ? watchClient(page, orderId) : null
     try {
-      if (!(await go(orderPath(orderId)))) return { ok: false, screen: null, client: null }
+      if (!(await go(orderPath(orderId), { quick: look !== undefined })))
+        return { ok: false, screen: null, client: null }
       const screen = await answer
       return { ok: true, screen, client: (await watch?.result(clientMs)) ?? null }
     } finally {
@@ -210,16 +344,18 @@ export function createBidTools(o: {
   }
 
   /**
-   * After the press: the form closed, or the site answered all the press sent (31.10.2026 the form stayed open 30 s
-   * while the money was already gone). At most ms; 'open' when neither.
+   * After the press: the wallet the eyes hear is down already (`paid`), the form closed, or the site answered all the
+   * press sent (31.10.2026 the form stayed open 30 s while the money was already gone). At most ms; 'open' when neither.
    */
   async function waitSent(
     page: Page,
     send: ReturnType<typeof watchSend>,
     ms: number,
+    paid: () => boolean,
   ): Promise<AfterPress['form']> {
     const until = Date.now() + ms
     while (Date.now() < until) {
+      if (paid()) return 'paid'
       if (!(await formOnScreen(page).catch(() => true))) return 'closed'
       if (send.settled()) return 'sent'
       await sleep(250)
@@ -236,58 +372,182 @@ export function createBidTools(o: {
   }
 
   /**
-   * After a press only a look: the bid on the page is that press and its money; anything else is UNCERTAIN. The order
-   * answer may show a bid the site has just taken minutes late (28.10 and 31.10.2026), so the page is looked at again
-   * every lookAgainMs until confirmMs passed. Its top bar counts too: the wallet down by the amount due since before
-   * the press is the site taking this press (found_on_page then stays false). `after` is null for a retry that only
-   * looks: it knows no wallet from before.
+   * The order's chat after a press: one page load, watched for chatLookMs, since the messenger page brings new messages
+   * itself. Our text in its bubbles or its answer is the bid; so is this order's line in the chats list with a message
+   * since the press (`since`, null for a retry that knows no press). The note for the log holds counts, never a word.
+   */
+  async function lookInChat(
+    page: Page,
+    t: { go: Go },
+    i: SubmitBidInput,
+    since: number | null,
+  ): Promise<{ by: BidSign | null; note: string }> {
+    let answered = 0
+    let inAnswer = false
+    let listed = false
+    const onResponse = async (res: Response) => {
+      if (!['fetch', 'xhr'].includes(res.request().resourceType())) return
+      try {
+        const body = await res.json()
+        const texts = o.parsers.chatTextsFromAnswer?.(res.url(), body) ?? null
+        if (texts) {
+          answered += texts.length
+          if (texts.some((x) => isOurBid(x, i.text))) inAnswer = true
+        }
+        const line = o.parsers
+          .chatsFromAnswer?.(res.url(), body)
+          ?.find((c) => c.chatId === i.order_id)
+        if (since !== null && line?.lastAt && Date.parse(line.lastAt) >= since - CLOCKS_MS)
+          listed = true
+      } catch {}
+    }
+    page.on('response', onResponse)
+    try {
+      if (!(await t.go(o.parsers.paths.chat(i.order_id), { quick: true })))
+        return { by: null, note: 'чат не открылся' }
+      const until = Date.now() + chatLookMs
+      let bubbles = 0
+      for (;;) {
+        const read = await o.parsers
+          .fromChatDom(page, i.order_id, { waitMs: 300 })
+          .catch(() => null)
+        const msgs = (read?.signals ?? []).filter((x): x is MessageSignal => x.t === 'message')
+        bubbles = msgs.length
+        const inBubble = msgs.some(
+          (x) => x.message.author !== 'client' && isOurBid(x.message.text, i.text),
+        )
+        if (inBubble || inAnswer)
+          return { by: 'chat', note: `чат: отклик есть, ${inBubble ? 'пузырь' : 'ответ'}` }
+        if (listed) return { by: 'list', note: 'чат: новая строка в списке' }
+        if (Date.now() >= until) break
+        await sleep(300)
+      }
+      return { by: null, note: `чат: отклика нет, пузырей ${bubbles}, в ответе ${answered}` }
+    } finally {
+      page.off('response', onResponse)
+    }
+  }
+
+  /** The order page after a press: its answer's hasBid and the wallet in its top bar, once the bar is drawn. */
+  async function lookAtOrder(page: Page, t: { go: Go }, orderId: string) {
+    const again = await openOrder(page, t.go, orderId, false, { answerMs: orderLookMs })
+    if (!again.ok) return { hasBid: null, wallet: null, note: 'заказ не открылся' }
+    let wallet = await headerWallet(page)
+    for (let k = 0; k < 8 && wallet === null; k++) {
+      await sleep(250)
+      wallet = await headerWallet(page)
+    }
+    const hasBid = again.screen ? again.screen.hasBid : null
+    return {
+      hasBid,
+      wallet,
+      note: `заказ: ${again.screen ? `hasBid ${hasBid}` : 'ответа нет'}, кошелёк ${wallet ?? 'не виден'}`,
+    }
+  }
+
+  /** What a call that comes after the press knows of it, from the press written down. */
+  function retryOf(a: BidAttempt | null): AfterPress {
+    const at = a ? Date.parse(a.pressedAt) : Number.NaN
+    return {
+      form: 'retry',
+      walletBefore: a?.walletRub ?? null,
+      pressedAt: Number.isNaN(at) ? null : at,
+    }
+  }
+
+  /**
+   * After a press only a look: a sign of the bid is that press and its money; no sign is UNCERTAIN. The signs, by what
+   * the live site gives first: the wallet the eyes hear, down by exactly the amount due since before the press (it costs no
+   * page and needs no tab: 95611217 showed it 2 s after the press); our text in the order's chat; this order's fresh
+   * line in the chats list; the order answer's hasBid; the wallet in the order page's top bar. found_on_page is true
+   * for the chat and the order page, which show the bid itself. The log line says what each look saw, so a sign that
+   * lags can be told from one not read.
    */
   async function confirm(
     r: BidRuntime,
     i: SubmitBidInput,
     dueRub: number,
     t: { go: Go; can(): boolean },
-    after: AfterPress | null = null,
+    after: AfterPress,
   ): Promise<SubmitBidOutput> {
-    const form = after ? FORM_WORDS[after.form] : 'повтор после нажатия'
-    const before = after?.walletBefore ?? null
-    const paid = (rub: number | null) =>
-      before !== null && dueRub > 0 && rub !== null && rub <= before - dueRub
+    const form = FORM_WORDS[after.form]
+    const before = after.walletBefore
+    const retry = after.form === 'retry'
     const started = Date.now()
-    const took = () => Math.round((Date.now() - started) / 1000)
+    const took = () => Math.round((Date.now() - (after.pressedAt ?? started)) / 1000)
+    const trail: string[] = []
+    const looks = () =>
+      [
+        ...trail,
+        `кошелёк до нажатия ${before ?? 'неизвестен'}`,
+        `глаза слышат ${r.eyes.balance() ?? 'ничего'}`,
+      ].join('; ')
     try {
       const page = r.page()
-      let by: 'page' | 'wallet' | null = null
-      for (let look = 0; by === null; look++) {
-        if (look > 0) {
+      // A press made after this one may have taken money too: it is not this press's.
+      const later = retry ? await duesPressedAfter(o.db, i.account_id, i.idempotency_key) : 0
+      const paid = (rub: number | null) => moneyGone(rub, before, dueRub, later)
+      const heard = () => paid(r.eyes.balance())
+      // The core calls a retry five times in half a minute: pages only now and then, the wallet every time.
+      const justLooked = retry && Date.now() - (lookedAt.get(i.idempotency_key) ?? 0) < retryLookMs
+      let by: BidSign | null = null
+      for (const [k, look] of (retry ? RETRY_LOOKS : LOOKS).entries()) {
+        if (k > 0) {
           if (Date.now() - started + lookAgainMs > confirmMs) break
-          await sleep(lookAgainMs)
+          await watchFor(lookAgainMs, heard)
+        }
+        if (heard()) {
+          by = 'wallet'
+          break
         }
         const s = r.watch.state()
-        if (s === 'dead' || s === 'banned' || !t.can()) break
-        const again = await openOrder(page, t.go, i.order_id)
-        if (again.screen?.hasBid === true) by = 'page'
-        else if (again.ok && paid(await headerWallet(page))) by = 'wallet'
+        if (s === 'dead' || s === 'banned') break
+        // No page may be opened now; the wallet is still heard until the time is out.
+        if (!t.can()) {
+          trail.push('вкладке нельзя ходить')
+          continue
+        }
+        if (justLooked) {
+          trail.push('смотрели только что')
+          break
+        }
+        if (look === 'chat') {
+          const seen = await lookInChat(page, t, i, after.pressedAt)
+          trail.push(seen.note)
+          by = seen.by
+        } else {
+          const seen = await lookAtOrder(page, t, i.order_id)
+          trail.push(seen.note)
+          by = seen.hasBid === true ? 'page' : paid(seen.wallet) ? 'wallet' : null
+        }
+        lookedAt.delete(i.idempotency_key)
+        if (lookedAt.size >= 100) lookedAt.delete(lookedAt.keys().next().value ?? '')
+        lookedAt.set(i.idempotency_key, Date.now())
+        if (by) break
       }
-      if (!by)
-        throw unsure(
-          i.order_id,
-          `${form}, за ${took()} с на странице заказа отклика нет${before === null ? '' : ', кошелёк тот же'}`,
-        )
-      console.error(
-        `BID ${i.order_id}: подтверждён ${by === 'page' ? 'на странице заказа' : 'по кошельку'} через ${took()} с, ${form}`,
-      )
+      if (!by && heard()) by = 'wallet'
+      if (!by) throw unsure(i.order_id, `${form}, за ${took()} с признаков отклика нет; ${looks()}`)
       await markOrderBid(o.db, i.account_id, i.order_id)
+      // Read only: the bar may not show the money gone yet, and the eyes must not hear the old wallet back from it. The
+      // bid is there, so the money is gone.
+      const shown = await headerWallet(page)
+      console.error(
+        `BID ${i.order_id}: подтверждён ${SIGN_WORDS[by]} через ${took()} с, ${form}; ${looks()}; в шапке сейчас ${shown ?? 'не виден'}`,
+      )
       const out = {
-        found_on_page: by === 'page',
+        found_on_page: by === 'chat' || by === 'page',
         spent_rub: dueRub,
-        balance_after_rub: (await walletOnPage(r, page)) ?? r.eyes.balance(),
+        balance_after_rub:
+          before !== null
+            ? Math.min(shown ?? before, before - dueRub)
+            : (shown ?? r.eyes.balance()),
       }
       await saveBidResult(o.db, i.idempotency_key, out)
+      lookedAt.delete(i.idempotency_key)
       return out
     } catch (e) {
       if (e instanceof ProfiToolError) throw e
-      throw unsure(i.order_id, `${form}, страница заказа не прочиталась`)
+      throw unsure(i.order_id, `${form}, страница не прочиталась; ${looks()}`)
     }
   }
 
@@ -296,10 +556,12 @@ export function createBidTools(o: {
     i: SubmitBidInput,
     t: { go: Go; can(): boolean },
     late: () => boolean,
+    trace: BidTrace,
   ): Promise<SubmitBidOutput> {
     const page = r.page()
     const id = i.order_id
     const key = i.idempotency_key
+    trace.step = 'страница заказа'
     const opened = await openOrder(page, t.go, id)
     if (!opened.ok) throw fail('RATE_LIMITED', 'Страница заказа не открылась, отклик не нажат')
     await keepFormMap(r, page)
@@ -308,8 +570,12 @@ export function createBidTools(o: {
       if (await closedNotice(page)) throw fail('ORDER_CLOSED', 'Заказ больше не принимает отклики')
       throw fail('LAYOUT_CHANGED', 'Страница заказа не дала свой ответ, отклик не нажат')
     }
+    trace.feeRub = s.feeRub
+    trace.step = 'кошелёк в шапке'
     // Before any money only the wallet the page itself shows counts, never one remembered.
     const wallet = await walletOnPage(r, page)
+    trace.walletRub = wallet
+    trace.step = 'ответ страницы заказа'
     if (s.hasBid === true) {
       await markOrderBid(o.db, i.account_id, id)
       return {
@@ -325,8 +591,10 @@ export function createBidTools(o: {
     const price = i.price_rub ?? null
     if (s.priceRequired && price === null)
       throw fail('INTERNAL', 'Профи.ру требует «Стоимость услуги», а цены в отклике нет')
-    if (s.feeRub === null || wallet === null)
-      throw fail('LAYOUT_CHANGED', 'Не прочитал цену отклика или кошелёк, отклик не нажат')
+    if (s.feeRub === null)
+      throw fail('LAYOUT_CHANGED', 'Не прочитал цену отклика в ответе страницы, отклик не нажат')
+    if (wallet === null)
+      throw fail('LAYOUT_CHANGED', 'Не прочитал кошелёк в шапке страницы, отклик не нажат')
     if (s.feeRub > i.max_fee_rub) throw dearer(s.feeRub, i.max_fee_rub)
     if (wallet < s.feeRub)
       throw fail('NO_MONEY', `В кошельке ${wallet} ₽, а отклик стоит ${s.feeRub} ₽`)
@@ -335,9 +603,16 @@ export function createBidTools(o: {
     if (late()) throw tooLate()
 
     // The press is written down before the opener: should the opener spend after all, a retry only looks.
-    if (!(await savePress(o.db, { key, accountId: i.account_id, orderId: id, dueRub: s.feeRub }))) {
+    const pressed = await savePress(o.db, {
+      key,
+      accountId: i.account_id,
+      orderId: id,
+      dueRub: s.feeRub,
+      walletRub: wallet,
+    })
+    if (!pressed) {
       const twin = await findBidAttempt(o.db, key)
-      return confirm(r, i, twin?.dueRub ?? s.feeRub, t)
+      return confirm(r, i, twin?.dueRub ?? s.feeRub, t, retryOf(twin))
     }
     let openerPressed = false
     /**
@@ -359,13 +634,27 @@ export function createBidTools(o: {
 
     let due = s.feeRub
     try {
+      trace.step = 'кнопка открытия формы'
       // «Продолжить» is pressed only beside the order's own fee, checked above against max_fee_rub.
       const form = await openForm(page, { words: s.openerText, feeRub: s.feeRub }, undefined, {
         may: () => t.can() && !late(),
+        card: true,
       })
       openerPressed = form.pressed
-      if (!form.open)
-        return await refuse(stopped() ?? fail('LAYOUT_CHANGED', 'Форма отклика не открылась'))
+      trace.opener = { why: form.why ?? null, shownRub: form.shownRub ?? null }
+      if (!form.open) {
+        const why =
+          form.why === 'opener_fee'
+            ? `на «Продолжить» ${form.shownRub} ₽, а в заказе ${s.feeRub} ₽`
+            : form.why
+              ? OPENER_WORDS[form.why]
+              : 'причина не видна'
+        return await refuse(
+          stopped() ??
+            fail('LAYOUT_CHANGED', `Форма отклика не открылась: ${why}, отклик не нажат`),
+        )
+      }
+      trace.step = 'оплата в форме'
       const pay = await readPayment(page, wallet)
       due = pay.dueRub ?? s.feeRub
       if (due > i.max_fee_rub) return await refuse(dearer(due, i.max_fee_rub))
@@ -384,7 +673,12 @@ export function createBidTools(o: {
           ),
         )
       }
-      const filled = await fillForm(page, { priceRub: price, text: i.text })
+      trace.step = 'поля формы'
+      const filled = await fillForm(page, {
+        priceRub: price,
+        priceToRub: i.price_to_rub ?? null,
+        text: i.text,
+      })
       if (filled === 'no_field')
         return await refuse(fail('LAYOUT_CHANGED', 'Поля формы отклика не нашлись'))
       if (filled === 'not_taken')
@@ -403,27 +697,40 @@ export function createBidTools(o: {
 
     // From here the bid may be on the site: anything not confirmed is UNCERTAIN, never a failure.
     let after: AfterPress
-    // The wallet the press is measured against: the lower of the one before the opener and the one the bar shows
-    // now, so money an opener took is never this press's.
-    const walletNow = await headerWallet(page)
-    const before = walletNow === null ? wallet : Math.min(wallet, walletNow)
+    // The wallet the press is measured against: the lowest of the one before the opener, the one the bar shows now and
+    // the one the eyes heard last, so money an opener took, or an old wallet the eyes remember, is never this press's.
+    const before = Math.min(
+      ...[wallet, await headerWallet(page), r.eyes.balance()].filter((x) => x !== null),
+    )
+    if (before !== wallet)
+      await o.db
+        .update(bidAttempt)
+        .set({ walletRub: before })
+        .where(eq(bidAttempt.idempotencyKey, key))
+        .catch(() => {})
     const send = watchSend(page)
+    trace.step = 'нажатие «Откликнуться»'
     try {
       const clicked = await clickSubmit(page, s.submitText)
       // Nothing was pressed after all.
       if (clicked === 'no_button')
         return await refuse(fail('LAYOUT_CHANGED', 'Кнопки отправки отклика нет'))
-      if (clicked === 'unsure') throw unsure(id, 'нажатие на кнопку не подтвердилось')
+      const pressedAt = Date.now()
       // The page is left only once the form closed or the site answered the send, so a slow send is never cut off;
-      // then it is looked at whatever the form did (a bid there is this press; the page before the press had none).
-      const form = await waitSent(page, send, 2 * closeMs)
-      after = { form, walletBefore: send.seen() ? before : null }
+      // then it is looked at whatever the form did (a bid there is this press; the page before the press had none). A
+      // press that may not have happened is looked for all the same.
+      const form =
+        clicked === 'unsure'
+          ? 'unsure'
+          : await waitSent(page, send, 2 * closeMs, () => moneyGone(r.eyes.balance(), before, due))
+      after = { form, walletBefore: before, pressedAt }
     } catch (e) {
       if (e instanceof ProfiToolError) throw e
       throw unsure(id, 'сбой после нажатия')
     } finally {
       send.stop()
     }
+    trace.step = 'проверка после нажатия'
     return confirm(r, i, due, t, after)
   }
 
@@ -485,45 +792,66 @@ export function createBidTools(o: {
     },
 
     async submitBid(i, signal) {
-      if (!verifyPermit(o.permitSecret, i))
-        throw fail('INTERNAL', 'Разрешение ядра не подходит к отклику')
-      // The core stopped waiting (the call was cancelled) or the permit's deadline passed: no press any more.
-      const late = () => signal?.aborted === true || Date.now() > Date.parse(i.not_after)
-      const r = runtime(i.account_id)
-      const known = await findBidAttempt(o.db, i.idempotency_key)
-      if (known?.result) return known.result as SubmitBidOutput
-      if (known) {
-        const due = known.dueRub
-        return r
-          .inTab((t) => confirm(r, i, due, t), { urgent: true })
-          .catch(() => Promise.reject(uncertain()))
+      const trace: BidTrace = { step: 'разрешение ядра' }
+      try {
+        return await submit(i, signal, trace)
+      } catch (e) {
+        logFailure(i.order_id, trace, e)
+        throw e
       }
-      if (late()) throw tooLate()
-      requireAlive(r.watch)
-      return r.inTab(
-        async (t) => {
-          // A twin of this call may have pressed while this one waited for the tab.
-          const twin = await findBidAttempt(o.db, i.idempotency_key)
-          if (twin?.result) return twin.result as SubmitBidOutput
-          if (twin) return confirm(r, i, twin.dueRub, t)
-          if (late()) throw tooLate()
-          requireAlive(r.watch)
-          if (!t.can())
-            throw fail(
-              'RATE_LIMITED',
-              'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
-            )
-          try {
-            return await bid(r, i, t, late)
-          } catch (e) {
-            if (e instanceof ProfiToolError) throw e
-            // A failure of our own before the press (the database, the browser): nothing was pressed.
-            const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
-            throw fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`)
-          }
-        },
-        { urgent: true },
-      )
     },
+  }
+
+  async function submit(
+    i: SubmitBidInput,
+    signal: AbortSignal | undefined,
+    trace: BidTrace,
+  ): Promise<SubmitBidOutput> {
+    if (!verifyPermit(o.permitSecret, i))
+      throw fail('INTERNAL', 'Разрешение ядра не подходит к отклику')
+    // The core stopped waiting (the call was cancelled) or the permit's deadline passed: no press any more.
+    const late = () => signal?.aborted === true || Date.now() > Date.parse(i.not_after)
+    const r = runtime(i.account_id)
+    const known = await findBidAttempt(o.db, i.idempotency_key)
+    if (known?.result) return known.result as SubmitBidOutput
+    if (known) {
+      trace.step = 'повтор после нажатия'
+      return r
+        .inTab((t) => confirm(r, i, known.dueRub, t, retryOf(known)), { urgent: true })
+        .catch((e) => Promise.reject(e instanceof ProfiToolError ? e : uncertain()))
+    }
+    if (late()) throw tooLate()
+    trace.step = 'вход на Профи.ру'
+    requireAlive(r.watch)
+    trace.step = 'очередь вкладки'
+    return r.inTab(
+      async (t) => {
+        // A twin of this call may have pressed while this one waited for the tab.
+        const twin = await findBidAttempt(o.db, i.idempotency_key)
+        if (twin?.result) return twin.result as SubmitBidOutput
+        if (twin) return confirm(r, i, twin.dueRub, t, retryOf(twin))
+        if (late()) throw tooLate()
+        requireAlive(r.watch)
+        if (!t.can())
+          throw fail(
+            'RATE_LIMITED',
+            'Вкладка аккаунта сейчас не ходит на сайт (живой экран, связь или IP), отклик не нажат',
+          )
+        try {
+          return await bid(r, i, t, late, trace)
+        } catch (e) {
+          if (e instanceof ProfiToolError) {
+            // The tab is still on the order page: its outline shows what the node could not read.
+            if (e.errorClass === 'LAYOUT_CHANGED')
+              await keepRefusal(r, i.order_id, trace, e.message)
+            throw e
+          }
+          // A failure of our own before the press (the database, the browser): nothing was pressed.
+          const why = e instanceof Error ? e.message.slice(0, 120) : String(e)
+          throw fail('INTERNAL', `Сбой до нажатия, отклик не нажат: ${why}`)
+        }
+      },
+      { urgent: true },
+    )
   }
 }

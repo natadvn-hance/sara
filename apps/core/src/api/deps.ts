@@ -44,15 +44,20 @@ export type AppDeps = {
     taskId: string
     text: string | null
     priceRub: number | null
+    priceToRub?: number | null
     followUps?: string[] | null
   }) => Promise<{
     saved: boolean
     message: string
   }>
+  /** The pult's own address (the VAPID contact of Web Push). */
+  publicUrl?: string
   /** The one writer of the mind (M5, ADR-025): Boris's «да» from the pult goes through it; unset, it waits. */
   mindWriter?: MindWriter
   /** The host's backup log for the health screen (config.backupLog). */
   backupLog?: string
+  /** A Google Sheet is linked (config.sheet): «Состояние» shows whether it keeps up. */
+  sheetLinked?: boolean
 }
 
 export type AccountConfig = { id: string; title: string; egressIp: string }

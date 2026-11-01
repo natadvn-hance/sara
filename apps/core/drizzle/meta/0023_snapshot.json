@@ -1,5 +1,5 @@
 {
-  "id": "36c55f49-dfde-46cd-8cda-f4ab2cd51c3b",
+  "id": "629fa682-93c6-4ce3-8260-5e4216a27b97",
   "prevId": "a4d074f5-b47f-4d1a-a72a-8fd199e460e7",
   "version": "7",
   "dialect": "postgresql",
@@ -458,65 +458,6 @@
         "chat_message_conversation_id_conversation_id_fk": {
           "name": "chat_message_conversation_id_conversation_id_fk",
           "tableFrom": "chat_message",
-          "tableTo": "conversation",
-          "schemaTo": "core",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "core.conv_owed": {
-      "name": "conv_owed",
-      "schema": "core",
-      "columns": {
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "anchor_message_id": {
-          "name": "anchor_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "steps": {
-          "name": "steps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_at": {
-          "name": "last_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "conv_owed_conversation_id_conversation_id_fk": {
-          "name": "conv_owed_conversation_id_conversation_id_fk",
-          "tableFrom": "conv_owed",
           "tableTo": "conversation",
           "schemaTo": "core",
           "columnsFrom": [
@@ -3505,6 +3446,56 @@
           "value": "jsonb_array_length(\"core\".\"persona\".\"source_refs\") > 0"
         }
       },
+      "isRLSEnabled": false
+    },
+    "core.push_subscription": {
+      "name": "push_subscription",
+      "schema": "core",
+      "columns": {
+        "endpoint": {
+          "name": "endpoint",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "p256dh": {
+          "name": "p256dh",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "auth": {
+          "name": "auth",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "failed_at": {
+          "name": "failed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "core.question": {

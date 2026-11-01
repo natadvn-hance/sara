@@ -1,0 +1,1 @@
+ALTER TABLE "node"."bid_attempt" ADD COLUMN "wallet_rub" integer;

@@ -298,6 +298,33 @@ describe('profi.send_message on the chat page (M4)', () => {
     expect(site.presses).toEqual([])
   }, 60000)
 
+  it('FR-CONV-9: for the series after a bid, a line of our own side after the expected one is no change, a client’s word still is (01.11.2026)', async () => {
+    // The core saw the bid (101); the site added its own line about the price after the stored chat was read.
+    site.chats.set('c1', {
+      messages: [
+        { id: '101', side: 'specialist', text: OURS },
+        { id: '102', side: 'specialist', text: 'Стоимость от 30000 до 45000 руб.' },
+      ],
+    })
+    expect(await failure(tools().sendMessage(msg(REPLY, { expect_last_message_id: '101' })))).toBe(
+      'CHAT_CHANGED',
+    )
+    const out = await tools().sendMessage(
+      msg(REPLY, { expect_last_message_id: '101', after_own: true, quick: true }),
+    )
+    expect(out.found_on_page).toBe(true)
+    expect(site.presses).toEqual([{ chat: 'c1', how: 'works', text: REPLY }])
+    // A client’s word after it stays a change whatever the flag says.
+    site.presses = []
+    c1().messages.push({ id: '103', side: 'client', text: 'Здравствуйте' })
+    expect(
+      await failure(
+        tools().sendMessage(msg('Второе', { expect_last_message_id: '101', after_own: true })),
+      ),
+    ).toBe('CHAT_CHANGED')
+    expect(site.presses).toEqual([])
+  }, 60000)
+
   it('FR-CONV-6: null means the chat must be empty: a chat with messages is CHAT_CHANGED, an empty one is written to', async () => {
     expect(await failure(tools().sendMessage(msg(REPLY, { expect_last_message_id: null })))).toBe(
       'CHAT_CHANGED',

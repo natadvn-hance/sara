@@ -26,6 +26,8 @@ export type SiteKlient = {
   positive: number
   negative: number
   tags: string[]
+  /** The site's own lines about the client (Profi Pro), as the answer writes them. */
+  summaries?: { image: string; colorTheme: string; description: string; renderInOrder: boolean }[]
 }
 export type SiteOrder = {
   id: string
@@ -70,6 +72,9 @@ export type BidSettings = BidLook & {
   postDelayMs: number
   /** The top bar shows this wallet whatever was spent (a bar not refreshed yet); null: the real one. */
   barBalance: number | null
+  /** A bid the site took stands in the order's chat, with the site's tail after it, as live; this late, in ms. */
+  chatBid: boolean
+  chatBidDelayMs: number
 }
 export type SiteAuthor = 'client' | 'specialist' | 'system' | 'strange'
 export type SiteMessage = { id: string; side: SiteAuthor; text: string; ts: string; read: boolean }
@@ -109,6 +114,8 @@ export type ProfiSite = {
   /** The next `n` page requests are cut off before any answer, as one lost request is. */
   dropNext(n: number): void
   muteRtp(on: boolean): void
+  /** The stream only names the chat with news and the message number, as the live one does; the words are on its page. */
+  streamNamesOnly(on: boolean): void
   changeLayout(): void
   close(): Promise<void>
 }
@@ -226,6 +233,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let askLeave = false
   let drops = 0
   let rtpMuted = false
+  let namesOnly = false
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
   const state = {
@@ -258,11 +266,26 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
     postDelayMs: 0,
     formStays: false,
     barBalance: null,
+    chatBid: true,
+    chatBidDelayMs: 0,
   })
   /** Orders whose taken bid the order answer does not show yet, and for how many more answers. */
   const bidLag = new Map<string, number>()
   const bidSettings = freshBidSettings()
 
+  function writeInChat(chatId: string, author: SiteAuthor, text: string): string {
+    const id = `m${++seq}`
+    // Our own messages are read: the list counts only what the other side wrote.
+    const read = author === 'specialist'
+    const m: SiteMessage = { id, side: author, text, ts: new Date().toISOString(), read }
+    chats.set(chatId, [...(chats.get(chatId) ?? []), m])
+    push(
+      namesOnly
+        ? { type: 'chat.touched', chatId, messageId: id }
+        : { type: 'message.new', chatId, message: m },
+    )
+    return id
+  }
   const sessOf = (req: IncomingMessage) => /sess=([^;]+)/.exec(req.headers.cookie ?? '')?.[1] ?? ''
   const html = (res: ServerResponse, body: string) =>
     res
@@ -322,13 +345,14 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.feedRequests++
       const open = orders.filter((x) => x.open)
       const size = state.boardPageSize
-      if (size <= 0) return json(res, { [layout.feedKey]: open })
+      if (size <= 0) return json(res, { [layout.feedKey]: open, totalCount: open.length })
       // Paged like the live board: a page and the cursor of the next one (here the index of its first order).
       const from = Number(url.searchParams.get('cursor') ?? 0) || 0
       const next = from + size
       return json(res, {
         [layout.feedKey]: open.slice(from, next),
         nextCursor: next < open.length ? String(next) : null,
+        totalCount: open.length,
       })
     }
     if (p.startsWith('/api/order/')) {
@@ -344,8 +368,13 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         })),
       })
     }
-    if (p.startsWith('/api/chat/'))
-      return json(res, { messages: chats.get(p.slice('/api/chat/'.length)) ?? [] })
+    if (p.startsWith('/api/chat/')) {
+      const messages = chats.get(p.slice('/api/chat/'.length)) ?? []
+      json(res, { messages })
+      // As the live site: a chat its page showed is read.
+      for (const m of messages) m.read = true
+      return
+    }
     if (p === '/graphql' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}') as { variables?: { id?: string } }
       const found = orders.find((x) => x.id === body.variables?.id)
@@ -378,6 +407,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
             count: { positive: k.positive, negative: k.negative },
             list: [{ tags: k.tags }],
           },
+          ...(k.summaries && { summaries: k.summaries }),
         },
       })
     }
@@ -399,6 +429,14 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       state.balance -= found.price
       found.hasBid = true
       if (bidSettings.hasBidLag > 0) bidLag.set(found.id, bidSettings.hasBidLag)
+      if (bidSettings.chatBid) {
+        const show = () => {
+          writeInChat(found.id, 'specialist', text)
+          writeInChat(found.id, 'specialist', `Стоимость от ${price} до ${priceTo} руб. усл.`)
+        }
+        if (bidSettings.chatBidDelayMs > 0) setTimeout(show, bidSettings.chatBidDelayMs)
+        else show()
+      }
       return json(res, { ok: true })
     }
     if (p === '/api/bid/open') {
@@ -516,13 +554,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
       push({ type: 'order.new', order })
       return id
     },
-    addMessage(chatId, author, text) {
-      const id = `m${++seq}`
-      const m: SiteMessage = { id, side: author, text, ts: new Date().toISOString(), read: false }
-      chats.set(chatId, [...(chats.get(chatId) ?? []), m])
-      push({ type: 'message.new', chatId, message: m })
-      return id
-    },
+    addMessage: writeInChat,
     logout() {
       sessions.clear()
       for (const c of clients) c.close()
@@ -545,6 +577,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         for (const s of sockets) s.destroy()
         for (const c of clients) c.terminate()
       }
+    },
+    streamNamesOnly(on) {
+      namesOnly = on
     },
     muteRtp(on) {
       rtpMuted = on

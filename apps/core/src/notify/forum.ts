@@ -2,6 +2,7 @@ import type { FunnelStage } from '@sara/shared'
 import { and, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { conversation, forumTopic, lead, telegramForum, telegramPost } from '../db/schema'
+import { firstName } from '../leads/clientName'
 import type { Place } from './notifier'
 
 /** Boris's forum (docs/product/telegram-forum.md), null while he has none: then everything goes to his chat. */
@@ -165,7 +166,12 @@ export async function topicIntro(
   // The stage is the pult's own (loaded here, not at the top: the pult reaches back into the notifier).
   const { stageForKey } = await import('../pult/clients')
   const stage = await stageForKey(db, key)
-  const name = topicName({ name: l?.clientName || null, orderId, title: l?.title ?? null, stage })
+  const name = topicName({
+    name: l?.clientName ? firstName(l.clientName) : null,
+    orderId,
+    title: l?.title ?? null,
+    stage,
+  })
   const text = l?.text ? oneLine(l.text) : ''
   const intro = [
     `📌 ${l?.title ?? (orderId ? `Заказ №${orderId}` : 'Клиент без заказа')}`,

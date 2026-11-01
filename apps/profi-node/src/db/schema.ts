@@ -76,6 +76,8 @@ export const bidAttempt = node.table('bid_attempt', {
   orderId: text('order_id').notNull(),
   /** What the form said it would charge. */
   dueRub: integer('due_rub').notNull(),
+  /** The wallet right before the press: a retry knows the press went by the wallet down from it (null: older rows). */
+  walletRub: integer('wallet_rub'),
   pressedAt: ts('pressed_at').notNull(),
   result: jsonb('result'),
 })

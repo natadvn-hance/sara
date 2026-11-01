@@ -5,6 +5,7 @@ import type { Db } from '../db/client'
 import { account, chatMessage, convTurn, mindGap } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
+import { workHoursSource } from '../leads/callSlots'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { buildDossier, clientNames, turnMessageIds, untilOurs } from './dossier'
@@ -29,6 +30,8 @@ export type TurnDeps = {
   mind: MindSearch
   /** The card of a decided turn to Boris: the shadow draft, a draft, a call (part C4). */
   card(turnId: string): Promise<void>
+  /** What is new in the chat the turn reads, told to Boris at once (the client's words, shown by whoever reads first). */
+  show?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
   /** The client's words to Boris: a client he took, a closed conversation. */
   forward(turnId: string): Promise<void>
   /**
@@ -272,8 +275,14 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
     })
     await stamp(turnId, 'recalled', { messageIds: dossier.turnMessageIds })
     const plan = await planTurn(
-      { gateway, mind },
-      { dossier, names: await clientNames(db, conv, dossier), settings, now },
+      { gateway, mind, slots: workHoursSource(db) },
+      {
+        dossier,
+        names: await clientNames(db, conv, dossier),
+        settings,
+        now,
+        leadId: conv.orderId,
+      },
     )
     const out = plan.output
     await stamp(turnId, 'planned', {

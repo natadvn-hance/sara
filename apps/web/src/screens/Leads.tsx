@@ -18,7 +18,7 @@ import { HoldBar, SKIP_REASONS } from '../ui/task'
 
 const DECIDED: Record<LeadQueue['decided'][number]['decision'], string> = {
   bid: 'отклик',
-  skip: 'пропущена',
+  skip: 'закрыта',
   closed: 'закрылась',
   other: 'решена',
 }
@@ -167,7 +167,7 @@ function Queue({
 }
 
 /**
- * The decision: «Откликнуться» waits ten seconds in the core and can be cancelled; «Пропустить» asks why here, one
+ * The decision: «Откликнуться» waits ten seconds in the core and can be cancelled; «Закрыть заявку» asks why here, one
  * tap on a reason or none; «Перепроверить» reads the order page now.
  */
 function Decide({ v }: { v: LeadView }) {
@@ -183,7 +183,7 @@ function Decide({ v }: { v: LeadView }) {
         {t.resolution === 'bid'
           ? 'отклик'
           : t.resolution === 'skip'
-            ? `пропущена${v.label?.reason ? `, ${v.label.reason}` : ''}`
+            ? `закрыта${v.label?.reason ? `, ${v.label.reason}` : ''}`
             : (t.resolution ?? 'закрыта')}
         .
       </p>
@@ -241,7 +241,7 @@ function Decide({ v }: { v: LeadView }) {
               disabled={busy !== null || !reason.trim()}
               onClick={() => skip(reason.trim())}
             >
-              Пропустить
+              Закрыть заявку
             </Btn>
             <Btn size="sm" onClick={() => setSkipping(false)}>
               Отмена
@@ -259,7 +259,7 @@ function Decide({ v }: { v: LeadView }) {
             {fee > 0 ? `Откликнуться за ${rub(fee)}` : 'Цена отклика неизвестна'}
           </Btn>
           <Btn disabled={busy !== null} onClick={() => setSkipping(true)}>
-            Пропустить
+            Закрыть заявку
           </Btn>
           <Btn
             size="sm"
@@ -309,14 +309,17 @@ function ScoreBlock({
  * The places of the series after the bid (Boris, 29.10.2026): the links, two lines and the call offer (30.10.2026);
  * an empty one is not sent.
  */
-const FOLLOW_UP_SLOTS = ['first', 'second', 'third', 'fourth'] as const
+const FOLLOW_UP_SLOTS = ['first', 'second', 'third', 'fourth', 'fifth'] as const
 
 /** The bid text with its price range; while the decision is open it is edited here, the card in Telegram stays. */
 function BidCard({ v }: { v: LeadView }) {
   const { press, busy } = usePress()
-  const [draft, setDraft] = useState<{ text: string; price: string; followUps: string[] } | null>(
-    null,
-  )
+  const [draft, setDraft] = useState<{
+    text: string
+    price: string
+    priceTo: string
+    followUps: string[]
+  } | null>(null)
   const open = v.task?.open === true
   const text = draft ? draft.text : (v.bid.text ?? '')
   const over = text.length > v.bid.limit
@@ -326,7 +329,14 @@ function BidCard({ v }: { v: LeadView }) {
       ? null
       : Number(draft.price)
     : v.bid.priceFromRub
+  const priceTo = draft
+    ? draft.priceTo.trim() === ''
+      ? null
+      : Number(draft.priceTo)
+    : v.bid.priceToRub
   const priceOk = price === null || (Number.isInteger(price) && price > 0)
+  const priceToOk =
+    priceTo === null || (price !== null && Number.isInteger(priceTo) && priceTo > price)
   return (
     <Card
       title="Отклик"
@@ -355,7 +365,7 @@ function BidCard({ v }: { v: LeadView }) {
           </label>
           <label className="kv" htmlFor="bid-price" style={{ maxWidth: 260 }}>
             <span className="muted" style={{ fontSize: 13 }}>
-              Стоимость услуги «от», ₽ («до» Сара посчитает сама)
+              Стоимость услуги «от», ₽
             </span>
             <input
               id="bid-price"
@@ -363,6 +373,21 @@ function BidCard({ v }: { v: LeadView }) {
               inputMode="numeric"
               value={draft.price}
               onChange={(e) => setDraft({ ...draft, price: e.target.value.replace(/[^\d]/g, '') })}
+              style={{ padding: '10px 14px' }}
+            />
+          </label>
+          <label className="kv" htmlFor="bid-price-to" style={{ maxWidth: 260 }}>
+            <span className="muted" style={{ fontSize: 13 }}>
+              Стоимость услуги «до», ₽ (пусто: в полтора раза выше «от»)
+            </span>
+            <input
+              id="bid-price-to"
+              className="quote mono"
+              inputMode="numeric"
+              value={draft.priceTo}
+              onChange={(e) =>
+                setDraft({ ...draft, priceTo: e.target.value.replace(/[^\d]/g, '') })
+              }
               style={{ padding: '10px 14px' }}
             />
           </label>
@@ -391,11 +416,14 @@ function BidCard({ v }: { v: LeadView }) {
             <Btn
               look="primary"
               icon="check"
-              disabled={busy !== null || over || seriesOver || !priceOk || text.trim() === ''}
+              disabled={
+                busy !== null || over || seriesOver || !priceOk || !priceToOk || text.trim() === ''
+              }
               onClick={async () => {
                 const ok = await press('text', `/api/leads/${encodeURIComponent(v.lead.id)}/text`, {
                   text: draft.text,
                   priceRub: price,
+                  priceToRub: priceTo,
                   followUps: draft.followUps.map((f) => f.trim()).filter((f) => f !== ''),
                 })
                 if (ok) setDraft(null)
@@ -445,6 +473,7 @@ function BidCard({ v }: { v: LeadView }) {
                   setDraft({
                     text: v.bid.text ?? '',
                     price: v.bid.priceFromRub === null ? '' : String(v.bid.priceFromRub),
+                    priceTo: v.bid.priceToRub === null ? '' : String(v.bid.priceToRub),
                     // Every place always: a series Sara did not write can be written here.
                     followUps: FOLLOW_UP_SLOTS.map((_slot, k) => v.bid.followUps[k] ?? ''),
                   })
@@ -482,6 +511,11 @@ function Lead({ v }: { v: LeadView }) {
           {l.client?.phone ? ' · номер подтверждён' : ''}
           {l.client?.reviews ? ` · ${l.client.reviews}` : ''}
         </p>
+        {l.client?.summaries?.map((s) => (
+          <p key={s.text}>
+            {s.mark} {s.text}
+          </p>
+        ))}
         {l.site?.own ? (
           <p className="muted">
             🌐 Сайт клиента: {l.site.own.domain} · {l.site.own.text}

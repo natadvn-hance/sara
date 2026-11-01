@@ -1,5 +1,5 @@
 import type { CheckInput, CheckIssue } from '../types'
-import { caseIssues, maskCaseName } from './caseChecks'
+import { caseIssues, maskCaseName, voiceIssues } from './caseChecks'
 import {
   AI_NAME,
   AI_SELF_PATTERNS,
@@ -11,7 +11,7 @@ import {
   ROBOTIC_PHRASES,
 } from './phrases'
 
-const MAX_LENGTH = 600
+const MAX_LENGTH = 1200
 /** A client turn longer than this may not be answered with more than LENGTH_TIMES its length. */
 const SHORT_TURN = 40
 const LENGTH_TIMES = 4
@@ -372,5 +372,6 @@ export function checkReplyText(i: CheckInput): CheckIssue[] {
     ...roboticIssues(i, text),
     ...promiseIssues(text),
     ...caseIssues(i, text, numberKeys),
+    ...voiceIssues(text),
   ]
 }

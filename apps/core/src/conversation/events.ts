@@ -64,8 +64,8 @@ async function noteUnclear(d: ConversationEventDeps, conv: ConversationRow, id: 
  * time, the words must not). Several in a row are shown one by one; the one draft comes after them. A failed send
  * never stops the turn.
  */
-async function showClientWords(
-  d: ConversationEventDeps,
+export async function showClientWords(
+  d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
   conv: ConversationRow,
   added: StoredMessage[],
 ) {
@@ -98,21 +98,27 @@ export async function onChatNews(
     ? await updateConversation(d.db, conv0.id, { lastClientHeardAt: now.toISOString() })
     : conv0
   const v1Writes = await getSetting(d.db, 'conv.v1_writes')
-  const r = await syncChat(d, conv, now, { v1Writes })
+  const r = await syncChat(
+    { db: d.db, profi: d.profi, show: (c, a) => showClientWords(d, c, a) },
+    conv,
+    now,
+    { v1Writes },
+  )
   conv = await applyOwnerRule(d.db, conv, r.added, { v1Writes })
   try {
     await d.onChatState?.(conv, r.messages)
   } catch (e) {
     console.error('reminders could not follow the chat', e instanceof Error ? e.message : e)
   }
-  await showClientWords(d, conv, r.added)
   if (r.unclear) {
     for (const m of r.added.filter((x) => x.side === 'unknown'))
       await noteUnclear(d, conv, m.platformMessageId)
     return
   }
   if (r.specialistAfter.length > 0) await d.onSpecialist(conv, r.specialistAfter)
-  const last = r.messages.at(-1)
+  // The site's own lines («Сообщите, если договоритесь…») come right behind a client's word and must never hide it
+  // (Boris, 31.10: the first answer of a real client got no turn and no card).
+  const last = r.messages.findLast((m) => m.side !== 'system')
   if (last?.side === 'client') {
     if (conv.unclearCount > 0) conv = await updateConversation(d.db, conv.id, { unclearCount: 0 })
     if (await getSetting(d.db, 'pipeline.conversations')) await d.onTurnNeeded(conv, now)

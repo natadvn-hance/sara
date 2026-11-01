@@ -58,6 +58,28 @@ const full: LeadCard = {
 }
 
 describe('the lead card layout', () => {
+  it("FR-LEAD-7: the site's own line about the client stands in the client line, with its colour (Profi Pro, 01.11.2026)", () => {
+    const text = leadCardText({
+      ...full,
+      clientInfo: {
+        ...CLIENT,
+        summaries: [
+          {
+            description: 'Договаривается меньше, чем в 20% заказов',
+            color_theme: 'RED',
+            percent: 20,
+          },
+          { description: 'Обычно отвечает быстро', color_theme: 'GREEN', percent: null },
+          { description: 'Новая сводка', color_theme: 'NEW_COLOR', percent: null },
+          { description: 'Без <цвета> & тега', color_theme: null, percent: null },
+        ],
+      },
+    })
+    expect(text).toContain(
+      '👤 <b>Ирина</b> · 🔴 Договаривается меньше, чем в 20% заказов · 🟢 Обычно отвечает быстро · ⚪ Новая сводка · ⚪ Без &lt;цвета&gt; &amp; тега · на Профи.ру с 7 сентября 2020',
+    )
+  })
+
   it('FR-LEAD-7: the whole card in order (Boris, sample 3): head, client, why, разбор, bid, order text, link', () => {
     expect(leadCardText(full).split('\n')).toEqual([
       '<b>🔔 Сайт для клиники</b>',
@@ -74,7 +96,7 @@ describe('the lead card layout', () => {
       '<b>Риск:</b> Объём больше, чем звучит',
       '<b>Брать, если:</b> сроки понятны',
       '',
-      `<b>✍️ Отклик</b>  ·  услуга 90${NBSP}000${NBSP}₽`,
+      `<b>✍️ Отклик</b>  ·  услуга от 90${NBSP}000${NBSP}₽ до 135${NBSP}000${NBSP}₽`,
       '<blockquote>Ирина, добрый день!',
       '',
       'Понимаю задачу.</blockquote>',
@@ -243,7 +265,7 @@ describe('the plain text fallback', () => {
     expect(plain.length).toBeLessThanOrEqual(4096)
     expect(plain.endsWith('https://profi.ru/backoffice/n.php?o=90001')).toBe(true)
     expect(plain).not.toMatch(/<\/?[a-z]/)
-    expect(plain).toContain('услуга 90')
+    expect(plain).toContain('услуга от 90')
   })
 
   it('FR-LEAD-7: a short card is just its text without markup, entities decoded, the link written out', () => {
@@ -322,7 +344,7 @@ describe('the lead card length', () => {
     expect(r.html).toMatch(/…<\/blockquote>/)
     // Everything after the order text is still on the card.
     expect(r.html).toContain('<b>балл 68</b>')
-    expect(r.html).toContain('услуга 90')
+    expect(r.html).toContain('услуга от 90')
     expect(r.html.endsWith(LINK)).toBe(true)
   })
 
@@ -415,6 +437,14 @@ describe('the card of an order closed on Profi.ru', () => {
     expect(closed).toContain('&lt;Сайт &amp; SEO&gt;')
   })
 
+  it('FR-LEAD-7: a card Boris closed himself is the short card with a folder, and the button says «Закрыть заявку»', () => {
+    expect(closedLeadCardText({ ...full, closedByBoris: true })).toBe(
+      `<b>📁 Заявка закрыта</b> · ${full.title}\n${SHORT_LINK}`,
+    )
+    expect(TEXTS.closeButton).toBe('Закрыть заявку')
+    expect(TEXTS.skipped).toBe('Заявка закрыта')
+  })
+
   it('FR-LEAD-10: a card that waited more than a day turns into the short stale card, with how long it waited', () => {
     const stale = closedLeadCardText({
       ...full,
@@ -457,13 +487,13 @@ describe('the card of an order closed on Profi.ru', () => {
 })
 
 describe('the lead card buttons', () => {
-  it('FR-LEAD-7: the buttons are «Откликнуться за N ₽», «Разбор», «Изменить», «Пропустить»', () => {
+  it('FR-LEAD-7: the buttons are «Откликнуться за N ₽», «Разбор», «Изменить», «Закрыть заявку»', () => {
     expect(leadCardKeyboard(card).inline_keyboard).toEqual([
       [{ text: `Откликнуться за 210${NBSP}₽`, callback_data: `t:${card.taskId}:bid` }],
       [
         { text: 'Разбор', callback_data: `t:${card.taskId}:razbor` },
         { text: 'Изменить', callback_data: `t:${card.taskId}:edit` },
-        { text: 'Пропустить', callback_data: `t:${card.taskId}:skip` },
+        { text: 'Закрыть заявку', callback_data: `t:${card.taskId}:skip` },
       ],
     ])
   })

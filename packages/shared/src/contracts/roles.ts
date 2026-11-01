@@ -78,6 +78,8 @@ export const AnalystOutput = z.object({
   condition: z.string().max(300),
   text: z.string().min(1).max(2000),
   price_rub: z.number().int().nonnegative().nullable(),
+  /** The top of the range, «до»; absent or not above «от»: the program puts half again over «от». */
+  price_to_rub: z.number().int().nonnegative().nullable().optional(),
   /**
    * The ids of the direction's cases that fit this order (FR-LEAD-6); the program puts in the links and checks the
    * ids against the library. Last in the schema and not required: a direction without cases never sees the field.
