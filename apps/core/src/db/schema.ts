@@ -969,8 +969,11 @@ export const sheetSync = core.table(
   'sheet_sync',
   {
     id: integer('id').primaryKey().default(1),
-    /** Bids from this moment on go to the sheet; older ones Boris wrote by hand. */
+    /** Bids from this moment on go to the sheet; the earlier ones wait for Boris's «Внести» (`backfill`). */
     since: ts('since').notNull(),
+    /** The past bids: `none` (not offered yet), `asked` (the preview waits for Boris), `running`, `done`, `declined`. */
+    backfill: text('backfill').notNull().default('none'),
+    backfillMessageId: bigint('backfill_message_id', { mode: 'number' }),
     lastOkAt: ts('last_ok_at'),
     lastWriteAt: ts('last_write_at'),
     lastError: text('last_error'),

@@ -7,6 +7,10 @@
  * Что делает: на каждый отклик Сары одна строка в конце лога, дальше Сара обновляет в ней этап, суммы и заметку.
  * Ячейку, которую ты поправил руками, Сара больше не трогает. Строку, которую ты удалил, она не возвращает.
  * Вкладки «Воронка» и «Сводка по месяцам» скрипт не трогает: новые строки вставляются внутрь их диапазонов.
+ *
+ * Прошлые отклики: если в логе уже есть твоя строка без метки Сары с тем же клиентом и тем же месяцем, скрипт не
+ * добавляет вторую, а берёт эту строку под отклик (ничего в ней не меняет). Если таких строк несколько или имя
+ * похоже, но не совпадает, строка не добавляется: Сара передаёт её тебе на решение.
  */
 
 // Секрет знает только сервер Сары: без него скрипт ничего не пишет.
@@ -46,9 +50,11 @@ function doPost(e) {
     const rows = indexRows(sheet)
     const ops = body.ops || []
     const results = []
+    // Строки без метки Сары: кандидаты на «это твоя ручная строка того же отклика».
+    const pool = ops.some((o) => o.match) ? unlabeled(sheet, rows) : []
     for (let i = 0; i < ops.length; i++) {
       try {
-        results.push(apply(sheet, rows, ops[i]))
+        results.push(apply(sheet, rows, ops[i], pool, !!body.preview))
       } catch (err) {
         results.push({ key: ops[i].key, status: 'error', error: String(err) })
       }
@@ -61,10 +67,24 @@ function doPost(e) {
 }
 
 /** Одна строка: найти по метке и обновить, или добавить в конец лога. */
-function apply(sheet, rows, op) {
+function apply(sheet, rows, op, pool, dry) {
   let row = rows[op.key]
   if (!row) {
     if (!op.create) return { key: op.key, status: 'gone' }
+    if (op.match) {
+      const m = findMatch(pool, op.values)
+      if (m.doubt) return { key: op.key, status: 'doubt', reason: m.doubt }
+      if (m.hit) {
+        pool.splice(pool.indexOf(m.hit), 1)
+        // Метку ставим, значения не пишем: ячейки в ней твои, Сара узнает их и дополнит только пустые и этап.
+        if (!dry) {
+          sheet.getRange(`${m.hit.row}:${m.hit.row}`).addDeveloperMetadata(KEY, op.key)
+          rows[op.key] = m.hit.row
+        }
+        return { key: op.key, status: 'adopted', current: currentOf(sheet, m.hit.row) }
+      }
+    }
+    if (dry) return { key: op.key, status: 'created', written: [], kept: [] }
     row = appendRow(sheet, rows)
     sheet.getRange(row, 1, 1, COLUMNS.length).setValues([COLUMNS.map((c) => cell(op.values[c]))])
     sheet.getRange(`${row}:${row}`).addDeveloperMetadata(KEY, op.key)
@@ -89,6 +109,51 @@ function apply(sheet, rows, op) {
     }
   }
   return { key: op.key, status: 'updated', written: written, kept: kept }
+}
+
+/** Что сейчас в строке, по колонкам Сары. */
+function currentOf(sheet, row) {
+  const vals = sheet.getRange(row, 1, 1, COLUMNS.length).getValues()[0]
+  const out = {}
+  for (let i = 0; i < COLUMNS.length; i++) out[COLUMNS[i]] = cell(vals[i])
+  return out
+}
+
+/** Имя клиента для сравнения: без регистра и «ё», пробелы по краям и повторы не важны. */
+function nameKey(v) {
+  return norm(v).toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ')
+}
+
+/** Строки лога, на которых нет метки Сары: {row, month, name}. */
+function unlabeled(sheet, rows) {
+  const taken = {}
+  for (const k in rows) taken[rows[k]] = true
+  const last = lastRow(sheet)
+  if (last < FIRST_ROW) return []
+  const vals = sheet.getRange(FIRST_ROW, 1, last - FIRST_ROW + 1, 2).getValues()
+  const out = []
+  for (let i = 0; i < vals.length; i++) {
+    const row = FIRST_ROW + i
+    if (taken[row] || !nameKey(vals[i][1])) continue
+    out.push({ row: row, month: norm(vals[i][0]), name: nameKey(vals[i][1]) })
+  }
+  return out
+}
+
+/**
+ * Ищет среди строк без метки ту же запись: тот же месяц и то же имя. Одна такая строка это {hit}. Несколько, или
+ * имя только похоже (первое слово то же, остальное нет), это {doubt}: строку не вставляем и не присваиваем.
+ */
+function findMatch(pool, values) {
+  const month = norm(values.month)
+  const name = nameKey(values.client)
+  const first = name.split(' ')[0]
+  const same = pool.filter((r) => r.month === month && r.name === name)
+  if (same.length === 1) return { hit: same[0] }
+  if (same.length > 1) return { doubt: `${same.length} строк с этим именем в месяце` }
+  const like = pool.filter((r) => r.month === month && r.name.split(' ')[0] === first)
+  if (like.length > 0) return { doubt: 'есть строка с похожим именем в месяце' }
+  return {}
 }
 
 /**

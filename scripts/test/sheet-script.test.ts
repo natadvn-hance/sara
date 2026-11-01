@@ -241,4 +241,75 @@ describe('the script in Boris sheet', () => {
       rows: 2,
     })
   })
+
+  describe('Boris own rows of the past bids', () => {
+    const op = (key: string, client: string, month = 'Апрель') => ({
+      key,
+      create: true,
+      match: true,
+      values: { ...VALUES, client, month },
+      expect: {},
+    })
+
+    it('FR-ANL-7: the same client in the same month is his row: labelled, nothing written, no twin', () => {
+      const s = fakeSheet(HEAD)
+      const r = loadScript(s.sheet).post({ secret: SECRET, ops: [op('95000401', 'ольга')] })
+      expect(r.results[0]).toMatchObject({ key: '95000401', status: 'adopted' })
+      expect(r.results[0].current).toMatchObject({
+        client: 'Ольга',
+        stage: 'Отвалился',
+        deal: 30000,
+      })
+      expect(s.grid).toHaveLength(4)
+      expect(s.grid[2]).toEqual(['Апрель', 'Ольга', 'Сайт', 'Отвалился', 30000, 120, '', ''])
+      expect(s.labels()).toEqual([{ value: '95000401', row: 3 }])
+    })
+
+    it('FR-ANL-7: the preview says the same and puts no label and no row', () => {
+      const s = fakeSheet(HEAD)
+      const { post } = loadScript(s.sheet)
+      const r = post({
+        secret: SECRET,
+        preview: true,
+        ops: [op('95000401', 'Ольга'), op('95000402', 'Гена')],
+      })
+      expect(r.results.map((x: { status: string }) => x.status)).toEqual(['adopted', 'created'])
+      expect(s.labels()).toEqual([])
+      expect(s.grid).toHaveLength(4)
+    })
+
+    it('FR-ANL-7: two rows of one name in a month, or a like name, are a doubt: nothing added', () => {
+      const twice = fakeSheet([
+        ...HEAD,
+        ['Апрель', 'Ольга', 'Консультация', 'Отклик', 5000, 60, '', ''],
+      ])
+      const a = loadScript(twice.sheet).post({ secret: SECRET, ops: [op('95000403', 'Ольга')] })
+      expect(a.results[0]).toMatchObject({ status: 'doubt' })
+      expect(twice.grid).toHaveLength(5)
+      expect(twice.labels()).toEqual([])
+      const like = fakeSheet([
+        ...HEAD,
+        ['Апрель', 'Игорь Якименко', 'Парсинг', 'Отвалился', 3000, 110, '', ''],
+      ])
+      const b = loadScript(like.sheet).post({ secret: SECRET, ops: [op('95000404', 'Игорь')] })
+      expect(b.results[0]).toMatchObject({ status: 'doubt' })
+      expect(like.grid).toHaveLength(5)
+    })
+
+    it('FR-ANL-7: another month is another bid: a new row; a row Sara already labelled is not a candidate', () => {
+      const s = fakeSheet(HEAD)
+      const { post } = loadScript(s.sheet)
+      const r = post({
+        secret: SECRET,
+        ops: [op('95000405', 'Ольга', 'Май'), op('95000406', 'Ольга'), op('95000407', 'Ольга')],
+      })
+      // May has no Ольга of his: new. April's one is taken by the first of the two; the second finds none left.
+      expect(r.results.map((x: { status: string }) => x.status)).toEqual([
+        'created',
+        'adopted',
+        'created',
+      ])
+      expect(s.grid.filter((row) => row[1] === 'Ольга')).toHaveLength(3)
+    })
+  })
 })
