@@ -971,6 +971,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           priceToRub:
             draft.priceRub === null ? null : priceRange(draft.priceRub, draft.priceToRub).to,
           followUps: seriesOf(draft) ?? [],
+          note: draft.styleNote ?? null,
         }
       : null,
     analysis: cardAnalysis(draft?.analysis),
