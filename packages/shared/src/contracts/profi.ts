@@ -39,6 +39,8 @@ export const SubmitBidInput = z.object({
   text: z.string().min(1),
   /** The «Стоимость услуги» field; null or absent leaves it empty (M2 design 4). */
   price_rub: z.number().int().positive().nullable().optional(),
+  /** The «До» of the range; left out, the node puts half again over «от». */
+  price_to_rub: z.number().int().positive().nullable().optional(),
   /** The most the bid may cost: the fee on the card Boris pressed. The node presses nothing when the site asks more. */
   max_fee_rub: z.number().int().nonnegative(),
   /** The node never presses after this moment: the core has stopped waiting for the answer by then. */

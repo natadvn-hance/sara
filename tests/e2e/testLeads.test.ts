@@ -182,6 +182,7 @@ beforeEach(async () => {
   node.setHealth({ balance_rub: 0 })
   // The call offer has its own test (series.test.ts); here the series is the Analyst's two messages.
   await setSetting(db, 'calls.offer', false, 'boris')
+  await setSetting(db, 'series.telegram', '', 'boris')
   // Never night here: the night is an hour that starts two hours from now.
   const h = moscowHour(new Date())
   await setSetting(db, 'conv.night', { from: (h + 2) % 24, to: (h + 3) % 24 }, 'boris')

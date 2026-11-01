@@ -44,6 +44,7 @@ export type AppDeps = {
     taskId: string
     text: string | null
     priceRub: number | null
+    priceToRub?: number | null
     followUps?: string[] | null
   }) => Promise<{
     saved: boolean

@@ -393,7 +393,7 @@ export const SettingRow = z.object({
   value: z.unknown(),
   isDefault: z.boolean(),
   edit: SettingEdit,
-  kind: z.enum(['flag', 'count', 'rub', 'hours', 'other']),
+  kind: z.enum(['flag', 'count', 'rub', 'hours', 'text', 'other']),
   changedAt: at.nullable(),
   changedBy: z.string().nullable(),
 })

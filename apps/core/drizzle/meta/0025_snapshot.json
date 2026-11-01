@@ -1,5 +1,5 @@
 {
-  "id": "0f984051-1558-4faf-b1c1-47a845004d69",
+  "id": "05b044b4-d1b2-4317-acaa-606c7a859eab",
   "prevId": "9e0905e1-8ff2-4b94-9186-2a10a5b334e8",
   "version": "7",
   "dialect": "postgresql",
@@ -1911,6 +1911,12 @@
         },
         "draft_price_rub": {
           "name": "draft_price_rub",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "draft_price_to_rub": {
+          "name": "draft_price_to_rub",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -3880,19 +3886,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
-        },
-        "backfill": {
-          "name": "backfill",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'none'"
-        },
-        "backfill_message_id": {
-          "name": "backfill_message_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
         },
         "last_ok_at": {
           "name": "last_ok_at",

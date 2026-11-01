@@ -1,0 +1,1 @@
+ALTER TABLE "core"."lead" ADD COLUMN "draft_price_to_rub" integer;
