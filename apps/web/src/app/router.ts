@@ -42,7 +42,6 @@ export function usePath(): string {
 export function sectionOf(path: string): string {
   const first = (path.split('?')[0] ?? '').split('/')[1] ?? ''
   if (first === '' || first === 'inbox') return 'inbox'
-  if (first === 'accounts') return 'settings'
   return first
 }
 
