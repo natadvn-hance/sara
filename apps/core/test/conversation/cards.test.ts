@@ -160,7 +160,7 @@ describe('the draft card', () => {
   })
 
   describe('a call for Boris with a draft', () => {
-    const DRAFT = 'Понимаю, вопрос о стоимости. Борис ответит вам лично, когда посмотрит задачу.'
+    const DRAFT = 'Понимаю, вопрос о стоимости. Уложимся в ваш бюджет, детали посмотрим на созвоне.'
     const call = (id: string, o: Partial<typeof convTurn.$inferInsert> = {}) =>
       turn(id, {
         decision: 'call_boris',
