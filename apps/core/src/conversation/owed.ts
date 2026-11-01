@@ -92,7 +92,7 @@ export async function waitingClients(d: { db: Db }, now: Date): Promise<Waiting[
     from core.conversation c
     join lateral (
       select * from core.chat_message m
-      where m.conversation_id = c.id
+      where m.conversation_id = c.id and m.side <> 'system'
       order by m.sent_at desc, m.platform_message_id desc
       limit 1
     ) m on true

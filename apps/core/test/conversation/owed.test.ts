@@ -134,6 +134,33 @@ describe('a client who waits', () => {
     expect(row?.steps).toBe(2)
   })
 
+  it('FR-CONV-12: the site’s own line behind the client’s word does not hide that he waits', async () => {
+    await clientWrote('m-1', 40)
+    const conv = await ensureConversation(db, {
+      accountId: 'hance-marketing',
+      chatId: CHAT,
+      orderId: CHAT,
+    })
+    await syncChat(
+      {
+        db,
+        profi: stubProfi([
+          chatMsg(
+            'm-2',
+            'system',
+            'Сообщите, если договоритесь работать с клиентом',
+            new Date(at.getTime() - 39 * MIN).toISOString(),
+          ),
+        ]),
+      },
+      conv,
+      at,
+      { v1Writes: false },
+    )
+    expect((await owedPass(deps, at)).reminded).toBe(1)
+    expect(texts[0]?.text).toContain('ждёт ответа 40 мин')
+  })
+
   it('FR-CONV-12: with an open draft the reminder carries the draft and its buttons', async () => {
     await clientWrote('m-1', 40)
     const taskId = newEventId()
