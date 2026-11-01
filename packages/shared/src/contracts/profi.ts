@@ -176,6 +176,13 @@ export const SendMessageInput = z.object({
   chat_id: z.string().min(1),
   text: z.string().min(1).max(4000),
   expect_last_message_id: z.string().min(1).nullable(),
+  /**
+   * Messages of our own side may stand after the one the core saw (the series after a bid: the site's line about the
+   * bid comes after the stored chat was read, 01.11.2026): only a word of the client or of an unknown side is a change.
+   */
+  after_own: z.boolean().optional(),
+  /** Type at once, not at a person's pace: the series follows a bid in seconds (Boris, 31.10.2026). */
+  quick: z.boolean().optional(),
   idempotency_key: z.string().min(1),
   permit: z.string().min(1),
 })

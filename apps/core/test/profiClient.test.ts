@@ -82,6 +82,47 @@ describe('profi client and event intake', () => {
     expect(fake.messages).toHaveLength(1)
   })
 
+  it('FR-CONV-9: lines of our own side after the one the core saw are no change for the series, a client’s word is (01.11.2026)', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    const base = {
+      account_id: 'hance-marketing',
+      chat_id: '95147899',
+      expect_last_message_id: null,
+    }
+    const bidLine = await fake.addChatMessage({
+      chatId: '95147899',
+      author: 'specialist',
+      text: 'Отклик',
+    })
+    await fake.addChatMessage({
+      chatId: '95147899',
+      author: 'specialist',
+      text: 'Стоимость от 30000 до 45000 руб.',
+    })
+    // The core saw the bid only: the site’s line came after.
+    const seen = { ...base, expect_last_message_id: bidLine.platformMessageId }
+    await expect(
+      client.sendMessage({ ...seen, text: 'Раз', idempotency_key: 'msg:own:1' }),
+    ).rejects.toMatchObject({
+      errorClass: 'CHAT_CHANGED',
+    })
+    expect(
+      (
+        await client.sendMessage({
+          ...seen,
+          text: 'Раз',
+          idempotency_key: 'msg:own:2',
+          after_own: true,
+        })
+      ).found_on_page,
+    ).toBe(true)
+    // A client’s word after it is a change whatever the flag says.
+    await fake.addChatMessage({ chatId: '95147899', author: 'client', text: 'Здравствуйте' })
+    await expect(
+      client.sendMessage({ ...seen, text: 'Два', idempotency_key: 'msg:own:3', after_own: true }),
+    ).rejects.toMatchObject({ errorClass: 'CHAT_CHANGED' })
+  })
+
   it('FR-CONV-1: the client reads chats through the node', async () => {
     const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
     expect(await client.listChats('hance-marketing')).toEqual({ chats: [] })

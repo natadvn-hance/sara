@@ -81,10 +81,14 @@ const STOPPED: Record<string, string> = {
 }
 
 /** The line of the status message about the series: how many went, and why it stopped when it did. */
-export function seriesLine(sent: number, why?: string): string {
+export function seriesLine(sent: number, why?: string, total?: number): string {
   const went =
     sent > 0 ? `Вдогонку ушло ${sent} ${plural(sent, ['сообщение', 'сообщения', 'сообщений'])}` : ''
   if (!why) return went
-  const stop = `Вдогонку остановилась: ${STOPPED[why] ?? why}`
+  const left = total === undefined ? 0 : total - sent
+  const stop =
+    why === 'not_sent' && left > 0
+      ? `Вдогонку не ушло ${left} из ${total} писем: площадка не ответила, письма в чате нет`
+      : `Вдогонку остановилась: ${STOPPED[why] ?? why}`
   return sent > 0 ? `${went}. ${stop}` : stop
 }
