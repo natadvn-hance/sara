@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { subscribe } from '../journal/bus'
 
+/**
+ * Steps no screen shows and that come often (each model call, «печатает», each try of a send): they would make the
+ * pult read every screen again for nothing.
+ */
+const QUIET = /^(model\.|outbox\.attempted$|profi\.client_typing$|profi\.client_read$|health\.)/
+
 /** The stream's heartbeat, so a proxy never closes a quiet connection. */
 const PING_MS = 25_000
 
@@ -22,7 +28,9 @@ export function registerStreamRoute(scoped: FastifyInstance): void {
     const send = (line: string) => {
       if (!res.writableEnded && !res.destroyed) res.write(line)
     }
-    const off = subscribe((e) => send(`data: ${JSON.stringify(e)}\n\n`))
+    const off = subscribe((e) => {
+      if (!QUIET.test(e.type)) send(`data: ${JSON.stringify(e)}\n\n`)
+    })
     const ping = setInterval(() => send(': ping\n\n'), PING_MS)
     const done = () => {
       off()

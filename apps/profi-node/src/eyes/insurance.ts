@@ -1,9 +1,10 @@
+import type { Response } from 'playwright'
 import type { AccountBrowser } from '../browser/accountBrowser'
 import { anonymousChatUrl, readChatFormMap } from './chatFormMap'
 import type { Eyes } from './eyes'
 import { readFormMap } from './formMap'
 import { BUBBLE, bubbleShapes, pageShape } from './pageShape'
-import type { Parsers } from './parsers'
+import type { ChatListItem, Parsers } from './parsers'
 
 export type Insurance = {
   stop(): void
@@ -29,6 +30,12 @@ export type Insurance = {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** How long the chats list's own answer is waited for once its page opened. */
+const LIST_ANSWER_MS = 5000
+/** A chat check without the list's answer reads its chats blind: no more often than this. */
+const BLIND_EVERY_MS = 600000
+/** At most this many chats a check opens; the rest go to the next one. */
+const NEWS_MAX = 8
 
 export type BoardScroll = {
   /** Pages of the board a pass loads, the one the page opens with included. */
@@ -79,6 +86,8 @@ export function startInsurance(o: {
   feedEveryMs?: number
   chatsEveryMs?: number
   chatPauseMs?: number
+  /** How often the chats the event stream named are looked for; each is read at once, in turn with the tab's work. */
+  newsEveryMs?: number
   canNavigate?: () => boolean
   onNavigate?: (ok: boolean) => Promise<void> | void
   /**
@@ -93,27 +102,34 @@ export function startInsurance(o: {
   const pause = o.chatPauseMs ?? 2000
   const scroll = { ...BOARD_SCROLL, ...o.board }
   let passes = 0
-  // The tab does one piece of work at a time, in turn, except that a press goes before all that waits: on 29.10.2026 a
-  // bid waited 2 minutes behind the chat check, the feed and another order's page.
-  const queue: { urgent: boolean; run: () => Promise<void> }[] = []
+  // The tab does one piece of work at a time, in turn: a press goes before all that waits (on 29.10.2026 a bid waited 2
+  // minutes behind the chat check, the feed and another order's page), then a chat the event stream named, then the rest.
+  const PRESS = 2
+  const NEWS = 1
+  const queue: { prio: number; run: () => Promise<void> }[] = []
   let pumping = false
   async function pump() {
     if (pumping) return
     pumping = true
     while (queue.length > 0) {
-      const i = queue.findIndex((j) => j.urgent)
-      const [job] = queue.splice(Math.max(i, 0), 1)
+      let i = 0
+      for (let k = 1; k < queue.length; k++)
+        if ((queue[k]?.prio ?? 0) > (queue[i]?.prio ?? 0)) i = k
+      const [job] = queue.splice(i, 1)
       await job?.run()
     }
     pumping = false
   }
-  const serial = <T>(f: () => Promise<T>, urgent = false): Promise<T> =>
+  const serial = <T>(f: () => Promise<T>, prio = 0): Promise<T> =>
     new Promise<T>((resolve, reject) => {
-      queue.push({ urgent, run: () => f().then(resolve, reject) })
+      queue.push({ prio, run: () => f().then(resolve, reject) })
       void pump()
     })
-  /** A press waits for the tab: a running check stops at its next page and leaves the rest to its next turn. */
-  const pressWaits = () => queue.some((j) => j.urgent)
+  /**
+   * A press or a chat the stream named waits for the tab: a running check stops at its next page and leaves the rest to
+   * its next turn.
+   */
+  const pressWaits = () => queue.some((j) => j.prio > 0)
   async function go(path: string): Promise<boolean> {
     let ok = false
     // One miss is tried again once the page has settled: the page's own navigation (a form that sent) or one stuck
@@ -221,7 +237,7 @@ export function startInsurance(o: {
     await o.eyes.onChatRead(id, read)
   }
 
-  // Chats the event stream named: read within the minute, at most 3 a pass, the rest on the next one.
+  // Chats the event stream named: read at once by the news job (or by the pass over the feed), 3 at a time.
   async function readTouchedChats() {
     let opened = 0
     for (const id of o.eyes.chatsTouched()) {
@@ -460,8 +476,8 @@ export function startInsurance(o: {
     })
   }
 
-  // The chats list of the real site is drawn without a JSON answer: its addresses and the outline of its elements
-  // (never its text) are kept so the list reader can be calibrated on them (ST-M1-04).
+  // The chats list of the real site draws neither links nor marks (its answer has them): its addresses and the outline
+  // of its elements (never its text) are kept so the list reader can be calibrated on them (ST-M1-04).
   async function keepList() {
     const links = await o.ab.page
       .evaluate(
@@ -482,19 +498,57 @@ export function startInsurance(o: {
     if (links) await keep({ ...links, shape: await pageShape(o.ab.page).catch(() => []) })
   }
 
-  async function chats(pick: (c: { unread: number; lastAt: string | null }) => boolean) {
+  /**
+   * Opens the chats list. Its chats come from the list's own answer when the parsers read one (the live list draws
+   * neither links nor marks; its answer rboMessengersByFilter has each chat's unread count and last time), else from
+   * the page; `marks` says the answer came. Null when the page did not open.
+   */
+  async function openList(): Promise<{ items: ChatListItem[]; marks: boolean } | null> {
+    const page = o.ab.page
+    const parse = o.parsers.chatsFromAnswer
+    const byId = new Map<string, ChatListItem>()
+    let answered = false
+    let came: () => void = () => {}
+    const first = new Promise<void>((r) => {
+      came = r
+    })
+    const onResponse = async (res: Response) => {
+      if (!parse || !['fetch', 'xhr'].includes(res.request().resourceType())) return
+      try {
+        const items = parse(res.url(), await res.json())
+        if (!items) return
+        for (const c of items) byId.set(c.chatId, c)
+        answered = true
+        came()
+      } catch {}
+    }
+    page.on('response', onResponse)
+    try {
+      if (!(await go(chatsPath ?? o.parsers.paths.chats))) return null
+      onFeed = false
+      if (parse && !answered) await Promise.race([first, sleep(LIST_ANSWER_MS)])
+      if (answered) return { items: [...byId.values()], marks: true }
+      return { items: await o.parsers.fromChatsDom(page), marks: false }
+    } finally {
+      page.off('response', onResponse)
+    }
+  }
+
+  // The real list showed not one chat link on 24.10.2026 and gave no answer to read: the chats Sara already knows are
+  // read in its place, so a message the event stream missed is still found (FR-CONV-1). Their news on the site is
+  // unknown, so each counts as unread with no known time.
+  async function listOrKnown(list: { items: ChatListItem[]; marks: boolean }) {
+    if (list.marks || list.items.length > 0) return list.items
+    return (await o.eyes.knownChats()).map((chatId) => ({ chatId, unread: 1, lastAt: null }))
+  }
+
+  async function chats(pick: (c: ChatListItem) => boolean) {
     await serial(async () => {
-      if (!can() || !(await go(chatsPath ?? o.parsers.paths.chats))) return
+      if (!can()) return
+      const list = await openList()
+      if (!list) return
       await keepList()
-      const shown = await o.parsers.fromChatsDom(o.ab.page)
-      // The real list showed not one chat link on 24.10.2026: the chats Sara already knows are read in its place, so
-      // a message the event stream missed is still found within 10 minutes (FR-CONV-1). Their news on the site is
-      // unknown, so each counts as unread with no known time.
-      const list =
-        shown.length > 0
-          ? shown
-          : (await o.eyes.knownChats()).map((chatId) => ({ chatId, unread: 1, lastAt: null }))
-      for (const c of list.filter(pick)) {
+      for (const c of (await listOrKnown(list)).filter(pick)) {
         if (!can()) return
         // A press goes first; the check starts again behind it, so no chat waits for the next 10 minutes.
         if (pressWaits()) {
@@ -508,6 +562,66 @@ export function startInsurance(o: {
       // Back to the feed, where the event stream lives.
       if (can()) await go(o.parsers.paths.feed)
     })
+  }
+
+  // The chat check every 2 minutes (Boris, 31.10.2026: «чаще просматривать страницы»): the list page, and only the
+  // chats it marks unread or whose last message is newer than the newest one the node holds, each such news once.
+  // Without the list's answer every chat would be read blind (up to 10 pages): that only every 10 minutes, as before.
+  const handled = new Map<string, string | null>()
+  let blindAt = Number.NEGATIVE_INFINITY
+  async function newsCheck() {
+    if (Date.now() - blindAt < BLIND_EVERY_MS) return
+    await serial(async () => {
+      if (!can()) return
+      const list = await openList()
+      if (!list) return
+      if (!list.marks) {
+        blindAt = Date.now()
+        await keepList()
+      }
+      const named = new Set(o.eyes.chatsTouched())
+      const held = list.marks
+        ? await o.eyes.lastStored(list.items.map((c) => c.chatId))
+        : new Map<string, number>()
+      const news = (await listOrKnown(list)).filter((c) => {
+        // A chat the stream named is read by the news job right away.
+        if (named.has(c.chatId)) return false
+        if (!list.marks) return c.unread > 0
+        if (handled.has(c.chatId) && handled.get(c.chatId) === c.lastAt) return false
+        const mine = held.get(c.chatId)
+        const at = c.lastAt === null ? Number.NaN : Date.parse(c.lastAt)
+        return c.unread > 0 || (mine !== undefined && at > mine)
+      })
+      let opened = 0
+      for (const c of news.slice(0, NEWS_MAX)) {
+        if (!can() || pressWaits()) break
+        await sleep(pause)
+        if (!(await go(o.parsers.paths.chat(c.chatId)))) break
+        opened++
+        await readChat(c.chatId)
+        handled.delete(c.chatId)
+        if (handled.size >= 500) handled.delete(handled.keys().next().value ?? '')
+        handled.set(c.chatId, c.lastAt)
+      }
+      // How the check went, without a chat's words: what the list gave and how many pages it cost.
+      await keep({
+        what: 'chat_check',
+        from: list.marks ? 'answer' : 'page',
+        chats: list.items.length,
+        news: news.length,
+        opened,
+      })
+    })
+  }
+
+  // A chat the event stream named is read at once, not at the next pass over the feed: the stream names only the chat,
+  // its words are on the chat page (FR-CONV-1).
+  async function readNews() {
+    if (o.eyes.chatsTouched().length === 0) return
+    await serial(async () => {
+      await readTouchedChats()
+      if (can() && !pressWaits()) await maybeBackToFeed()
+    }, NEWS)
   }
 
   // A check still waiting or running is not queued again: a whole-board pass (up to 50 s) would otherwise stack the
@@ -526,10 +640,8 @@ export function startInsurance(o: {
   }
   const timers = [
     setInterval(unlessBusy(feedOnce), o.feedEveryMs ?? 30000),
-    setInterval(
-      unlessBusy(() => chats((c) => c.unread > 0)),
-      o.chatsEveryMs ?? 600000,
-    ),
+    setInterval(unlessBusy(newsCheck), o.chatsEveryMs ?? 120000),
+    setInterval(unlessBusy(readNews), o.newsEveryMs ?? 1000),
   ]
 
   return {
@@ -547,28 +659,31 @@ export function startInsurance(o: {
       opt?: { urgent?: boolean },
     ): Promise<T> {
       return new Promise<T>((resolve, reject) => {
-        void serial(async () => {
-          const errands: (() => Promise<void>)[] = []
-          try {
-            resolve(
-              await f({
-                // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
-                go: async (path) => {
-                  if (!can()) return false
-                  onFeed = false
-                  return go(path)
-                },
-                can,
-                later: (errand) => void errands.push(errand),
-              }),
-            )
-          } catch (e) {
-            reject(e)
-          }
-          // Errands (the form map, the calibration) give way to a press too.
-          for (const errand of errands) if (!pressWaits()) await errand().catch(() => {})
-          if (can() && !pressWaits()) await maybeBackToFeed()
-        }, opt?.urgent === true).catch(() => {})
+        void serial(
+          async () => {
+            const errands: (() => Promise<void>)[] = []
+            try {
+              resolve(
+                await f({
+                  // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
+                  go: async (path) => {
+                    if (!can()) return false
+                    onFeed = false
+                    return go(path)
+                  },
+                  can,
+                  later: (errand) => void errands.push(errand),
+                }),
+              )
+            } catch (e) {
+              reject(e)
+            }
+            // Errands (the form map, the calibration) give way to a press too.
+            for (const errand of errands) if (!pressWaits()) await errand().catch(() => {})
+            if (can() && !pressWaits()) await maybeBackToFeed()
+          },
+          opt?.urgent === true ? PRESS : 0,
+        ).catch(() => {})
       })
     },
     // After a logout or an outage: the feed and the chats with messages since then, one by one (F8).

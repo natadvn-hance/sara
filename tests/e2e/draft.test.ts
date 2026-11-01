@@ -9,6 +9,7 @@ import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, leadLabel, outbox, question, task } from '../../apps/core/src/db/schema'
 import { saveProfile } from '../../apps/core/src/direction/profile'
 import { seedDirection } from '../../apps/core/src/direction/store'
+import { askWhy } from '../../apps/core/src/learning/questions'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
@@ -480,10 +481,9 @@ describe('the pult', { timeout: 30000 }, () => {
       .from(task)
       .where(and(eq(task.entityId, id), eq(task.kind, 'lead_decision')))
     expect((await post(cookie, `/api/tasks/${t?.id}/skip`, {})).status).toBe(200)
-    await until(() => tg.markups.some((m) => m.message_id === t?.telegramMessageId))
-    expect(tg.markups.at(-1)?.reply_markup?.inline_keyboard).toEqual([
-      [{ text: 'Решено в приложении: пропущено', callback_data: 'done' }],
-    ])
+    // A closed lead card is edited into «📁 Заявка закрыта», without a button.
+    await until(() => tg.edited.some((e) => e.text.includes('📁 Заявка закрыта')))
+    expect(tg.edited.at(-1)).toMatchObject({ reply_markup: { inline_keyboard: [] } })
   })
 })
 
@@ -551,13 +551,13 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     )
   })
 
-  it('FR-LEAD-7: after «Пропустить» a late edit changes nothing', async () => {
+  it('FR-LEAD-7: after «Закрыть заявку» a late edit changes nothing', async () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     const ask = await pressEdit(cards()[0])
     tg.pushPress(111, button(cards()[0], 'skip'))
-    await until(() => tg.answers.some((a) => a.text === 'Пропущено'))
+    await until(() => tg.answers.some((a) => a.text === 'Заявка закрыта'))
     tg.pushText(111, NEW, ask)
     await until(() => said('Заявка уже решена, текст не поменяла'))
     expect(cards()).toHaveLength(1)
@@ -625,7 +625,15 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await fake.emitOrder({ order_id: b, title: 'Реклама на радио' })
     await until(() => cards().length === 2)
     const ask = await pressEdit(cards()[0])
+    const edits = tg.edited.length
     tg.pushPress(111, button(cards()[1], 'skip'))
+    await until(() => tg.edited.length === edits + 1)
+    // Closing asks nothing any more; a «почему?» that is waiting anyway (an older one) is asked directly.
+    await askWhy(
+      { db: app.db, notifier: app.bot.notifier },
+      { kind: 'why_skip', entityId: b, title: 'Реклама на радио' },
+      new Date(),
+    )
     await until(() =>
       tg.sent.some(
         (m) => m.text === 'Почему пропустил «Реклама на радио»? Напиши или скажи голосом.',
@@ -653,7 +661,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     tg.pushPress(111, button(cards()[0], 'skip'))
-    await until(() => tg.answers.some((a) => a.text === 'Пропущено'))
+    await until(() => tg.answers.some((a) => a.text === 'Заявка закрыта'))
     tg.pushPress(111, button(cards()[0], 'edit'))
     await until(() => tg.answers.some((a) => a.text === 'Уже сделано'))
     expect(await editRequests()).toHaveLength(0)

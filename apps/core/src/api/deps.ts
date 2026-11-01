@@ -49,6 +49,8 @@ export type AppDeps = {
     saved: boolean
     message: string
   }>
+  /** The pult's own address (the VAPID contact of Web Push). */
+  publicUrl?: string
   /** The one writer of the mind (M5, ADR-025): Boris's «да» from the pult goes through it; unset, it waits. */
   mindWriter?: MindWriter
   /** The host's backup log for the health screen (config.backupLog). */
