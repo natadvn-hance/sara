@@ -76,6 +76,8 @@ export type FakeProfi = {
   redeliver(eventId: string): Promise<void>
   failNextAck(): void
   failAcks(n: number): void
+  /** The next `times` sends are refused with this class and nothing is typed (UNCERTAIN: the node was restarting). */
+  refuseSends(errorClass: ProfiErrorClass, times?: number): void
   /** The next send goes out and is recorded, then its answer is lost. */
   failNextSendAck(): void
   setCoreEventsUrl(url: string): void
@@ -153,6 +155,7 @@ export async function createFakeProfi(o: {
   let balance = 5000
   let dropAcks = 0
   let dropSendAcks = 0
+  let sendRefusal: { errorClass: ProfiErrorClass; times: number } | null = null
   let coreEventsUrl = o.coreEventsUrl
   // The fee of the fake site for every order; null: each order's own, as emitted (210 when it has none).
   let fee: number | null = null
@@ -309,11 +312,28 @@ export async function createFakeProfi(o: {
       if (!verifyMessagePermit(o.permitSecret, m, i.permit)) {
         throw new ProfiToolError('INTERNAL', 'permit does not match this message')
       }
+      if (sendRefusal && sendRefusal.times > 0 && !sentMessages.has(i.idempotency_key)) {
+        sendRefusal.times--
+        throw new ProfiToolError(
+          sendRefusal.errorClass,
+          `the fake refuses to send: ${sendRefusal.errorClass}`,
+        )
+      }
       // A repeat answers first, before the check: its chat already has the message it sent.
       let out = sentMessages.get(i.idempotency_key)
       if (!out) {
         const last = chats.get(i.chat_id)?.messages.at(-1)?.platform_message_id ?? null
-        if (i.expect_last_message_id !== last) {
+        // The series after a bid: lines of our own side after the expected one are no change.
+        const seen = chats.get(i.chat_id)?.messages ?? []
+        const at =
+          i.expect_last_message_id === null
+            ? -1
+            : seen.findIndex((m) => m.platform_message_id === i.expect_last_message_id)
+        const ownOnly =
+          i.after_own === true &&
+          (i.expect_last_message_id === null || at >= 0) &&
+          seen.slice(at + 1).every((m) => m.author === 'specialist' || m.author === 'system')
+        if (i.expect_last_message_id !== last && !ownOnly) {
           throw new ProfiToolError(
             'CHAT_CHANGED',
             `chat ${i.chat_id} ends with ${last ?? 'nothing'}, not ${i.expect_last_message_id ?? 'nothing'}`,
@@ -458,6 +478,9 @@ export async function createFakeProfi(o: {
     },
     failAcks(n) {
       dropAcks = n
+    },
+    refuseSends(errorClass, times = 1) {
+      sendRefusal = { errorClass, times }
     },
     failNextSendAck() {
       dropSendAcks = 1

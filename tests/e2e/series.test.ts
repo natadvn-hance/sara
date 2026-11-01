@@ -9,6 +9,7 @@ import { loadConfig } from '../../apps/core/src/config'
 import { queueMessage } from '../../apps/core/src/conversation/outbox'
 import { conversation, event, lead, outbox } from '../../apps/core/src/db/schema'
 import { isApprovedText, isCallOffer, SLOTS_MARK } from '../../apps/core/src/leads/callSlots'
+import { resumeStoppedSeries } from '../../apps/core/src/leads/series'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
@@ -103,6 +104,7 @@ beforeAll(async () => {
       remindAfterMs: async () => 3_600_000,
       notifyRetry: { maxAttempts: 4, intervalSeconds: 0.5 },
       seriesDelayMs: { first: [400, 500], next: [300, 400], call: [300, 400] },
+      seriesUnsureWaitsMs: [300, 300, 300],
       // Three times ahead of the moment of sending, whatever the clock of the run says.
       callSlots: {
         slots: async (now) => [3, 5].map((h) => new Date(now.getTime() + h * 3600_000)),
@@ -138,6 +140,7 @@ beforeEach(async () => {
   fake.messages.length = 0
   fake.refuseNext('INTERNAL', 0)
   fake.failAcks(0)
+  fake.refuseSends('INTERNAL', 0)
   const inChat = new Set<string>()
   // The site puts the bid into the order's chat once, as Profi.ru does; the chat's number is the order's.
   fake.onSubmit(async (i) => {
@@ -195,6 +198,51 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await settle()
     expect(sentTo(id)).toHaveLength(2)
     expect(await events('bid.series_stopped', id)).toEqual([])
+  })
+
+  it('FR-CONV-9: a message the node cannot answer for waits, is read for in the chat and goes again, once each (01.11.2026)', async () => {
+    // The node is restarting: the first two tries of the first message are lost, nothing is typed.
+    fake.refuseSends('UNCERTAIN', 2)
+    const id = await cardFor()
+    press()
+    await until(() => sentTo(id).length === 2)
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    expect(sentTo(id).map((m) => m.idempotency_key)).toEqual([
+      `msg:series:${id}:0`,
+      `msg:series:${id}:1`,
+    ])
+    await settle()
+    expect(sentTo(id)).toHaveLength(2)
+    expect(await events('bid.series_stopped', id)).toEqual([])
+  })
+
+  it('FR-CONV-9: a series stopped on an unsent message is taken up again at that message, with no duplicates (01.11.2026)', async () => {
+    // The node stays away through every try of the second message.
+    const id = await cardFor()
+    press()
+    await until(() => sentTo(id).length === 1)
+    fake.refuseSends('UNCERTAIN', 50)
+    await until(async () => (await events('bid.series_stopped', id)).length === 1)
+    expect(await events('bid.series_stopped', id)).toEqual([
+      expect.objectContaining({
+        n: 1,
+        why: 'not_sent',
+        detail: expect.objectContaining({ rule: 'delivery_uncertain_after_retries' }),
+      }),
+    ])
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST])
+    await until(() => tg.edited.some((m) => m.text.includes('Вдогонку не ушло 1 из 2 писем')))
+    // The core starts again, the node is back: the series goes on from the second message.
+    fake.refuseSends('UNCERTAIN', 0)
+    expect(await resumeStoppedSeries(db)).toBe(1)
+    await until(() => sentTo(id).length === 2)
+    expect(sentTo(id).map((m) => m.text)).toEqual([FIRST, SECOND])
+    await settle()
+    expect(sentTo(id)).toHaveLength(2)
+    // Once only: another start finds the same process.
+    expect(await resumeStoppedSeries(db)).toBe(1)
+    await settle()
+    expect(sentTo(id)).toHaveLength(2)
   })
 
   it('FR-CONV-9: a client who answered before the series stops it, nothing is sent', async () => {

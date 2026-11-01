@@ -37,7 +37,13 @@ import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
 import { createRecheckOne } from './leads/recheckOne'
-import { SERIES_DELAYS, type SeriesDeps, setSeriesDeps } from './leads/series'
+import {
+  resumeStoppedSeries,
+  SERIES_DELAYS,
+  SERIES_UNSURE_WAITS_MS,
+  type SeriesDeps,
+  setSeriesDeps,
+} from './leads/series'
 import { type StaleSweep, startStaleSweep } from './leads/staleCards'
 import { answerQuestion as answerBorisQuestion, handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
@@ -101,6 +107,8 @@ export type StartOptions = {
   quickLookDelaysMs?: number[]
   /** The waits of the series after a bid: before its first message and between the next ones (SERIES_DELAYS). */
   seriesDelayMs?: SeriesDeps['delayMs']
+  /** The waits after an unsure delivery of a message of the series (tests make them short). */
+  seriesUnsureWaitsMs?: number[]
   /** Where the times of the call offer come from (default Boris's working hours); tests fix them. */
   callSlots?: SlotSource
   remindAfterMs?: () => Promise<number>
@@ -260,6 +268,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     delayMs: o.seriesDelayMs ?? SERIES_DELAYS,
     slots: o.callSlots ?? workHoursSource(db),
+    unsureWaitsMs: o.seriesUnsureWaitsMs ?? SERIES_UNSURE_WAITS_MS,
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   secretaryTools = {
@@ -447,6 +456,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   // Bids whose delivery never started (a crash right after Boris's press) are picked up now, once the bot can
   // tell Boris about one given back.
   await resumeQueuedOutbox(db)
+  await resumeStoppedSeries(db).catch((e) =>
+    console.error('series not taken up again', e instanceof Error ? e.message : e),
+  )
   const learning = startLearningJobs({
     db,
     notifier: bot.notifier,

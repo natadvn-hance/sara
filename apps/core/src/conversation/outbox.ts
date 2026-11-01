@@ -19,6 +19,10 @@ export type MessagePayload = {
   author: 'sara' | 'boris'
   /** The chat's last message the sender saw; the node refuses when the chat has moved on (CHAT_CHANGED). */
   expectLast: string | null
+  /** The series after a bid: our own side's lines after `expectLast` are no change (SendMessageInput.after_own). */
+  afterOwn?: boolean
+  /** The series after a bid is typed at once. */
+  quick?: boolean
 }
 
 export type Delivery = 'confirmed' | 'changed' | 'uncertain' | 'failed'
@@ -215,6 +219,8 @@ export async function deliverMessage(
         chat_id: p.chatId,
         text: p.text,
         expect_last_message_id: p.expectLast,
+        ...(p.afterOwn && { after_own: true }),
+        ...(p.quick && { quick: true }),
         idempotency_key: row.idempotencyKey,
       })
       await mark('confirmed', null)
