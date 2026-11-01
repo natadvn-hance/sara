@@ -10,6 +10,7 @@ import { buildServer } from './api/server'
 import { requireSession } from './auth/session'
 import type { Config } from './config'
 import { forwardTurn, sendTurnCard } from './conversation/cards'
+import { catchUpMissedTurns } from './conversation/catchUp'
 import { onClientText, onConvEdit, onConvPress, onConvReply } from './conversation/commands'
 import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
@@ -454,6 +455,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
+  // Once at start: the conversations whose last client word got no turn (a site line once hid it) get theirs now.
+  void catchUpMissedTurns({ db }).catch((e) =>
+    console.error('catch-up of missed turns failed', e instanceof Error ? e.message : e),
+  )
   const reconcile = startReconcile(
     conversationDeps,
     config.accounts.map((a) => a.id),
