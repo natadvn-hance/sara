@@ -674,7 +674,11 @@ export async function writeDraft(
     } else {
       // Boris does not want «не X, а Y» (01.11.2026): one more try with the reason; if it stays, the bid still goes to
       // him, with a note on the card, never without a draft.
-      const neuro = neuroSpeech(body)
+      // The series after the bid is checked the same way (Boris, 01.11.2026).
+      const neuro =
+        neuroSpeech(body) ??
+        (r.output.follow_ups ?? []).map((f) => neuroSpeech(f.text)).find((h) => h !== null) ??
+        null
       if (!neuro) return accept(r.output, text, attempts)
       if (attempts >= 2) return accept(r.output, text, attempts, NEURO_NOTE)
       input = `${base}\n\nВ прошлом варианте ${neuroSpeechReason(neuro)}. Перепиши без таких оборотов, остальное сохрани.`

@@ -260,6 +260,19 @@ describe('the Analyst', () => {
     expect((d2 as { styleNote?: string }).styleNote).toContain('не X, а Y')
   })
 
+  it('FR-CONV-15: a «не X, а Y» in a follow-up is asked once more, and the series stays', async () => {
+    const bad = 'Тут важно не количество постов, а понятный путь к записи'
+    const withFollow = (): AnalystOutput => ({
+      ...answer('Нужен человек, который ведет задачи. Когда запуск?'),
+      follow_ups: [{ text: bad, case_id: null }],
+    })
+    const { gw, inputs } = stubGateway([withFollow(), withFollow()])
+    const d = await write(gw, await order())
+    expect(inputs[1]).toContain('так пишет нейросеть')
+    expect((d as { styleNote?: string }).styleNote).toContain('не X, а Y')
+    expect((d as { followUps?: string[] }).followUps).toEqual([bad])
+  })
+
   it('FR-LEAD-6: still too long after the second ask gives no draft', async () => {
     const { gw } = stubGateway([answer('а'.repeat(600)), answer('б'.repeat(600))])
     expect(await write(gw, await order())).toMatchObject({

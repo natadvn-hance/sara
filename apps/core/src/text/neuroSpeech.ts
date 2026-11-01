@@ -2,7 +2,7 @@
  * The turn of phrase of a neural net that Boris will not have in a bid or a letter to a client (Boris, 01.11.2026:
  * «нужен не подрядчик на разовые задачи, а человек; не просто провести встречи, а понять; главная беда не в
  * качестве работы, а в том. Нейро-речь мне не нравится, человек так не пишет»): the negative parallel «не X, а Y» and
- * its kin. None of the 35 speech examples of Boris has one. A pure function over the text; the first hit is returned.
+ * its kin. None of the 36 speech examples of Boris has one. A pure function over the text; the first hit is returned.
  *
  * Plain talk of a day or a number, «не во вторник, а в среду», «не в 10, а в 11», is a correction and stays: a part
  * before the «а» with a weekday, a time word or a digit is no parallel.
