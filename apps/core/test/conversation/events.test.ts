@@ -104,7 +104,11 @@ describe('conversation events', () => {
     await first(envelope('profi.client_message', ref('m-2')))
     // The same message heard twice is shown once.
     await first(envelope('profi.client_message', ref('m-2')))
-    expect(texts).toEqual(['💬 Клиент: Покажите примеры', '💬 Клиент: И цены'])
+    expect(texts).toHaveLength(2)
+    expect(texts[0]).toMatch(
+      /^💬 <b>Клиент<\/b> · \d+ \S+, \d\d:\d\d\n<blockquote>Покажите примеры<\/blockquote>$/,
+    )
+    expect(texts[1]).toContain('<blockquote>И цены</blockquote>')
     const [c] = await db.select().from(conversation)
     expect(places).toEqual([{ conversation: c?.id }, { conversation: c?.id }])
   })

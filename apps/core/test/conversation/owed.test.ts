@@ -2,7 +2,6 @@ import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import {
-  backfillTopics,
   nextMorning,
   type OwedDeps,
   owedDueAt,
@@ -12,7 +11,7 @@ import {
 } from '../../src/conversation/owed'
 import { ensureConversation, updateConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
-import { chatMessage, convOwed, convTurn, forumTopic, lead, task } from '../../src/db/schema'
+import { chatMessage, convOwed, convTurn, lead, task } from '../../src/db/schema'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -228,40 +227,5 @@ describe('a client who waits', () => {
     await owedPass(deps, new Date(at.getTime() + 2 * MIN))
     expect(texts.filter((t) => t.place === 'general')).toHaveLength(1)
     expect(texts.filter((t) => t.place !== 'general')).toHaveLength(1)
-  })
-})
-
-describe('a bid that went before topics were made at the bid', () => {
-  const sentLead = (status = 'bid_sent') =>
-    db
-      .update(lead)
-      .set({ status, draftText: 'Татьяна, добрый день! Расскажу, как можно начать.' })
-      .where(eq(lead.id, CHAT))
-
-  it('ST-M7-16: its topic is made once, with the bid text, and not again once it exists', async () => {
-    await sentLead()
-    expect(await backfillTopics(deps, at)).toBe(1)
-    expect(texts[0]?.place).toEqual({ order: CHAT })
-    expect(texts[0]?.text).toContain('Отклик отправлен')
-    expect(texts[0]?.text).toContain('как можно начать')
-    // The fake notifier makes no topic; with one in place the order is no candidate.
-    await db.insert(forumTopic).values({ chatId: -1001, key: CHAT, threadId: 7, name: 'Татьяна' })
-    texts = []
-    expect(await backfillTopics(deps, at)).toBe(0)
-    expect(texts).toEqual([])
-  })
-
-  it('ST-M7-16: nothing without a forum, for an order not bid on, a closed conversation or a test order', async () => {
-    await sentLead()
-    forum = false
-    expect(await backfillTopics(deps, at)).toBe(0)
-    forum = true
-    await sentLead('new')
-    expect(await backfillTopics(deps, at)).toBe(0)
-    await sentLead()
-    await clientWrote('m-1', 40)
-    await updateConversation(db, convId, { closedAt: at.toISOString() })
-    expect(await backfillTopics(deps, at)).toBe(0)
-    expect(texts).toEqual([])
   })
 })

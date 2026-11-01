@@ -27,6 +27,7 @@ import { registerConversationRoutes } from './conversation/routes'
 import { setSendDeps, startSendJob } from './conversation/sendFlow'
 import { prepareJob } from './conversation/sendJob'
 import { SEND_TEXTS } from './conversation/sendTexts'
+import { startTopicRestore } from './conversation/topicRestore'
 import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
@@ -477,6 +478,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
   const owed = startOwed({ db, notifier: bot.notifier }, o.learningTickMs)
+  // The topics as the chat with the client: old ones laid out anew and given their history, bids without one get it.
+  const topicRestore = startTopicRestore({ db, notifier: bot.notifier }, o.learningTickMs)
   // The conversations whose last client word got no real turn (a site line once hid it, a node restart cut the turn)
   // get theirs, once the node answers and then every ten minutes.
   const catchUp = startCatchUp({
@@ -540,6 +543,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       clearInterval(mindTimer)
       conversationSummary.stop()
       owed.stop()
+      topicRestore.stop()
       catchUp.stop()
       gateway.stop()
       await bot.stop()

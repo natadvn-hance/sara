@@ -354,6 +354,7 @@ describe('M4 contracts', () => {
       'conv.compared',
       'conv.day_summary',
       'conv.owed_reminded',
+      'conv.topic_restored',
       'mind.indexed',
       'mind.proposed',
       'history.exported',

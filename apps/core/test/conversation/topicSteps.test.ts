@@ -139,10 +139,10 @@ describe('the steps in the topic', () => {
     })
     await ev('profi.order_gone', { kind: 'order', id: ORDER, payload: {} })
     expect(await topicSteps(deps, new Date())).toBe(3)
-    expect(steps.map((s) => s.text).sort()).toEqual([
-      '👁 Клиент прочитал отклик',
-      '📁 Заказ закрыт на сайте',
-      '📞 Созвон назначен',
+    expect(steps.map((s) => s.text.replace(/ · .*$/, '')).sort()).toEqual([
+      '<i>👁 Клиент прочитал отклик',
+      '<i>📁 Заказ закрыт на сайте',
+      '<i>📞 Созвон назначен',
     ])
     expect(steps.every((s) => s.quiet && (s.place as { order: string }).order === ORDER)).toBe(true)
     // Never twice.

@@ -225,14 +225,14 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
           (m) => m.chat_id === FORUM && m.message_thread_id === topic?.message_thread_id,
         )
       await until(() =>
-        inTopic().some((m) => m.text.includes('Ушло вдогонку: 2 из 2') && m.text.includes(SECOND)),
+        inTopic().some((m) => m.text.includes('Вдогонку 2 из 2') && m.text.includes(SECOND)),
       )
       expect(
         inTopic().some(
           (m) => m.text.includes('Отклик отправлен') && m.text.includes('Прочитал описание'),
         ),
       ).toBe(true)
-      expect(inTopic().filter((m) => m.text.includes('Ушло вдогонку'))).toHaveLength(2)
+      expect(inTopic().filter((m) => m.text.includes('Вдогонку'))).toHaveLength(2)
       // The ✅ of «Заявки» stays and links to the topic.
       const linked = [...tg.sent, ...tg.edited].some(
         (m) =>

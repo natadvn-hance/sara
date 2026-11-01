@@ -153,7 +153,7 @@ describe('Boris’s forum', () => {
       topic?.message_thread_id,
     ])
     // The topic begins with the order, then what came for the client.
-    expect(shown[2]?.text).toMatch(/^📌 Сайт для салона красоты\nКлиент: Ирина/)
+    expect(shown[2]?.text).toMatch(/^📌 <b>Сайт для салона красоты<\/b>\nИрина/)
     expect(shown[2]?.text).toContain('https://profi.ru/backoffice/n.php?o=90001')
     expect(shown[3]?.text).toBe('Клиент написал')
     // The core knows forum messages by negative numbers, never by a number of Boris's own chat.

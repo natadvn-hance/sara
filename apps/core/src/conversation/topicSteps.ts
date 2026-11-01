@@ -3,6 +3,7 @@ import type { Db } from '../db/client'
 import { forumTopic, topicStep } from '../db/schema'
 import { STAGE_DOT } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
+import { stepPost } from '../notify/topicPosts'
 import { stageForKey } from '../pult/clients'
 
 /**
@@ -34,27 +35,30 @@ const placeOf = (key: string) =>
   key.startsWith('conv:') ? { conversation: key.slice(5) } : { order: key }
 
 /** The topics, from the journal: who read, whose call was booked, whose order closed, after the topic was made. */
-async function news(db: Db, since: string): Promise<{ key: string; step: Step }[]> {
+async function news(db: Db, since: string): Promise<{ key: string; step: Step; at: string }[]> {
   const res = await db.execute(sql`
-    select distinct t.key, 'read' as step
+    select t.key, 'read' as step, min(e.occurred_at) as at
     from core.event e
     join core.conversation c on c.chat_id = e.payload->>'chat_id' and c.account_id = e.account_id
     join core.forum_topic t on t.key = coalesce(c.order_id, 'conv:' || c.id::text)
     where e.type = 'profi.client_read' and e.occurred_at >= ${since} and e.occurred_at >= t.created_at
+    group by t.key
     union
-    select distinct t.key, 'call_booked' as step
+    select t.key, 'call_booked' as step, min(e.occurred_at) as at
     from core.event e
     join core.deal dl on dl.id::text = e.entity_id
     join core.forum_topic t on t.key = dl.lead_id
     where e.type = 'deal.stage_changed' and e.payload->>'to' = 'call_booked'
       and e.occurred_at >= ${since} and e.occurred_at >= t.created_at
+    group by t.key
     union
-    select distinct t.key, 'order_closed' as step
+    select t.key, 'order_closed' as step, min(e.occurred_at) as at
     from core.event e
     join core.forum_topic t on t.key = e.entity_id
     where e.type = 'profi.order_gone' and e.entity_kind = 'order'
-      and e.occurred_at >= ${since} and e.occurred_at >= t.created_at`)
-  return (res.rows as { key: string; step: Step }[]).filter((r) => r.step in STEPS)
+      and e.occurred_at >= ${since} and e.occurred_at >= t.created_at
+    group by t.key`)
+  return (res.rows as { key: string; step: Step; at: string }[]).filter((r) => r.step in STEPS)
 }
 
 /** Each step goes once per topic, quietly, in the order the events happened. */
@@ -70,7 +74,11 @@ export async function topicSteps(d: StepDeps, now: Date): Promise<number> {
       .returning({ key: topicStep.key })
     if (claimed.length === 0) continue
     try {
-      await d.notifier.sendText(STEPS[n.step], { quiet: true, place: placeOf(n.key) })
+      await d.notifier.sendText(stepPost(STEPS[n.step], new Date(n.at).toISOString()), {
+        html: true,
+        quiet: true,
+        place: placeOf(n.key),
+      })
       shown++
     } catch (e) {
       // Not shown: the claim goes, so the next tick tries again.

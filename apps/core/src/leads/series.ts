@@ -5,8 +5,9 @@ import { deliverMessage, queueMessage } from '../conversation/outbox'
 import type { Db } from '../db/client'
 import { conversation, event, outbox } from '../db/schema'
 import { appendEvent } from '../journal/journal'
-import { TEXTS } from '../notify/cards'
+import { markShown } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
+import { seriesPost } from '../notify/topicPosts'
 import type { ProfiClient } from '../profi/client'
 import { addStatusLine, seriesLine } from './bidStatus'
 import { fillCallOffer, isApprovedText, isCallOffer, type SlotSource } from './callSlots'
@@ -391,11 +392,11 @@ async function showInTopic(job: SeriesJob, text: string, n: number): Promise<voi
   try {
     const notifier = d().notifier
     if (!notifier || !(await notifier.forumOn?.())) return
-    await notifier.sendText(TEXTS.seriesInTopic(text, n, job.followUps.length), {
-      html: true,
-      quiet: true,
-      place: { order: job.leadId },
-    })
+    await notifier.sendText(
+      seriesPost({ at: new Date().toISOString(), text, n, total: job.followUps.length }),
+      { html: true, quiet: true, place: { order: job.leadId } },
+    )
+    await markShown(d().db, job.leadId, `series:${n}`)
   } catch (e) {
     console.error('series not shown in the topic', e instanceof Error ? e.message.slice(0, 200) : e)
   }
