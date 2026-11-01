@@ -356,8 +356,53 @@ function Push({ r }: { r: SettingRow }) {
             Сохранить
           </Btn>
         ) : null}
+        <PushSubscribe />
       </div>
     </div>
+  )
+}
+
+/** This device: ask the browser to ring, and tell the core where (Web Push, pult v2 design 6). */
+function PushSubscribe() {
+  const [state, setState] = useState<'idle' | 'busy' | 'on' | 'no'>('idle')
+  const supported =
+    typeof window !== 'undefined' &&
+    'Notification' in window &&
+    'serviceWorker' in navigator &&
+    'PushManager' in window
+  if (!supported) return <span className="muted small">Этот браузер не умеет уведомления</span>
+  return (
+    <Btn
+      size="sm"
+      icon="bell"
+      disabled={state === 'busy' || state === 'on'}
+      onClick={async () => {
+        setState('busy')
+        try {
+          if ((await Notification.requestPermission()) !== 'granted') return setState('no')
+          const reg = await navigator.serviceWorker.register('/sw.js')
+          await navigator.serviceWorker.ready
+          const { key } = await api<{ key: string }>('/api/push/key')
+          const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: key,
+          })
+          await api('/api/push/subscribe', {
+            subscription: sub.toJSON(),
+            label: navigator.userAgent.slice(0, 120),
+          })
+          setState('on')
+        } catch {
+          setState('no')
+        }
+      }}
+    >
+      {state === 'on'
+        ? 'Это устройство звонит'
+        : state === 'no'
+          ? 'Браузер не разрешил'
+          : 'Звонить на этом устройстве'}
+    </Btn>
   )
 }
 

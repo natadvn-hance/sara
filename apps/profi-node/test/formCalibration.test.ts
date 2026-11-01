@@ -124,6 +124,14 @@ describe('the node opens the bid form itself to map it (Boris, 24.10.2026)', () 
     expect(await openedMaps()).toEqual([])
   }, 90000)
 
+  it("FR-LEAD-8: the calibration never presses the order card's «Откликнуться»: its words are the send's", async () => {
+    const c = calibration()
+    site.bidSettings.opener = 'card'
+    await openOne(c)
+    c.stop()
+    expect(site.openerClicks).toBe(0)
+  }, 60000)
+
   it("FR-LEAD-8: only «Продолжить» with the order's own fee, or «Написать клиенту», is pressed", async () => {
     const c = calibration()
     site.bidSettings.openerAmount = 999

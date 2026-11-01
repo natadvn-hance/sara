@@ -1,7 +1,7 @@
 import { type NoticeKind, type NoticeList, type NoticeRow, newEventId } from '@sara/shared'
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { notice, question, task } from '../db/schema'
+import { convTurn, notice, question, task } from '../db/schema'
 import { htmlToPlain } from './cards'
 import type { Notifier } from './notifier'
 
@@ -60,12 +60,19 @@ export function taskOfRows(rows: { callbackData: string }[][] | undefined): stri
   return null
 }
 
-const taskPath = (kind: string, entityKind: string, entityId: string) =>
-  kind.startsWith('lead')
-    ? `/leads/${encodeURIComponent(entityId)}`
-    : entityKind === 'conv_turn'
-      ? null
-      : null
+/** The page of a task's thing: a lead's own page, or the client of a draft card. */
+async function taskPath(db: DbOrTx, t: typeof task.$inferSelect): Promise<string | null> {
+  if (t.entityKind === 'lead') return `/leads/${encodeURIComponent(t.entityId)}`
+  if (t.entityKind === 'conv_turn') {
+    const [turn] = await db
+      .select({ c: convTurn.conversationId })
+      .from(convTurn)
+      .where(eq(convTurn.id, t.entityId))
+    return turn ? `/clients/${turn.c}` : null
+  }
+  if (t.kind === 'rule_proposal') return '/settings'
+  return null
+}
 
 export async function recordNotice(
   db: DbOrTx,
@@ -115,7 +122,7 @@ export async function noticeOfMessage(
     const [t] = await db.select().from(task).where(eq(task.id, taskId))
     if (t) {
       kind ??= t.kind.startsWith('conv_') ? 'draft' : t.kind === 'rule_proposal' ? 'system' : 'lead'
-      link ??= taskPath(t.kind, t.entityKind, t.entityId)
+      link ??= await taskPath(db, t)
     }
   }
   const { title, body } = split(text)
@@ -131,42 +138,60 @@ export async function noticeOfMessage(
 }
 
 /** Every send of the bot leaves a notice; the Telegram message itself is not touched. */
-export function withNoticeLog(n: Notifier, db: Db): Notifier {
-  const log = (p: Promise<string | null>) =>
-    p.catch((e: unknown) =>
-      console.error('notice not recorded', e instanceof Error ? e.message.slice(0, 200) : e),
-    )
+export function withNoticeLog(
+  n: Notifier,
+  db: Db,
+  /** A new notice (not a repeat within the hour): the phone and the computer ring (Web Push). */
+  onNotice?: (kind: NoticeKind) => void,
+): Notifier {
+  const log = (p: Promise<string | null>, kind: () => Promise<NoticeKind | null>) =>
+    p
+      .then(async (id) => {
+        if (!id || !onNotice) return
+        const k = await kind()
+        if (k) onNotice(k)
+      })
+      .catch((e: unknown) =>
+        console.error('notice not recorded', e instanceof Error ? e.message.slice(0, 200) : e),
+      )
+  const kindOf = async (recorded: Promise<string | null>): Promise<NoticeKind | null> => {
+    const id = await recorded
+    if (!id) return null
+    const [row] = await db.select({ kind: notice.kind }).from(notice).where(eq(notice.id, id))
+    return (row?.kind as NoticeKind | undefined) ?? null
+  }
   return {
     ...n,
     async sendLeadCard(c, o) {
       const m = await n.sendLeadCard(c, o)
-      await log(
-        recordNotice(db, {
-          kind: 'lead',
-          title: `Заявка: ${c.title}`,
-          body: [
-            c.city,
-            c.score ? `балл ${c.score.value}` : null,
-            c.bidPriceRub > 0 ? `отклик ${c.bidPriceRub} ₽` : null,
-            c.budgetText ? `бюджет ${c.budgetText}` : null,
-          ]
-            .filter(Boolean)
-            .join(' · '),
-          link: `/leads/${encodeURIComponent(c.orderId)}`,
-          taskId: c.taskId,
-          telegramMessageId: m.messageId,
-        }),
-      )
+      const recorded = recordNotice(db, {
+        kind: 'lead',
+        title: `Заявка: ${c.title}`,
+        body: [
+          c.city,
+          c.score ? `балл ${c.score.value}` : null,
+          c.bidPriceRub > 0 ? `отклик ${c.bidPriceRub} ₽` : null,
+          c.budgetText ? `бюджет ${c.budgetText}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        link: `/leads/${encodeURIComponent(c.orderId)}`,
+        taskId: c.taskId,
+        telegramMessageId: m.messageId,
+      })
+      await log(recorded, () => kindOf(recorded))
       return m
     },
     async sendText(text, o) {
       const m = await n.sendText(text, o)
-      await log(noticeOfMessage(db, text, { hint: o?.notice, messageId: m.messageId }))
+      const recorded = noticeOfMessage(db, text, { hint: o?.notice, messageId: m.messageId })
+      await log(recorded, () => kindOf(recorded))
       return m
     },
     async sendButtons(text, rows, o) {
       const m = await n.sendButtons(text, rows, o)
-      await log(noticeOfMessage(db, text, { rows, hint: o?.notice, messageId: m.messageId }))
+      const recorded = noticeOfMessage(db, text, { rows, hint: o?.notice, messageId: m.messageId })
+      await log(recorded, () => kindOf(recorded))
       return m
     },
   }

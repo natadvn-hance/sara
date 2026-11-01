@@ -65,6 +65,12 @@ export type FakeProfi = {
     read?: boolean
     sentAt?: string
   }): Promise<{ platformMessageId: string; eventId: string | null }>
+  /**
+   * The line the real site puts into a chat right behind the client's first word («Сообщите, если договоритесь
+   * работать с клиентом»); on by default, null turns it off. It is the last message the core reads, and it hides
+   * the client's word from a check that looks only at the last message (Boris, 31.10).
+   */
+  setSystemLineAfterFirstClient(text: string | null): void
   emitTyping(chatId: string): Promise<void>
   emitRead(chatId: string, platformMessageId: string): Promise<void>
   redeliver(eventId: string): Promise<void>
@@ -175,6 +181,8 @@ export async function createFakeProfi(o: {
   const change = () => changed?.()
 
   /** Appends to the chat in page order; a message without its own time comes after the chat's last one. */
+  let systemLine: string | null = 'Сообщите, если договоритесь работать с клиентом'
+
   function append(
     chatId: string,
     m: {
@@ -386,7 +394,10 @@ export async function createFakeProfi(o: {
     async emitOrder(partial) {
       const base = sampleOrders()[0]
       if (!base) throw new Error('no sample orders')
-      const order: ProfiOrder = { ...base, seen_at: new Date().toISOString(), ...partial }
+      // The sample text is short; a few more sentences give it the client's own words the screen asks for (15), so a
+      // test order is not marked as a thin one and keeps its score. A test that needs a thin text passes its own.
+      const text = `${base.text} Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.`
+      const order: ProfiOrder = { ...base, text, seen_at: new Date().toISOString(), ...partial }
       emitted.set(order.order_id, order)
       change()
       const e: EventEnvelope = {
@@ -407,7 +418,11 @@ export async function createFakeProfi(o: {
       return e.id
     },
     async addChatMessage(m) {
+      const firstClient =
+        m.author === 'client' && !chats.get(m.chatId)?.messages.some((x) => x.author === 'client')
       const { message, orderId } = append(m.chatId, { ...m, read: m.read ?? false })
+      if (firstClient && systemLine)
+        append(m.chatId, { author: 'system', text: systemLine, read: true })
       const type = MESSAGE_EVENTS[m.author]
       const eventId = type
         ? await shipChatEvent(type, m.chatId, () => ({
@@ -419,6 +434,9 @@ export async function createFakeProfi(o: {
           }))
         : null
       return { platformMessageId: message.platform_message_id, eventId }
+    },
+    setSystemLineAfterFirstClient(text) {
+      systemLine = text
     },
     async emitTyping(chatId) {
       await shipChatEvent('profi.client_typing', chatId, (at) => ({ chat_id: chatId, at }))

@@ -8,6 +8,7 @@ import {
   TEST_MARK,
 } from '@sara/shared'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
+import { firstName } from '../leads/clientName'
 import { isTelegramLine } from '../leads/telegramLine'
 import { siteCardView, studiedLine } from '../site/view'
 
@@ -86,6 +87,8 @@ export type LeadCard = {
   closed?: ClosedWhen | null
   /** The card waited more than a day (FR-LEAD-10): from its first message to now, for the short stale card. */
   stale?: { since: string; at: string } | null
+  /** Boris closed the card himself («Закрыть заявку»): the short card says so and nothing else. */
+  closedByBoris?: boolean
   /**
    * The client's own site as Sara read it (Boris, 30.10.2026): its short summary against the order, or «сайт не
    * открылся»; and the example sites the client named. None: the order names no site.
@@ -140,7 +143,7 @@ export const TEXTS = {
   leadsTopic: 'Заявки',
   commandFailed: 'Не получилось ответить на команду. Попробуй ещё раз чуть позже.',
   alreadyDone: 'Уже сделано',
-  skipped: 'Пропущено',
+  skipped: 'Заявка закрыта',
   bidQueued: 'Отправляю отклик',
   bidsPaused: 'Отклик не ушёл: отправка откликов на паузе',
   bidFailed: 'Отклик не ушёл: площадка ответила ошибкой. Посмотри «Состояние системы».',
@@ -247,6 +250,9 @@ export const TEXTS = {
   draftLate: 'Заявка уже решена, текст не поменяла',
   /** The card of an order closed on Profi.ru, in short (Boris, 30.10.2026): the buttons are gone. */
   closedCard: '🔒 Заявка закрыта',
+  /** Boris closed the card with the button: the same short card, a folder instead of a lock. */
+  closedByBorisCard: '📁 Заявка закрыта',
+  closeButton: 'Закрыть заявку',
   closedAfter: (span: string, published: boolean) =>
     `закрылась через ${span} ${published ? 'после публикации' : 'после того, как я её увидела'}`,
   closedBy: (clock: string, openFor: string | null) =>
@@ -384,7 +390,12 @@ const sinceText = (s: string) =>
 function clientLines(c: LeadCard): string[] {
   const info = c.clientInfo ?? null
   // The order page's name is the fuller one; the list may give a first name or none.
-  const name = info?.name?.trim() || c.clientName.trim()
+  const raw = info?.name?.trim() || c.clientName.trim()
+  // The profile name as the site wrote it; a name in Latin letters is shown as Sara calls him, «Александр (alexander)»
+  // (01.11.2026). A profession or a company stays as it is: Boris sees what the profile says, only the greeting is
+  // without a name.
+  const first = raw ? firstName(raw) : null
+  const name = first && !/^\p{Script=Cyrillic}/u.test(raw) ? `${first} (${raw})` : raw
   const parts = [`👤 <b>${name ? clean(name, CAP.short) : 'имя не указано'}</b>`]
   if (info) {
     const since = info.on_profi_since?.trim()
@@ -609,6 +620,8 @@ function closedWhenText(w: ClosedWhen): string {
  * says so instead, with how long it waited.
  */
 export function closedLeadCardText(c: LeadCard): string {
+  if (c.closedByBoris)
+    return `${[`<b>${TEXTS.closedByBorisCard}</b>`, clean(c.title, CAP.title)].join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
   const head = c.stale
     ? [
         `<b>${TEXTS.staleCard}</b>`,
@@ -724,7 +737,7 @@ export function leadCardKeyboard(c: LeadCard) {
       [
         { text: TEXTS.analysisButton, callback_data: formatCallback(c.taskId, 'razbor') },
         { text: TEXTS.editButton, callback_data: formatCallback(c.taskId, 'edit') },
-        { text: 'Пропустить', callback_data: formatCallback(c.taskId, 'skip') },
+        { text: TEXTS.closeButton, callback_data: formatCallback(c.taskId, 'skip') },
       ],
     ],
   }

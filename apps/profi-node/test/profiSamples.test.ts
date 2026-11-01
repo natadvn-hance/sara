@@ -30,6 +30,8 @@ describe('Profi.ru samples', () => {
     expect(r.what).toBe('feed')
     // 346 orders on the board, the answer holds the first ones: the page loads the rest when scrolled (nextCursor).
     expect(r.more).toBe(true)
+    // The number that moves when an order comes or goes, wherever it landed on the board.
+    expect(r.total).toBe(346)
     // The carousel of older orders sits among the cards; Boris: score them like the others (24.10.2026).
     const cards = (
       s.body as { data: { boSearchBoardItems: { items: BoardItem[] } } }
