@@ -179,11 +179,23 @@ export function sinceDay(since: string, orderDay: string): string | null {
 }
 
 /** One criterion checked: it fired, it lacked its data, or it passed. */
-export type Check = { hit: ScreenMark } | { noData: ScreenCriterion } | { pass: ScreenCriterion }
+export type Check =
+  | { hit: ScreenMark }
+  | { soft: ScreenMark }
+  | { noData: ScreenCriterion }
+  | { pass: ScreenCriterion }
 
 /** The criteria a set of checks looked at. */
 export const checkedOf = (checks: Check[]): ScreenCriterion[] =>
-  checks.map((c) => ('hit' in c ? c.hit.criterion : 'noData' in c ? c.noData : c.pass))
+  checks.map((c) =>
+    'hit' in c
+      ? c.hit.criterion
+      : 'soft' in c
+        ? c.soft.criterion
+        : 'noData' in c
+          ? c.noData
+          : c.pass,
+  )
 
 /** Criterion 1: the client's account was made on the day of the order. */
 export function newAccount(info: ClientInfo | null, orderAt: Date): Check {
@@ -213,6 +225,15 @@ export function negativeReviews(info: ClientInfo | null): Check {
 
 /** The points a text that looks like a vacancy loses in the score (Boris, 30.10.2026). */
 export const VACANCY_PENALTY = 15
+/** The points a thin text loses: few own words, but the form's answers say something (Boris, 31.10.2026). */
+export const SHORT_TEXT_PENALTY = 5
+const PENALTY: Partial<Record<ScreenCriterion, number>> = {
+  vacancy: VACANCY_PENALTY,
+  short_text: SHORT_TEXT_PENALTY,
+}
+/** What the soft marks take off the score together, each criterion once. */
+export const penaltyOf = (soft: readonly ScreenMark[]): number =>
+  [...new Set(soft.map((m) => m.criterion))].reduce((n, c) => n + (PENALTY[c] ?? 0), 0)
 
 /** The signs of a vacancy, by group (docs/product/lead-analysis.md, criterion 7). Each group counts once. */
 const VACANCY_GROUPS: { id: string; re: RegExp }[] = [
@@ -287,18 +308,48 @@ export function vacancySoft(o: { title: string; text: string }): ScreenMark | nu
 const QUOTE_MAX = 160
 const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max - 1)}…`)
 
-/** Criterion 3: fewer own words than `min`; an order without text is no data. */
+/** The words of the form's answers: a form part as it stands, of a form label only what follows it. */
+export function answerWords(o: { title: string; text: string }, form: FormParts): string[] {
+  const out: string[] = []
+  const title = key(space(o.title))
+  for (const p of splitParts(o.text)) {
+    if (key(p) === title) continue
+    const l = labelled(p)
+    if (form.parts.has(key(p))) out.push(...wordsOf(l ? l.value : p))
+    else if (l && form.labels.has(key(l.label))) out.push(...wordsOf(l.value))
+  }
+  return out
+}
+
+/** Fewer words of answers than this, with no own words, is an empty order. */
+const EMPTY_ANSWER_WORDS = 3
+
+/**
+ * Criterion 3, softened (Boris, 31.10.2026: on Profi.ru the client fills the form and writes little himself). Only an
+ * order with no own words and next to no answers of the form is stopped; fewer own words than `min` with a form that
+ * says something is a soft mark, a few points off the score. An order without text is no data.
+ */
 export function shortText(o: { title: string; text: string }, form: FormParts, min: number): Check {
   if (!o.text.trim()) return { noData: 'short_text' }
   const words = ownWords(o, form)
   if (words.length >= min) return { pass: 'short_text' }
+  const answers = answerWords(o, form)
+  // The title alone is no text: an order is empty when the text has no own words and next to no answers.
+  if (
+    ownWords({ title: '', text: o.text }, form).length === 0 &&
+    answers.length < EMPTY_ANSWER_WORDS
+  )
+    return {
+      hit: { criterion: 'short_text', basis: 'пустой заказ: нет ни своих слов, ни ответов формы' },
+    }
+  const own =
+    words.length === 0
+      ? 'своих слов нет'
+      : `своими словами ${words.length} ${plural(words.length, ['слово', 'слова', 'слов'])}: «${clip(words.join(' '), QUOTE_MAX)}»`
   return {
-    hit: {
+    soft: {
       criterion: 'short_text',
-      basis:
-        words.length === 0
-          ? 'своих слов нет, только ответы формы'
-          : `своими словами ${words.length} ${plural(words.length, ['слово', 'слова', 'слов'])}: «${clip(words.join(' '), QUOTE_MAX)}»`,
+      basis: `${own}, в ответах формы ${answers.length} ${plural(answers.length, ['слово', 'слова', 'слов'])}`,
     },
   }
 }
@@ -341,14 +392,15 @@ export function screenOf(
   p: { stops: boolean; ownWords: number | null; at: Date },
 ): LeadScreen {
   const hits = [...checks.flatMap((c) => ('hit' in c ? [c.hit] : [])), ...(extra.hits ?? [])]
+  const soft = [...checks.flatMap((c) => ('soft' in c ? [c.soft] : [])), ...(extra.soft ?? [])]
   const noData = checks.flatMap((c) => ('noData' in c ? [c.noData] : []))
   return {
     stops: p.stops,
     hits: byOrder(hits),
     clarify: byOrder(extra.clarify ?? []),
     no_data: [...new Set(noData)].sort((a, b) => order(a) - order(b)),
-    soft: extra.soft ?? [],
-    penalty: (extra.soft ?? []).length > 0 ? VACANCY_PENALTY : 0,
+    soft: byOrder(soft),
+    penalty: penaltyOf(soft),
     own_words: p.ownWords,
     at: p.at.toISOString(),
   }
@@ -367,6 +419,7 @@ export function mergeScreens(
   const again = new Set<ScreenCriterion>([
     ...checked,
     ...after.hits.map((h) => h.criterion),
+    ...after.soft.map((m) => m.criterion),
     ...after.no_data,
     ...after.clarify.map((c) => c.criterion),
   ])
@@ -377,7 +430,7 @@ export function mergeScreens(
     hits: byOrder([...keep(before.hits), ...after.hits]),
     clarify: byOrder([...keep(before.clarify), ...after.clarify]),
     soft: byOrder([...keep(before.soft), ...after.soft]),
-    penalty: [...keep(before.soft), ...after.soft].length > 0 ? VACANCY_PENALTY : 0,
+    penalty: penaltyOf([...keep(before.soft), ...after.soft]),
     no_data: [...new Set([...before.no_data.filter((c) => !again.has(c)), ...after.no_data])].sort(
       (a, b) => order(a) - order(b),
     ),
@@ -399,9 +452,10 @@ export function clarifyLines(
     ...s.clarify.map(
       (c) => `Уточнить в отклике: ${SCREEN_RU[c.criterion]}${c.basis ? `, ${c.basis}` : ''}`,
     ),
-    ...(s.soft ?? []).map(
-      (c) =>
-        `Похоже на вакансию (минус ${s.penalty ?? VACANCY_PENALTY} баллов): ${c.basis}. В отклике спросить, нужен ли только человек в штат или и внешняя команда`,
+    ...(s.soft ?? []).map((c) =>
+      c.criterion === 'vacancy'
+        ? `Похоже на вакансию (минус ${VACANCY_PENALTY} баллов): ${c.basis}. В отклике спросить, нужен ли только человек в штат или и внешняя команда`
+        : `Мало слов клиента (минус ${SHORT_TEXT_PENALTY} баллов): ${c.basis}`,
     ),
   ]
 }

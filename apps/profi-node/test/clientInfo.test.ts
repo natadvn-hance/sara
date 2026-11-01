@@ -11,6 +11,52 @@ const sample = (name: string) => JSON.parse(readFileSync(join(ROOT, `${name}.jso
 const answer = (data: Record<string, unknown>) => ({ data })
 
 describe('the client answer of the order page (getKlientInfo)', () => {
+  it("FR-LEAD-5: the site's own lines about the client are kept: the words, the colour and the percent (Profi Pro, 01.11.2026)", () => {
+    const info = clientInfoFromAnswer(sample('klient-info-pro').body)
+    expect(info?.summaries).toEqual([
+      {
+        description: 'Договаривается меньше, чем в 20% заказов',
+        color_theme: 'RED',
+        percent: 20,
+      },
+      { description: 'Обычно отвечает в течение часа', color_theme: 'GREEN', percent: null },
+    ])
+    expect(ClientInfo.safeParse(info).success).toBe(true)
+    // The contacts beside them and the pictures stay in the answer.
+    expect(JSON.stringify(info)).not.toMatch(/\+7|cdn\.profi|image/)
+  })
+
+  it('FR-LEAD-5: the lines are known by their shape, wherever the list sits and whatever it is called', () => {
+    const line = { colorTheme: 'RED', description: 'Договаривается в 5 % заказов' }
+    const base = { title: 'На Профи.ру с 2020' }
+    const want = [{ description: 'Договаривается в 5 % заказов', color_theme: 'RED', percent: 5 }]
+    expect(clientInfoFromAnswer(answer({ ...base, stats: [line] }))?.summaries).toEqual(want)
+    expect(clientInfoFromAnswer(answer({ ...base, block: { stats: [line] } }))?.summaries).toEqual(
+      want,
+    )
+    // The same line twice is one line.
+    expect(clientInfoFromAnswer(answer({ ...base, a: [line], b: [line] }))?.summaries).toEqual(want)
+  })
+
+  it('FR-LEAD-5: nothing else passes for such a line: no contacts, no text without a colour, no percent over 100', () => {
+    const base = { title: 'На Профи.ру с 2020' }
+    const line = { colorTheme: 'RED', description: 'Телефон +70000000000' }
+    expect(
+      clientInfoFromAnswer(answer({ ...base, contacts: { list: [line] } })),
+    ).not.toHaveProperty('summaries')
+    expect(
+      clientInfoFromAnswer(answer({ ...base, notes: [{ description: 'Слова клиента' }] })),
+    ).not.toHaveProperty('summaries')
+    const big = clientInfoFromAnswer(
+      answer({ ...base, stats: [{ colorTheme: 'RED', description: 'Рост 300%' }] }),
+    )
+    expect(big?.summaries?.[0]?.percent).toBeNull()
+  })
+
+  it('FR-LEAD-5: an answer without such lines has no summaries at all, as before', () => {
+    expect(clientInfoFromAnswer(sample('klient-info').body)).not.toHaveProperty('summaries')
+  })
+
   it('FR-LEAD-5: the sample gives the name, the date on Profi.ru, the verified number, the reviews and their tags', () => {
     expect(clientInfoFromAnswer(sample('klient-info').body)).toEqual({
       name: 'Ирина',

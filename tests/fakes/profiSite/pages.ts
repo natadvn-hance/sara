@@ -105,7 +105,7 @@ export type BidLook = {
    * What opens the form: «Продолжить» with the fee beside it, a div as on the live page (maps of 24.10.2026), or the
    * answer's own opener words (tariffsBlock.scrollButtonText).
    */
-  opener: 'continue' | 'words'
+  opener: 'continue' | 'words' | 'card'
   /** The amount the «Продолжить» opener shows; null shows the fee. */
   openerAmount: number | null
   /** A widget in a frame of the page asks the backoffice API for another client first (an advert, a similar order). */
@@ -142,11 +142,16 @@ fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json
   const amount = ${look.openerAmount === null ? 's.price.value' : `'${look.openerAmount}'`}
   const opener = (i) => ${look.opener === 'continue'}
     ? '<div id="bid-opener' + (i ? i : '') + '" class="opener" style="cursor: pointer"><div>Продолжить</div><div>' + amount + ' ₽</div></div>'
-    : '<a id="bid-opener' + (i ? i : '') + '" class="opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>'
-  box.innerHTML = '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div>' +
+    : ${look.opener === 'card'}
+      ? '<button id="bid-opener' + (i ? i : '') + '" class="opener" type="button">Откликнуться</button>'
+      : '<a id="bid-opener' + (i ? i : '') + '" class="opener" href="#bid" style="cursor: pointer">' + t.scrollButtonText + '</a>'
+  const openers = hidden ? Array.from({ length: ${look.openers} }, (_, i) => opener(i)).join('') : ''
+  // The page of 31.10.2026 (order 95590077): no tariff block, the order card's «Цена отклика» and its button.
+  box.innerHTML = (${look.opener === 'card'}
+    ? '<div data-testid="order_card_container"><div>Цена отклика</div><div>' + amount + ' ₽</div>' + openers + '</div>'
+    : '<div data-testid="orderCard/tariffs"><div>' + t.label + '</div>' +
     '<div class="tariff" style="cursor: pointer"><div>' + t.tariffs[0].title + ' • ' + t.tariffs[0].price.value + '</div><div>Вы платите сразу за предложение услуг, но не каждый отклик приводит к заказу</div></div>' +
-    '<a href="#details">' + t.details + '</a>' +
-    (hidden ? Array.from({ length: ${look.openers} }, (_, i) => opener(i)).join('') : '') + '</div>' +
+    '<a href="#details">' + t.details + '</a>' + openers + '</div>') +
     '<div id="bid-form" data-testid="bid_window_container"' + (hidden ? ' hidden' : '') + '><h3>' + t.formTitle + '</h3>' +
     '<div>' + s.form.elements.amount.label + '</div><label>От <input id="bid-price" type="text"></label><label>До <input id="bid-price-to" type="text"></label>' +
     '<div>' + s.form.elements.commentsForClient.label + '</div><textarea id="bid-text" maxlength="500" placeholder="Расскажите о своём опыте. Опишите, как будете решать задачу клиента, прокомментируйте цену."></textarea><textarea hidden></textarea>' +
@@ -198,5 +203,7 @@ async function load() {
   document.getElementById('chat').innerHTML = d.messages.map((m) =>
     '<div class="cw_msg ' + CLASSES[m.side] + '" data-message-content-id="' + m.id + '" data-sent-at="' + m.ts + '"><div class="cw_xeDn2R"><div class="cw_BFgZYK">' + m.text + '</div></div></div>').join('')
 }
+// The list beside the chat: the live messenger asks for it on this page too.
+fetch('/api/chats').catch(() => {})
 load(); window.__RTP.addEventListener('message', load)`,
   )

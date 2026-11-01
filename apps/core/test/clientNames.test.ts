@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { namesToHide } from '../src/leads/clientName'
+import { addressName, namesToHide } from '../src/leads/clientName'
 
 describe('the names a model must not see', () => {
   it('NFR-PRIV-2: a given name is hidden as written', () => {
@@ -30,5 +30,18 @@ describe('the names a model must not see', () => {
 
   it('NFR-PRIV-2: «скрыт», «скрыл», «скрыто» all say the name is hidden', () => {
     expect(namesToHide('Пользователь скрыл имя', 'Имя скрыто', 'Скрытый клиент')).toEqual([])
+  })
+})
+
+describe('FR-CONV-14: the name in a reply is the formal first name', () => {
+  it('«alexander» becomes «Александр»; a profession is left out of the greeting; a good name stays', () => {
+    expect(addressName('alexander, добрый день! Понял вас.', ['alexander'])).toBe(
+      'Александр, добрый день! Понял вас.',
+    )
+    expect(addressName('Психотерапевт, добрый день! Картина понятна.', ['Психотерапевт'])).toBe(
+      'Добрый день! Картина понятна.',
+    )
+    expect(addressName('Анна, здравствуйте!', ['Анна'])).toBe('Анна, здравствуйте!')
+    expect(addressName('Добрый день!', [])).toBe('Добрый день!')
   })
 })

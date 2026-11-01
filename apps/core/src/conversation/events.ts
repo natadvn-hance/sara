@@ -112,7 +112,9 @@ export async function onChatNews(
     return
   }
   if (r.specialistAfter.length > 0) await d.onSpecialist(conv, r.specialistAfter)
-  const last = r.messages.at(-1)
+  // The site's own lines («Сообщите, если договоритесь…») come right behind a client's word and must never hide it
+  // (Boris, 31.10: the first answer of a real client got no turn and no card).
+  const last = r.messages.findLast((m) => m.side !== 'system')
   if (last?.side === 'client') {
     if (conv.unclearCount > 0) conv = await updateConversation(d.db, conv.id, { unclearCount: 0 })
     if (await getSetting(d.db, 'pipeline.conversations')) await d.onTurnNeeded(conv, now)

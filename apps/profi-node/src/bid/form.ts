@@ -21,14 +21,27 @@ const rubIn = (text: string | null) => {
 /** What may open the form: the answer's opener words and the fee the opener shows beside «Продолжить». */
 export type Opener = { words: string | null; feeRub: number | null }
 
+/** Why the form did not open, for the node's log and the record of a refused bid. */
+export type OpenerMiss =
+  | 'no_opener'
+  | 'opener_fee'
+  | 'two_openers'
+  | 'opener_sends'
+  | 'may_not'
+  | 'no_field'
+
 // «Продолжить» with the fee beside it (the live opener: a div of two divs, so no space in its text).
 const CONTINUE_PRICED = /^\s*Продолжить\s*\d[\d\s]*₽\s*$/
+// The order card's button of the page without a tariff block (live 31.10.2026, order 95590077: «Цена отклика» and
+// this one button, no field until it is pressed).
+const CARD_OPENER = 'Откликнуться'
 
 /**
  * The text field is on screen, after pressing what opens the form. On the live page (maps of 24.10.2026) that is no
  * button but a div in the tariff block: «Продолжить» with the fee beside it, pressed only when the fee is the order's
  * own. Then the answer's opener words (tariffsBlock.scrollButtonText), one in the tariff block or the only one on the
- * page, and the September button «Продолжить». Two of a kind, or another fee, presses nothing.
+ * page, the September button «Продолжить», and for a bid the order card's «Откликнуться» of a page with no tariff
+ * block. Two of a kind, or another fee, presses nothing.
  */
 export async function openForm(
   page: Page,
@@ -39,9 +52,28 @@ export async function openForm(
     may?: () => boolean
     /** «Продолжить» as the September button; the node's own calibration never uses it. */
     september?: boolean
+    /**
+     * The order card's «Откликнуться», the last one tried and only when it is the one such button on the page, outside
+     * any form. A bid takes it; the calibration never does, since its words are the send's too.
+     */
+    card?: boolean
   } = {},
-): Promise<{ open: boolean; pressed: boolean; by: string | null }> {
-  const none = { open: false, pressed: false, by: null }
+): Promise<{
+  open: boolean
+  pressed: boolean
+  by: string | null
+  /** Why it did not open; null when it did. */
+  why?: OpenerMiss | null
+  /** The amount the «Продолжить» opener showed, when one was there. */
+  shownRub?: number | null
+}> {
+  const none = (why: OpenerMiss, shownRub: number | null = null) => ({
+    open: false,
+    pressed: false,
+    by: null,
+    why,
+    shownRub,
+  })
   const text = shown(page, TEXT)
   const tariffs = page.locator(TARIFFS)
   const priced = tariffs.locator('*').filter({ hasText: CONTINUE_PRICED }).filter({ visible: true })
@@ -51,7 +83,10 @@ export async function openForm(
     o.september === false
       ? null
       : page.getByRole('button', { name: CONTINUE, exact: true }).filter({ visible: true })
-  const anyOpener = [priced, byWords(page), september].reduce<Locator | null>(
+  const card = o.card
+    ? page.getByRole('button', { name: CARD_OPENER, exact: true }).filter({ visible: true })
+    : null
+  const anyOpener = [priced, byWords(page), september, card].reduce<Locator | null>(
     (a, b) => (a && b ? a.or(b) : (a ?? b)),
     null,
   )
@@ -76,7 +111,8 @@ export async function openForm(
     .catch(() => ({ n: 0, one: false, text: '' }))
   if (seen.n > 0) {
     const fee = Number(seen.text.replace(/[^\d]/g, ''))
-    if (!seen.one || opener.feeRub === null || fee !== opener.feeRub) return none
+    if (!seen.one) return none('two_openers', fee)
+    if (opener.feeRub === null || fee !== opener.feeRub) return none('opener_fee', fee)
     press = priced.last()
     by = `${CONTINUE} ${fee} ₽`
   } else {
@@ -84,6 +120,7 @@ export async function openForm(
       [byWords(tariffs), opener.words],
       [byWords(page), opener.words],
       [september, CONTINUE],
+      [card, CARD_OPENER],
     ] as const) {
       if (c && (await c.count()) === 1) {
         press = c
@@ -92,19 +129,20 @@ export async function openForm(
       }
     }
   }
-  if (!press) return none
+  if (!press) return none('no_opener')
   // Never what sends a form: an opener is no submit and lives outside the form.
   const sends = await press
     .evaluate((el) => !!el.closest('form, button[type="submit"], input[type="submit"]'))
     .catch(() => true)
-  if (sends || (o.may && !o.may())) return none
+  if (sends) return none('opener_sends')
+  if (o.may && !o.may()) return none('may_not')
   await press.click({ timeout: 5000 }).catch(() => {})
   const open = await text
     .first()
     .waitFor({ timeout: ms })
     .then(() => true)
     .catch(() => false)
-  return { open, pressed: true, by }
+  return { open, pressed: true, by, why: open ? null : 'no_field', shownRub: null }
 }
 
 // The block of the open form: the one that holds the text field (live: bid_window_container).
@@ -179,12 +217,12 @@ export async function readPayment(
 /**
  * Fills the price (empty for null) and the text, then reads them back: what the form did not take whole stops. The
  * live form (25.10.2026) has a range «От» «До» without names: the price goes to «От», and «До» gets the top of the
- * range (`priceUpTo`, Boris 27.10.2026), or stays empty when there is no price. A single
+ * range (`priceUpTo`, Boris 27.10.2026, or the Analyst's own «до» when the bid brings one), or stays empty when there is no price. A single
  * «stavka» field («Сумма») is taken too.
  */
 export async function fillForm(
   page: Page,
-  v: { priceRub: number | null; text: string },
+  v: { priceRub: number | null; priceToRub?: number | null; text: string },
 ): Promise<'ok' | 'no_field' | 'not_taken'> {
   const text = shown(page, TEXT)
   if ((await text.count()) !== 1) return 'no_field'
@@ -198,7 +236,10 @@ export async function fillForm(
   if (!price && v.priceRub !== null) return 'no_field'
   const want = v.priceRub === null ? '' : String(v.priceRub)
   // «До» is the top of the range Sara gives, never what the page filled itself.
-  const wantTo = v.priceRub === null ? '' : String(priceUpTo(v.priceRub))
+  const wantTo =
+    v.priceRub === null
+      ? ''
+      : String(v.priceToRub && v.priceToRub > v.priceRub ? v.priceToRub : priceUpTo(v.priceRub))
   try {
     if (price) await price.fill(want, { timeout: 5000 })
     const hasTo = range && (await to.count()) === 1

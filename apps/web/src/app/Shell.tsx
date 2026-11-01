@@ -25,6 +25,7 @@ export const MORE: Item[] = [
   { id: 'settings', to: '/settings', title: 'Настройки', icon: 'settings' },
   { id: 'health', to: '/health', title: 'Состояние', icon: 'health' },
   { id: 'journal', to: '/journal', title: 'Журнал', icon: 'list' },
+  { id: 'accounts', to: '/accounts', title: 'Аккаунты', icon: 'user' },
   { id: 'notices', to: '/notices', title: 'Уведомления', icon: 'bell' },
 ]
 /** Every section, for the search: a section opens from the search too (FR-UI-1). */

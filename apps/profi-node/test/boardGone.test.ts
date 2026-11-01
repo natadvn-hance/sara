@@ -76,6 +76,14 @@ describe('an order gone from the feed (FR-LEAD-5)', () => {
     expect(await gone()).toEqual([])
   })
 
+  it('FR-LEAD-5: what a short pass did not reach waits for the next long one: most passes read only the first pages', async () => {
+    await pass([['1'], ['2'], ['3'], ['4']])
+    await pass([['1'], ['2']])
+    // An order gone from a deep page, found by the next pass that reads that far.
+    await pass([['1'], ['2'], ['4'], ['5']])
+    expect(await gone()).toEqual([{ id: '3', page: 2 }])
+  })
+
   it('FR-LEAD-5: a board read to its end covers its last page too', async () => {
     await pass(
       [

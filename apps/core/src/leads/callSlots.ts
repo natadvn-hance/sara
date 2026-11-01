@@ -1,4 +1,8 @@
-import type { DbOrTx } from '../db/client'
+import { isTestOrder, newEventId } from '@sara/shared'
+import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm'
+import type { Db } from '../db/client'
+import { event, meeting } from '../db/schema'
+import { appendEvent } from '../journal/journal'
 import { getSetting } from '../settings/store'
 
 /**
@@ -15,7 +19,13 @@ export const SLOTS_MARK = '{слоты}'
  * Where free times come from: the times to offer after `now`, by the source's own rules. Today's times first, then those
  * of the next working day; the offer says «или лучше завтра» after today's (Boris, 30.10.2026).
  */
-export type SlotSource = { slots(now: Date): Promise<Date[]> }
+export type SlotSource = {
+  /**
+   * `leadId`: whom the times are for. Times offered to another client lately, and the meetings already set, are not
+   * offered again (Boris, 01.11.2026: «если мы всем будем предлагать одно и то же время, будет наслоение»).
+   */
+  slots(now: Date, o?: { leadId?: string }): Promise<Date[]>
+}
 
 export type WorkHours = {
   /** Moscow hours: a call starts at `from`:00 at the earliest and ends by `to`:00. */
@@ -56,19 +66,30 @@ const minuteOf = (hhmm: string): number | null => {
  * The starts offered on one working day (minutes since midnight, Moscow): Boris's preferred times that fit the hours and
  * are not before `earliest`, else the first start of the grid that is. At most two, none when the day has no room.
  */
-function dayStarts(w: WorkHours, midnight: number, earliest: number): number[] {
+function dayStarts(
+  w: WorkHours,
+  midnight: number,
+  earliest: number,
+  busy: readonly Date[],
+): number[] {
   const last = w.hours.to * 60 - w.slotMin
   const ok = (m: number) =>
     m >= w.hours.from * 60 &&
     m <= last &&
     midnight + m * 60_000 - MSK_MS >= earliest &&
     !inNight(m, w.night)
+  // A start is taken when another call (offered or set) overlaps it.
+  const free = (m: number) =>
+    busy.every((b) => Math.abs(midnight + m * 60_000 - MSK_MS - b.getTime()) >= w.slotMin * 60_000)
   const wanted = [...new Set(w.preferred.map(minuteOf).filter((m): m is number => m !== null))]
     .filter(ok)
     .sort((a, b) => a - b)
-  if (wanted.length > 0) return wanted.slice(0, 2)
-  for (let m = w.hours.from * 60; m <= last; m += w.slotMin) if (ok(m)) return [m]
-  return []
+  const wantedFree = wanted.filter(free)
+  if (wantedFree.length > 0) return wantedFree.slice(0, 2)
+  // Boris's times are taken (or none fits): the nearest free starts of the grid, two when his own were taken.
+  const grid: number[] = []
+  for (let m = w.hours.from * 60; m <= last; m += w.slotMin) if (ok(m) && free(m)) grid.push(m)
+  return grid.slice(0, wanted.length > 0 ? 2 : 1)
 }
 
 /**
@@ -77,7 +98,7 @@ function dayStarts(w: WorkHours, midnight: number, earliest: number): number[] {
  * working day's (tomorrow, or Monday after Friday and the weekend), so the offer always has «or tomorrow». Without
  * today's, only tomorrow's.
  */
-export function workHoursSlots(now: Date, w: WorkHours): Date[] {
+export function workHoursSlots(now: Date, w: WorkHours, busy: readonly Date[] = []): Date[] {
   const earliest = now.getTime() + w.minAheadMin * 60_000
   const today = moscowDay(now)
   const out: Date[] = []
@@ -86,7 +107,7 @@ export function workHoursSlots(now: Date, w: WorkHours): Date[] {
     const midnight = today.midnight + d * DAY_MS
     const weekday = ((today.weekday - 1 + d) % 7) + 1
     if (!w.days.includes(weekday)) continue
-    const starts = dayStarts(w, midnight, earliest)
+    const starts = dayStarts(w, midnight, earliest, busy)
     if (starts.length === 0 && d === 0) continue
     // Today counts as a day only when it has times; the next working day always is the «tomorrow».
     out.push(...starts.map((m) => new Date(midnight + m * 60_000 - MSK_MS)))
@@ -96,20 +117,100 @@ export function workHoursSlots(now: Date, w: WorkHours): Date[] {
   return out
 }
 
-/** Boris's working hours from the settings, read each time: a change in the pult counts from the next offer. */
-export function workHoursSource(db: DbOrTx): SlotSource {
+/** How long a time offered to a client stays taken for the next ones (Boris, 01.11.2026). */
+export const OFFER_HOLD_MS = 48 * 3600_000
+
+/** The starts taken by other clients' offers and by meetings already set, after `from`. */
+async function takenStarts(db: Db, from: Date, leadId: string | undefined): Promise<Date[]> {
+  const offered = await db
+    .select({ payload: event.payload })
+    .from(event)
+    .where(
+      and(
+        eq(event.type, 'call.slots_offered'),
+        gt(event.occurredAt, new Date(from.getTime() - OFFER_HOLD_MS).toISOString()),
+        leadId ? ne(event.entityId, leadId) : undefined,
+      ),
+    )
+  const set = await db
+    .select({ at: meeting.startsAt })
+    .from(meeting)
+    .where(and(gt(meeting.startsAt, from.toISOString()), isNull(meeting.outcome)))
+  return [
+    ...offered.flatMap((r) =>
+      ((r.payload as { slots?: string[] }).slots ?? []).map((t) => new Date(t)),
+    ),
+    ...set.flatMap((r) => (r.at ? [new Date(r.at)] : [])),
+  ].filter((t) => Number.isFinite(t.getTime()) && t.getTime() > from.getTime())
+}
+
+/**
+ * Boris's working hours from the settings, read each time: a change in the pult counts from the next offer. The times
+ * picked for a client are recorded (`call.slots_offered`), so the next client gets others; the same client asking
+ * again gets his own times back while they are still ahead. A test order takes no time of a real client.
+ */
+export function workHoursSource(db: Db): SlotSource {
   return {
-    async slots(now) {
-      return workHoursSlots(now, {
-        hours: await getSetting(db, 'calls.work_hours'),
-        days: await getSetting(db, 'calls.work_days'),
-        slotMin: await getSetting(db, 'calls.slot_min'),
-        minAheadMin: await getSetting(db, 'calls.min_ahead_min'),
-        preferred: await getSetting(db, 'calls.preferred'),
-        night: await getSetting(db, 'conv.night'),
+    async slots(now, o) {
+      return db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db
+        // One at a time, or two clients asking together are offered the same times.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('call-slots'))`)
+        const w: WorkHours = {
+          hours: await getSetting(txDb, 'calls.work_hours'),
+          days: await getSetting(txDb, 'calls.work_days'),
+          slotMin: await getSetting(txDb, 'calls.slot_min'),
+          minAheadMin: await getSetting(txDb, 'calls.min_ahead_min'),
+          preferred: await getSetting(txDb, 'calls.preferred'),
+          night: await getSetting(txDb, 'conv.night'),
+        }
+        const leadId = o?.leadId
+        const real = leadId !== undefined && !isTestOrder(leadId)
+        if (real) {
+          const own = await ownOffer(txDb, now, leadId)
+          if (
+            own.length > 0 &&
+            own.every((t) => t.getTime() >= now.getTime() + w.minAheadMin * 60_000)
+          )
+            return own
+        }
+        // A test order sees the real clients' times as taken, and takes none.
+        const slots = workHoursSlots(now, w, await takenStarts(txDb, now, leadId))
+        if (real && slots.length > 0) {
+          await appendEvent(txDb, {
+            type: 'call.slots_offered',
+            v: 1,
+            entity: { kind: 'lead', id: leadId },
+            account_id: null,
+            actor: 'sara',
+            occurred_at: now.toISOString(),
+            causation_id: null,
+            correlation_id: newEventId(),
+            reason: null,
+            payload: { slots: slots.map((t) => t.toISOString()) },
+          })
+        }
+        return slots
       })
     },
   }
+}
+
+/** The times this order was offered lately, if any (the newest offer). */
+async function ownOffer(db: Db, now: Date, leadId: string): Promise<Date[]> {
+  const [row] = await db
+    .select({ payload: event.payload })
+    .from(event)
+    .where(
+      and(
+        eq(event.type, 'call.slots_offered'),
+        eq(event.entityId, leadId),
+        gt(event.occurredAt, new Date(now.getTime() - OFFER_HOLD_MS).toISOString()),
+      ),
+    )
+    .orderBy(sql`${event.occurredAt} desc`)
+    .limit(1)
+  return ((row?.payload as { slots?: string[] } | undefined)?.slots ?? []).map((t) => new Date(t))
 }
 
 const WEEKDAY_AT = [
@@ -178,8 +279,8 @@ export function callOfferTemplate(seed: string): string {
 export const isCallOffer = (text: string) => text.includes(SLOTS_MARK)
 
 /** The offer with its times put in at the mark. */
-export const fillCallOffer = (template: string, slots: Date[], now: Date) =>
-  template.split(SLOTS_MARK).join(slotsText(slots, now))
+export const fillCallOffer = (template: string, slots: Date[], now: Date, whenNone = '') =>
+  template.split(SLOTS_MARK).join(slots.length > 0 ? slotsText(slots, now) : whenNone)
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 

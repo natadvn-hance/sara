@@ -17,7 +17,7 @@ export type Press = {
 
 const DONE_RU: Partial<Record<TaskAction, string>> = {
   bid: 'отклик',
-  skip: 'пропущено',
+  skip: 'закрыто',
   send: 'отправлено',
   take: 'клиент твой',
   close: 'закрыто',
@@ -44,6 +44,8 @@ export function createResolver(d: {
     const [after] = await d.db.select().from(task).where(eq(task.id, p.taskId))
     if (!after || after.state === 'open' || before.state !== 'open' || !after.telegramMessageId)
       return answer
+    // A closed lead card is already edited into «📁 Заявка закрыта»: no button is put back on it.
+    if (p.action === 'skip' && after.kind === 'lead_decision') return answer
     try {
       await d.notifier.markDone?.(
         after.telegramMessageId,

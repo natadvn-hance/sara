@@ -9,6 +9,7 @@ import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, leadLabel, outbox, question, task } from '../../apps/core/src/db/schema'
 import { saveProfile } from '../../apps/core/src/direction/profile'
 import { seedDirection } from '../../apps/core/src/direction/store'
+import { askWhy } from '../../apps/core/src/learning/questions'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
@@ -243,7 +244,7 @@ describe('the draft on the card', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain(`<blockquote>${DRAFT}</blockquote>`)
-    expect(cards()[0]?.text).toContain(`услуга 90${NBSP}000${NBSP}₽`)
+    expect(cards()[0]?.text).toContain(`услуга от 90${NBSP}000${NBSP}₽ до 135${NBSP}000${NBSP}₽`)
     expect(cards()[0]?.text).toContain(
       '<b>Хочет:</b> Боится долгого запуска\n<b>Риск:</b> Объём больше, чем звучит\n<b>Брать, если:</b> сроки понятны',
     )
@@ -278,7 +279,7 @@ describe('the draft on the card', () => {
     await fake.emitOrder({
       order_id: orderId(),
       client_name: 'Ирина',
-      text: 'Меня зовут Ирина, нужен сайт для клиники.',
+      text: 'Меня зовут Ирина, нужен сайт для клиники. Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.',
     })
     await until(() => cards().length === 1)
     const stdins = (await readFile(claudeLog, 'utf8'))
@@ -364,7 +365,7 @@ describe('the order page name', () => {
     await fake.emitOrder({
       order_id: id,
       client_name: '',
-      text: 'Меня зовут Ольга Петрова, нужен сайт для клиники.',
+      text: 'Меня зовут Ольга Петрова, нужен сайт для клиники. Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.',
     })
     await until(async () => (await leadOf(id))?.status === 'scored_out')
     await db
@@ -403,7 +404,24 @@ describe('the bid', () => {
     tg.pushPress(111, button(cards()[0], 'bid'))
     await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
-    expect(fake.bids[0]).toMatchObject({ order_id: id, text: DRAFT, price_rub: 90000 })
+    expect(fake.bids[0]).toMatchObject({
+      order_id: id,
+      text: DRAFT,
+      price_rub: 90000,
+      price_to_rub: 135000,
+    })
+  })
+
+  it('FR-LEAD-8: the Analyst’s own range goes to the card and the form, «до» not above the budget (31.10.2026)', async () => {
+    byRole = { ...byRole, analyst: { ...ANALYST, price_rub: 40000, price_to_rub: 90000 } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.text).toContain(`услуга от 40${NBSP}000${NBSP}₽ до 90${NBSP}000${NBSP}₽`)
+    expect(await leadOf(id)).toMatchObject({ draftPriceRub: 40000, draftPriceToRub: 90000 })
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.shown('✅ Отклик отправлен'))
+    expect(fake.bids[0]).toMatchObject({ price_rub: 40000, price_to_rub: 90000 })
   })
 
   it('FR-LEAD-7: «Откликнуться» without a draft asks for «Изменить» and records nothing', async () => {
@@ -443,6 +461,19 @@ describe('the pult', { timeout: 30000 }, () => {
     return { status: r.status, body: (await r.json()) as { message?: string; error?: string } }
   }
 
+  it('FR-LEAD-7: a range from the pult goes to the bid, and a price alone brings back half again over «от» (31.10.2026)', async () => {
+    const cookie = await owner()
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const r = await post(cookie, `/api/leads/${id}/text`, { priceRub: 30000, priceToRub: 60000 })
+    expect(r.status).toBe(200)
+    expect(await leadOf(id)).toMatchObject({ draftPriceRub: 30000, draftPriceToRub: 60000 })
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.shown('✅ Отклик отправлен'))
+    expect(fake.bids[0]).toMatchObject({ price_rub: 30000, price_to_rub: 60000 })
+  })
+
   it('FR-LEAD-7: the pult saves a new text and price with no new card, and the bid goes with them', async () => {
     const cookie = await owner()
     const id = orderId()
@@ -480,10 +511,9 @@ describe('the pult', { timeout: 30000 }, () => {
       .from(task)
       .where(and(eq(task.entityId, id), eq(task.kind, 'lead_decision')))
     expect((await post(cookie, `/api/tasks/${t?.id}/skip`, {})).status).toBe(200)
-    await until(() => tg.markups.some((m) => m.message_id === t?.telegramMessageId))
-    expect(tg.markups.at(-1)?.reply_markup?.inline_keyboard).toEqual([
-      [{ text: 'Решено в приложении: пропущено', callback_data: 'done' }],
-    ])
+    // A closed lead card is edited into «📁 Заявка закрыта», without a button.
+    await until(() => tg.edited.some((e) => e.text.includes('📁 Заявка закрыта')))
+    expect(tg.edited.at(-1)).toMatchObject({ reply_markup: { inline_keyboard: [] } })
   })
 })
 
@@ -502,7 +532,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await until(() => said(SAVED))
     expect(cards()).toHaveLength(2)
     expect(cards()[1]?.text).toContain(`<blockquote>Ирина, добрый день!\n\n${NEW}</blockquote>`)
-    expect(cards()[1]?.text).toContain(`услуга 90${NBSP}000${NBSP}₽`)
+    expect(cards()[1]?.text).toContain(`услуга от 90${NBSP}000${NBSP}₽ до 135${NBSP}000${NBSP}₽`)
     expect(await leadOf(id)).toMatchObject({
       draftText: `Ирина, добрый день!\n\n${NEW}`,
       draftPriceRub: 90000,
@@ -551,13 +581,13 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     )
   })
 
-  it('FR-LEAD-7: after «Пропустить» a late edit changes nothing', async () => {
+  it('FR-LEAD-7: after «Закрыть заявку» a late edit changes nothing', async () => {
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     const ask = await pressEdit(cards()[0])
     tg.pushPress(111, button(cards()[0], 'skip'))
-    await until(() => tg.answers.some((a) => a.text === 'Пропущено'))
+    await until(() => tg.answers.some((a) => a.text === 'Заявка закрыта'))
     tg.pushText(111, NEW, ask)
     await until(() => said('Заявка уже решена, текст не поменяла'))
     expect(cards()).toHaveLength(1)
@@ -625,7 +655,15 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await fake.emitOrder({ order_id: b, title: 'Реклама на радио' })
     await until(() => cards().length === 2)
     const ask = await pressEdit(cards()[0])
+    const edits = tg.edited.length
     tg.pushPress(111, button(cards()[1], 'skip'))
+    await until(() => tg.edited.length === edits + 1)
+    // Closing asks nothing any more; a «почему?» that is waiting anyway (an older one) is asked directly.
+    await askWhy(
+      { db: app.db, notifier: app.bot.notifier },
+      { kind: 'why_skip', entityId: b, title: 'Реклама на радио' },
+      new Date(),
+    )
     await until(() =>
       tg.sent.some(
         (m) => m.text === 'Почему пропустил «Реклама на радио»? Напиши или скажи голосом.',
@@ -653,7 +691,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     tg.pushPress(111, button(cards()[0], 'skip'))
-    await until(() => tg.answers.some((a) => a.text === 'Пропущено'))
+    await until(() => tg.answers.some((a) => a.text === 'Заявка закрыта'))
     tg.pushPress(111, button(cards()[0], 'edit'))
     await until(() => tg.answers.some((a) => a.text === 'Уже сделано'))
     expect(await editRequests()).toHaveLength(0)

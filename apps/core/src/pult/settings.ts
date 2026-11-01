@@ -119,6 +119,12 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'flag',
   },
+  'series.telegram': {
+    title: 'Telegram в конце серии',
+    hint: 'Последнее сообщение после отклика: «Если удобнее, пишите в тг @ник)». Пусто: не отправлять.',
+    edit: 'free',
+    kind: 'text',
+  },
   'calls.work_hours': {
     title: 'Рабочие часы для созвонов',
     hint: 'По Москве. Выходные и время ближе двух часов не предлагаются.',
@@ -187,6 +193,7 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
     title: 'Созвоны и ссылки',
     keys: [
       'calls.offer',
+      'series.telegram',
       'calls.work_hours',
       'calls.preferred',
       'calls.slot_min',

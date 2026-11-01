@@ -25,6 +25,11 @@ export type Config = {
   ffmpegBin: string
   /** The host's backup log (infra/backup), mounted read only for the pult's health screen; unset: not seen. */
   backupLog: string | undefined
+  /**
+   * Boris's Google Sheet (FR-ANL-7, docs/ops/google-sheet.md): the address of the script in it and the secret it
+   * knows. Both live only in /opt/sara/.env; without them nothing goes to the sheet.
+   */
+  sheet: { url: string | undefined; secret: string | undefined }
   production: boolean
 }
 
@@ -66,6 +71,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     whisperModel: env.SARA_WHISPER_MODEL ?? resolve(dataDir, 'whisper/ggml-small.bin'),
     ffmpegBin: env.SARA_FFMPEG_BIN ?? 'ffmpeg',
     backupLog: env.SARA_BACKUP_LOG || undefined,
+    sheet: { url: env.SARA_SHEET_URL || undefined, secret: env.SARA_SHEET_SECRET || undefined },
     production,
   }
 }

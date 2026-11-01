@@ -93,6 +93,7 @@ describe('M4 contracts', () => {
       'urgent',
       'why',
       'case',
+      'sites',
       'text',
       'fact_ids',
       'example_ids',

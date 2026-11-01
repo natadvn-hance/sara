@@ -11,6 +11,7 @@ import {
   lead,
   leadLabel,
   leadScore,
+  question,
   ruleProposal,
   task,
 } from '../../apps/core/src/db/schema'
@@ -179,16 +180,36 @@ describe('scoring in the lead pipeline', () => {
     expect(l).toMatchObject({ label: 'no', source: 'card', score: 70, surprise: false })
   })
 
-  it('FR-LEAD-7: skipping a card scored far above the threshold brings «почему?»', async () => {
+  it('FR-LEAD-7: closing a card scored far above the threshold edits that card, asks no «почему?» and keeps the features', async () => {
     byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(80) }
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
-    const skip = cards()[0]
+    const close = cards()[0]
       ?.reply_markup?.inline_keyboard.flat()
       .find((b) => b.callback_data.endsWith(':skip'))
-    tg.pushPress(111, skip?.callback_data ?? '')
-    await until(() => tg.sent.some((m) => m.text.startsWith('Почему пропустил «')))
+    expect(close?.text).toBe('Закрыть заявку')
+    tg.pushPress(111, close?.callback_data ?? '')
+    await until(() => tg.edited.length === 1)
+    expect(tg.edited[0]).toMatchObject({
+      message_id: cards()[0]?.message_id,
+      reply_markup: { inline_keyboard: [] },
+    })
+    expect(tg.edited[0]?.text.startsWith('<b>📁 Заявка закрыта</b> · ')).toBe(true)
+    expect(tg.edited[0]?.text).toContain('Открыть на Профи.ру')
+    await new Promise((r) => setTimeout(r, 800))
+    expect(tg.sent.some((m) => m.text.startsWith('Почему пропустил'))).toBe(false)
+    expect(await db.select().from(question)).toHaveLength(0)
+    const [e] = await db
+      .select({ payload: event.payload })
+      .from(event)
+      .where(and(eq(event.type, 'lead.labeled'), eq(event.entityId, id)))
+    expect(e?.payload).toMatchObject({
+      label: 'no',
+      source: 'card',
+      surprise: true,
+      features: { score: 80, score_version: 1, category: expect.any(String), has_draft: true },
+    })
   })
 
   it('FR-LEAD-7: «Взял бы» is a yes, asks why and brings a normal card; pressing again does nothing', async () => {

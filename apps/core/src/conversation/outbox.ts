@@ -19,6 +19,10 @@ export type MessagePayload = {
   author: 'sara' | 'boris'
   /** The chat's last message the sender saw; the node refuses when the chat has moved on (CHAT_CHANGED). */
   expectLast: string | null
+  /** The series after a bid: our own side's lines after `expectLast` are no change (SendMessageInput.after_own). */
+  afterOwn?: boolean
+  /** The series after a bid is typed at once. */
+  quick?: boolean
 }
 
 export type Delivery = 'confirmed' | 'changed' | 'uncertain' | 'failed'
@@ -79,7 +83,7 @@ async function borisPressed(
 }
 
 /** The key of a message of the series after a bid: `series:<order>:<place>`, `:2` on its one try after the chat moved. */
-const SERIES_KEY = /^series:([^:]+):([0-3])(?::2)?$/
+const SERIES_KEY = /^series:([^:]+):([0-4])(?::2)?$/
 
 /**
  * Whether the message is one of the series Boris approved with his press on «Откликнуться» (Boris, 29.10.2026): the bid
@@ -215,6 +219,8 @@ export async function deliverMessage(
         chat_id: p.chatId,
         text: p.text,
         expect_last_message_id: p.expectLast,
+        ...(p.afterOwn && { after_own: true }),
+        ...(p.quick && { quick: true }),
         idempotency_key: row.idempotencyKey,
       })
       await mark('confirmed', null)
@@ -254,6 +260,29 @@ export async function lastSeen(db: Db, conversationId: string): Promise<string |
     .where(eq(chatMessage.conversationId, conversationId))
     .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
   return rows.at(-1)?.id ?? null
+}
+
+/**
+ * What the node must still see as the chat's last message when a draft that answers up to `covered` goes. The site's own
+ * lines stand behind a client's word («Сообщите, если договоритесь…») and the node counts them, so with only such lines
+ * after `covered` the last of them is expected; with any word of the client's or ours after it, `covered` stays, and the
+ * send is refused as a chat that moved on (CHAT_CHANGED).
+ */
+export async function expectLastAfter(
+  db: Db,
+  conversationId: string,
+  covered: string | null | undefined,
+): Promise<string | undefined> {
+  if (!covered) return undefined
+  const rows = await db
+    .select({ id: chatMessage.platformMessageId, side: chatMessage.side })
+    .from(chatMessage)
+    .where(eq(chatMessage.conversationId, conversationId))
+    .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+  const at = rows.findIndex((r) => r.id === covered)
+  if (at < 0) return covered
+  const tail = rows.slice(at + 1)
+  return tail.length > 0 && tail.every((r) => r.side === 'system') ? tail.at(-1)?.id : covered
 }
 
 /** Step 7 «отправить» of a turn after the switch: its text, once per round. */

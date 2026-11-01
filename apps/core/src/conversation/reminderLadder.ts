@@ -1,3 +1,4 @@
+import { firstName } from '../leads/clientName'
 import { moscowHoursEnd } from './time'
 
 /**
@@ -91,7 +92,7 @@ export function reminderFallback(
   tone: ReminderTone,
   variant: 0 | 1 = 0,
 ): string {
-  const first = (clientName ?? '').trim().split(/\s+/)[0]
+  const first = clientName ? firstName(clientName) : null
   const greeting = first ? `${first}, здравствуйте.` : 'Здравствуйте.'
   if (tone === 'friendly')
     return variant === 0
