@@ -51,6 +51,8 @@ export type FakeTelegram = {
   sent: SentMessage[]
   /** Edits Telegram accepted, in order (refused ones are not here): closed cards, the M4 shadow card. */
   edited: EditedMessage[]
+  /** Whether a message was sent, or edited into, a text that starts with `prefix` (a bid's one status message is both). */
+  shown(prefix: string): boolean
   /** Buttons replaced on a sent message (editMessageReplyMarkup): a card decided in the pult. */
   markups: { message_id: number; reply_markup: EditedMessage['reply_markup'] }[]
   answers: { callback_query_id: string; text?: string }[]
@@ -74,6 +76,8 @@ export type FakeTelegram = {
   setSendDelay(ms: number): void
   /** Forum topics made by the bot, with their names and whether they are closed. */
   topics: FakeTopic[]
+  /** Calls the fake answers with a plain `true` (setMyCommands, setChatMenuButton...), in order. */
+  calls: { method: string; params: Record<string, unknown> }[]
   pushGroupText(m: GroupText): void
   /** A press in a group, by `fromId`, on a message in `thread`. */
   pushGroupPress(chatId: number, fromId: number, data: string, thread?: number): string
@@ -163,6 +167,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     return n
   }
   const topics: FakeTopic[] = []
+  const calls: FakeTelegram['calls'] = []
   const deletedTopics = new Set<string>()
   let botRights = { admin: true, canManageTopics: true }
   let goneChat: number | null = null
@@ -365,6 +370,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           actions.push(String(params.action))
           return reply(true)
         default:
+          calls.push({ method: method ?? '', params })
           return reply(true)
       }
     })
@@ -378,6 +384,8 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     username: 'sara_dev_bot',
     sent,
     edited,
+    shown: (prefix) =>
+      sent.some((m) => m.text.startsWith(prefix)) || edited.some((m) => m.text.startsWith(prefix)),
     markups,
     answers,
     actions,
@@ -423,8 +431,10 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           from: { id: chatId, is_bot: false, first_name: 'Борис' },
           text,
           // A command is a command for the bot, as in Telegram.
-          ...(/^\/\w+/.test(text) && {
-            entities: [{ type: 'bot_command', offset: 0, length: /^\/\w+/.exec(text)?.[0].length }],
+          ...(/^\/\w+(?:@\w+)?/.test(text) && {
+            entities: [
+              { type: 'bot_command', offset: 0, length: /^\/\w+(?:@\w+)?/.exec(text)?.[0].length },
+            ],
           }),
           ...(replyTo
             ? {
@@ -485,6 +495,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
       sendDelayMs = ms
     },
     topics,
+    calls,
     pushGroupText(m) {
       const chat = {
         id: m.chatId,
@@ -492,7 +503,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
         title: m.title ?? 'Сара · клиенты',
         ...(m.forum !== false && { is_forum: true }),
       }
-      const command = /^\/\w+/.exec(m.text)?.[0]
+      const command = /^\/\w+(?:@\w+)?/.exec(m.text)?.[0]
       const topic = m.thread !== undefined ? topicOf(m.chatId, m.thread) : undefined
       // In a topic a message that replies to nothing points at the topic's first service message, as in Telegram.
       const replyTo =

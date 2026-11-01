@@ -30,6 +30,9 @@ export type ParseResult = {
 
 export type FeedRef = { orderId: string; snippet: string }
 
+/** A chat of the chats list: its unread count and the time of its last message (null when the list does not say). */
+export type ChatListItem = { chatId: string; unread: number; lastAt: string | null }
+
 export type Parsers = {
   paths: { feed: string; chats: string; chat(id: string): string; order?(id: string): string }
   /** Eyes 3 on the feed page: order numbers on it (recognized: the page had the shape we know). */
@@ -44,7 +47,12 @@ export type Parsers = {
   fromRtp(body: unknown): ParseResult
   fromResponse(url: string, body: unknown): ParseResult
   fromHeaderDom(page: Page): Promise<Signal[]>
-  fromChatsDom(page: Page): Promise<{ chatId: string; unread: number; lastAt: string | null }[]>
+  fromChatsDom(page: Page): Promise<ChatListItem[]>
+  /**
+   * The chats of the list from the list's own answer, when the site gives one: the live list page draws neither links
+   * nor marks (24.10.2026), its answer carries both. Null for any other answer.
+   */
+  chatsFromAnswer?(url: string, body: unknown): ChatListItem[] | null
   /** `waitMs`: how long to wait for the first bubble (a sender that knows the chat may be empty does not wait long). */
   fromChatDom(page: Page, chatId: string, o?: { waitMs?: number }): Promise<ParseResult>
 }
@@ -116,6 +124,15 @@ export const standInParsers: Parsers = {
     if (body.type === 'order.new' && isObj(body.order)) {
       return { recognized: true, what: 'stream', signals: [order(body.order as StandInOrder)] }
     }
+    // As the live stream: only the chat with news and its message number, the words are on the chat page.
+    if (body.type === 'chat.touched' && typeof body.chatId === 'string') {
+      const messageId = typeof body.messageId === 'string' ? body.messageId : null
+      return {
+        recognized: true,
+        what: 'stream',
+        signals: [{ t: 'chat_touched', chatId: body.chatId, messageId }],
+      }
+    }
     if (body.type === 'message.new' && isObj(body.message) && typeof body.chatId === 'string') {
       return {
         recognized: true,
@@ -163,6 +180,15 @@ export const standInParsers: Parsers = {
       .catch(() => null)
     if (presence) out.push({ t: 'presence', on: presence.split(/\s+/).includes('on') })
     return out
+  },
+  chatsFromAnswer(url, body) {
+    if (new URL(url).pathname !== '/api/chats' || !isObj(body) || !Array.isArray(body.chats))
+      return null
+    return (body.chats as { id?: unknown; unread?: unknown; last?: unknown }[]).map((c) => ({
+      chatId: String(c?.id ?? ''),
+      unread: Number(c?.unread) || 0,
+      lastAt: typeof c?.last === 'string' ? c.last : null,
+    }))
   },
   async fromChatsDom(page) {
     return page

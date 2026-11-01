@@ -44,8 +44,12 @@ describe('the Secretary, its parts', () => {
   it('FR-NOTIF-4: no tool spends money or writes to a client by itself: those only send Boris the button', () => {
     // A new tool is a decision (ADR-027): one that spends or sends must go through Boris's press, and this list
     // changes with it.
+    // The two test-order tools act without a button, and that is the one exception: a test order is made up, its
+    // client is a simulator, nothing of it reaches the node, the wallet or a real client (docs/ops/test-leads.md).
+    const TEST_ORDERS_ONLY = ['start_test_leads', 'clear_test_leads']
     expect(Object.keys(SECRETARY_TOOLS).sort()).toEqual(
       [
+        ...TEST_ORDERS_ONLY,
         'today',
         'leads',
         'lead',
@@ -54,6 +58,7 @@ describe('the Secretary, its parts', () => {
         'settings',
         'health',
         'analytics',
+        'counts',
         'set_setting',
         'skip_lead',
         'offer_bid',

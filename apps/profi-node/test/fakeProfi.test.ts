@@ -518,6 +518,89 @@ describe('fake Profi-MCP', () => {
     await c.close()
   })
 
+  it('NFR-MAINT-1: a snapshot carries orders, pages, chats, bids and the wallet over to a new fake', async () => {
+    await fake.emitOrder({ order_id: '1', bid_price_rub: 200 })
+    await fake.emitOrder({ order_id: '804' })
+    fake.setOrderPage('804', { open: false })
+    const c = await mcp()
+    const first = await c.callTool({ name: 'profi.submit_bid', arguments: bid() })
+    await fake.addChatMessage({ chatId: '1', author: 'client', text: 'Здравствуйте!' })
+    await c.close()
+    const snap = fake.snapshot()
+    expect(snap.balance).toBe(4800)
+
+    const again = await createFakeProfi({
+      port: 0,
+      coreEventsUrl: `http://127.0.0.1:${(core.address() as { port: number }).port}/internal/profi/events`,
+      nodeToken: 'node-tok',
+      permitSecret: SECRET,
+      initial: JSON.parse(JSON.stringify(snap)),
+    })
+    try {
+      const client = new Client({ name: 'test', version: '0' })
+      await client.connect(new StreamableHTTPClientTransport(new URL(again.url)))
+      const order = (id: string) =>
+        client.callTool({
+          name: 'profi.get_order',
+          arguments: { account_id: 'hance-marketing', order_id: id },
+        })
+      expect((await order('1')).structuredContent).toMatchObject({ has_bid: true })
+      expect((await order('804')).structuredContent).toMatchObject({ open: false })
+      // A repeat of the press answers as the first did: nothing is spent twice.
+      const repeat = await client.callTool({ name: 'profi.submit_bid', arguments: bid() })
+      expect(repeat.structuredContent).toEqual(first.structuredContent)
+      expect((await readChat(client, '1')).map((m) => m.text)).toEqual(['Здравствуйте!'])
+      const next = await again.addChatMessage({ chatId: '1', author: 'client', text: 'Ау' })
+      expect(next.platformMessageId).toBe('fake-2')
+      expect(again.snapshot().balance).toBe(4800)
+      await client.close()
+    } finally {
+      await again.close()
+    }
+  })
+
+  it('NFR-MAINT-1: the hooks hear a new bid and a new message once, and every change', async () => {
+    await fake.emitOrder({ order_id: '1' })
+    const placed: { order: string; spent: number }[] = []
+    const sentTo: string[] = []
+    let changes = 0
+    fake.onPlaced((i, out) => {
+      placed.push({ order: i.order_id, spent: out.spent_rub })
+    })
+    fake.onSent((i, id) => {
+      sentTo.push(`${i.chat_id}:${id}`)
+    })
+    fake.onChange(() => {
+      changes++
+    })
+    const c = await mcp()
+    await c.callTool({ name: 'profi.submit_bid', arguments: bid() })
+    await c.callTool({ name: 'profi.submit_bid', arguments: bid() })
+    fake.refuseNext('PRICE_CHANGED')
+    await c.callTool({ name: 'profi.submit_bid', arguments: bid('bid:2') })
+    expect(placed).toEqual([{ order: '1', spent: 210 }])
+    const msg = send('1', 'Добрый день', 'msg:h:1', null)
+    await c.callTool({ name: 'profi.send_message', arguments: msg })
+    await c.callTool({ name: 'profi.send_message', arguments: msg })
+    expect(sentTo).toEqual(['1:fake-1'])
+    expect(changes).toBeGreaterThanOrEqual(2)
+    await c.close()
+  })
+
+  it('NFR-MAINT-1: the wallet is set by hand and the health answers it', async () => {
+    fake.setBalance(900)
+    const c = await mcp()
+    const health = await c.callTool({
+      name: 'profi.session_health',
+      arguments: { account_id: 'hance-marketing' },
+    })
+    expect(health.structuredContent).toMatchObject({ balance_rub: 900 })
+    await fake.emitOrder({ order_id: '1' })
+    const out = await c.callTool({ name: 'profi.submit_bid', arguments: bid() })
+    expect(out.structuredContent).toMatchObject({ balance_after_rub: 690 })
+    await c.close()
+  })
+
   it('FR-LEAD-5: an order the fake never emitted is NOT_FOUND', async () => {
     const c = await mcp()
     const r = await c.callTool({

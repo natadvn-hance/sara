@@ -1,7 +1,8 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { lead } from '../db/schema'
 import { getSetting } from '../settings/store'
+import { notTest } from '../testLeads/sql'
 import type { Profile, ProfilePatch } from './profile'
 
 export type Contradiction = {
@@ -41,7 +42,7 @@ export async function contradictions(
     const fees = await d.db
       .select({ fee: lead.bidPriceRub })
       .from(lead)
-      .where(eq(lead.accountId, accountId))
+      .where(and(eq(lead.accountId, accountId), notTest(lead.id)))
       .orderBy(desc(lead.seenAt))
       .limit(FEES_LOOKED_AT)
     const usual = fees.length > 0 ? median(fees.map((f) => f.fee)) : null

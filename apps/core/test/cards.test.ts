@@ -415,6 +415,14 @@ describe('the card of an order closed on Profi.ru', () => {
     expect(closed).toContain('&lt;Сайт &amp; SEO&gt;')
   })
 
+  it('FR-LEAD-7: a card Boris closed himself is the short card with a folder, and the button says «Закрыть заявку»', () => {
+    expect(closedLeadCardText({ ...full, closedByBoris: true })).toBe(
+      `<b>📁 Заявка закрыта</b> · ${full.title}\n${SHORT_LINK}`,
+    )
+    expect(TEXTS.closeButton).toBe('Закрыть заявку')
+    expect(TEXTS.skipped).toBe('Заявка закрыта')
+  })
+
   it('FR-LEAD-10: a card that waited more than a day turns into the short stale card, with how long it waited', () => {
     const stale = closedLeadCardText({
       ...full,
@@ -457,13 +465,13 @@ describe('the card of an order closed on Profi.ru', () => {
 })
 
 describe('the lead card buttons', () => {
-  it('FR-LEAD-7: the buttons are «Откликнуться за N ₽», «Разбор», «Изменить», «Пропустить»', () => {
+  it('FR-LEAD-7: the buttons are «Откликнуться за N ₽», «Разбор», «Изменить», «Закрыть заявку»', () => {
     expect(leadCardKeyboard(card).inline_keyboard).toEqual([
       [{ text: `Откликнуться за 210${NBSP}₽`, callback_data: `t:${card.taskId}:bid` }],
       [
         { text: 'Разбор', callback_data: `t:${card.taskId}:razbor` },
         { text: 'Изменить', callback_data: `t:${card.taskId}:edit` },
-        { text: 'Пропустить', callback_data: `t:${card.taskId}:skip` },
+        { text: 'Закрыть заявку', callback_data: `t:${card.taskId}:skip` },
       ],
     ])
   })

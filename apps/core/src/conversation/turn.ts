@@ -1,5 +1,5 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type CaseChoice, newEventId, type Topic } from '@sara/shared'
+import { type CaseChoice, isTestOrder, newEventId, type Topic } from '@sara/shared'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account, chatMessage, convTurn, mindGap } from '../db/schema'
@@ -219,15 +219,19 @@ const sinceAnchor = (messages: StoredMessage[], anchor: string) => {
   return at >= 0 ? messages.slice(at) : []
 }
 
-async function policySettings(db: Db, accountId: string): Promise<PolicySettings> {
+/** A test chat (docs/ops/test-leads.md) is held by neither the pause for real clients nor the live account's state. */
+async function policySettings(db: Db, accountId: string, chatId: string): Promise<PolicySettings> {
   const [a] = await db.select().from(account).where(eq(account.id, accountId))
+  const test = isTestOrder(chatId)
   return {
     v1Writes: await getSetting(db, 'conv.v1_writes'),
     autopilot: await getSetting(db, 'conv.autopilot'),
-    outboundMessages: await getSetting(db, 'outbound.messages'),
-    accountPaused: a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false,
+    outboundMessages: test || (await getSetting(db, 'outbound.messages')),
+    accountPaused:
+      !test && (a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false),
     night: await getSetting(db, 'conv.night'),
     autonomy: (await getSetting(db, 'conv.autonomy')) as Record<Topic, 'self' | 'draft' | 'call'>,
+    blockedLinks: await getSetting(db, 'links.blocked'),
   }
 }
 
@@ -259,7 +263,7 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
         .filter((m) => m.side === 'client' && seen.includes(m.platformMessageId))
         .map((m) => m.text),
     )
-    const settings = await policySettings(db, conv.accountId)
+    const settings = await policySettings(db, conv.accountId, conv.chatId)
     const dossier = await buildDossier(db, conversationId, now, {
       night: settings.night,
       profi,
@@ -434,7 +438,7 @@ async function reread(
   if (!v1Writes && after.some((m) => m.side === 'specialist')) return stop('answered')
   const known = new Set(covered)
   if (after.some((m) => m.side === 'client' && !known.has(m.platformMessageId))) return stop('more')
-  const settings = await policySettings(db, conv.accountId)
+  const settings = await policySettings(db, conv.accountId, conv.chatId)
   const why = settings.v1Writes
     ? 'режим тени'
     : settings.accountPaused

@@ -23,6 +23,7 @@ import { PULT_TEXTS } from '../pult/routes'
 import { pultMay, SETTING_META, settingsView } from '../pult/settings'
 import { todayView } from '../pult/today'
 import { getSetting, setSetting } from '../settings/store'
+import { CountsInput, periodCounts } from './counts'
 
 /** What the Secretary's tools act with: the same functions as the buttons and the pult (ADR-027). */
 export type SecretaryDeps = {
@@ -45,6 +46,8 @@ export type SecretaryDeps = {
   ): Promise<BorisReply>
   /** The health screen. */
   system(): Promise<SystemView>
+  /** Boris's /test with the words after it, the same function as the bot's command (docs/ops/test-leads.md). */
+  test(args: string): Promise<string>
 }
 
 /** One turn as its tools see it. */
@@ -75,6 +78,8 @@ const TOOL_TEXTS = {
   noTask: 'Такой задачи нет: возьми taskId из leads или lead.',
   notWaiting: 'Эта заявка уже решена или не ждёт решения.',
   noConversation: 'Такого разговора нет: возьми id из conversations.',
+  badPeriod:
+    'Не поняла период. Нужен period (today, yesterday, week) или from и to датами ГГГГ-ММ-ДД, не длиннее года.',
   noCard:
     'У этого клиента сейчас нет открытой карточки. Свой текст без карточки можно отправить из пульта («Свой текст») или самому на Профи.ру.',
   noDraft: 'У этого клиента нет черновика, который ждёт отправки.',
@@ -89,6 +94,20 @@ const TOOL_TEXTS = {
     `Откликнуться на «${title}»${fee > 0 ? ` за ${fee} ₽` : ''}?\n${url}`,
   draftCard: (name: string, text: string) => `Черновик для ${name}:\n\n${text}`,
 } as const
+
+/** The words after /test for each scenario of test orders: the bot's own words. */
+const TEST_SCENARIOS = {
+  copy: '',
+  invented: 'выдуманный',
+  answers: 'отвечает',
+  price: 'цена',
+  call: 'созвон',
+  silent: 'молчит',
+  leaves: 'уходит',
+  manual: 'сам',
+  day: 'день',
+} as const
+const TEST_MAX = 5
 
 const uuid = z.uuid()
 
@@ -189,6 +208,22 @@ export const SECRETARY_TOOLS = {
     input: z.object({}),
     run: (d) => d.system(),
   }),
+  counts: tool({
+    description:
+      'Точный счёт за период по журналу, по Москве, без тестовых заказов: найдено заявок, отсеяно, прошло отсев, получили балл, карточек, откликов ушло и не ушло, потрачено, сообщений клиентов, моих ответов. period: today (с 00:00 по сейчас), yesterday, week (7 дней по сегодня) или from и to датами ГГГГ-ММ-ДД. На любой вопрос «сколько … сегодня, вчера, за неделю» бери число отсюда.',
+    input: z.object({
+      period: z.enum(['today', 'yesterday', 'week']).optional(),
+      from: z.string().optional().describe('первый день, ГГГГ-ММ-ДД по Москве'),
+      to: z.string().optional().describe('последний день включительно, ГГГГ-ММ-ДД'),
+    }),
+    run: async (d, _t, i) => {
+      const parsed = CountsInput.safeParse(i)
+      return (
+        (parsed.success && (await periodCounts(d.db, parsed.data))) ||
+        done(false, TOOL_TEXTS.badPeriod)
+      )
+    },
+  }),
   analytics: tool({
     description: 'Аналитика за год: клиенты по месяцам, воронка, месяцы (отклики, выигрыши).',
     input: z.object({ year: z.number().int().min(2020).max(2100).optional() }),
@@ -209,7 +244,7 @@ export const SECRETARY_TOOLS = {
   }),
   skip_lead: tool({
     description:
-      'Пропустить заявку из очереди (как кнопка «Пропустить»). taskId из leads или lead.',
+      'Закрыть заявку из очереди (как кнопка «Закрыть заявку»). taskId из leads или lead.',
     input: z.object({ taskId: z.string() }),
     run: async (d, _t, i) => {
       const t = await openLeadTask(d.db, i.taskId)
@@ -316,6 +351,30 @@ export const SECRETARY_TOOLS = {
       ])
       return done(true, TOOL_TEXTS.draftOffered)
     },
+  }),
+  start_test_leads: tool({
+    description:
+      'Подкинуть тестовые заявки: бесплатные выдуманные заказы с клиентами-симуляторами, как команда /test. Настоящих клиентов и денег они не касаются. scenario: copy (копия реального заказа, по умолчанию), invented (выдуманный), answers, price, call, silent, leaves, manual (как ведёт себя клиент), day (пять заказов за пять минут, count не нужен). count: сколько заявок, до 5.',
+    input: z.object({
+      scenario: z.enum(Object.keys(TEST_SCENARIOS) as [keyof typeof TEST_SCENARIOS]).optional(),
+      count: z.number().int().min(1).max(TEST_MAX).optional(),
+      invented: z.boolean().optional(),
+    }),
+    run: async (d, _t, i) => {
+      const scenario = i.scenario ?? 'copy'
+      const words = [TEST_SCENARIOS[scenario], i.invented && scenario !== 'day' ? 'выдуманный' : '']
+      const args = [...new Set(words.filter(Boolean))].join(' ')
+      const n = scenario === 'day' ? 1 : (i.count ?? 1)
+      const said: string[] = []
+      for (let k = 0; k < n; k++) said.push(await d.test(args))
+      return done(true, said.join('\n'))
+    },
+  }),
+  clear_test_leads: tool({
+    description:
+      'Стереть все тестовые заявки, как команда /test_clear. Настоящие заявки и клиентов не трогает.',
+    input: z.object({}),
+    run: async (d) => done(true, await d.test('стереть')),
   }),
   answer_question: tool({
     description:

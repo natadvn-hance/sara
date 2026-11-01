@@ -20,6 +20,7 @@ import { siteSection } from '../site/view'
 import { fixClientText, greetingFor, moscowPartOfDay } from '../text/clientText'
 import { bidCaseProblems, bidCasesText, chosenCase } from './bidCases'
 import { firstName, namesToHide } from './clientName'
+import { chosenSites, type HanceSite, SITES_SHOWN, sameUrl, siteLine, sitesText } from './siteOrder'
 import { sorterInput } from './sorter'
 
 /** Profi.ru's bid form takes at most this many characters, the greeting included. */
@@ -52,6 +53,10 @@ export type Draft = {
   followUpCases?: string[]
   /** Why a message of the series the model wrote was left out; the bid itself stays. */
   followUpsDropped?: FollowUpMiss[]
+  /** The sites of Hance the series shows by their links, for an order of a site (Boris, 30.10.2026). */
+  followUpSites?: string[]
+  /** The call offer that ends the series, its times still to be put in (Boris, 30.10.2026); none when it is off. */
+  callOffer?: string
 }
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
@@ -357,8 +362,8 @@ export const FOLLOW_UP_MAX = 300
 export const FOLLOW_UP_EDIT_MAX = 500
 /** The Analyst writes at most this many messages after a bid. */
 export const FOLLOW_UPS_MAX = 2
-/** With the message of links in front of them, at most this many messages follow a bid. */
-export const SERIES_MAX = FOLLOW_UPS_MAX + 1
+/** With the message of links in front of them and the call offer after them, at most this many messages follow a bid. */
+export const SERIES_MAX = FOLLOW_UPS_MAX + 2
 
 /** Why a message of the series was left out. */
 export type FollowUpMiss = 'not_plain' | 'greeting' | 'link' | 'too_long' | 'bad_case' | 'no_link'
@@ -373,7 +378,11 @@ export type FollowUpMiss = 'not_plain' | 'greeting' | 'link' | 'too_long' | 'bad
 export function followUpsOf(
   answer: AnalystOutput['follow_ups'],
   cases: CaseHit[],
-): { texts: string[]; caseIds: string[]; dropped: FollowUpMiss[] } {
+  /** For an order of a site: the sites offered and the ids the answer chose; their links lead the message of links. */
+  sites: { offered: HanceSite[]; ids: readonly string[] | undefined } = { offered: [], ids: [] },
+  /** Links a client is never given (links.blocked): a case of the list is shown by no link. */
+  blocked: readonly string[] = [],
+): { texts: string[]; caseIds: string[]; siteIds: string[]; dropped: FollowUpMiss[] } {
   const texts: string[] = []
   const caseIds: string[] = []
   const links: string[] = []
@@ -381,7 +390,7 @@ export function followUpsOf(
   for (const f of (answer ?? []).slice(0, FOLLOW_UPS_MAX)) {
     const text = plain(f.text).trim()
     const chosen = f.case_id ? (cases.find((c) => c.id === f.case_id) ?? null) : null
-    const link = chosen ? publicLink(chosen) : null
+    const link = chosen ? publicLink(chosen, blocked) : null
     const miss: FollowUpMiss | null =
       !text || NOT_PLAIN.test(text) || BRACKETED.test(text)
         ? 'not_plain'
@@ -406,7 +415,19 @@ export function followUpsOf(
       links.push(link)
     }
   }
-  return { texts: links.length > 0 ? [links.join('\n'), ...texts] : texts, caseIds, dropped }
+  // An order of a site shows 3-4 sites of Hance first (Boris, 30.10.2026); a case's link the sites have already is not
+  // given twice, and the message holds no more links than the sites may.
+  const shown = sites.offered.length > 0 ? chosenSites(sites.offered, sites.ids) : []
+  const lines = [
+    ...shown.map(siteLine),
+    ...links.filter((l) => !shown.some((s) => sameUrl(s.url, l))),
+  ].slice(0, shown.length > 0 ? SITES_SHOWN.max : links.length)
+  return {
+    texts: lines.length > 0 ? [lines.join('\n'), ...texts] : texts,
+    caseIds,
+    siteIds: shown.map((s) => s.id),
+    dropped,
+  }
 }
 
 /**
@@ -504,6 +525,10 @@ export async function writeDraft(
     mindCases?: CaseHit[]
     /** The texts of the latest bids, newest first: this one opens differently (Boris, 29.10.2026). */
     recentBids?: string[]
+    /** For an order of a site, the sites of Hance it may show (Boris, 30.10.2026); none for any other order. */
+    sites?: HanceSite[]
+    /** Links a client is never given (links.blocked, Boris 30.10.2026). */
+    blockedLinks?: string[]
     /** The client's own site as Sara read it (Boris, 30.10.2026); the text may name a detail of it. */
     site?: LeadSite | null
     now?: Date
@@ -522,7 +547,8 @@ export async function writeDraft(
   const recent = opts.recentBids ?? []
   const extra = [
     analystProfileText(profile),
-    bidCasesText(mindCases),
+    bidCasesText(mindCases, opts.blockedLinks),
+    sitesText(opts.sites ?? []),
     siteSection(opts.site),
     recentOpenersText(recent),
   ].filter((t) => t !== '')
@@ -538,7 +564,12 @@ export async function writeDraft(
     // A case of the mind is told in the text itself, with no link: only its id is kept.
     const told = chosenCase(mindCases, out.case_ids)
     const placed = placeCases(`${longest}${text.slice(hello.length)}`, profile, out.case_ids ?? [])
-    const series = followUpsOf(out.follow_ups, mindCases)
+    const series = followUpsOf(
+      out.follow_ups,
+      mindCases,
+      { offered: opts.sites ?? [], ids: out.site_ids },
+      opts.blockedLinks ?? [],
+    )
     return {
       text: `${hello}${placed.text.slice(longest.length)}`,
       priceRub: priceWithin(out.price_rub, o.budget_text),
@@ -548,6 +579,7 @@ export async function writeDraft(
       followUps: series.texts,
       followUpCases: series.caseIds,
       followUpsDropped: series.dropped,
+      ...(series.siteIds.length > 0 && { followUpSites: series.siteIds }),
     }
   }
   for (let attempts = 1; attempts <= 2; attempts++) {
@@ -556,6 +588,8 @@ export async function writeDraft(
       now: _now,
       mindCases: _cases,
       recentBids: _recent,
+      sites: _sites,
+      blockedLinks: _blocked,
       site: _site,
       ...callOpts
     } = opts

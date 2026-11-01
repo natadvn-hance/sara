@@ -180,6 +180,7 @@ describe('the Analyst', () => {
       'price_rub',
       'case_ids',
       'follow_ups',
+      'site_ids',
     ])
     const reading = (
       roleJsonSchema(AnalystOutput) as {
@@ -526,8 +527,9 @@ describe('the Analyst reads the direction (FR-LEAD-6)', () => {
       required: string[]
     }
     // The series is written after the bid it follows (Boris, 29.10.2026).
-    expect(Object.keys(schema.properties).slice(-2)).toEqual(['case_ids', 'follow_ups'])
+    expect(Object.keys(schema.properties).slice(-3)).toEqual(['case_ids', 'follow_ups', 'site_ids'])
     expect(schema.required).not.toContain('case_ids')
     expect(schema.required).not.toContain('follow_ups')
+    expect(schema.required).not.toContain('site_ids')
   })
 })
