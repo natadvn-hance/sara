@@ -54,10 +54,14 @@ describe('the posts of a client topic', () => {
   })
 
   it('NFR-UX-1: text from outside is escaped and has no long dash', () => {
-    const p = clientPost({ name: 'А<b>', at: '2026-10-28T13:02:00.000Z', text: 'a — b <i> & c' })
+    const p = clientPost({
+      name: 'А<b>',
+      at: '2026-10-28T13:02:00.000Z',
+      text: 'a \u2014 b <i> & c',
+    })
     expect(p).toContain('А&lt;b&gt;')
     expect(p).toContain('a - b &lt;i&gt; &amp; c')
-    expect(p).not.toMatch(/[–—]/)
+    expect(p).not.toMatch(/[\u2013\u2014]/)
   })
 
   it('ST-M7-16: the first post is laid out: title, who, facts as bullets, the full text folded, a link in words', () => {
