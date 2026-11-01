@@ -8,6 +8,7 @@ import {
   TEST_MARK,
 } from '@sara/shared'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
+import { firstName } from '../leads/clientName'
 import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
@@ -388,7 +389,12 @@ const sinceText = (s: string) =>
 function clientLines(c: LeadCard): string[] {
   const info = c.clientInfo ?? null
   // The order page's name is the fuller one; the list may give a first name or none.
-  const name = info?.name?.trim() || c.clientName.trim()
+  const raw = info?.name?.trim() || c.clientName.trim()
+  // The profile name as the site wrote it; a name in Latin letters is shown as Sara calls him, «Александр (alexander)»
+  // (01.11.2026). A profession or a company stays as it is: Boris sees what the profile says, only the greeting is
+  // without a name.
+  const first = raw ? firstName(raw) : null
+  const name = first && !/^\p{Script=Cyrillic}/u.test(raw) ? `${first} (${raw})` : raw
   const parts = [`👤 <b>${name ? clean(name, CAP.short) : 'имя не указано'}</b>`]
   if (info) {
     const since = info.on_profi_since?.trim()

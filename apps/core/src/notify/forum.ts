@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { conversation, forumTopic, lead, telegramForum, telegramPost } from '../db/schema'
+import { firstName } from '../leads/clientName'
 import type { Place } from './notifier'
 
 /** Boris's forum (docs/product/telegram-forum.md), null while he has none: then everything goes to his chat. */
@@ -140,7 +141,11 @@ export async function topicIntro(
         .from(lead)
         .where(eq(lead.id, orderId))
     : []
-  const name = topicName({ name: l?.clientName || null, orderId, title: l?.title ?? null })
+  const name = topicName({
+    name: l?.clientName ? firstName(l.clientName) : null,
+    orderId,
+    title: l?.title ?? null,
+  })
   const text = l?.text ? oneLine(l.text) : ''
   const intro = [
     `📌 ${l?.title ?? (orderId ? `Заказ №${orderId}` : 'Клиент без заказа')}`,
