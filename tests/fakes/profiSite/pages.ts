@@ -203,5 +203,7 @@ async function load() {
   document.getElementById('chat').innerHTML = d.messages.map((m) =>
     '<div class="cw_msg ' + CLASSES[m.side] + '" data-message-content-id="' + m.id + '" data-sent-at="' + m.ts + '"><div class="cw_xeDn2R"><div class="cw_BFgZYK">' + m.text + '</div></div></div>').join('')
 }
+// The list beside the chat: the live messenger asks for it on this page too.
+fetch('/api/chats').catch(() => {})
 load(); window.__RTP.addEventListener('message', load)`,
   )

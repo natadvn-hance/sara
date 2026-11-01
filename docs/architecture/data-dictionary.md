@@ -27,7 +27,7 @@
 | `raw_order` | `order_id`, `account_id`, `seen_at`, `body` | П | 30 дней |
 | `raw_message` | `platform_message_id`, `chat_id`, `account_id`, `author_side` (`client`, `specialist`), `sent_at`, `text` | П | 2 года для закрытых, как в ядре |
 | `outbox_node` | `event_id`, `payload`, `attempts`, `next_try_at`, `confirmed_at` | П | до подтверждения + 7 дней |
-| `bid_attempt` | `idempotency_key`, `account_id`, `order_id`, `due_rub`, `pressed_at`, `result` (jsonb): нажатие, записанное до кнопки, которая открывает форму, и подтверждённый ответ. Остановка до «Откликнуться» стирает запись, если кошелёк на странице не изменился | Н | 30 дней |
+| `bid_attempt` | `idempotency_key`, `account_id`, `order_id`, `due_rub`, `wallet_rub` (кошелёк прямо перед нажатием), `pressed_at`, `result` (jsonb): нажатие, записанное до кнопки, которая открывает форму, и подтверждённый ответ. Остановка до «Откликнуться» стирает запись, если кошелёк на странице не изменился | Н | 30 дней |
 | `message_attempt` | `idempotency_key`, `account_id`, `chat_id`, `expect_last_message_id`, `pressed_at`, `result` (jsonb): нажатие кнопки отправки сообщения, записанное до кнопки, и подтверждённый ответ. Текста сообщения нет | Н | 30 дней |
 | `node_flag` | `account_id`, `name`, `reason`, `set_at`: остановка, которую узел поставил себе сам (например `form_calibration`: кошелёк уменьшился после открытия формы) | Н | пока человек не снимет |
 | `browser_profile` | папка профиля на диске, вне базы | С | пока аккаунт активен |

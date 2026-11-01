@@ -1,7 +1,7 @@
 import type { MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
 import { clientInfoFromAnswer } from './clientInfo'
-import { listedChats } from './history'
+import { chatHistory, listedChats } from './history'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
@@ -303,6 +303,13 @@ export const profiParsers: Parsers = {
     // Kept as a path on the site, whatever form the menu uses.
     const u = new URL(href, 'https://profi.ru')
     return `${u.pathname}${u.search}`
+  },
+
+  // The chat's answer (messengerChatMessages), read live by the archive reader on 28.10.2026, 86 messages of 86.
+  chatTextsFromAnswer(_url, body) {
+    const m = (body as { data?: { messengerChatMessages?: unknown } } | null)?.data
+      ?.messengerChatMessages
+    return m ? chatHistory([body], '').messages.map((x) => x.text) : null
   },
 
   // Told by its shape alone, as the archive reader read it live (28.10.2026), whatever address it came from.

@@ -53,6 +53,8 @@ export type Parsers = {
    * nor marks (24.10.2026), its answer carries both. Null for any other answer.
    */
   chatsFromAnswer?(url: string, body: unknown): ChatListItem[] | null
+  /** The texts of a chat from the chat's own answer, for finding our bid there. Null for any other answer. */
+  chatTextsFromAnswer?(url: string, body: unknown): string[] | null
   /** `waitMs`: how long to wait for the first bubble (a sender that knows the chat may be empty does not wait long). */
   fromChatDom(page: Page, chatId: string, o?: { waitMs?: number }): Promise<ParseResult>
 }
@@ -180,6 +182,11 @@ export const standInParsers: Parsers = {
       .catch(() => null)
     if (presence) out.push({ t: 'presence', on: presence.split(/\s+/).includes('on') })
     return out
+  },
+  chatTextsFromAnswer(url, body) {
+    if (!/^\/api\/chat\//.test(new URL(url).pathname)) return null
+    if (!isObj(body) || !Array.isArray(body.messages)) return null
+    return (body.messages as { text?: unknown }[]).map((m) => String(m?.text ?? ''))
   },
   chatsFromAnswer(url, body) {
     if (new URL(url).pathname !== '/api/chats' || !isObj(body) || !Array.isArray(body.chats))
