@@ -1,6 +1,6 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import { type CaseChoice, isTestOrder, newEventId, type Topic } from '@sara/shared'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account, chatMessage, convTurn, mindGap } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
@@ -93,6 +93,14 @@ const UNREADABLE_TRIES = 30
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 /** The steps that talk to Telegram or the service: the same retries, and a failure that ends the turn as failed. */
 const notifyStep = () => ({ ...DB_STEP, ...d().stepRetry })
+
+/**
+ * The reasons of a draft with no text that come from the plumbing, not from a decision: the chat could not be read (the
+ * node is down or restarting). Such a turn did not answer the client; the words stay open and a later attempt may take
+ * them (Boris, 01.11: a node that restarts under a turn must not cost the client his draft). A planning that threw is
+ * not among them: it covers what it saw, as it always did, so the conversation moves on.
+ */
+export const INFRA_REASONS = ['не могу прочитать чат'] as const
 
 type Gate = 'go' | 'closed' | 'take' | 'answered' | 'unclear' | 'unreadable'
 type Heard = { gate: Gate; quietLeftS: number }
@@ -490,9 +498,15 @@ async function handoff(
   const messages = await storedMessages(db, conversationId)
   // A turn that covered nothing (Boris's client, an unclear author, a failure) still covers what it saw; only a
   // turn that our side's message cancelled does not, that message already ends the client turn.
+  const [row] = await db
+    .select({ reason: convTurn.decisionReason, text: convTurn.text })
+    .from(convTurn)
+    .where(eq(convTurn.id, turnId))
+  const plumbing = !row?.text && (INFRA_REASONS as readonly string[]).includes(row?.reason ?? '')
   const through =
-    // After the switch the card is the client's only way to an answer: when it did not reach Boris the words stay open.
-    outcome === 'card_lost'
+    // After the switch the card is the client's only way to an answer: when it did not reach Boris the words stay open;
+    // so they do when the turn only met a chat it could not read or a planning that threw.
+    outcome === 'card_lost' || plumbing
       ? undefined
       : (covered.at(-1) ??
         (outcome !== 'answered'
@@ -734,7 +748,8 @@ async function pendingAnchor(conv: ConversationRow): Promise<string | null> {
 
 /**
  * Which attempt of the client turn at `anchor` is the current one: every earlier turn of it whose card never reached
- * Boris (`card_lost`) leaves it unanswered, and the client's next message starts the next attempt.
+ * Boris (`card_lost`), or that met only a chat it could not read, leaves it unanswered; the client's next message or a
+ * later catch-up starts the next attempt.
  */
 async function attemptOf(conversationId: string, anchor: string): Promise<number> {
   const rows = await d()
@@ -745,7 +760,14 @@ async function attemptOf(conversationId: string, anchor: string): Promise<number
         eq(convTurn.conversationId, conversationId),
         eq(convTurn.kind, 'reply'),
         eq(convTurn.anchorMessageId, anchor),
-        eq(convTurn.outcome, 'card_lost'),
+        or(
+          eq(convTurn.outcome, 'card_lost'),
+          and(
+            isNull(convTurn.text),
+            isNotNull(convTurn.finishedAt),
+            inArray(convTurn.decisionReason, [...INFRA_REASONS]),
+          ),
+        ),
       ),
     )
   return rows.length
