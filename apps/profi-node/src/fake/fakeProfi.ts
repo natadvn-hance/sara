@@ -386,7 +386,10 @@ export async function createFakeProfi(o: {
     async emitOrder(partial) {
       const base = sampleOrders()[0]
       if (!base) throw new Error('no sample orders')
-      const order: ProfiOrder = { ...base, seen_at: new Date().toISOString(), ...partial }
+      // The sample text is short; a few more sentences give it the client's own words the screen asks for (15), so a
+      // test order is not marked as a thin one and keeps its score. A test that needs a thin text passes its own.
+      const text = `${base.text} Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.`
+      const order: ProfiOrder = { ...base, text, seen_at: new Date().toISOString(), ...partial }
       emitted.set(order.order_id, order)
       change()
       const e: EventEnvelope = {
