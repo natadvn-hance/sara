@@ -23,12 +23,14 @@ import {
   markTopic,
   postOf,
   postRef,
+  renameTopic,
   saveTopic,
   topicByKey,
   topicByThread,
   topicIntro,
   topicKey,
   unbindForum,
+  withoutDot,
 } from './forum'
 import type { Notifier, Place } from './notifier'
 
@@ -655,7 +657,7 @@ export function createTelegramRuntime(d: {
         await closeHtml(messageId, closedLeadCardText(c))
       },
       async sendText(text, o) {
-        const silent = await silentNow(o?.loud)
+        const silent = o?.quiet || (await silentNow(o?.loud))
         const extra: Omit<SendOptions, 'parse_mode'> = silent ? { disable_notification: true } : {}
         const messageId = await post(o?.place, (to, where) =>
           o?.html
@@ -702,6 +704,40 @@ export function createTelegramRuntime(d: {
             // The same text again is not an error worth a retry.
             if (!String((e as Error).message).includes('message is not modified')) throw e
           })
+      },
+      async setTopicStage(place, dot) {
+        try {
+          const f = await forumOf(d.db)
+          const k = f ? await topicKey(d.db, place) : null
+          const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+          if (!f || !t) return
+          const name = `${dot} ${withoutDot(t.name)}`.slice(0, 128 - CLOSED_MARK.length)
+          if (name === t.name) return
+          await bot.api
+            .editForumTopic(f.chatId, t.threadId, {
+              name: t.closedAt ? `${name}${CLOSED_MARK}` : name,
+            })
+            .catch(logTopic('topic not renamed'))
+          await renameTopic(d.db, f.chatId, t.key, name)
+        } catch (e) {
+          console.error('topic stage', short(e))
+        }
+      },
+      async forumOn() {
+        return (await forumOf(d.db).catch(() => null)) !== null
+      },
+      async topicLink(place) {
+        try {
+          const f = await forumOf(d.db)
+          const k = f ? await topicKey(d.db, place) : null
+          const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+          return f && t
+            ? `https://t.me/c/${String(f.chatId).replace(/^-100/, '')}/${t.threadId}`
+            : null
+        } catch (e) {
+          console.error('topic link', short(e))
+          return null
+        }
       },
       async closeTopic(place, outcome) {
         try {

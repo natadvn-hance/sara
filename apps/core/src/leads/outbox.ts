@@ -290,6 +290,29 @@ async function giveBack(outboxId: string, p: BidPayload, reason: string): Promis
   })
 }
 
+/**
+ * The client's topic opens with the bid (Boris, 01.11: «после того как она откликнулась, в форуме должен же создаваться
+ * чат с клиентом»): the intro, the bid's text and its price go in, and the link comes back for the ✅ in «Заявки».
+ * Nothing without a forum; a failure only costs the topic its early start (it opens on the first message anyway).
+ */
+async function openTopic(p: BidPayload, spent: number): Promise<string | null> {
+  try {
+    if (!(await d().notifier.forumOn?.())) return null
+    await d().notifier.sendText(TEXTS.bidInTopic(p.text, spent, p.servicePriceRub ?? null), {
+      html: true,
+      quiet: true,
+      place: { order: p.leadId },
+    })
+    return (await d().notifier.topicLink?.({ order: p.leadId })) ?? null
+  } catch (err) {
+    console.error('client topic not opened', err instanceof Error ? err.message.slice(0, 200) : err)
+    return null
+  }
+}
+
+const withTopic = (text: string, link: string | null) =>
+  link ? `${text}\nТема клиента: ${link}` : text
+
 /** A word about a bid: by the card in «Заявки»; once the bid is on Profi.ru, in the client's own topic (`client`). */
 async function tell(text: string, p: BidPayload, o: { client?: boolean } = {}): Promise<void> {
   try {
@@ -496,7 +519,12 @@ async function foundOnOrder(outboxId: string, p: BidPayload, quick = false): Pro
   const text = quick
     ? TEXTS.bidSent(p.title, p.priceRub)
     : TEXTS.bidFoundLater(p.title, p.priceRub, late)
-  await DBOS.runStep(() => tell(text, p, { client: true }), { name: 'tellFound' })
+  const link = (await DBOS.patch('bid-topic'))
+    ? await DBOS.runStep(() => openTopic(p, p.priceRub), { name: 'openTopicFound' })
+    : null
+  await DBOS.runStep(() => tell(withTopic(text, link), p, { client: true }), {
+    name: 'tellFound',
+  })
   if (series.length > 0 && !late)
     await startSeries({
       leadId: p.leadId,
@@ -584,10 +612,16 @@ async function deliver(outboxId: string): Promise<void> {
       ...DB_STEP,
     })
     // What was spent, not the fee on the card.
-    if (first)
-      await DBOS.runStep(() => tell(TEXTS.bidSent(p.title, final.spent), p, { client: true }), {
-        name: 'tellSent',
-      })
+    if (first) {
+      // Behind a patch, so a run recorded before it ends as it began.
+      const link = (await DBOS.patch('bid-topic'))
+        ? await DBOS.runStep(() => openTopic(p, final.spent), { name: 'openTopic' })
+        : null
+      await DBOS.runStep(
+        () => tell(withTopic(TEXTS.bidSent(p.title, final.spent), link), p, { client: true }),
+        { name: 'tellSent' },
+      )
+    }
     // The series Boris approved with the bid follows it in a process of its own (Boris, 29.10.2026); only a bid this
     // run confirmed has one. Behind a patch, so a run recorded before the series ends as it began.
     const series = p.followUps ?? []

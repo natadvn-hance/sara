@@ -14,8 +14,13 @@ import { startCatchUp } from './conversation/catchUp'
 import { onClientText, onConvEdit, onConvPress, onConvReply } from './conversation/commands'
 import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
-import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
+import {
+  type ConversationEventDeps,
+  createConversationEvents,
+  showClientWords,
+} from './conversation/events'
 import { sendTurnReply } from './conversation/outbox'
+import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
 import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
 import { registerConversationRoutes } from './conversation/routes'
@@ -268,6 +273,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     delayMs: o.seriesDelayMs ?? SERIES_DELAYS,
     slots: o.callSlots ?? workHoursSource(db),
+    notifier: bot.notifier,
     unsureWaitsMs: o.seriesUnsureWaitsMs ?? SERIES_UNSURE_WAITS_MS,
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
@@ -313,6 +319,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     // In shadow the turn never reaches a send; after the switch it goes through the message outbox.
     send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
+    show: (conv, added) => showClientWords({ db, notifier: bot.notifier }, conv, added),
   })
   // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
   setRemindDeps({ db, profi, gateway, mind, notifier: bot.notifier })
@@ -469,6 +476,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
+  const owed = startOwed({ db, notifier: bot.notifier }, o.learningTickMs)
   // The conversations whose last client word got no real turn (a site line once hid it, a node restart cut the turn)
   // get theirs, once the node answers and then every ten minutes.
   const catchUp = startCatchUp({
@@ -531,6 +539,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       reconcile.stop()
       clearInterval(mindTimer)
       conversationSummary.stop()
+      owed.stop()
       catchUp.stop()
       gateway.stop()
       await bot.stop()

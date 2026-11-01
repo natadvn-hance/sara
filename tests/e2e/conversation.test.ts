@@ -158,7 +158,9 @@ describe('a conversation end to end', () => {
     expect(rows[0]?.messageIds).toHaveLength(3)
     expect(cards()).toHaveLength(1)
     // Each message reached Boris at once as its own; the one card does not repeat them.
-    const said = tg.sent.filter((m) => !m.reply_markup && m.text.startsWith('💬 '))
+    const saidNow = () => tg.sent.filter((m) => !m.reply_markup && m.text.startsWith('💬 '))
+    await until(() => saidNow().length === 3)
+    const said = saidNow()
     expect(said.map((m) => m.text.replace(/^💬 [^:]+: /, ''))).toEqual([
       'Здравствуйте',
       'Как начнём?',

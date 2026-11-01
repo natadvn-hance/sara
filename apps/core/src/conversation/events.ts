@@ -64,8 +64,8 @@ async function noteUnclear(d: ConversationEventDeps, conv: ConversationRow, id: 
  * time, the words must not). Several in a row are shown one by one; the one draft comes after them. A failed send
  * never stops the turn.
  */
-async function showClientWords(
-  d: ConversationEventDeps,
+export async function showClientWords(
+  d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
   conv: ConversationRow,
   added: StoredMessage[],
 ) {
@@ -98,14 +98,18 @@ export async function onChatNews(
     ? await updateConversation(d.db, conv0.id, { lastClientHeardAt: now.toISOString() })
     : conv0
   const v1Writes = await getSetting(d.db, 'conv.v1_writes')
-  const r = await syncChat(d, conv, now, { v1Writes })
+  const r = await syncChat(
+    { db: d.db, profi: d.profi, show: (c, a) => showClientWords(d, c, a) },
+    conv,
+    now,
+    { v1Writes },
+  )
   conv = await applyOwnerRule(d.db, conv, r.added, { v1Writes })
   try {
     await d.onChatState?.(conv, r.messages)
   } catch (e) {
     console.error('reminders could not follow the chat', e instanceof Error ? e.message : e)
   }
-  await showClientWords(d, conv, r.added)
   if (r.unclear) {
     for (const m of r.added.filter((x) => x.side === 'unknown'))
       await noteUnclear(d, conv, m.platformMessageId)

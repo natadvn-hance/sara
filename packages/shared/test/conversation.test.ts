@@ -353,6 +353,7 @@ describe('M4 contracts', () => {
       'conv.boris_wrote',
       'conv.compared',
       'conv.day_summary',
+      'conv.owed_reminded',
       'mind.indexed',
       'mind.proposed',
       'history.exported',

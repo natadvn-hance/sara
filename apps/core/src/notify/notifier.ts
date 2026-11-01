@@ -23,7 +23,7 @@ export type Notifier = {
   /** `html`: the text is Telegram HTML (every value in it already escaped); the default is plain text. */
   sendText(
     text: string,
-    o?: { html?: boolean; loud?: boolean; place?: Place; notice?: NoticeHint },
+    o?: { html?: boolean; loud?: boolean; quiet?: boolean; place?: Place; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /** A message with inline buttons, row by row (the daily summary, rule proposals). */
   sendButtons(
@@ -45,6 +45,15 @@ export type Notifier = {
     rows?: { text: string; callbackData: string }[][],
     o?: { html?: boolean },
   ): Promise<void>
+  /** The link to the client's topic in the forum; null without a forum or before the topic exists. It never throws. */
+  topicLink?(place: { conversation: string } | { order: string }): Promise<string | null>
+  /**
+   * The circle of the client's stage in the name of his topic, changed in place (Telegram keeps a topic's icon colour,
+   * so the colour is in the name). Nothing without a forum or a topic, or when the circle is already that; it never throws.
+   */
+  setTopicStage?(place: { conversation: string } | { order: string }, dot: string): Promise<void>
+  /** Whether Boris's forum is bound: a message for a client's topic is worth sending only then. It never throws. */
+  forumOn?(): Promise<boolean>
   /**
    * The client's topic ends (the conversation closed): `outcome` is its last line, the name says so and the topic
    * closes. The next message to it opens it again. Nothing without a forum or a topic; it never throws.

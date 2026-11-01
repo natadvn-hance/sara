@@ -5,6 +5,8 @@ import { deliverMessage, queueMessage } from '../conversation/outbox'
 import type { Db } from '../db/client'
 import { conversation, event, outbox } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { TEXTS } from '../notify/cards'
+import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { addStatusLine, seriesLine } from './bidStatus'
 import { fillCallOffer, isApprovedText, isCallOffer, type SlotSource } from './callSlots'
@@ -32,6 +34,8 @@ export type SeriesDeps = {
   delayMs: { first: SeriesWait; next: SeriesWait; call: SeriesWait }
   /** Where the times of the call offer come from: Boris's working hours, his calendar later (M6). */
   slots: SlotSource
+  /** Where a sent message is shown in the client's topic; left out, it is not shown. */
+  notifier?: Pick<Notifier, 'sendText' | 'forumOn'>
   /**
    * The waits between the tries of a message the node could not answer for (a restart of the node, a lost answer):
    * the chat is read after each, and the message goes again only when it is not in the chat (31.10.2026).
@@ -374,9 +378,27 @@ async function runSeries(job: SeriesJob): Promise<void> {
       name: `sent-${n}`,
       ...DB_STEP,
     })
+    // The topic shows the whole talk with the client, the series included (Boris, 01.11). Behind a patch.
+    if (text && (await DBOS.patch('bid-series-topic')))
+      await DBOS.runStep(() => showInTopic(job, text, n + 1), { name: `topic-${n}` })
   }
   if (await DBOS.patch('bid-series-status'))
     await DBOS.runStep(() => status(job, sent.length), { name: 'status-done' })
+}
+
+/** Step: a message of the series, short, in the client's topic; nothing without a forum, and it never throws. */
+async function showInTopic(job: SeriesJob, text: string, n: number): Promise<void> {
+  try {
+    const notifier = d().notifier
+    if (!notifier || !(await notifier.forumOn?.())) return
+    await notifier.sendText(TEXTS.seriesInTopic(text, n, job.followUps.length), {
+      html: true,
+      quiet: true,
+      place: { order: job.leadId },
+    })
+  } catch (e) {
+    console.error('series not shown in the topic', e instanceof Error ? e.message.slice(0, 200) : e)
+  }
 }
 
 /** Step: the line about the series goes under the status message of the bid (one message for the whole bid). */
