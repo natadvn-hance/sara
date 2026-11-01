@@ -1,5 +1,6 @@
 import { InterlocutorOutput } from '@sara/shared'
 import { fillCallOffer, isCallOffer, type SlotSource } from '../leads/callSlots'
+import { addressName } from '../leads/clientName'
 import { chosenSites, siteLine, sitesForBid } from '../leads/siteOrder'
 import { agreesToCallProposal, detectCallRequest } from './callDetector'
 import { caseLink } from './caseLink'
@@ -150,10 +151,14 @@ const recalledIds = (r: Recall, cases: CaseHit[]) =>
   ].map((h) => h.id)
 
 /** The times a call can be offered, none without a source or when it fails. */
-async function callTimesFor(slots: SlotSource | undefined, now: Date): Promise<Date[]> {
+async function callTimesFor(
+  slots: SlotSource | undefined,
+  now: Date,
+  leadId?: string | null,
+): Promise<Date[]> {
   if (!slots) return []
   try {
-    return await slots.slots(now)
+    return await slots.slots(now, leadId ? { leadId } : undefined)
   } catch (e) {
     console.error('call slots failed', e instanceof Error ? e.message : e)
     return []
@@ -173,7 +178,7 @@ const isCaseIssue = (x: CheckIssue) => x.id.startsWith('case.') || x.id === 'che
 export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<TurnPlan> {
   const d = input.dossier
   // The times of a call are the program's (Boris, 31.10.2026): the model puts a mark, the program puts real times in.
-  const callTimes = await callTimesFor(deps.slots, input.now)
+  const callTimes = await callTimesFor(deps.slots, input.now, input.leadId)
   const r: Recall = {
     ...(await recall(deps.mind, d)),
     sites: d.order ? await sitesForBid(deps.mind, d.order, input.settings.blockedLinks) : [],
@@ -273,8 +278,11 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     if (output.move === 'call_boris') break
     withoutCase = issues.some(isCaseIssue)
   }
-  if (issues.length === 0 && output?.move === 'reply' && output.text && isCallOffer(output.text))
+  const sendable = issues.length === 0 || output?.move === 'call_boris'
+  if (sendable && output && output.move !== 'none' && output.text && isCallOffer(output.text))
     output = { ...output, text: fillCallOffer(output.text, callTimes, input.now, NO_TIMES) }
+  // The name is called by its formal first name, or left out when the profile gives none (Boris, 01.11.2026).
+  if (output?.text) output = { ...output, text: addressName(output.text, input.names) }
   // The sites of Hance shown to a client of a site order are the code's too: the lines come from the record, never from
   // the model's text (Boris, 31.10.2026: to «покажите примеры» show sites, not a case of another niche).
   const shownSites =

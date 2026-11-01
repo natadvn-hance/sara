@@ -208,7 +208,14 @@ export type Decision = {
   holdUntil: string | null
 }
 
-export type TurnInput = { dossier: Dossier; names: string[]; settings: PolicySettings; now: Date }
+export type TurnInput = {
+  dossier: Dossier
+  names: string[]
+  settings: PolicySettings
+  now: Date
+  /** The lead of the chat: the call times offered to it skip the times that stand offered or booked to other clients. */
+  leadId?: string | null
+}
 
 export type TurnPlan = {
   recall: Recall

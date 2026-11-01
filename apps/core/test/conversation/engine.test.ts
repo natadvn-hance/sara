@@ -1091,6 +1091,29 @@ describe('a call is offered with real times (Boris, 31.10.2026)', () => {
     }
   })
 
+  it('FR-CONV-14: the lead of the chat reaches the call times, and the client is called by a formal name', async () => {
+    const d = await dossierOf()
+    const asked: unknown[] = []
+    const source = {
+      slots: async (_now: Date, o?: { leadId?: string }) => {
+        asked.push(o)
+        return CALL_SLOTS
+      },
+    }
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'alexander, здравствуйте! Понял вас. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind(), slots: source },
+      { dossier: d, names: ['alexander'], settings, now: CALL_NOW, leadId: 'lead-1' },
+    )
+    expect(asked).toEqual([{ leadId: 'lead-1' }])
+    expect(plan.output?.text).toMatch(/^Александр, здравствуйте!/)
+  })
+
   it('FR-CONV-14: a first-person answer, a signature and «меня зовут Борис» are not third person', () => {
     for (const text of [
       'Добрый день! Картину понял: amoCRM, МИС и номера под каналы. По цене уложимся, это не проблема. Давайте созвонимся, когда вам удобно?',

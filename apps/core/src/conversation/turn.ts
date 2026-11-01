@@ -274,7 +274,13 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
     await stamp(turnId, 'recalled', { messageIds: dossier.turnMessageIds })
     const plan = await planTurn(
       { gateway, mind, slots: workHoursSource(db) },
-      { dossier, names: await clientNames(db, conv, dossier), settings, now },
+      {
+        dossier,
+        names: await clientNames(db, conv, dossier),
+        settings,
+        now,
+        leadId: conv.orderId,
+      },
     )
     const out = plan.output
     await stamp(turnId, 'planned', {

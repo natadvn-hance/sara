@@ -17,6 +17,32 @@ export function firstName(clientName: string): string | null {
   return formal.length > 0 && formal.every((p): p is string => p !== null) ? formal.join('-') : null
 }
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * The name in a reply as Sara calls it (Boris, 01.11.2026): the model writes the label and the gateway puts back the
+ * name the site gave, «alexander» or «Психотерапевт». Each such name becomes its formal first name ahead of the text
+ * («Александр»); a name that is none (a profession, a nick) is dropped from the greeting, «Психотерапевт, добрый
+ * день!» becoming «Добрый день!». A name that already reads right stays.
+ */
+export function addressName(text: string, names: string[]): string {
+  let out = text
+  for (const raw of names) {
+    const word = /^\p{L}[\p{L}-]*/u.exec(raw.trim())?.[0]
+    if (!word) continue
+    const formal = firstName(raw)
+    if (formal === word) continue
+    const re = new RegExp(`(?<![\\p{L}-])${escapeRe(word)}(?![\\p{L}-])`, 'giu')
+    if (formal) out = out.replace(re, formal)
+    else
+      out = out.replace(
+        new RegExp(`(^|\\n)(\\s*)${escapeRe(word)}\\s*,\\s*(\\p{L})`, 'giu'),
+        (_m, nl: string, sp: string, c: string) => `${nl}${sp}${c.toUpperCase()}`,
+      )
+  }
+  return out
+}
+
 /** «ИП», «ООО»: a company form in capitals is no part of a person's name, and hiding it would mangle the text. */
 const COMPANY_FORM = /^\p{Lu}{1,3}$/u
 
