@@ -298,6 +298,7 @@ async function openTopic(p: BidPayload, spent: number): Promise<string | null> {
     if (!(await d().notifier.forumOn?.())) return null
     await d().notifier.sendText(TEXTS.bidInTopic(p.text, spent, p.servicePriceRub ?? null), {
       html: true,
+      quiet: true,
       place: { order: p.leadId },
     })
     return (await d().notifier.topicLink?.({ order: p.leadId })) ?? null

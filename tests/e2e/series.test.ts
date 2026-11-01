@@ -209,19 +209,21 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
       await until(() => sentTo(id).length === 2)
       const topic = tg.topics.find((t) => t.name.includes(`№${id}`))
       expect(topic).toBeDefined()
+      // The circle of the client's stage (a bid: yellow) is in the name from the start.
+      expect(topic?.name.startsWith('🟡 ')).toBe(true)
       const inTopic = () =>
         tg.sent.filter(
           (m) => m.chat_id === FORUM && m.message_thread_id === topic?.message_thread_id,
         )
       await until(() =>
-        inTopic().some((m) => m.text.includes('Вдогонку') && m.text.includes(SECOND)),
+        inTopic().some((m) => m.text.includes('Ушло вдогонку: 2 из 2') && m.text.includes(SECOND)),
       )
       expect(
         inTopic().some(
           (m) => m.text.includes('Отклик отправлен') && m.text.includes('Прочитал описание'),
         ),
       ).toBe(true)
-      expect(inTopic().filter((m) => m.text.includes('Вдогонку'))).toHaveLength(2)
+      expect(inTopic().filter((m) => m.text.includes('Ушло вдогонку'))).toHaveLength(2)
       // The ✅ of «Заявки» stays and links to the topic.
       const linked = [...tg.sent, ...tg.edited].some(
         (m) =>

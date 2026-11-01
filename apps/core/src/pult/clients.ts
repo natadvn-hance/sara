@@ -49,6 +49,23 @@ export function stageOf(
   return s
 }
 
+/** The stage of the client behind a forum topic (its key is the order's number, or `conv:` and the conversation). */
+export async function stageForKey(db: DbOrTx, key: string): Promise<FunnelStage> {
+  const [c] = key.startsWith('conv:')
+    ? await db
+        .select()
+        .from(conversation)
+        .where(eq(conversation.id, key.slice(5)))
+    : await db.select().from(conversation).where(eq(conversation.orderId, key))
+  const dealRows = c?.dealId
+    ? await db.select({ stage: deal.stage }).from(deal).where(eq(deal.id, c.dealId))
+    : key.startsWith('conv:')
+      ? []
+      : await db.select({ stage: deal.stage }).from(deal).where(eq(deal.leadId, key))
+  const dealStage = dealRows[0]?.stage ?? null
+  return c ? stageOf(c, dealStage) : funnelStage(dealStage)
+}
+
 async function dealStages(db: DbOrTx, convs: ConvRow[]): Promise<Map<string, string>> {
   const ids = convs.map((c) => c.dealId).filter((x): x is string => !!x)
   if (ids.length === 0) return new Map()

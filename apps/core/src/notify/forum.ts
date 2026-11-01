@@ -1,3 +1,4 @@
+import type { FunnelStage } from '@sara/shared'
 import { and, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { conversation, forumTopic, lead, telegramForum, telegramPost } from '../db/schema'
@@ -110,6 +111,25 @@ export async function conversationOfTopic(db: DbOrTx, t: Topic): Promise<string 
 const NAME_MAX = 128
 export const CLOSED_MARK = ' · закрыт'
 
+/**
+ * The circle in front of a topic's name is the client's stage in Boris's funnel (the same stage the pult and the client
+ * log show, Boris, 01.11); Telegram does not let a topic's icon colour change, so the colour is in the name. Boris will
+ * correct the colours by his table.
+ */
+export const STAGE_DOT: Record<FunnelStage, string> = {
+  Отклик: '🟡',
+  Переговоры: '🔵',
+  'В работе': '🟠',
+  Закрыта: '🟢',
+  Отвалился: '🔴',
+}
+const DOTS = Object.values(STAGE_DOT)
+/** The name of a topic without the circle of its stage. */
+export const withoutDot = (name: string) => {
+  const dot = DOTS.find((x) => name.startsWith(`${x} `))
+  return dot ? name.slice(dot.length + 1) : name
+}
+
 const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim()
 
 /** «Ирина · №95147898 · Сайт для салона», cut to fit with room for the closed mark. */
@@ -117,12 +137,14 @@ export function topicName(o: {
   name: string | null
   orderId: string | null
   title: string | null
+  stage?: FunnelStage
 }) {
+  const dot = o.stage ? `${STAGE_DOT[o.stage]} ` : ''
   const head = [o.name && oneLine(o.name), o.orderId && `№${o.orderId}`].filter(Boolean).join(' · ')
-  const room = NAME_MAX - CLOSED_MARK.length - head.length - 3
+  const room = NAME_MAX - CLOSED_MARK.length - dot.length - head.length - 3
   const title = o.title ? oneLine(o.title) : ''
   const cut = title.length > room ? `${title.slice(0, Math.max(room - 1, 0)).trimEnd()}…` : title
-  return [head, cut].filter(Boolean).join(' · ') || 'Клиент'
+  return `${dot}${[head, cut].filter(Boolean).join(' · ') || 'Клиент'}`
 }
 
 const orderUrl = (orderId: string) =>
@@ -140,7 +162,10 @@ export async function topicIntro(
         .from(lead)
         .where(eq(lead.id, orderId))
     : []
-  const name = topicName({ name: l?.clientName || null, orderId, title: l?.title ?? null })
+  // The stage is the pult's own (loaded here, not at the top: the pult reaches back into the notifier).
+  const { stageForKey } = await import('../pult/clients')
+  const stage = await stageForKey(db, key)
+  const name = topicName({ name: l?.clientName || null, orderId, title: l?.title ?? null, stage })
   const text = l?.text ? oneLine(l.text) : ''
   const intro = [
     `📌 ${l?.title ?? (orderId ? `Заказ №${orderId}` : 'Клиент без заказа')}`,
@@ -152,6 +177,18 @@ export async function topicIntro(
     .filter(Boolean)
     .join('\n')
   return { name, intro }
+}
+
+export async function renameTopic(
+  db: DbOrTx,
+  chatId: number,
+  key: string,
+  name: string,
+): Promise<void> {
+  await db
+    .update(forumTopic)
+    .set({ name })
+    .where(and(eq(forumTopic.chatId, chatId), eq(forumTopic.key, key)))
 }
 
 export async function saveTopic(

@@ -445,6 +445,16 @@ export const convOwed = core.table('conv_owed', {
   messageId: bigint('message_id', { mode: 'number' }),
 })
 
+/**
+ * The once-only micro-steps shown in a client's topic («Клиент прочитал отклик», «Созвон назначен», «Заказ закрыт на
+ * сайте»), by the topic's key and the step: a row is the step shown.
+ */
+export const topicStep = core.table(
+  'topic_step',
+  { key: text('key').notNull(), step: text('step').notNull() },
+  (t) => [primaryKey({ columns: [t.key, t.step] })],
+)
+
 /** Every chat message Sara knows, live or exported from history, with whose voice it is (FR-CONV-2, FR-TRAIN-1). */
 export const chatMessage = core.table(
   'chat_message',

@@ -142,7 +142,7 @@ describe('Boris’s forum', () => {
     )
     const second = await bot.notifier.sendText('Отправила клиенту', { place: { order: ORDER } })
     const topic = tg.topics[1]
-    expect(topic?.name).toBe('Ирина · №90001 · Сайт для салона красоты')
+    expect(topic?.name).toBe('🟡 Ирина · №90001 · Сайт для салона красоты')
     expect(tg.topics).toHaveLength(2)
     const shown = inForum().slice(-5)
     expect(shown.map((m) => m.message_thread_id)).toEqual([
@@ -215,7 +215,7 @@ describe('Boris’s forum', () => {
     await bot.notifier.closeTopic?.({ conversation: conv.id }, '📁 Разговор закрыт')
     const topic = tg.topics[1]
     expect(topic).toMatchObject({
-      name: 'Ирина · №90001 · Сайт для салона красоты · закрыт',
+      name: '🟡 Ирина · №90001 · Сайт для салона красоты · закрыт',
       closed: true,
     })
     expect(lastTo(FORUM)).toMatchObject({
@@ -223,7 +223,10 @@ describe('Boris’s forum', () => {
       message_thread_id: topic?.message_thread_id,
     })
     await bot.notifier.sendText('Клиент снова написал', { place: { conversation: conv.id } })
-    expect(topic).toMatchObject({ name: 'Ирина · №90001 · Сайт для салона красоты', closed: false })
+    expect(topic).toMatchObject({
+      name: '🟡 Ирина · №90001 · Сайт для салона красоты',
+      closed: false,
+    })
     expect(tg.topics).toHaveLength(2)
   })
 

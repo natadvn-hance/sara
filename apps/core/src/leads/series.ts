@@ -275,18 +275,22 @@ async function runSeries(job: SeriesJob): Promise<void> {
     })
     // The topic shows the whole talk with the client, the series included (Boris, 01.11). Behind a patch.
     if (text && (await DBOS.patch('bid-series-topic')))
-      await DBOS.runStep(() => showInTopic(job, text), { name: `topic-${n}` })
+      await DBOS.runStep(() => showInTopic(job, text, n + 1), { name: `topic-${n}` })
   }
   if (await DBOS.patch('bid-series-status'))
     await DBOS.runStep(() => status(job, sent.length), { name: 'status-done' })
 }
 
 /** Step: a message of the series, short, in the client's topic; nothing without a forum, and it never throws. */
-async function showInTopic(job: SeriesJob, text: string): Promise<void> {
+async function showInTopic(job: SeriesJob, text: string, n: number): Promise<void> {
   try {
-    const n = d().notifier
-    if (!n || !(await n.forumOn?.())) return
-    await n.sendText(TEXTS.seriesInTopic(text), { html: true, place: { order: job.leadId } })
+    const notifier = d().notifier
+    if (!notifier || !(await notifier.forumOn?.())) return
+    await notifier.sendText(TEXTS.seriesInTopic(text, n, job.followUps.length), {
+      html: true,
+      quiet: true,
+      place: { order: job.leadId },
+    })
   } catch (e) {
     console.error('series not shown in the topic', e instanceof Error ? e.message.slice(0, 200) : e)
   }

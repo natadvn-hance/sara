@@ -160,9 +160,9 @@ export const TEXTS = {
       .filter(Boolean)
       .join('\n'),
   /** One more message of the series that followed the bid, short, in the same topic. */
-  seriesInTopic: (text: string) => {
+  seriesInTopic: (text: string, n: number, total: number) => {
     const t = text.trim().replace(/\s+/g, ' ')
-    return `📨 <b>Вдогонку</b>\n<blockquote>${esc(t.length > 300 ? `${t.slice(0, 299)}…` : t)}</blockquote>`
+    return `✉️ <b>Ушло вдогонку: ${n} из ${total}</b>\n<blockquote>${esc(t.length > 300 ? `${t.slice(0, 299)}…` : t)}</blockquote>`
   },
   bidRefused: (title: string, errorClass: string) =>
     `Отклик на «${title}» не ушёл: ${REFUSED[errorClass] ?? REFUSED.INTERNAL}`,

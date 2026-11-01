@@ -11,6 +11,7 @@ import { NOT_TEST } from '../testLeads/sql'
 import { rowsFor } from './cards'
 import { CONV_TEXTS } from './texts'
 import { moscowHour } from './time'
+import { topicStages, topicSteps } from './topicSteps'
 
 /**
  * A client must not be left without an answer (Boris, 31.10: «вот тут не ответили клиенту, нельзя»). In drafts mode an
@@ -33,7 +34,10 @@ const MORNING = 9
 
 export type OwedDeps = {
   db: Db
-  notifier: Pick<Notifier, 'sendText' | 'sendButtons' | 'markDone' | 'topicLink' | 'forumOn'>
+  notifier: Pick<
+    Notifier,
+    'sendText' | 'sendButtons' | 'markDone' | 'topicLink' | 'forumOn' | 'setTopicStage'
+  >
 }
 
 type Waiting = {
@@ -44,6 +48,9 @@ type Waiting = {
   words: string
   sentAt: Date
 }
+
+const failed = (what: string) => (e: unknown) =>
+  console.error(`${what} failed`, e instanceof Error ? e.message : e)
 
 /** The next 9:00 Moscow strictly after `t`. */
 export function nextMorning(t: Date): Date {
@@ -216,6 +223,8 @@ export async function owedPass(d: OwedDeps, now: Date = new Date()): Promise<{ r
     reminded++
   }
   await backfillTopics(d, now)
+  await topicStages(d).catch(failed('topic stages'))
+  await topicSteps(d, now).catch(failed('topic steps'))
   await owedSummary(d, waiting, now)
   return { reminded }
 }
@@ -250,7 +259,7 @@ export async function backfillTopics(d: OwedDeps, now: Date): Promise<number> {
           Number(r.bid_price_rub ?? 0),
           (r.draft_price_rub as number | null) ?? null,
         ),
-        { html: true, place: { order: String(r.id) } },
+        { html: true, quiet: true, place: { order: String(r.id) } },
       )
       made++
     } catch (e) {
