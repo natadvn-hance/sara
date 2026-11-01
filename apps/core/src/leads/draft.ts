@@ -57,6 +57,8 @@ export type Draft = {
   followUpSites?: string[]
   /** The call offer that ends the series, its times still to be put in (Boris, 30.10.2026); none when it is off. */
   callOffer?: string
+  /** The last message of the series: Boris's Telegram (31.10.2026). */
+  telegram?: string
 }
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
@@ -363,7 +365,7 @@ export const FOLLOW_UP_EDIT_MAX = 500
 /** The Analyst writes at most this many messages after a bid. */
 export const FOLLOW_UPS_MAX = 2
 /** With the message of links in front of them and the call offer after them, at most this many messages follow a bid. */
-export const SERIES_MAX = FOLLOW_UPS_MAX + 2
+export const SERIES_MAX = FOLLOW_UPS_MAX + 3
 
 /** Why a message of the series was left out. */
 export type FollowUpMiss = 'not_plain' | 'greeting' | 'link' | 'too_long' | 'bad_case' | 'no_link'

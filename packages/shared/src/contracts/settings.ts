@@ -105,6 +105,17 @@ export const SETTINGS = {
     schema: z.array(z.string().trim().min(3).max(200)).max(50),
     default: ['nexum.su'] as string[],
   },
+  /**
+   * Boris's Telegram nick for the last message of the series, «@bmnoian» (31.10.2026); an empty one turns the message
+   * off.
+   */
+  'series.telegram': {
+    schema: z
+      .string()
+      .trim()
+      .regex(/^(@[A-Za-z0-9_]{4,32})?$/),
+    default: '@bmnoian',
+  },
   /** Boris's working days for calls, 1 Monday to 7 Sunday. */
   'calls.work_days': {
     schema: z.array(z.number().int().min(1).max(7)).min(1),

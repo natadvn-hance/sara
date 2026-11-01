@@ -9,6 +9,7 @@ import {
 } from '@sara/shared'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
 import { firstName } from '../leads/clientName'
+import { isTelegramLine } from '../leads/telegramLine'
 import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
@@ -500,8 +501,9 @@ function whyBlocks(c: LeadCard): string[][] {
  */
 function followUpLines(c: LeadCard): string[] {
   const all = c.draft?.followUps ?? []
-  const series = all.filter((t) => !isCallOffer(t))
+  const series = all.filter((t) => !isCallOffer(t) && !isTelegramLine(t))
   const call = all.find(isCallOffer)
+  const telegram = all.find(isTelegramLine)
   if (all.length === 0) return []
   return [
     ...(series.length > 0
@@ -517,6 +519,12 @@ function followUpLines(c: LeadCard): string[] {
             .split(SLOTS_MARK)
             .map(esc)
             .join('<i>[три времени по рабочим часам]</i>')}</blockquote>`,
+        ]
+      : []),
+    ...(telegram
+      ? [
+          '<b>💬 Телеграм</b>  ·  последним',
+          `<blockquote>${clean(telegram, CAP.followUp)}</blockquote>`,
         ]
       : []),
     `<i>Уйдет тем же нажатием, сразу за откликом${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,

@@ -201,7 +201,7 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
     })
   })
 
-  it('FR-LEAD-6: Boris edits the series on the pult: the voice rules, empty messages gone, four at most', () => {
+  it('FR-LEAD-6: Boris edits the series on the pult: the voice rules, empty messages gone, five at most', () => {
     expect(followUpsEdit([`Сделаем ${DASH} быстро.`, '  '])).toEqual(['Сделаем быстро'])
     // A link stays as it is.
     expect(followUpsEdit(['https://lisa-clinic.ru/some-page', 'Из недавнего)'])).toEqual([
@@ -209,8 +209,8 @@ describe('the series after a bid: its texts (Boris, 29.10.2026)', () => {
       'Из недавнего)',
     ])
     expect(followUpsEdit(['Раз', 'Два', 'Три'])).toEqual(['Раз', 'Два', 'Три'])
-    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре'])).toHaveLength(4)
-    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре', 'Пять'])).toBeNull()
+    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре', 'Пять'])).toHaveLength(5)
+    expect(followUpsEdit(['Раз', 'Два', 'Три', 'Четыре', 'Пять', 'Шесть'])).toBeNull()
     // The call offer keeps its mark for the times.
     expect(followUpsEdit(['Созвонимся? Могу {слоты}'])).toEqual(['Созвонимся? Могу {слоты}'])
     expect(followUpsEdit(['а'.repeat(501)])).toBeNull()
