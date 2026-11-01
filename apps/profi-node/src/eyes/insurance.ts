@@ -21,7 +21,11 @@ export type Insurance = {
    */
   inTab<T>(
     f: (t: {
-      go(path: string): Promise<boolean>
+      /**
+       * `quick`: back as soon as the document answered, without the wait for the page to settle (up to 15 s). A quick
+       * look that misses says nothing of the site: right after a press the page may be moving on by itself.
+       */
+      go(path: string, o?: { quick?: boolean }): Promise<boolean>
       can(): boolean
       later(errand: () => Promise<void>): void
     }) => Promise<T>,
@@ -130,7 +134,7 @@ export function startInsurance(o: {
    * its next turn.
    */
   const pressWaits = () => queue.some((j) => j.prio > 0)
-  async function go(path: string): Promise<boolean> {
+  async function go(path: string, opt?: { quick?: boolean }): Promise<boolean> {
     let ok = false
     // One miss is tried again once the page has settled: the page's own navigation (a form that sent) or one stuck
     // request must not take the site for lost and stop every page for 5 minutes, as after a bid on 29.10.2026. A site
@@ -138,13 +142,13 @@ export function startInsurance(o: {
     for (let tries = 0; tries < 2 && !ok; tries++) {
       if (tries > 0)
         await o.ab.page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {})
-      ok = await goOnce(path)
+      ok = await goOnce(path, opt?.quick === true)
     }
     // Not awaited: what the guard does next (a reconcile) queues behind this check instead of deadlocking it.
-    void Promise.resolve(o.onNavigate?.(ok)).catch(() => {})
+    if (ok || !opt?.quick) void Promise.resolve(o.onNavigate?.(ok)).catch(() => {})
     return ok
   }
-  async function goOnce(path: string): Promise<boolean> {
+  async function goOnce(path: string, quick: boolean): Promise<boolean> {
     let ok = false
     try {
       // A page whose document answered is open. Profi.ru's messenger keeps polling, so its network never goes quiet,
@@ -156,7 +160,8 @@ export function startInsurance(o: {
         timeout: 30000,
       })
       ok = (res?.status() ?? 0) > 0 && (res?.status() ?? 0) < 500
-      await o.ab.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+      if (!quick)
+        await o.ab.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
     } catch {
       ok = false
     }
@@ -652,7 +657,7 @@ export function startInsurance(o: {
     chatsOnce: (onlyUnread = true) => chats((c) => !onlyUnread || c.unread > 0),
     inTab<T>(
       f: (t: {
-        go(path: string): Promise<boolean>
+        go(path: string, o?: { quick?: boolean }): Promise<boolean>
         can(): boolean
         later(errand: () => Promise<void>): void
       }) => Promise<T>,
@@ -666,10 +671,10 @@ export function startInsurance(o: {
               resolve(
                 await f({
                   // Asked again on every page: the IP may turn wrong or a viewer come in the middle of the work.
-                  go: async (path) => {
+                  go: async (path, goOpt) => {
                     if (!can()) return false
                     onFeed = false
-                    return go(path)
+                    return go(path, goOpt)
                   },
                   can,
                   later: (errand) => void errands.push(errand),
