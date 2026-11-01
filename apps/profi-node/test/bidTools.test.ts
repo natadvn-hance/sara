@@ -261,6 +261,32 @@ describe('get_order on the order page (FR-LEAD-5)', () => {
     tags: ['Перестала отвечать'],
   }
 
+  it("FR-LEAD-5: get_order gives the site's own lines about the client too (Profi Pro)", async () => {
+    const id = site.addOrder({
+      price: 71,
+      klient: {
+        ...KLIENT,
+        summaries: [
+          {
+            image: 'https://cdn.profi.ru/client-info/summaries/message-x-red.png',
+            colorTheme: 'RED',
+            description: 'Договаривается меньше, чем в 20% заказов',
+            renderInOrder: true,
+          },
+        ],
+      },
+    })
+    await seen(id)
+    const o = await tools().getOrder({ account_id: ACCOUNT, order_id: id })
+    expect(o.client_info?.summaries).toEqual([
+      {
+        description: 'Договаривается меньше, чем в 20% заказов',
+        color_theme: 'RED',
+        percent: 20,
+      },
+    ])
+  }, 60000)
+
   it('FR-LEAD-5: get_order gives the client of the order page: since when, the number, the reviews and their tags', async () => {
     const id = site.addOrder({ price: 71, klient: KLIENT })
     await seen(id)

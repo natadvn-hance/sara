@@ -26,6 +26,8 @@ export type SiteKlient = {
   positive: number
   negative: number
   tags: string[]
+  /** The site's own lines about the client (Profi Pro), as the answer writes them. */
+  summaries?: { image: string; colorTheme: string; description: string; renderInOrder: boolean }[]
 }
 export type SiteOrder = {
   id: string
@@ -405,6 +407,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
             count: { positive: k.positive, negative: k.negative },
             list: [{ tags: k.tags }],
           },
+          ...(k.summaries && { summaries: k.summaries }),
         },
       })
     }

@@ -58,6 +58,28 @@ const full: LeadCard = {
 }
 
 describe('the lead card layout', () => {
+  it("FR-LEAD-7: the site's own line about the client stands in the client line, with its colour (Profi Pro, 01.11.2026)", () => {
+    const text = leadCardText({
+      ...full,
+      clientInfo: {
+        ...CLIENT,
+        summaries: [
+          {
+            description: 'Договаривается меньше, чем в 20% заказов',
+            color_theme: 'RED',
+            percent: 20,
+          },
+          { description: 'Обычно отвечает быстро', color_theme: 'GREEN', percent: null },
+          { description: 'Новая сводка', color_theme: 'NEW_COLOR', percent: null },
+          { description: 'Без <цвета> & тега', color_theme: null, percent: null },
+        ],
+      },
+    })
+    expect(text).toContain(
+      '👤 <b>Ирина</b> · 🔴 Договаривается меньше, чем в 20% заказов · 🟢 Обычно отвечает быстро · ⚪ Новая сводка · ⚪ Без &lt;цвета&gt; &amp; тега · на Профи.ру с 7 сентября 2020',
+    )
+  })
+
   it('FR-LEAD-7: the whole card in order (Boris, sample 3): head, client, why, разбор, bid, order text, link', () => {
     expect(leadCardText(full).split('\n')).toEqual([
       '<b>🔔 Сайт для клиники</b>',

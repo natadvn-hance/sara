@@ -75,3 +75,15 @@ export function normalizeText(s: string): string {
     .trim()
     .replace(/^[\s.,!?;:()]+|[\s.,!?;:()]+$/g, '')
 }
+
+/** The mark of the site's colour of a line about the client, on the card and in the pult. */
+export function colorMark(theme: string | null | undefined): string {
+  const marks: Record<string, string> = {
+    RED: '🔴',
+    ORANGE: '🟠',
+    YELLOW: '🟡',
+    GREEN: '🟢',
+    BLUE: '🔵',
+  }
+  return marks[(theme ?? '').toUpperCase()] ?? '⚪'
+}

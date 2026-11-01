@@ -100,8 +100,21 @@ export const GetOrderInput = z.object({
   order_id: z.string().min(1),
 })
 /**
+ * What the site itself says of the client for Profi Pro (Boris, 01.11.2026: «Это очень важный показатель»), in the
+ * site's words, as «Договаривается меньше, чем в 20% заказов».
+ */
+export const ClientSummary = z.object({
+  description: z.string(),
+  /** The site's colour of it: RED, GREEN... */
+  color_theme: z.string().nullable(),
+  /** The percent in its words, when they have one. */
+  percent: z.number().int().min(0).max(100).nullable(),
+})
+export type ClientSummary = z.infer<typeof ClientSummary>
+
+/**
  * What the order page says about the client (the backoffice answer getKlientInfo): shown on the card and read by
- * the Scorer for the client's quality. Every part may be missing on a page that does not show it.
+ * the Analyst for the client's quality. Every part may be missing on a page that does not show it.
  */
 export const ClientInfo = z.object({
   name: z.string().nullable(),
@@ -114,6 +127,8 @@ export const ClientInfo = z.object({
     .nullable(),
   /** Short tags of those reviews, newest first («Перестала отвечать»). */
   review_tags: z.array(z.string()).max(10),
+  /** The site's own lines about the client; absent on an order read before them or without Profi Pro. */
+  summaries: z.array(ClientSummary).max(10).optional(),
 })
 export type ClientInfo = z.infer<typeof ClientInfo>
 

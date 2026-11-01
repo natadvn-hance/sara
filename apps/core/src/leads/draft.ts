@@ -522,6 +522,7 @@ function clientLine(info: DraftSource['client_info']): string | null {
     info.review_tags &&
       info.review_tags.length > 0 &&
       `отметки в отзывах: ${info.review_tags.join(', ')}`,
+    ...(info.summaries ?? []).map((s) => `сводка Профи.ру: ${s.description}`),
   ].filter((p): p is string => typeof p === 'string' && p !== '')
   return parts.length > 0 ? `Клиент на площадке: ${parts.join('; ')}` : null
 }

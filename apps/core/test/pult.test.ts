@@ -563,6 +563,31 @@ describe('the pult on the live data (28.10.2026)', () => {
     })
   })
 
+  it("FR-UI-5: a lead shows the site's own lines about the client with their colour; an older lead has none", async () => {
+    const before = LeadView.parse((await get(`/api/leads/${LEAD}`)).body)
+    expect(before.lead.client).not.toHaveProperty('summaries')
+    await db.update(lead).set({
+      clientInfo: {
+        name: 'Вероника',
+        on_profi_since: 'На Профи.ру с 2022',
+        phone_verified: true,
+        reviews: { positive: 3, negative: 0 },
+        review_tags: [],
+        summaries: [
+          {
+            description: 'Договаривается меньше, чем в 20% заказов',
+            color_theme: 'RED',
+            percent: 20,
+          },
+        ],
+      },
+    })
+    const v = LeadView.parse((await get(`/api/leads/${LEAD}`)).body)
+    expect(v.lead.client?.summaries).toEqual([
+      { mark: '🔴', text: 'Договаривается меньше, чем в 20% заказов' },
+    ])
+  })
+
   it('FR-LEAD-7: the bid text is edited from the pult only while the decision is open', async () => {
     expect((await post(`/api/leads/${LEAD}/text`, {})).status).toBe(400)
     const r = await post(`/api/leads/${LEAD}/text`, { text: 'Новый текст', priceRub: 50000 })

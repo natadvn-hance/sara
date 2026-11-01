@@ -166,6 +166,8 @@ export const LeadView = z.object({
         since: z.string().nullable(),
         phone: z.boolean().nullable(),
         reviews: z.string().nullable(),
+        /** The site's own lines about the client, with the mark of their colour. */
+        summaries: z.array(z.object({ mark: z.string(), text: z.string() })).optional(),
       })
       .nullable(),
     /**

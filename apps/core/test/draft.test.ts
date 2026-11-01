@@ -387,6 +387,28 @@ describe('what the Analyst is told about the client', () => {
     expect(input).not.toContain('Ирина')
   })
 
+  it("FR-LEAD-6: the site's own line about the client goes to the Analyst as a fact", async () => {
+    const o = await order()
+    const input = analystInput(
+      {
+        ...o,
+        client_info: {
+          ...info,
+          summaries: [
+            {
+              description: 'Договаривается меньше, чем в 20% заказов',
+              color_theme: 'RED',
+              percent: 20,
+            },
+          ],
+        },
+      },
+      400,
+    )
+    expect(input).toContain('; сводка Профи.ру: Договаривается меньше, чем в 20% заказов')
+    expect(analystInput({ ...o, client_info: info }, 400)).not.toContain('сводка')
+  })
+
   it('FR-LEAD-6: what the page did not show is left out, an unverified number is said', async () => {
     const o = await order()
     const input = analystInput(

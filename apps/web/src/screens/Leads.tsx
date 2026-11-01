@@ -511,6 +511,11 @@ function Lead({ v }: { v: LeadView }) {
           {l.client?.phone ? ' · номер подтверждён' : ''}
           {l.client?.reviews ? ` · ${l.client.reviews}` : ''}
         </p>
+        {l.client?.summaries?.map((s) => (
+          <p key={s.text}>
+            {s.mark} {s.text}
+          </p>
+        ))}
         {l.site?.own ? (
           <p className="muted">
             🌐 Сайт клиента: {l.site.own.domain} · {l.site.own.text}
