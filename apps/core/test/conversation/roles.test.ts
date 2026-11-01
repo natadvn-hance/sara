@@ -20,7 +20,7 @@ const ROLES = join(resolve(import.meta.dirname, '../../../..'), 'roles')
 const M4_ROLES = {
   interlocutor: {
     meta: {
-      version: 10,
+      version: 11,
       model: 'opus',
       fallbackModel: 'sonnet',
       priority: 'P0',
@@ -90,18 +90,16 @@ describe('the M4 roles', () => {
     expect(none).toMatch(/call_boris и urgent/)
   })
 
-  it('FR-CONV-3: the Interlocutor writes a short draft for Boris when it calls him, with no price and no promise to call', async () => {
+  it('FR-CONV-3: the Interlocutor writes a full answer when it marks call_boris, with no invented price and no call time', async () => {
     const role = await readFile(join(ROLES, 'interlocutor/role.md'), 'utf8')
     const rule =
-      role.split('\n').find((l) => l.startsWith('При ходе call_boris Борис получает карточку')) ??
-      ''
-    expect(rule).toMatch(/короткий черновик/)
+      role.split('\n').find((l) => l.startsWith('При ходе call_boris в text напиши')) ?? ''
+    expect(rule).toMatch(/такой же полный ответ клиенту/)
     expect(rule).toMatch(/никогда не называй цену/)
-    expect(rule).toMatch(/не пиши, что кто-то позвонит, перезвонит или наберёт/i)
-    expect(rule).toMatch(/не называй время звонка/i)
+    expect(rule).toMatch(/Время звонка не называй/)
     // The field list no longer says the text of a call is empty.
     const field = role.split('\n').find((l) => /^10\. text/.test(l)) ?? ''
-    expect(field).toMatch(/call_boris это короткий черновик для Бориса/)
+    expect(field).toMatch(/call_boris это такой же полный ответ клиенту/)
     expect(field).not.toMatch(/При ходе call_boris и none: null/)
   })
 
@@ -121,6 +119,17 @@ describe('the M4 roles', () => {
       expect(role, word).toContain(word)
     for (const stage of CONV_STAGES) expect(role, stage).toContain(stage)
     expect(role).not.toContain('Сара v1')
+  })
+
+  it('FR-CONV-14: the Interlocutor role writes as Boris in the first person and answers price and bargaining by substance', async () => {
+    const role = await readFile(join(ROLES, 'interlocutor/role.md'), 'utf8')
+    expect(role).toMatch(/от лица Бориса Мнояна/)
+    expect(role).toMatch(/Никогда не пиши о Борисе в третьем лице/)
+    expect(role).toMatch(/по цене уложимся, это не проблема/)
+    expect(role).toMatch(/подробное письмо подробный ответ/)
+    expect(role).not.toMatch(
+      /на него лично ответит Борис|звонит только Борис|Эти темы всегда у Бориса/,
+    )
   })
 
   it('FR-CONV-4: the examiner does not judge facts it has no records for, and its example holds no invented number', async () => {

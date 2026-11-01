@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { type CaseMoment, newEventId, SETTINGS } from '@sara/shared'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { voiceIssues } from '../../src/conversation/check/caseChecks'
 import { buildDossier, clientNames } from '../../src/conversation/dossier'
 import { planTurn, recall } from '../../src/conversation/engine'
 import { formatInterlocutorInput } from '../../src/conversation/prompt'
@@ -290,7 +291,7 @@ describe('turn engine', () => {
   })
 
   const live = { ...settings, v1Writes: false, outboundMessages: true }
-  const DRAFT = 'Понимаю, вопрос о стоимости. Борис ответит вам лично, когда посмотрит задачу.'
+  const DRAFT = 'Понимаю, вопрос о стоимости. Уложимся в ваш бюджет, детали посмотрим на созвоне.'
 
   it('FR-CONV-3: a price question calls Boris and carries a short draft for him, with no price in it', async () => {
     const d = await dossierOf()
@@ -1064,5 +1065,39 @@ describe('a call is offered with real times (Boris, 31.10.2026)', () => {
       ).toContain('case.no_examples')
       await resetDb(db)
     }
+  })
+
+  it('FR-CONV-14: Boris in the third person, or a hand-over to a colleague, goes back for a rewrite', async () => {
+    // The real draft that Boris called «полный ужас» (a client's long letter about a CRM and phone numbers).
+    for (const text of [
+      'Добрый день! Спасибо, что так подробно описали, картина понятна. По составу работ и стоимости лично ответит Борис, это удобно обсудить на созвоне. Когда вам удобно созвониться?',
+      'Передам Борису ваше письмо, он вернется с ответом.',
+      'Давайте созвонимся, Борис свяжется с вами в течение дня.',
+      'Наш менеджер уточнит детали и ответит.',
+      'Уточню у специалиста и вернусь с ответом.',
+      'Вопрос по сроку лучше обсудить с Борисом.',
+    ]) {
+      const d = await dossierOf()
+      const gw = await gateway({ interlocutor: interlocutorAnswer({ text }), checker: CLEAN_CHECK })
+      const plan = await planTurn(
+        { gateway: gw, mind: fakeMind() },
+        { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+      )
+      expect(
+        plan.issues.map((x) => x.id),
+        text,
+      ).toContain('voice.third_person')
+      await resetDb(db)
+    }
+  })
+
+  it('FR-CONV-14: a first-person answer, a signature and «меня зовут Борис» are not third person', () => {
+    for (const text of [
+      'Добрый день! Картину понял: amoCRM, МИС и номера под каналы. По цене уложимся, это не проблема. Давайте созвонимся, когда вам удобно?',
+      'Меня зовут Борис, я веду проекты в Hance. Давайте созвонимся.',
+      'Понял вас, всё посмотрю и вернусь с ответом.\n\nБорис',
+      'Созвонимся, могу набрать вас сегодня.\nС уважением, Борис Мноян',
+    ])
+      expect(voiceIssues(text), text).toEqual([])
   })
 })
