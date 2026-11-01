@@ -37,6 +37,8 @@ import { analysisMessages, type ClosedWhen, type LeadCard, TEXTS } from '../noti
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { onSheetPress } from '../sheet/backfill'
+import { SHEET_TASK_ID } from '../sheet/sync'
 import { leadSiteOf, studyLeadSite } from '../site'
 import type { Fetched } from '../site/fetch'
 import { seriesWithoutBlocked } from '../text/blockedLinks'
@@ -1648,6 +1650,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     async onPress({ taskId, action, source, reason }) {
+      // The preview of the past bids for Boris's sheet has no task row: its id only carries the press.
+      if (taskId === SHEET_TASK_ID) return onSheetPress(d(), action)
       if (action === 'want') return onWant(taskId)
       if (action === 'open') return onOpen(taskId)
       if (action === 'edit') return onEdit(taskId)

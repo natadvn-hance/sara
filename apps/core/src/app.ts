@@ -485,7 +485,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
 
   // Boris's Google Sheet next to the pult (FR-ANL-7): its own pace, its failures never reach the work above.
-  const sheet = startSheetSync({ db, url: config.sheet.url, secret: config.sheet.secret })
+  const sheet = startSheetSync({
+    db,
+    url: config.sheet.url,
+    secret: config.sheet.secret,
+    notifier: bot.notifier,
+  })
 
   return {
     url,

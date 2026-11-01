@@ -12,7 +12,14 @@ import {
   sheetRow,
 } from '../../src/db/schema'
 import { analyticsView } from '../../src/pult/analytics'
-import { type SheetOp, sheetPart, startSheetSync } from '../../src/sheet/sync'
+import { onSheetPress } from '../../src/sheet/backfill'
+import {
+  SHEET_TASK_ID,
+  type SheetOp,
+  sheetPart,
+  stageWins,
+  startSheetSync,
+} from '../../src/sheet/sync'
 import { openTestDb, resetDb } from '../helpers/db'
 
 const { db, close } = openTestDb()
@@ -29,7 +36,9 @@ const at = (min: number) => new Date(LINKED.getTime() + min * 60_000)
  */
 function fakeGoogle() {
   const rows = new Map<string, Record<string, string | number>>()
-  const calls: { ops?: SheetOp[]; ping?: boolean }[] = []
+  const calls: { ops?: SheetOp[]; ping?: boolean; preview?: boolean }[] = []
+  /** What the script would say to an op that looks for Boris's own row: his row taken, or a doubt. */
+  const plan: Record<string, Record<string, unknown>> = {}
   let down = false
   const f = (async (_url: string, init: { body: string }) => {
     if (down) throw new Error('connect ETIMEDOUT')
@@ -41,6 +50,13 @@ function fakeGoogle() {
       const row = rows.get(op.key)
       if (!row) {
         if (!op.create) return { key: op.key, status: 'gone' }
+        const p = op.match ? plan[op.key] : undefined
+        if (p) {
+          if (!body.preview && p.status === 'adopted')
+            rows.set(op.key, { ...(p.current as Record<string, string | number>) })
+          return { key: op.key, ...p }
+        }
+        if (body.preview) return { key: op.key, status: 'created', written: [], kept: [] }
         rows.set(op.key, { ...op.values } as Record<string, string | number>)
         return { key: op.key, status: 'created', written: Object.keys(op.values), kept: [] }
       }
@@ -61,6 +77,7 @@ function fakeGoogle() {
     fetch: f,
     rows,
     calls,
+    plan,
     set down(v: boolean) {
       down = v
     },
@@ -129,6 +146,39 @@ async function bid(o: {
 
 const sync = (g: ReturnType<typeof fakeGoogle>, url: string | undefined = URL) =>
   startSheetSync({ db, url, secret: SECRET, fetch: g.fetch, tickMs: 3600_000 })
+
+/** Boris's chat: what Sara sent him and which messages she marked decided. */
+function fakeChat() {
+  const sent: { text: string; rows?: { text: string; callbackData: string }[][] }[] = []
+  const done: [number, string][] = []
+  return {
+    sent,
+    done,
+    notifier: {
+      sendButtons: async (text: string, rows: { text: string; callbackData: string }[][]) => {
+        sent.push({ text, rows })
+        return { messageId: 700 + sent.length }
+      },
+      sendText: async (text: string) => {
+        sent.push({ text })
+        return { messageId: 700 + sent.length }
+      },
+    },
+    markDone: async (id: number, note: string) => {
+      done.push([id, note])
+    },
+  }
+}
+
+const withChat = (g: ReturnType<typeof fakeGoogle>, chat: ReturnType<typeof fakeChat>) =>
+  startSheetSync({
+    db,
+    url: URL,
+    secret: SECRET,
+    fetch: g.fetch,
+    tickMs: 3600_000,
+    notifier: chat.notifier,
+  })
 
 beforeEach(async () => {
   await resetDb(db)
@@ -296,14 +346,14 @@ describe('Boris Google Sheet', () => {
     const part = await sheetPart(db, true, at(30))
     expect(part).toMatchObject({
       tone: 'bad',
-      text: expect.stringContaining('Таблица отстала: 1 строка ждёт'),
+      text: expect.stringContaining('Таблица отстала: 1 строка ждет'),
     })
     expect(part?.fix).toContain('Google не ответил')
     g.down = false
     expect(await s.tick(at(31))).toEqual({ state: 'sent', ops: 1 })
     expect(await sheetPart(db, true, at(32))).toMatchObject({
       tone: 'ok',
-      text: 'Пишет отклики в «Лог клиентов»',
+      text: 'Пишет отклики в «Лог клиентов».',
     })
     s.stop()
   })
@@ -324,5 +374,178 @@ describe('Boris Google Sheet', () => {
     const off = startSheetSync({ db, url: undefined, secret: SECRET, fetch: g.fetch })
     expect(await off.tick()).toEqual({ state: 'off' })
     expect(await sheetPart(db, false, at(40))).toBeNull()
+  })
+
+  describe('the past bids', () => {
+    const DAY = 24 * 60
+    const old = async () => {
+      await bid({
+        id: '95000201',
+        name: 'Ольга',
+        title: 'Сайт',
+        min: -30 * DAY,
+        fee: 300,
+        quote: 20000,
+      })
+      await bid({
+        id: '95000202',
+        name: 'Артем',
+        title: 'Консультация',
+        min: -20 * DAY,
+        fee: 100,
+        quote: 5000,
+      })
+      await bid({
+        id: '95000203',
+        name: 'Игорь',
+        title: 'Стратегия',
+        min: -10 * DAY,
+        fee: 150,
+        quote: 30000,
+      })
+    }
+    const BORIS_ROW = {
+      month: 'Сентябрь',
+      client: 'Ольга',
+      service: 'Сайт',
+      stage: 'Отвалился',
+      deal: 25000,
+      spend: 280,
+      ltv: '',
+      note: 'Звонили',
+    }
+
+    it('FR-ANL-7: the past bids are shown to Boris first, with counts and names, and nothing is written', async () => {
+      const g = fakeGoogle()
+      const chat = fakeChat()
+      const s = withChat(g, chat)
+      await old()
+      g.plan['95000201'] = { status: 'adopted', current: BORIS_ROW }
+      g.plan['95000202'] = { status: 'doubt', reason: '2 строки с этим именем в месяце' }
+      await s.tick(at(0))
+      expect(chat.sent).toHaveLength(1)
+      const m = chat.sent[0]
+      expect(m?.text).toContain('Всего: 3.')
+      expect(m?.text).toContain('Добавлю новых строк: 1.')
+      expect(m?.text).toContain('Сопоставлю с твоими строками (они уже есть, не дублирую): 1.')
+      expect(m?.text).toContain('Под вопросом, не вношу (1): Артем, Сентябрь.')
+      expect(m?.text).not.toContain('\u2014')
+      expect(m?.rows?.[0]?.map((b) => b.text)).toEqual(['Внести', 'Не вносить'])
+      expect(m?.rows?.[0]?.[0]?.callbackData).toBe(`t:${SHEET_TASK_ID}:apply`)
+      // Preview only: nothing in the sheet, nothing in the queue, and it is asked once.
+      expect(g.rows.size).toBe(0)
+      expect(await db.select().from(sheetRow)).toHaveLength(0)
+      await s.tick(at(5))
+      await s.tick(at(10))
+      expect(chat.sent).toHaveLength(1)
+      expect(g.calls.filter((c) => c.preview)).toHaveLength(1)
+      expect(await sheetPart(db, true, at(11))).toMatchObject({
+        tone: 'warn',
+        text: expect.stringContaining('Жду твоего ответа про прошлые отклики'),
+      })
+      s.stop()
+    })
+
+    it('FR-ANL-7: «Внести» writes them: new rows, Boris\u2019s own row taken without a twin, doubts left to him', async () => {
+      const g = fakeGoogle()
+      const chat = fakeChat()
+      const s = withChat(g, chat)
+      await old()
+      g.plan['95000201'] = { status: 'adopted', current: BORIS_ROW }
+      g.plan['95000202'] = { status: 'doubt', reason: '2 строки с этим именем в месяце' }
+      await s.tick(at(0))
+      expect(await onSheetPress({ db, notifier: chat }, 'apply')).toBe(
+        'Вношу прошлые отклики в таблицу, это займет несколько минут.',
+      )
+      expect(chat.done).toEqual([[701, 'Вношу']])
+      expect(await s.tick(at(5))).toEqual({ state: 'sent', ops: 3 })
+      // A new row for the third, Boris's row labelled for the first, nothing for the doubtful second.
+      expect(g.rows.get('95000203')).toMatchObject({ client: 'Игорь', stage: 'Отклик', spend: 150 })
+      expect(g.rows.has('95000202')).toBe(false)
+      const [first] = await db.select().from(sheetRow).where(eq(sheetRow.orderId, '95000201'))
+      // His cells stay his, Sara has no cell to change here: she says «Отклик», his row says «Отвалился».
+      expect(first?.boris).toEqual(['month', 'client', 'service', 'stage', 'deal', 'spend', 'note'])
+      const [second] = await db.select().from(sheetRow).where(eq(sheetRow.orderId, '95000202'))
+      expect(second).toMatchObject({ state: 'doubt' })
+      expect(second?.written._doubt).toContain('Артем, Сентябрь')
+      // The pass after finds nothing left, says so once, and a rerun duplicates nothing.
+      const n = g.calls.filter((c) => c.ops && !c.preview).length
+      expect(await s.tick(at(10))).toEqual({ state: 'idle' })
+      expect(chat.sent).toHaveLength(2)
+      expect(chat.sent[1]?.text).toContain('Добавила строк: 1. Сопоставила с твоими: 1.')
+      expect(chat.sent[1]?.text).toContain('Не внесла, нужно твое решение (1): Артем, Сентябрь')
+      await s.tick(at(15))
+      expect(g.calls.filter((c) => c.ops && !c.preview)).toHaveLength(n)
+      expect(chat.sent).toHaveLength(2)
+      expect(g.rows.size).toBe(2)
+      s.stop()
+    })
+
+    it('FR-ANL-7: without a press nothing moves; «Не вносить» keeps it so; a second press does nothing', async () => {
+      const g = fakeGoogle()
+      const chat = fakeChat()
+      const s = withChat(g, chat)
+      await old()
+      await s.tick(at(0))
+      await s.tick(at(30))
+      expect(g.rows.size).toBe(0)
+      expect(await onSheetPress({ db, notifier: chat }, 'drop')).toBe(
+        'Хорошо, прошлые отклики в таблицу не вношу.',
+      )
+      expect(await onSheetPress({ db, notifier: chat }, 'apply')).toBe('Это уже решено.')
+      await s.tick(at(40))
+      expect(g.rows.size).toBe(0)
+      s.stop()
+    })
+
+    it('FR-ANL-7: with no past bids nothing is asked', async () => {
+      const g = fakeGoogle()
+      const chat = fakeChat()
+      const s = withChat(g, chat)
+      await s.tick(at(0))
+      expect(chat.sent).toHaveLength(0)
+      s.stop()
+    })
+
+    it('FR-ANL-7: in Boris\u2019s own row Sara changes the stage only when she is further on, and fills only empty cells', async () => {
+      expect(stageWins('Закрыта', 'Отклик')).toBe(true)
+      expect(stageWins('Переговоры', 'Отклик')).toBe(true)
+      expect(stageWins('Отклик', 'Переговоры')).toBe(false)
+      expect(stageWins('Отвалился', 'Переговоры')).toBe(true)
+      expect(stageWins('Отвалился', 'Закрыта')).toBe(false)
+      expect(stageWins('Отклик', 'Закрыта')).toBe(false)
+      expect(stageWins('Отклик', 'что-то свое')).toBe(true)
+      const g = fakeGoogle()
+      const chat = fakeChat()
+      const s = withChat(g, chat)
+      await bid({
+        id: '95000301',
+        name: 'Ольга',
+        title: 'Сайт',
+        min: -5 * DAY,
+        fee: 300,
+        quote: 20000,
+      })
+      g.plan['95000301'] = {
+        status: 'adopted',
+        current: { ...BORIS_ROW, stage: 'Отклик', deal: '', spend: '' },
+      }
+      await s.tick(at(0))
+      await onSheetPress({ db, notifier: chat }, 'apply')
+      await s.tick(at(5))
+      // The empty cells are Sara's to fill; the cells with something in them are Boris's.
+      await db.update(deal).set({ stage: 'talking' }).where(eq(deal.leadId, '95000301'))
+      await s.tick(at(10))
+      expect(g.rows.get('95000301')).toMatchObject({
+        stage: 'Переговоры',
+        deal: 20000,
+        spend: 300,
+        note: 'Звонили',
+        client: 'Ольга',
+      })
+      const [r] = await db.select().from(sheetRow).where(eq(sheetRow.orderId, '95000301'))
+      expect(r?.boris).toEqual(['month', 'client', 'service', 'note'])
+      s.stop()
+    })
   })
 })

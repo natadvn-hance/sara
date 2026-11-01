@@ -1,7 +1,8 @@
-import { isTestOrder, plural, type SystemPart } from '@sara/shared'
+import { formatCallback, isTestOrder, plural, type SystemPart } from '@sara/shared'
 import { eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { sheetRow, sheetSync } from '../db/schema'
+import type { Notifier } from '../notify/notifier'
 import { type LogRow, logRows, monthName } from '../pult/analytics'
 
 /**
@@ -50,9 +51,17 @@ export function norm(v: unknown): string {
   return /^-?\d+(\.\d+)?$/.test(s) ? String(Number(s)) : s
 }
 
+/** The earliest moment: «since» of a backfill, so every bid of the journal is a row. */
+export const EPOCH = '2000-01-01T00:00:00.000Z'
+
+/** The press of «Внести» has no task row: this id only carries the callback (sheet/backfill.ts). */
+export const SHEET_TASK_ID = 'a5a5a5a5-0000-4000-8000-5eeeeeee0001'
+
 export type SheetOp = {
   key: string
   create: boolean
+  /** Look first for Boris's own row of the same client and month, and take it instead of adding a second. */
+  match?: boolean
   values: Partial<SheetValues>
   /** What Sara wrote in these cells last time: the script writes a cell only while it still holds this. */
   expect: Partial<SheetValues>
@@ -60,9 +69,13 @@ export type SheetOp = {
 
 type SheetResult = {
   key: string
-  status: 'created' | 'updated' | 'gone' | 'error'
+  status: 'created' | 'updated' | 'gone' | 'adopted' | 'doubt' | 'error'
   written?: string[]
   kept?: string[]
+  /** `adopted`: what Boris's row holds now, by column. */
+  current?: Partial<Record<SheetColumn, string | number>>
+  /** `doubt`: why the row was not added. */
+  reason?: string
   error?: string
 }
 
@@ -89,11 +102,56 @@ const ERRORS: Record<string, string> = {
   bad_json: 'Скрипт таблицы не понял запрос',
 }
 
+const RANK: Record<string, number> = {
+  Отклик: 0,
+  Переговоры: 1,
+  'В работе': 2,
+  Закрыта: 3,
+}
+
+/**
+ * Sara's stage replaces the one in Boris's own row only when it is further on. A won deal stays won, a drop stays a
+ * drop (Boris knows it first), a stage that is not one of the five is replaced.
+ */
+export function stageWins(sara: string, current: string): boolean {
+  if (sara === current || current === 'Закрыта') return false
+  if (!(current in RANK) && current !== 'Отвалился') return sara !== ''
+  if (sara === 'Закрыта') return true
+  if (current === 'Отвалился') return false
+  if (sara === 'Отвалился') return true
+  return (RANK[sara] ?? -1) > (RANK[current] ?? -1)
+}
+
+const listNames = (names: string[]) =>
+  names.length > 15
+    ? `${names.slice(0, 15).join('; ')} и еще ${names.length - 15}`
+    : names.join('; ')
+
+export function backfillText(c: {
+  total: number
+  added: number
+  matched: number
+  doubts: string[]
+}): string {
+  return [
+    '📊 Таблица подключена. Прошлые отклики из журнала Сары можно внести.',
+    `Всего: ${c.total}.`,
+    `Добавлю новых строк: ${c.added}.`,
+    `Сопоставлю с твоими строками (они уже есть, не дублирую): ${c.matched}.`,
+    c.doubts.length
+      ? `Под вопросом, не вношу (${c.doubts.length}): ${listNames(c.doubts)}.`
+      : 'Под вопросом: ничего.',
+    'Вносить?',
+  ].join('\n')
+}
+
 export function startSheetSync(d: {
   db: Db
   url: string | undefined
   secret: string | undefined
   fetch?: typeof fetch
+  /** Boris's chat: the preview of the past bids and its summary; without it the past bids are not offered. */
+  notifier?: Pick<Notifier, 'sendButtons' | 'sendText'>
   now?: () => Date
   /** How often the sheet is brought up to date (default a minute); tests call tick instead. */
   tickMs?: number
@@ -122,7 +180,7 @@ export function startSheetSync(d: {
       a = (await res.json()) as SheetAnswer
     } catch {
       throw new Error(
-        'По ссылке не скрипт таблицы: при развёртывании нужен доступ «Все» и ссылка, которая кончается на /exec',
+        'По ссылке не скрипт таблицы: при развертывании нужен доступ «Все» и ссылка, которая кончается на /exec',
       )
     }
     if (!a.ok) throw new Error(ERRORS[a.error ?? ''] ?? `Скрипт таблицы ответил: ${a.error}`)
@@ -155,17 +213,26 @@ export function startSheetSync(d: {
     if (!configured) return { state: 'off' }
     const s = await state(at)
     if (s.nextTryAt && Date.parse(s.nextTryAt) > at.getTime()) return { state: 'waiting' }
+    if (s.backfill === 'none' && d.notifier) {
+      try {
+        await askBackfill(at, s.since)
+      } catch (e) {
+        return failed(at, s.failures, (e as Error).message)
+      }
+    }
     const rows = (await logRows(d.db, { since: s.since })).filter((r) => !isTestOrder(r.orderId))
     const known = new Map((await d.db.select().from(sheetRow)).map((k) => [k.orderId, k] as const))
+    const labels = new Map(rows.map((r) => [r.orderId, `${r.client}, ${monthName(r.month)}`]))
     const ops: SheetOp[] = []
     for (const r of rows) {
       const k = known.get(r.orderId)
-      if (k?.state === 'gone') continue
+      if (k?.state === 'gone' || k?.state === 'doubt') continue
       const want = sheetValues(r)
       const boris = new Set(k?.boris ?? [])
       const written = k?.written ?? {}
       const create = !k || k.state === 'new'
       const op: SheetOp = { key: r.orderId, create, values: {}, expect: {} }
+      if (create) op.match = true
       for (const c of SHEET_COLUMNS) {
         if (boris.has(c) || (!create && norm(want[c]) === norm(written[c]))) continue
         op.values[c] = want[c]
@@ -193,6 +260,7 @@ export function startSheetSync(d: {
     }
 
     if (ops.length === 0) {
+      if (s.backfill === 'running') await finishBackfill(at)
       if (s.lastOkAt && at.getTime() - Date.parse(s.lastOkAt) < PING_EVERY_MS)
         return { state: 'idle' }
       try {
@@ -223,7 +291,7 @@ export function startSheetSync(d: {
           errors.push(r?.error ?? `нет ответа по заказу ${op.key}`)
           continue
         }
-        await settle(op, r)
+        await settle(op, r, labels.get(op.key) ?? op.key)
       }
       await d.db
         .update(sheetSync)
@@ -241,7 +309,38 @@ export function startSheetSync(d: {
   }
 
   /** What the sheet now holds: the cells written are Sara's last values, the cells kept are Boris's from now on. */
-  async function settle(op: SheetOp, r: SheetResult) {
+  async function settle(op: SheetOp, r: SheetResult, label: string) {
+    if (r.status === 'doubt') {
+      await d.db
+        .update(sheetRow)
+        .set({
+          state: 'doubt',
+          written: { _doubt: `${label}: ${r.reason ?? 'есть сомнение'}` },
+          pendingSince: null,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(sheetRow.orderId, op.key))
+      return
+    }
+    if (r.status === 'adopted') {
+      // Boris's own row now carries this order: what it holds is his, except the empty cells and a stage Sara outranks.
+      const current = r.current ?? {}
+      const written: Record<string, string | number> = { _how: 'adopted' }
+      const boris: string[] = []
+      for (const c of SHEET_COLUMNS) {
+        const have = current[c]
+        written[c] = have ?? ''
+        if (norm(have) === '') continue
+        const sara = norm(op.values.stage)
+        if (c === 'stage' && (norm(have) === sara || stageWins(sara, norm(have)))) continue
+        boris.push(c)
+      }
+      await d.db
+        .update(sheetRow)
+        .set({ state: 'active', written, boris, pendingSince: null, updatedAt: sql`now()` })
+        .where(eq(sheetRow.orderId, op.key))
+      return
+    }
     if (r.status === 'gone') {
       await d.db
         .update(sheetRow)
@@ -251,6 +350,7 @@ export function startSheetSync(d: {
     }
     const [k] = await d.db.select().from(sheetRow).where(eq(sheetRow.orderId, op.key))
     const written = { ...(k?.written ?? {}) }
+    if (r.status === 'created') written._how = 'created'
     for (const c of r.written ?? []) {
       const v = op.values[c as SheetColumn]
       if (v !== undefined) written[c] = v
@@ -260,6 +360,78 @@ export function startSheetSync(d: {
       .update(sheetRow)
       .set({ state: 'active', written, boris, pendingSince: null, updatedAt: sql`now()` })
       .where(eq(sheetRow.orderId, op.key))
+  }
+
+  /**
+   * The bids from before the link: the script says how each would go (a new row, Boris's own row taken, a doubt),
+   * Boris gets one message with the counts and «Внести». Nothing is written before his press.
+   */
+  async function askBackfill(at: Date, since: string) {
+    const old = (await logRows(d.db, { since: EPOCH })).filter(
+      (r) => !isTestOrder(r.orderId) && Date.parse(r.bidAt) < Date.parse(since),
+    )
+    const known = new Set(
+      (await d.db.select({ id: sheetRow.orderId }).from(sheetRow)).map((r) => r.id),
+    )
+    const fresh = old.filter((r) => !known.has(r.orderId))
+    if (fresh.length === 0) {
+      await d.db.update(sheetSync).set({ backfill: 'done' }).where(eq(sheetSync.id, 1))
+      return
+    }
+    const ops: SheetOp[] = fresh.map((r) => ({
+      key: r.orderId,
+      create: true,
+      match: true,
+      values: sheetValues(r),
+      expect: {},
+    }))
+    const a = await post({ preview: true, ops })
+    const by = new Map((a.results ?? []).map((r) => [r.key, r] as const))
+    let added = 0
+    let matched = 0
+    const doubts: string[] = []
+    for (const r of fresh) {
+      const res = by.get(r.orderId)
+      if (res?.status === 'adopted') matched++
+      else if (res?.status === 'doubt') doubts.push(`${r.client}, ${monthName(r.month)}`)
+      else added++
+    }
+    const m = await d.notifier?.sendButtons(
+      backfillText({ total: fresh.length, added, matched, doubts }),
+      [
+        [
+          { text: 'Внести', callbackData: formatCallback(SHEET_TASK_ID, 'apply') },
+          { text: 'Не вносить', callbackData: formatCallback(SHEET_TASK_ID, 'drop') },
+        ],
+      ],
+    )
+    await d.db
+      .update(sheetSync)
+      .set({ backfill: 'asked', backfillMessageId: m?.messageId ?? null })
+      .where(eq(sheetSync.id, 1))
+    console.log(
+      `sheet backfill asked at ${at.toISOString()}: ${added} new, ${matched} matched, ${doubts.length} doubts`,
+    )
+  }
+
+  /** The past bids are all in: one line of what happened. */
+  async function finishBackfill(at: Date) {
+    await d.db.update(sheetSync).set({ backfill: 'done' }).where(eq(sheetSync.id, 1))
+    const rows = await d.db.select().from(sheetRow)
+    const how = (h: string) => rows.filter((r) => r.written._how === h).length
+    const doubts = rows
+      .filter((r) => r.state === 'doubt')
+      .map((r) => String(r.written._doubt ?? r.orderId))
+    await d.notifier?.sendText(
+      [
+        '📊 Прошлые отклики в таблице.',
+        `Добавила строк: ${how('created')}. Сопоставила с твоими: ${how('adopted')}.`,
+        doubts.length
+          ? `Не внесла, нужно твое решение (${doubts.length}): ${listNames(doubts)}.`
+          : 'Сомнительных нет.',
+      ].join('\n'),
+    )
+    console.log(`sheet backfill done at ${at.toISOString()}`)
   }
 
   // One pass at a time: a slow Google never overlaps the next tick.
@@ -313,12 +485,21 @@ export async function sheetPart(
   // A raw query gives the time as a Date: «Состояние» carries it as text.
   const since = p?.since ? new Date(p.since).toISOString() : null
   const lagging = !!since && now.getTime() - Date.parse(since) > LAG_MS
+  const [dq] = (
+    await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from core.sheet_row where state = 'doubt'`,
+    )
+  ).rows
+  const doubts = dq?.n ?? 0
+  const extra =
+    (s?.backfill === 'asked' ? ' Жду твоего ответа про прошлые отклики.' : '') +
+    (doubts ? ` Под вопросом строк: ${doubts}.` : '')
   const retry = s?.nextTryAt ? ` Следующая попытка в ${hhmm(s.nextTryAt)}.` : ''
   if (lagging && since)
     return {
       ...base,
       tone: 'bad',
-      text: `Таблица отстала: ${waiting} ${plural(waiting, ['строка ждёт', 'строки ждут', 'строк ждут'])} с ${hhmm(since)}`,
+      text: `Таблица отстала: ${waiting} ${plural(waiting, ['строка ждет', 'строки ждут', 'строк ждут'])} с ${hhmm(since)}`,
       fix: `${s?.lastError ?? 'Запись в таблицу не проходит'}. Сара пробует сама.${retry}`,
       at: since,
     }
@@ -340,10 +521,11 @@ export async function sheetPart(
     }
   return {
     ...base,
-    tone: 'ok',
-    text: s.lastWriteAt
-      ? 'Пишет отклики в «Лог клиентов»'
-      : 'Связь есть, новых откликов для таблицы пока не было',
+    tone: s.backfill === 'asked' ? 'warn' : 'ok',
+    text:
+      (s.lastWriteAt
+        ? 'Пишет отклики в «Лог клиентов».'
+        : 'Связь есть, новых откликов для таблицы пока не было.') + extra,
     fix: null,
     at: s.lastWriteAt ?? s.lastOkAt,
   }

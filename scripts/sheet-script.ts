@@ -22,7 +22,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error('Куда записать скрипт: pnpm sheet:script <файл>')
     process.exit(1)
   }
-  const secret = randomBytes(24).toString('hex')
+  // A new version of the script for a sheet that already works keeps its secret: SARA_SHEET_SECRET=<hex> pnpm sheet:script <file>.
+  const secret = process.env.SARA_SHEET_SECRET || randomBytes(24).toString('hex')
   await writeFile(out, fillScript(await readFile(SCRIPT, 'utf8'), secret), { mode: 0o600 })
-  console.log(`SARA_SHEET_SECRET=${secret}`)
+  if (!process.env.SARA_SHEET_SECRET) console.log(`SARA_SHEET_SECRET=${secret}`)
 }
