@@ -7,7 +7,9 @@ import { lostRoute } from '../direction/router'
 import { createDeal } from '../domain/deal'
 import { appendEvent } from '../journal/journal'
 import { TEXTS } from '../notify/cards'
+import { markShown } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
+import { bidPost } from '../notify/topicPosts'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { openStatus, setBidStatusDeps, setStatus } from './bidStatus'
@@ -298,11 +300,25 @@ async function giveBack(outboxId: string, p: BidPayload, reason: string): Promis
 async function openTopic(p: BidPayload, spent: number): Promise<string | null> {
   try {
     if (!(await d().notifier.forumOn?.())) return null
-    await d().notifier.sendText(TEXTS.bidInTopic(p.text, spent, p.servicePriceRub ?? null), {
-      html: true,
-      quiet: true,
-      place: { order: p.leadId },
-    })
+    const now = d().now?.() ?? new Date()
+    // The text that really went to the client (the greeting of that hour, tidied), as the node is given it.
+    let text: string | null = null
+    try {
+      text = bidTextDetail(p.text, p.clientName ?? '', now).text
+    } catch {
+      text = p.text
+    }
+    await d().notifier.sendText(
+      bidPost({
+        at: now.toISOString(),
+        text,
+        feeRub: spent,
+        priceFromRub: p.servicePriceRub ?? null,
+        priceToRub: p.servicePriceToRub ?? null,
+      }),
+      { html: true, quiet: true, place: { order: p.leadId } },
+    )
+    await markShown(d().db, p.leadId, 'bid')
     return (await d().notifier.topicLink?.({ order: p.leadId })) ?? null
   } catch (err) {
     console.error('client topic not opened', err instanceof Error ? err.message.slice(0, 200) : err)

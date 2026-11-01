@@ -92,9 +92,6 @@ const REMINDER_STEP_RU = {
 } as const
 
 export const CONV_TEXTS = {
-  /** A client's message the moment the core hears it, in the client's topic: the draft comes later (Boris, 31.10). */
-  clientSaid: (name: string | null, text: string) => `💬 ${name || 'Клиент'}: ${text}`,
-
   /** A client waits for Boris's answer (Boris, 31.10): in his topic, with the draft's buttons when there is a draft. */
   owedReminder: (v: {
     name: string | null
