@@ -59,6 +59,8 @@ export type BidPayload = {
   priceRub: number
   /** The «Стоимость услуги» typed into the form; null or absent (rows from before M2) leaves it empty. */
   servicePriceRub?: number | null
+  /** The «До» of the range as pressed; absent in rows from before 31.10.2026: half again over «от». */
+  servicePriceToRub?: number | null
   /**
    * The series after the bid as it was when Boris pressed (Boris, 29.10.2026): his one press approves it with the bid.
    * Absent in rows from before the series; empty when the lead had none.
@@ -388,6 +390,7 @@ async function attempt(
       order_id: p.leadId,
       text: sent.text,
       price_rub: p.servicePriceRub ?? null,
+      price_to_rub: p.servicePriceToRub ?? null,
       // The fee on the card Boris pressed: the node pays no more than that.
       max_fee_rub: p.priceRub,
       idempotency_key: row.idempotencyKey,

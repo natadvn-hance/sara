@@ -102,6 +102,19 @@ describe('the live bid form (calibrated by the opened-form map)', () => {
     expect(await ab.page.locator('textarea').first().inputValue()).toBe(text)
   })
 
+  it('FR-LEAD-8: the Analyst’s own «до» goes to «До»; one not above «от» falls back to half again (31.10.2026)', async () => {
+    await ab.page.setContent(liveForm('<div>Кошелёк</div>'))
+    expect(
+      await fillForm(ab.page, { priceRub: 40000, priceToRub: 90000, text: 'Добрый день!' }),
+    ).toBe('ok')
+    expect(await ab.page.getByLabel('От', { exact: true }).inputValue()).toBe('40000')
+    expect(await ab.page.getByLabel('До', { exact: true }).inputValue()).toBe('90000')
+    expect(
+      await fillForm(ab.page, { priceRub: 40000, priceToRub: 30000, text: 'Добрый день!' }),
+    ).toBe('ok')
+    expect(await ab.page.getByLabel('До', { exact: true }).inputValue()).toBe('60000')
+  })
+
   it('FR-LEAD-8: a «До» the page filled itself is replaced by the range top, and a price field outside the form is left alone', async () => {
     await ab.page.setContent(
       liveForm('<div>Кошелёк</div>', {

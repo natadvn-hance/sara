@@ -10,6 +10,7 @@ import {
   newEventId,
   type OrderAttachment,
   ProfiOrder,
+  priceRange,
   type ScreenMark,
   type SorterOutput,
   type TaskAction,
@@ -145,6 +146,8 @@ export type LeadPipeline = {
     taskId: string
     text: string | null
     priceRub: number | null
+    /** The «до» of the range; absent: half again over «от». */
+    priceToRub?: number | null
     followUps?: string[] | null
   }): Promise<{
     saved: boolean
@@ -434,6 +437,7 @@ function storeDraft(
         .set({
           draftText: dr.text,
           draftPriceRub: dr.priceRub,
+          draftPriceToRub: 'priceToRub' in dr ? (dr.priceToRub ?? null) : null,
           draftFollowUps: seriesOf(dr),
         })
         .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
@@ -962,6 +966,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       ? {
           text: bidTextAt(draft.text, withPage.client_name, greetingMoment()),
           priceRub: draft.priceRub,
+          priceToRub:
+            draft.priceRub === null ? null : priceRange(draft.priceRub, draft.priceToRub).to,
           followUps: seriesOf(draft) ?? [],
         }
       : null,
@@ -1065,7 +1071,7 @@ async function cardOfFound(
     // that the greeting may change; it is built again when the bid is sent.
     draft: l.draftText
       ? {
-          ...draftOnCard(l.draftText, l.clientName, l.draftPriceRub),
+          ...draftOnCard(l.draftText, l.clientName, l.draftPriceRub, l.draftPriceToRub),
           followUps: seriesWithoutBlocked(
             l.draftFollowUps ?? [],
             await getSetting(d().db, 'links.blocked'),
@@ -1085,7 +1091,8 @@ function draftOnCard(
   stored: string,
   clientName: string,
   priceRub: number | null,
-): { text: string; priceRub: number | null; note: string | null } {
+  priceToRub: number | null,
+): { text: string; priceRub: number | null; priceToRub: number | null; note: string | null } {
   const { text, fallback } = bidTextDetail(stored, clientName, greetingMoment())
   const note =
     fallback === 'name_dropped'
@@ -1093,7 +1100,12 @@ function draftOnCard(
       : fallback === 'greeting_kept'
         ? TEXTS.greetingKept
         : null
-  return { text, priceRub, note }
+  return {
+    text,
+    priceRub,
+    priceToRub: priceRub === null ? null : priceRange(priceRub, priceToRub).to,
+    note,
+  }
 }
 
 /** The lead card for an open task. */
@@ -1417,7 +1429,10 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
       )
     }
     if (said.priceRub !== null) {
-      await tx.update(lead).set({ draftPriceRub: said.priceRub }).where(eq(lead.id, l.id))
+      await tx
+        .update(lead)
+        .set({ draftPriceRub: said.priceRub, draftPriceToRub: said.priceToRub })
+        .where(eq(lead.id, l.id))
       await appendEvent(
         tx,
         ev('draft.priced', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
@@ -1439,6 +1454,7 @@ async function saveBidText(p: {
   taskId: string
   text: string | null
   priceRub: number | null
+  priceToRub?: number | null
   followUps?: string[] | null
 }): Promise<{ saved: boolean; message: string }> {
   const found = await leadOfTask(p.taskId)
@@ -1488,8 +1504,12 @@ async function saveBidText(p: {
         }),
       )
     }
-    if (p.priceRub !== null && p.priceRub !== l.draftPriceRub) {
-      await tx.update(lead).set({ draftPriceRub: p.priceRub }).where(eq(lead.id, l.id))
+    const toRub = p.priceToRub ?? null
+    if (p.priceRub !== null && (p.priceRub !== l.draftPriceRub || toRub !== l.draftPriceToRub)) {
+      await tx
+        .update(lead)
+        .set({ draftPriceRub: p.priceRub, draftPriceToRub: toRub })
+        .where(eq(lead.id, l.id))
       await appendEvent(
         tx,
         ev('draft.priced', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
@@ -1719,6 +1739,10 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
               title: l.title,
               priceRub: now.bidPriceRub,
               servicePriceRub: now.draftPriceRub,
+              servicePriceToRub:
+                now.draftPriceRub === null
+                  ? null
+                  : priceRange(now.draftPriceRub, now.draftPriceToRub).to,
               // The same press approves the series as it stands now (Boris, 29.10.2026), without the links a client
               // is never given (30.10.2026: a draft made before a site was put on the list may still hold one).
               followUps: seriesWithoutBlocked(

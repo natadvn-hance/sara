@@ -72,6 +72,7 @@ const TextBody = z
   .object({
     text: z.string().trim().min(1).max(2000).nullable().default(null),
     priceRub: z.number().int().positive().max(100_000_000).nullable().default(null),
+    priceToRub: z.number().int().positive().max(100_000_000).nullable().default(null),
     /** The whole series after the bid as Boris left it; absent, it stays as it is. */
     followUps: z.array(z.string().max(2000)).max(5).nullable().default(null),
   })
