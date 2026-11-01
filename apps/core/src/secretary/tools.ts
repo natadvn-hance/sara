@@ -36,6 +36,7 @@ export type SecretaryDeps = {
     taskId: string
     text: string | null
     priceRub: number | null
+    priceToRub?: number | null
   }): Promise<{ saved: boolean; message: string }>
   /** The commands of a conversation card (M4). */
   commands: CommandDeps
@@ -279,11 +280,12 @@ export const SECRETARY_TOOLS = {
   }),
   set_bid_text: tool({
     description:
-      'Сохранить на карточке заявки новый текст отклика и или «Стоимость услуги» в рублях (priceRub). Только после «да» Бориса на этот текст. Отклик не отправляет.',
+      'Сохранить на карточке заявки новый текст отклика и или «Стоимость услуги» в рублях: priceRub («от») и priceToRub («до», по умолчанию в полтора раза выше). Только после «да» Бориса на этот текст. Отклик не отправляет.',
     input: z.object({
       taskId: z.string(),
       text: z.string().min(1).optional(),
       priceRub: z.number().int().positive().optional(),
+      priceToRub: z.number().int().positive().optional(),
     }),
     run: async (d, _t, i) => {
       if (i.text === undefined && i.priceRub === undefined)
@@ -293,6 +295,7 @@ export const SECRETARY_TOOLS = {
         taskId: i.taskId,
         text: i.text ?? null,
         priceRub: i.priceRub ?? null,
+        priceToRub: i.priceToRub ?? null,
       })
       return done(r.saved, r.message)
     },

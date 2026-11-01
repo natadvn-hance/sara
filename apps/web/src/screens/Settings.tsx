@@ -27,6 +27,7 @@ function valueText(r: SettingRow): string {
   if (r.kind === 'flag') return r.value ? 'включено' : 'выключено'
   if (r.kind === 'rub') return r.value === null ? 'без ограничения' : rub(r.value as number)
   if (r.kind === 'hours') return hours(r.value)
+  if (r.kind === 'text') return r.value ? String(r.value) : 'выключено'
   return String(r.value)
 }
 
@@ -123,6 +124,34 @@ function Limit({ r }: { r: SettingRow }) {
   )
 }
 
+/** A short text, Boris's Telegram nick for the end of the series; empty turns the message off. */
+function Handle({ r }: { r: SettingRow }) {
+  const { press, busy } = usePress()
+  const [draft, setDraft] = useState(String(r.value ?? ''))
+  const text = draft.trim()
+  const valid = /^(@[A-Za-z0-9_]{4,32})?$/.test(text)
+  return (
+    <div className="actions">
+      <input
+        aria-label={r.title}
+        value={draft}
+        placeholder="@ник"
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      {text !== String(r.value ?? '') ? (
+        <Btn
+          size="sm"
+          look="primary"
+          disabled={!valid || busy !== null}
+          onClick={() => press(r.key, `/api/settings/${r.key}`, { value: text })}
+        >
+          Сохранить
+        </Btn>
+      ) : null}
+    </div>
+  )
+}
+
 /** Hours from and to, by Moscow: the quiet hours of the cards and of the clients' night. */
 function Hours({ r }: { r: SettingRow }) {
   const { press, busy } = usePress()
@@ -184,6 +213,8 @@ function Row({ r }: { r: SettingRow }) {
         <Flag r={r} />
       ) : r.edit === 'free' && r.kind === 'hours' ? (
         <Hours key={JSON.stringify(r.value)} r={r} />
+      ) : r.edit === 'free' && r.kind === 'text' ? (
+        <Handle key={String(r.value)} r={r} />
       ) : r.edit === 'free' && (r.kind === 'count' || r.kind === 'rub') ? (
         <Limit key={String(r.value)} r={r} />
       ) : (

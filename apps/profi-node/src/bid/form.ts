@@ -217,12 +217,12 @@ export async function readPayment(
 /**
  * Fills the price (empty for null) and the text, then reads them back: what the form did not take whole stops. The
  * live form (25.10.2026) has a range «От» «До» without names: the price goes to «От», and «До» gets the top of the
- * range (`priceUpTo`, Boris 27.10.2026), or stays empty when there is no price. A single
+ * range (`priceUpTo`, Boris 27.10.2026, or the Analyst's own «до» when the bid brings one), or stays empty when there is no price. A single
  * «stavka» field («Сумма») is taken too.
  */
 export async function fillForm(
   page: Page,
-  v: { priceRub: number | null; text: string },
+  v: { priceRub: number | null; priceToRub?: number | null; text: string },
 ): Promise<'ok' | 'no_field' | 'not_taken'> {
   const text = shown(page, TEXT)
   if ((await text.count()) !== 1) return 'no_field'
@@ -236,7 +236,10 @@ export async function fillForm(
   if (!price && v.priceRub !== null) return 'no_field'
   const want = v.priceRub === null ? '' : String(v.priceRub)
   // «До» is the top of the range Sara gives, never what the page filled itself.
-  const wantTo = v.priceRub === null ? '' : String(priceUpTo(v.priceRub))
+  const wantTo =
+    v.priceRub === null
+      ? ''
+      : String(v.priceToRub && v.priceToRub > v.priceRub ? v.priceToRub : priceUpTo(v.priceRub))
   try {
     if (price) await price.fill(want, { timeout: 5000 })
     const hasTo = range && (await to.count()) === 1

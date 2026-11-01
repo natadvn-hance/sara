@@ -8,7 +8,7 @@ import {
   type LeadScores,
   LeadScreen,
   type LeadView,
-  priceUpTo,
+  priceRange,
   type QueueOrder,
   shownTitle,
 } from '@sara/shared'
@@ -293,7 +293,8 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
     bid: {
       text: l.draftText,
       priceFromRub: l.draftPriceRub,
-      priceToRub: l.draftPriceRub === null ? null : priceUpTo(l.draftPriceRub),
+      priceToRub:
+        l.draftPriceRub === null ? null : priceRange(l.draftPriceRub, l.draftPriceToRub).to,
       limit: BID_LIMIT,
       followUps: seriesWithoutBlocked(
         l.draftFollowUps ?? [],

@@ -5,10 +5,12 @@ import {
   isTestOrder,
   type LeadSite,
   plural,
+  priceRange,
   TEST_MARK,
 } from '@sara/shared'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
 import { firstName } from '../leads/clientName'
+import { isTelegramLine } from '../leads/telegramLine'
 import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
@@ -72,6 +74,8 @@ export type LeadCard = {
   draft?: {
     text: string
     priceRub: number | null
+    /** The «до» of the range (31.10.2026); absent: half again over «от». */
+    priceToRub?: number | null
     note?: string | null
     followUps?: string[]
   } | null
@@ -500,8 +504,9 @@ function whyBlocks(c: LeadCard): string[][] {
  */
 function followUpLines(c: LeadCard): string[] {
   const all = c.draft?.followUps ?? []
-  const series = all.filter((t) => !isCallOffer(t))
+  const series = all.filter((t) => !isCallOffer(t) && !isTelegramLine(t))
   const call = all.find(isCallOffer)
+  const telegram = all.find(isTelegramLine)
   if (all.length === 0) return []
   return [
     ...(series.length > 0
@@ -519,13 +524,21 @@ function followUpLines(c: LeadCard): string[] {
             .join('<i>[три времени по рабочим часам]</i>')}</blockquote>`,
         ]
       : []),
+    ...(telegram
+      ? [
+          '<b>💬 Телеграм</b>  ·  последним',
+          `<blockquote>${clean(telegram, CAP.followUp)}</blockquote>`,
+        ]
+      : []),
     `<i>Уйдет тем же нажатием, сразу за откликом${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,
   ]
 }
 
 function draftLines(c: LeadCard): string[] {
   if (!c.draft) return [NO_DRAFT]
-  const price = c.draft.priceRub ? `  ·  услуга ${formatRub(c.draft.priceRub)}` : ''
+  const price = c.draft.priceRub
+    ? `  ·  услуга от ${formatRub(c.draft.priceRub)} до ${formatRub(priceRange(c.draft.priceRub, c.draft.priceToRub).to)}`
+    : ''
   return [
     `<b>✍️ Отклик</b>${price}`,
     `<blockquote>${clean(c.draft.text, CAP.draft)}</blockquote>`,

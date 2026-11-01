@@ -156,8 +156,15 @@ export async function groundSeries(job: SeriesJob, sent: readonly string[]): Pro
     .then((r) => r.messages)
     .catch(() => [])
   const authors = messages.map((m) => m.author)
-  if (authors.includes('client'))
-    return { go: false, why: 'client_replied', detail: { rule: 'client_message', authors } }
+  // Only a word after our bid is an answer to it: a client may write first (an invitation of a specialist), and the
+  // series still follows the bid (Boris, 31.10.2026, test order 99793452149).
+  const bidAt = messages.findIndex((m) => m.author === 'specialist')
+  if (bidAt >= 0 && messages.slice(bidAt + 1).some((m) => m.author === 'client'))
+    return {
+      go: false,
+      why: 'client_replied',
+      detail: { rule: 'client_message_after_bid', authors },
+    }
   // The first message of our side is the bid itself; after it only the series, or the site's own lines, may stand.
   if (foreignOurs(messages, sent))
     return { go: false, why: 'boris_wrote', detail: { rule: 'other_specialist_message', authors } }

@@ -1,8 +1,8 @@
 {
   "name": "analyst",
   "version": 13,
-  "model": "opus",
-  "fallbackModel": "sonnet",
+  "model": "sonnet",
+  "fallbackModel": "opus",
   "priority": "P1",
   "timeoutMs": 120000
 }

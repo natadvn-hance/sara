@@ -674,7 +674,11 @@ export function createBidTools(o: {
         )
       }
       trace.step = 'поля формы'
-      const filled = await fillForm(page, { priceRub: price, text: i.text })
+      const filled = await fillForm(page, {
+        priceRub: price,
+        priceToRub: i.price_to_rub ?? null,
+        text: i.text,
+      })
       if (filled === 'no_field')
         return await refuse(fail('LAYOUT_CHANGED', 'Поля формы отклика не нашлись'))
       if (filled === 'not_taken')
