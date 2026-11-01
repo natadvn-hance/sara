@@ -6,11 +6,23 @@ import { firstName } from '../leads/clientName'
 import type { Place } from './notifier'
 
 /** Boris's forum (docs/product/telegram-forum.md), null while he has none: then everything goes to his chat. */
-export type Forum = { chatId: number; title: string | null; leadsThreadId: number | null }
+export type Forum = {
+  chatId: number
+  title: string | null
+  leadsThreadId: number | null
+  analyticsThreadId?: number | null
+}
 
 export async function forumOf(db: DbOrTx): Promise<Forum | null> {
   const [f] = await db.select().from(telegramForum).where(eq(telegramForum.id, 1))
-  return f ? { chatId: f.chatId, title: f.title, leadsThreadId: f.leadsThreadId } : null
+  return f
+    ? {
+        chatId: f.chatId,
+        title: f.title,
+        leadsThreadId: f.leadsThreadId,
+        analyticsThreadId: f.analyticsThreadId,
+      }
+    : null
 }
 
 export async function bindForum(db: DbOrTx, f: Forum): Promise<void> {

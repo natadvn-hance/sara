@@ -54,6 +54,17 @@ const RANK: Record<FunnelStage, number> = {
   Отвалился: -1,
 }
 
+/**
+ * Whether a row at `stage` counts in the funnel line `s` (Boris's sheet «Воронка»: the count runs up, every line a share of
+ * the bids). A dropped bid counts in «Отклик» and «Отвалился» only. The pult's tables and the hypotheses of the analytics
+ * topic read the funnel through this one function.
+ */
+export function reachedStage(stage: FunnelStage, s: FunnelStage): boolean {
+  if (s === 'Отвалился') return stage === 'Отвалился'
+  if (stage === 'Отвалился') return s === 'Отклик'
+  return RANK[stage] >= RANK[s]
+}
+
 type BidRow = {
   lead_id: string
   account_id: string
@@ -206,11 +217,7 @@ export async function analyticsView(db: DbOrTx, year: number): Promise<Analytics
     link: `/leads/${encodeURIComponent(r.orderId)}`,
   }))
 
-  const reached = (s: FunnelStage) =>
-    s === 'Отвалился'
-      ? list.filter((c) => c.stage === 'Отвалился').length
-      : list.filter((c) => c.stage !== 'Отвалился' && RANK[c.stage] >= RANK[s]).length +
-        (s === 'Отклик' ? list.filter((c) => c.stage === 'Отвалился').length : 0)
+  const reached = (s: FunnelStage) => list.filter((c) => reachedStage(c.stage, s)).length
   const bids = list.length
   const funnel = FUNNEL_STAGES.map((stage) => {
     const count = reached(stage)

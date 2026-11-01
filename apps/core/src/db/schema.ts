@@ -247,10 +247,27 @@ export const telegramForum = core.table(
     title: text('title'),
     /** The topic of new orders; null in the General topic. */
     leadsThreadId: integer('leads_thread_id'),
+    /** The topic «📊 Аналитика» (Boris, 01.11.2026), made by Sara on the first hypothesis; null: not made yet. */
+    analyticsThreadId: integer('analytics_thread_id'),
     boundAt: ts('bound_at').notNull().defaultNow(),
   },
   (t) => [check('telegram_forum_single_row', sql`${t.id} = 1`)],
 )
+
+/**
+ * A hypothesis of the «📊 Аналитика» topic (docs/product/analytics-hypotheses.md): what Sara told Boris, with the numbers it
+ * stands on, and what he answered. `preview` is a run that only showed (nothing was sent).
+ */
+export const analyticsHypothesis = core.table('analytics_hypothesis', {
+  id: uuid('id').primaryKey(),
+  fingerprint: text('fingerprint').notNull(),
+  level: text('level').notNull(),
+  status: text('status').notNull(),
+  text: text('text').notNull(),
+  facts: jsonb('facts').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  decidedAt: ts('decided_at'),
+})
 
 /** The topic of one client's order in a forum; the key is the order's number, `conv:<id>` for a chat without one. */
 export const forumTopic = core.table(
