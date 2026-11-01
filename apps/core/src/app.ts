@@ -256,6 +256,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     delayMs: o.seriesDelayMs ?? SERIES_DELAYS,
     slots: o.callSlots ?? workHoursSource(db),
+    notifier: bot.notifier,
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   secretaryTools = {

@@ -4,6 +4,7 @@ import type { Db } from '../db/client'
 import { convOwed, convTurn, jobRun, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { mskParts } from '../learning/summary'
+import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { NOT_TEST } from '../testLeads/sql'
@@ -32,7 +33,7 @@ const MORNING = 9
 
 export type OwedDeps = {
   db: Db
-  notifier: Pick<Notifier, 'sendText' | 'sendButtons' | 'markDone' | 'topicLink'>
+  notifier: Pick<Notifier, 'sendText' | 'sendButtons' | 'markDone' | 'topicLink' | 'forumOn'>
 }
 
 type Waiting = {
@@ -214,8 +215,53 @@ export async function owedPass(d: OwedDeps, now: Date = new Date()): Promise<{ r
     await journal(d.db, 'conv.owed_reminded', w.conversationId, after)
     reminded++
   }
+  await backfillTopics(d, now)
   await owedSummary(d, waiting, now)
   return { reminded }
+}
+
+/** Topics made per pass for bids that went before the topics were made at the bid; Telegram limits making them. */
+const BACKFILL_PER_PASS = 3
+/** Only bids this young get a topic after the fact. */
+const BACKFILL_DAYS = 30
+
+/**
+ * Orders with a bid sent and no topic (Boris, 01.11: the bids of 95592581, 95596098 and 95611217 got none): each gets
+ * its topic, with the intro and the bid's text. It repeats by itself until none is left, because an order with a topic
+ * is no longer a candidate; a closed topic stays a topic. Only with a forum, and before the summary, which links to them.
+ */
+export async function backfillTopics(d: OwedDeps, now: Date): Promise<number> {
+  if (!(await d.notifier.forumOn?.())) return 0
+  const since = new Date(now.getTime() - BACKFILL_DAYS * 24 * HOUR).toISOString()
+  const res = await d.db.execute(sql`
+    select l.id, l.draft_text, l.draft_price_rub, l.bid_price_rub
+    from core.lead l
+    where l.status = 'bid_sent' and l.seen_at >= ${since} and ${NOT_TEST('l.id')}
+      and not exists (select 1 from core.forum_topic t where t.key = l.id)
+      and not exists (select 1 from core.conversation c where c.order_id = l.id and c.closed_at is not null)
+    order by l.seen_at desc
+    limit ${BACKFILL_PER_PASS}`)
+  let made = 0
+  for (const r of res.rows as Record<string, unknown>[]) {
+    try {
+      await d.notifier.sendText(
+        TEXTS.bidInTopic(
+          (r.draft_text as string | null) ?? null,
+          Number(r.bid_price_rub ?? 0),
+          (r.draft_price_rub as number | null) ?? null,
+        ),
+        { html: true, place: { order: String(r.id) } },
+      )
+      made++
+    } catch (e) {
+      console.error(
+        'topic not made for a bid',
+        r.id,
+        e instanceof Error ? e.message.slice(0, 200) : e,
+      )
+    }
+  }
+  return made
 }
 
 /**

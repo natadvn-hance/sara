@@ -703,6 +703,9 @@ export function createTelegramRuntime(d: {
             if (!String((e as Error).message).includes('message is not modified')) throw e
           })
       },
+      async forumOn() {
+        return (await forumOf(d.db).catch(() => null)) !== null
+      },
       async topicLink(place) {
         try {
           const f = await forumOf(d.db)

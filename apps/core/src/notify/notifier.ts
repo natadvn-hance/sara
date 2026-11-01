@@ -46,7 +46,9 @@ export type Notifier = {
     o?: { html?: boolean },
   ): Promise<void>
   /** The link to the client's topic in the forum; null without a forum or before the topic exists. It never throws. */
-  topicLink?(place: { conversation: string }): Promise<string | null>
+  topicLink?(place: { conversation: string } | { order: string }): Promise<string | null>
+  /** Whether Boris's forum is bound: a message for a client's topic is worth sending only then. It never throws. */
+  forumOn?(): Promise<boolean>
   /**
    * The client's topic ends (the conversation closed): `outcome` is its last line, the name says so and the topic
    * closes. The next message to it opens it again. Nothing without a forum or a topic; it never throws.
