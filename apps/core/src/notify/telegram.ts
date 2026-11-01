@@ -666,12 +666,14 @@ export function createTelegramRuntime(d: {
       },
       async sendButtons(text, rows, o) {
         const silent = await silentNow(o?.loud)
+        const extra: Omit<SendOptions, 'parse_mode'> = {
+          ...(silent && { disable_notification: true }),
+          reply_markup: { inline_keyboard: keyboard(rows) },
+        }
         const messageId = await post(o?.place, (to, where) =>
-          bot.api.sendMessage(to, text, {
-            ...where,
-            ...(silent && { disable_notification: true }),
-            reply_markup: { inline_keyboard: keyboard(rows) },
-          }),
+          o?.html
+            ? sendHtml(to, text, { ...where, ...extra })
+            : bot.api.sendMessage(to, text, { ...where, ...extra }),
         )
         return { messageId }
       },
@@ -688,11 +690,12 @@ export function createTelegramRuntime(d: {
           })
           .catch((e: unknown) => console.error('card not marked', short(e)))
       },
-      async editText(ref, text, rows) {
+      async editText(ref, text, rows, o) {
         const at = await locate(ref)
         if (!at) return void console.error('message not edited: unknown', ref)
         await bot.api
           .editMessageText(at.to, at.id, text, {
+            ...(o?.html && { parse_mode: 'HTML', link_preview_options: { is_disabled: true } }),
             ...(rows && { reply_markup: { inline_keyboard: keyboard(rows) } }),
           })
           .catch((e: unknown) => {

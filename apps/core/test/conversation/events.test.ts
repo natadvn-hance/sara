@@ -82,6 +82,40 @@ describe('conversation events', () => {
     expect(c?.lastClientHeardAt).not.toBeNull()
   })
 
+  it('FR-CONV-1: each new client message reaches Boris at once, in the client topic, before any draft', async () => {
+    await setSetting(db, 'pipeline.conversations', true, 'system')
+    const places: unknown[] = []
+    const chat = stubProfi([])
+    chat.chat.push(chatMsg('m-1', 'client', 'Покажите примеры', new Date().toISOString()))
+    const first = createConversationEvents({
+      db,
+      profi: chat,
+      notifier: {
+        sendText: async (t, o) => (
+          texts.push(t), places.push(o?.place), { messageId: texts.length }
+        ),
+      },
+      onTurnNeeded: async () => {},
+      onTyping: async () => {},
+      onSpecialist: async () => {},
+    })
+    await first(envelope('profi.client_message', ref('m-1')))
+    chat.chat.push(chatMsg('m-2', 'client', 'И цены', new Date().toISOString()))
+    await first(envelope('profi.client_message', ref('m-2')))
+    // The same message heard twice is shown once.
+    await first(envelope('profi.client_message', ref('m-2')))
+    expect(texts).toEqual(['💬 Клиент: Покажите примеры', '💬 Клиент: И цены'])
+    const [c] = await db.select().from(conversation)
+    expect(places).toEqual([{ conversation: c?.id }, { conversation: c?.id }])
+  })
+
+  it('FR-CONV-1: with conversations off nothing is shown at once', async () => {
+    const { onEvent, chat } = setup()
+    chat.chat.push(chatMsg('m-2', 'client', 'Сколько стоит?', new Date().toISOString()))
+    await onEvent(envelope('profi.client_message', ref('m-2')))
+    expect(texts).toEqual([])
+  })
+
   it('FR-CONV-1: the site’s own line right behind the client’s word does not hide it: the turn starts', async () => {
     await setSetting(db, 'pipeline.conversations', true, 'system')
     const { onEvent, chat } = setup()
@@ -182,7 +216,6 @@ describe('reconcile', () => {
       ],
     })
     const { onEvent } = setup(p)
-    void onEvent
     const n = await reconcileChats(
       {
         db,

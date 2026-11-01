@@ -1,7 +1,7 @@
 import type { EventEnvelope } from '@sara/shared'
 import { and, eq, lte, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { chatMessage, conversation } from '../db/schema'
+import { chatMessage, conversation, lead } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
@@ -60,6 +60,31 @@ async function noteUnclear(d: ConversationEventDeps, conv: ConversationRow, id: 
 }
 
 /**
+ * Every new client message goes to Boris at once, to the client's topic (Boris, 31.10: the draft waits for the quiet
+ * time, the words must not). Several in a row are shown one by one; the one draft comes after them. A failed send
+ * never stops the turn.
+ */
+async function showClientWords(
+  d: ConversationEventDeps,
+  conv: ConversationRow,
+  added: StoredMessage[],
+) {
+  const words = added.filter((m) => m.side === 'client' && m.text.trim() !== '')
+  if (words.length === 0 || !(await getSetting(d.db, 'pipeline.conversations'))) return
+  const [l] = conv.orderId
+    ? await d.db.select({ name: lead.clientName }).from(lead).where(eq(lead.id, conv.orderId))
+    : []
+  for (const m of words)
+    try {
+      await d.notifier.sendText(CONV_TEXTS.clientSaid(l?.name || null, m.text), {
+        place: { conversation: conv.id },
+      })
+    } catch (e) {
+      console.error('client words not shown', e instanceof Error ? e.message : e)
+    }
+}
+
+/**
  * What a chat's news does to its conversation: the chat is read and stored, the owner rule applied, our side's new
  * messages go to the comparison and a clear client message starts a turn (FR-CONV-1, FR-CONV-2, FR-CONV-10).
  */
@@ -80,6 +105,7 @@ export async function onChatNews(
   } catch (e) {
     console.error('reminders could not follow the chat', e instanceof Error ? e.message : e)
   }
+  await showClientWords(d, conv, r.added)
   if (r.unclear) {
     for (const m of r.added.filter((x) => x.side === 'unknown'))
       await noteUnclear(d, conv, m.platformMessageId)
