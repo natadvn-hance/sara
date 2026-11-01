@@ -183,8 +183,8 @@ describe('the card', () => {
   })
 
   it('FR-ANL: no card holds a long dash', () => {
-    expect(renderCard(f, null).text).not.toContain('—')
-    expect(plainText(f)).not.toContain('—')
-    expect(footer(f)).not.toContain('—')
+    expect(renderCard(f, null).text).not.toContain('\u2014')
+    expect(plainText(f)).not.toContain('\u2014')
+    expect(footer(f)).not.toContain('\u2014')
   })
 })
