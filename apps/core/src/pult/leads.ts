@@ -1,6 +1,7 @@
 import {
   AnalystOutput,
   ClientInfo,
+  colorMark,
   combinedScore,
   formatRub,
   type LeadQueue,
@@ -255,7 +256,17 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
       budgetText: l.budgetText,
       clientName: l.clientName,
       client: info.success
-        ? { since: info.data.on_profi_since, phone: info.data.phone_verified, reviews }
+        ? {
+            since: info.data.on_profi_since,
+            phone: info.data.phone_verified,
+            reviews,
+            ...(info.data.summaries && {
+              summaries: info.data.summaries.map((s) => ({
+                mark: colorMark(s.color_theme),
+                text: s.description,
+              })),
+            }),
+          }
         : null,
       site: siteView(l.clientSite),
       seenAt: l.seenAt,

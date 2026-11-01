@@ -1,5 +1,6 @@
 import {
   type ClientInfo,
+  colorMark,
   formatCallback,
   formatRub,
   isTestOrder,
@@ -389,7 +390,7 @@ function headLines(c: LeadCard): string[] {
 const sinceText = (s: string) =>
   /^на\s+профи\.ру/i.test(s) ? s : `на Профи.ру с ${s.replace(/^с\s+/i, '')}`
 
-/** The client in one line (Boris, sample 3, 27.10.2026): name, since when, the phone, the reviews. */
+/** The client in one line (Boris, sample 3, 27.10.2026): name, the site's lines, since when, the phone, the reviews. */
 function clientLines(c: LeadCard): string[] {
   const info = c.clientInfo ?? null
   // The order page's name is the fuller one; the list may give a first name or none.
@@ -401,6 +402,9 @@ function clientLines(c: LeadCard): string[] {
   const name = first && !/^\p{Script=Cyrillic}/u.test(raw) ? `${first} (${raw})` : raw
   const parts = [`👤 <b>${name ? clean(name, CAP.short) : 'имя не указано'}</b>`]
   if (info) {
+    // The site's own lines first (Boris, 01.11.2026: «Это очень важный показатель»).
+    for (const s of info.summaries ?? [])
+      parts.push(`${colorMark(s.color_theme)} ${clean(s.description, CAP.short)}`)
     const since = info.on_profi_since?.trim()
     if (since) parts.push(clean(sinceText(since).replace(/^На /, 'на '), CAP.short))
     if (info.phone_verified) parts.push('номер подтверждён')
