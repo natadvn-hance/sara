@@ -32,10 +32,11 @@ export type Eyes = {
   /** The site's board answer was read in the last 10 minutes. */
   boardWorks(now?: number): boolean
   /**
-   * The board answers read so far: how many (a counter, to tell a new one from the last) and whether the last one
-   * said the board has more pages. Null before the first. The minute check scrolls the board by it.
+   * The board answers read so far: how many (a counter, to tell a new one from the last), whether the last one said the
+   * board has more pages, and how many orders it said the whole board holds (null: it did not say). Null before the
+   * first. The minute check scrolls the board by it.
    */
-  board(): { seq: number; more: boolean } | null
+  board(): { seq: number; more: boolean; total: number | null } | null
   /**
    * A pass over the board begins (the minute check opens the feed) and ends (its scroll is done). An order the last
    * pass saw is gone from the feed when this pass does not show it although it loaded the page the order was on, and
@@ -72,7 +73,7 @@ export function createEyes(o: {
   // The fee from the order page's own answer: truer than the page text, which misses a discount.
   const fees = new Map<string, { rub: number; baseRub: number | null; hasBid: boolean | null }>()
   let boardAt = 0
-  let board: { seq: number; more: boolean } | null = null
+  let board: { seq: number; more: boolean; total: number | null } | null = null
   // chat → when the stream named it and which message, for the time the message really came.
   const touched = new Map<string, { at: string; messageId: string | null }>()
   // order → the first board page (from 0) it was on, in the pass going on and in the last one; when it was told gone.
@@ -215,7 +216,7 @@ export function createEyes(o: {
     await onSignals(p.signals, body)
     // Counted when its orders are stored and on their way, so a pass that saw the answer arrive leaves nothing behind.
     if (p.recognized && p.what === 'feed' && source === 'response') {
-      board = { seq: (board?.seq ?? 0) + 1, more: p.more === true }
+      board = { seq: (board?.seq ?? 0) + 1, more: p.more === true, total: p.total ?? null }
       if (pass) {
         for (const s of p.signals)
           if (s.t === 'order' && !pass.orders.has(s.order.order_id))
@@ -235,6 +236,9 @@ export function createEyes(o: {
     if (!before) return
     // Its last page may lose an order to the next page; the board read to its end loses none.
     const covered = board?.more === false ? Number.POSITIVE_INFINITY : seen.pages - 1
+    // What this pass did not reach waits for the next one that does: most passes read only the first pages.
+    for (const [orderId, page] of before)
+      if (page >= covered && !lastPass.has(orderId)) lastPass.set(orderId, page)
     for (const [orderId, page] of before) {
       if (seen.orders.has(orderId) || page >= covered) continue
       const told = goneAt.get(orderId)

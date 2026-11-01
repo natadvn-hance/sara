@@ -11,7 +11,7 @@ import { proposeMind } from '../mind/proposals'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { clientNames } from './dossier'
-import { lastSeen } from './outbox'
+import { expectLastAfter, lastSeen } from './outbox'
 import { editReminder, onReminderPress } from './reminderCard'
 import { holdText, sendHold } from './sendHold'
 import { type SendOptions, STALE_DRAFT } from './sendTexts'
@@ -400,7 +400,7 @@ export async function onConvPress(
       if (!claimed) return COMMAND_TEXTS.done
       const covered = ((turn.messageIds as string[] | null) ?? []).at(-1)
       return d.sendText(conversationId, turn.text, 'sara', {
-        expectLast: covered ?? undefined,
+        expectLast: await expectLastAfter(d.db, conversationId, covered),
         key: `send:${t.id}`,
         after: { kind: 'draft', taskId: t.id },
       })
@@ -598,7 +598,7 @@ async function onSayPress(d: CommandDeps, st: CardTask, action: TaskAction): Pro
   )
   const covered = ((parent.messageIds as string[] | null) ?? []).at(-1)
   return d.sendText(parent.conversationId, words, 'boris', {
-    expectLast: covered ?? undefined,
+    expectLast: await expectLastAfter(d.db, parent.conversationId, covered),
     key,
   })
 }

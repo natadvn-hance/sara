@@ -3,6 +3,7 @@ import { and, eq, like } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { convTurn, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { firstName } from '../leads/clientName'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { sendHold } from './sendHold'
@@ -93,7 +94,7 @@ export async function sendReminderCard(
   const b = CONV_TEXTS.buttons
   const m = await d.notifier.sendButtons(
     CONV_TEXTS.reminderCard({
-      name: l?.clientName || null,
+      name: l?.clientName ? firstName(l.clientName) : null,
       orderTitle: l ? shownTitle(l.id, l.title) : null,
       step,
       text,

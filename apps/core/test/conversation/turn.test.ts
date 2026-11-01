@@ -723,5 +723,22 @@ describe('the turn workflow', () => {
       messageIds: ['m-2'],
     })
     expect(cards).toHaveLength(1)
+    // The words stay open: a chat that could not be read did not answer the client.
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBeNull()
+  }, 40000)
+
+  it('FR-CONV-2: once the chat can be read the open words get a second attempt, and a real draft', async () => {
+    readsFail = true
+    await clientWrites('m-2', 'Как начнём?')
+    await turnsDone(1)
+    readsFail = false
+    const [conv] = await db.select().from(conversation)
+    await startTurnFor(rowOf(conv as typeof conversation.$inferSelect))
+    const rows = await turnsDone(2)
+    const second = rows.find((r) => r.id.endsWith(':1') || r.id !== rows[0]?.id)
+    expect(rows).toHaveLength(2)
+    expect(second?.decisionReason).not.toBe('не могу прочитать чат')
+    expect(second?.text).toBeTruthy()
+    expect((await db.select().from(conversation))[0]?.handledThrough).toBe('m-2')
   }, 40000)
 })

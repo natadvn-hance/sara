@@ -1,13 +1,17 @@
 import {
   type ClientInfo,
+  colorMark,
   formatCallback,
   formatRub,
   isTestOrder,
   type LeadSite,
   plural,
+  priceRange,
   TEST_MARK,
 } from '@sara/shared'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
+import { firstName } from '../leads/clientName'
+import { isTelegramLine } from '../leads/telegramLine'
 import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
@@ -71,6 +75,8 @@ export type LeadCard = {
   draft?: {
     text: string
     priceRub: number | null
+    /** The «до» of the range (31.10.2026); absent: half again over «от». */
+    priceToRub?: number | null
     note?: string | null
     followUps?: string[]
   } | null
@@ -384,13 +390,21 @@ function headLines(c: LeadCard): string[] {
 const sinceText = (s: string) =>
   /^на\s+профи\.ру/i.test(s) ? s : `на Профи.ру с ${s.replace(/^с\s+/i, '')}`
 
-/** The client in one line (Boris, sample 3, 27.10.2026): name, since when, the phone, the reviews. */
+/** The client in one line (Boris, sample 3, 27.10.2026): name, the site's lines, since when, the phone, the reviews. */
 function clientLines(c: LeadCard): string[] {
   const info = c.clientInfo ?? null
   // The order page's name is the fuller one; the list may give a first name or none.
-  const name = info?.name?.trim() || c.clientName.trim()
+  const raw = info?.name?.trim() || c.clientName.trim()
+  // The profile name as the site wrote it; a name in Latin letters is shown as Sara calls him, «Александр (alexander)»
+  // (01.11.2026). A profession or a company stays as it is: Boris sees what the profile says, only the greeting is
+  // without a name.
+  const first = raw ? firstName(raw) : null
+  const name = first && !/^\p{Script=Cyrillic}/u.test(raw) ? `${first} (${raw})` : raw
   const parts = [`👤 <b>${name ? clean(name, CAP.short) : 'имя не указано'}</b>`]
   if (info) {
+    // The site's own lines first (Boris, 01.11.2026: «Это очень важный показатель»).
+    for (const s of info.summaries ?? [])
+      parts.push(`${colorMark(s.color_theme)} ${clean(s.description, CAP.short)}`)
     const since = info.on_profi_since?.trim()
     if (since) parts.push(clean(sinceText(since).replace(/^На /, 'на '), CAP.short))
     if (info.phone_verified) parts.push('номер подтверждён')
@@ -494,8 +508,9 @@ function whyBlocks(c: LeadCard): string[][] {
  */
 function followUpLines(c: LeadCard): string[] {
   const all = c.draft?.followUps ?? []
-  const series = all.filter((t) => !isCallOffer(t))
+  const series = all.filter((t) => !isCallOffer(t) && !isTelegramLine(t))
   const call = all.find(isCallOffer)
+  const telegram = all.find(isTelegramLine)
   if (all.length === 0) return []
   return [
     ...(series.length > 0
@@ -513,13 +528,21 @@ function followUpLines(c: LeadCard): string[] {
             .join('<i>[три времени по рабочим часам]</i>')}</blockquote>`,
         ]
       : []),
+    ...(telegram
+      ? [
+          '<b>💬 Телеграм</b>  ·  последним',
+          `<blockquote>${clean(telegram, CAP.followUp)}</blockquote>`,
+        ]
+      : []),
     `<i>Уйдет тем же нажатием, сразу за откликом${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,
   ]
 }
 
 function draftLines(c: LeadCard): string[] {
   if (!c.draft) return [NO_DRAFT]
-  const price = c.draft.priceRub ? `  ·  услуга ${formatRub(c.draft.priceRub)}` : ''
+  const price = c.draft.priceRub
+    ? `  ·  услуга от ${formatRub(c.draft.priceRub)} до ${formatRub(priceRange(c.draft.priceRub, c.draft.priceToRub).to)}`
+    : ''
   return [
     `<b>✍️ Отклик</b>${price}`,
     `<blockquote>${clean(c.draft.text, CAP.draft)}</blockquote>`,

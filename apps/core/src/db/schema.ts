@@ -65,6 +65,8 @@ export const lead = core.table('lead', {
   draftText: text('draft_text'),
   /** The «Стоимость услуги» for the bid form; null leaves the field empty. */
   draftPriceRub: integer('draft_price_rub'),
+  /** The top of the price range of the draft, «до»; null: half again over «от» (31.10.2026). */
+  draftPriceToRub: integer('draft_price_to_rub'),
   /** The Analyst's reading of the order and its short разбор (hidden need, risk, condition); null: none. */
   draftAnalysis: jsonb('draft_analysis'),
   /** What the order page says about the client (contract ClientInfo), read when the order page is opened. */
@@ -943,6 +945,45 @@ export const meeting = core.table(
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
   (t) => [index('meeting_starts').on(t.startsAt)],
+)
+
+/**
+ * Boris's Google Sheet (FR-ANL-7, docs/ops/google-sheet.md): one row per bid Sara keeps in his «Лог клиентов». The
+ * sheet itself finds the row by its order (developer metadata), so a row Boris moves stays the same row.
+ */
+export const sheetRow = core.table('sheet_row', {
+  orderId: text('order_id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  /** `new`: not in the sheet yet; `active`: Sara keeps it; `gone`: Boris deleted the row, Sara leaves it be. */
+  state: text('state').notNull().default('new'),
+  /** What Sara last wrote, column by column: a cell that holds something else is Boris's. */
+  written: jsonb('written').$type<Record<string, string | number>>().notNull().default({}),
+  /** Columns Boris changed by hand in this row: Sara never writes them again. */
+  boris: jsonb('boris').$type<string[]>().notNull().default([]),
+  /** Since when the sheet lags behind what Sara knows of this bid; null: it has it all. */
+  pendingSince: ts('pending_since'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+
+/** The link to Boris's sheet: since when bids go there, the last answer, the last failure and the next try. */
+export const sheetSync = core.table(
+  'sheet_sync',
+  {
+    id: integer('id').primaryKey().default(1),
+    /** Bids from this moment on go to the sheet; the earlier ones wait for Boris's «Внести» (`backfill`). */
+    since: ts('since').notNull(),
+    /** The past bids: `none` (not offered yet), `asked` (the preview waits for Boris), `running`, `done`, `declined`. */
+    backfill: text('backfill').notNull().default('none'),
+    backfillMessageId: bigint('backfill_message_id', { mode: 'number' }),
+    lastOkAt: ts('last_ok_at'),
+    lastWriteAt: ts('last_write_at'),
+    lastError: text('last_error'),
+    lastErrorAt: ts('last_error_at'),
+    failures: integer('failures').notNull().default(0),
+    nextTryAt: ts('next_try_at'),
+  },
+  (t) => [check('sheet_sync_single_row', sql`${t.id} = 1`)],
 )
 
 /** A browser that asked to ring (pult v2 design 6): one row per Web Push endpoint. */

@@ -115,6 +115,7 @@ export function createSendTools(o: {
     lookMs: [500, 1500],
     ...o.typing,
   }
+  const QUICK_TYPING: Typing = { charMs: [5, 15], budgetMs: 4000, lookMs: [150, 400] }
   const uncertain = (why: string) => fail('UNCERTAIN', why)
   const stillUnknown = () =>
     uncertain('Сообщение нажато, но страница его не показала: смотреть чат, а не слать снова')
@@ -222,8 +223,9 @@ export function createSendTools(o: {
     field: Locator,
     text: string,
     stop: () => ProfiToolError | null,
+    tp: Typing,
   ) {
-    const cap = Math.max(1, Math.floor(typing.budgetMs / Math.max(text.length, 1)))
+    const cap = Math.max(1, Math.floor(tp.budgetMs / Math.max(text.length, 1)))
     const lines = text.split(/\r\n?|\n/)
     for (const [n, line] of lines.entries()) {
       // A line break goes in as inserted text: an Enter key might send the half-written message.
@@ -233,7 +235,7 @@ export function createSendTools(o: {
         const halt = stop()
         if (halt) throw halt
         await field.pressSequentially(piece, {
-          delay: Math.min(Math.round(between(typing.charMs)), cap),
+          delay: Math.min(Math.round(between(tp.charMs)), cap),
         })
       }
     }
@@ -253,6 +255,19 @@ export function createSendTools(o: {
       })
       typedMapKept = true
     } catch {}
+  }
+
+  /**
+   * Whether the page's chat has moved on from what the core saw. With `afterOwn` (the series after a bid) lines of our
+   * own side after the expected message are no move: the site adds its own line about the bid (price, contacts) when
+   * the stored chat was read, and a word of the client or of a side nobody knows is still a move.
+   */
+  const chatMoved = (messages: Seen[], expect: string | null, afterOwn: boolean): boolean => {
+    if ((messages.at(-1)?.id ?? null) === expect) return false
+    if (!afterOwn) return true
+    const at = expect === null ? -1 : messages.findIndex((m) => m.id === expect)
+    if (expect !== null && at < 0) return true
+    return messages.slice(at + 1).some((m) => m.author !== 'specialist' && m.author !== 'system')
   }
 
   /** After a press, or when a twin pressed: only a look whether the message is in the chat. */
@@ -308,7 +323,7 @@ export function createSendTools(o: {
     if (bubbles.length > 0 && bubbles.every((m) => m.text.trim() === ''))
       throw fail('LAYOUT_CHANGED', 'Сообщения чата прочитались без слов, сообщение не набрано')
     const last = bubbles.at(-1)?.id ?? null
-    if (last !== i.expect_last_message_id)
+    if (chatMoved(bubbles, i.expect_last_message_id, i.after_own === true))
       throw fail(
         'CHAT_CHANGED',
         `В чате ${i.chat_id} последнее сообщение ${last ?? 'пусто'}, а ядро видело ${i.expect_last_message_id ?? 'пусто'}: ничего не набрано`,
@@ -346,12 +361,14 @@ export function createSendTools(o: {
     if (early) throw early
 
     const want = i.text.replace(/\r\n?/g, '\n')
+    // The series after a bid is typed at once, a person's pace is for the talk (Boris, 31.10.2026).
+    const tp: Typing = i.quick ? QUICK_TYPING : typing
     // From the written press on, the message may be in the chat: nothing is a plain failure any more.
     let pressed = false
     try {
       // Like a person: into the field, a look at the chat, then the words.
       await field.click({ timeout: 5000 })
-      await sleep(between(typing.lookMs))
+      await sleep(between(tp.lookMs))
       if ((await field.inputValue()) !== '') await clearDraft(field)
       // The button before the words: a microphone while the field is empty (old Sara). It must change with the text.
       const button = field.locator(CHAT_SEND_PATH)
@@ -367,7 +384,7 @@ export function createSendTools(o: {
         return button.evaluate((el) => el.outerHTML)
       }
       const emptyButton = await buttonNow()
-      await typeIn(page, field, i.text, stop)
+      await typeIn(page, field, i.text, stop, tp)
       let got = await field.inputValue()
       // The field did not take it as typed: old Sara's way, the whole text at once.
       if (got !== want) {
@@ -390,7 +407,7 @@ export function createSendTools(o: {
       } catch {
         throw fail('LAYOUT_CHANGED', 'Кнопку отправки нельзя нажать, сообщение не отправлено')
       }
-      await sleep(between(typing.lookMs))
+      await sleep(between(tp.lookMs))
       const late = stop()
       if (late) throw late
 
@@ -399,7 +416,10 @@ export function createSendTools(o: {
       const fresh = await o.parsers.fromChatDom(page, i.chat_id, { waitMs: 0 })
       await r.eyes.onChatRead(i.chat_id, fresh).catch(() => {})
       const lastNow = messagesOf(fresh).at(-1)?.id ?? null
-      if (lastNow !== i.expect_last_message_id || (await field.inputValue()) !== want)
+      if (
+        chatMoved(messagesOf(fresh), i.expect_last_message_id, i.after_own === true) ||
+        (await field.inputValue()) !== want
+      )
         throw fail(
           'CHAT_CHANGED',
           `Пока набирался текст, чат ${i.chat_id} изменился (последнее сообщение ${lastNow ?? 'пусто'}): ничего не отправлено`,

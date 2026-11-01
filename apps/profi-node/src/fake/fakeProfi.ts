@@ -65,11 +65,19 @@ export type FakeProfi = {
     read?: boolean
     sentAt?: string
   }): Promise<{ platformMessageId: string; eventId: string | null }>
+  /**
+   * The line the real site puts into a chat right behind the client's first word («Сообщите, если договоритесь
+   * работать с клиентом»); on by default, null turns it off. It is the last message the core reads, and it hides
+   * the client's word from a check that looks only at the last message (Boris, 31.10).
+   */
+  setSystemLineAfterFirstClient(text: string | null): void
   emitTyping(chatId: string): Promise<void>
   emitRead(chatId: string, platformMessageId: string): Promise<void>
   redeliver(eventId: string): Promise<void>
   failNextAck(): void
   failAcks(n: number): void
+  /** The next `times` sends are refused with this class and nothing is typed (UNCERTAIN: the node was restarting). */
+  refuseSends(errorClass: ProfiErrorClass, times?: number): void
   /** The next send goes out and is recorded, then its answer is lost. */
   failNextSendAck(): void
   setCoreEventsUrl(url: string): void
@@ -147,6 +155,7 @@ export async function createFakeProfi(o: {
   let balance = 5000
   let dropAcks = 0
   let dropSendAcks = 0
+  let sendRefusal: { errorClass: ProfiErrorClass; times: number } | null = null
   let coreEventsUrl = o.coreEventsUrl
   // The fee of the fake site for every order; null: each order's own, as emitted (210 when it has none).
   let fee: number | null = null
@@ -175,6 +184,8 @@ export async function createFakeProfi(o: {
   const change = () => changed?.()
 
   /** Appends to the chat in page order; a message without its own time comes after the chat's last one. */
+  let systemLine: string | null = 'Сообщите, если договоритесь работать с клиентом'
+
   function append(
     chatId: string,
     m: {
@@ -301,11 +312,28 @@ export async function createFakeProfi(o: {
       if (!verifyMessagePermit(o.permitSecret, m, i.permit)) {
         throw new ProfiToolError('INTERNAL', 'permit does not match this message')
       }
+      if (sendRefusal && sendRefusal.times > 0 && !sentMessages.has(i.idempotency_key)) {
+        sendRefusal.times--
+        throw new ProfiToolError(
+          sendRefusal.errorClass,
+          `the fake refuses to send: ${sendRefusal.errorClass}`,
+        )
+      }
       // A repeat answers first, before the check: its chat already has the message it sent.
       let out = sentMessages.get(i.idempotency_key)
       if (!out) {
         const last = chats.get(i.chat_id)?.messages.at(-1)?.platform_message_id ?? null
-        if (i.expect_last_message_id !== last) {
+        // The series after a bid: lines of our own side after the expected one are no change.
+        const seen = chats.get(i.chat_id)?.messages ?? []
+        const at =
+          i.expect_last_message_id === null
+            ? -1
+            : seen.findIndex((m) => m.platform_message_id === i.expect_last_message_id)
+        const ownOnly =
+          i.after_own === true &&
+          (i.expect_last_message_id === null || at >= 0) &&
+          seen.slice(at + 1).every((m) => m.author === 'specialist' || m.author === 'system')
+        if (i.expect_last_message_id !== last && !ownOnly) {
           throw new ProfiToolError(
             'CHAT_CHANGED',
             `chat ${i.chat_id} ends with ${last ?? 'nothing'}, not ${i.expect_last_message_id ?? 'nothing'}`,
@@ -386,7 +414,10 @@ export async function createFakeProfi(o: {
     async emitOrder(partial) {
       const base = sampleOrders()[0]
       if (!base) throw new Error('no sample orders')
-      const order: ProfiOrder = { ...base, seen_at: new Date().toISOString(), ...partial }
+      // The sample text is short; a few more sentences give it the client's own words the screen asks for (15), so a
+      // test order is not marked as a thin one and keeps its score. A test that needs a thin text passes its own.
+      const text = `${base.text} Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.`
+      const order: ProfiOrder = { ...base, text, seen_at: new Date().toISOString(), ...partial }
       emitted.set(order.order_id, order)
       change()
       const e: EventEnvelope = {
@@ -407,7 +438,11 @@ export async function createFakeProfi(o: {
       return e.id
     },
     async addChatMessage(m) {
+      const firstClient =
+        m.author === 'client' && !chats.get(m.chatId)?.messages.some((x) => x.author === 'client')
       const { message, orderId } = append(m.chatId, { ...m, read: m.read ?? false })
+      if (firstClient && systemLine)
+        append(m.chatId, { author: 'system', text: systemLine, read: true })
       const type = MESSAGE_EVENTS[m.author]
       const eventId = type
         ? await shipChatEvent(type, m.chatId, () => ({
@@ -419,6 +454,9 @@ export async function createFakeProfi(o: {
           }))
         : null
       return { platformMessageId: message.platform_message_id, eventId }
+    },
+    setSystemLineAfterFirstClient(text) {
+      systemLine = text
     },
     async emitTyping(chatId) {
       await shipChatEvent('profi.client_typing', chatId, (at) => ({ chat_id: chatId, at }))
@@ -440,6 +478,9 @@ export async function createFakeProfi(o: {
     },
     failAcks(n) {
       dropAcks = n
+    },
+    refuseSends(errorClass, times = 1) {
+      sendRefusal = { errorClass, times }
     },
     failNextSendAck() {
       dropSendAcks = 1

@@ -44,6 +44,7 @@ export type AppDeps = {
     taskId: string
     text: string | null
     priceRub: number | null
+    priceToRub?: number | null
     followUps?: string[] | null
   }) => Promise<{
     saved: boolean
@@ -55,6 +56,8 @@ export type AppDeps = {
   mindWriter?: MindWriter
   /** The host's backup log for the health screen (config.backupLog). */
   backupLog?: string
+  /** A Google Sheet is linked (config.sheet): «Состояние» shows whether it keeps up. */
+  sheetLinked?: boolean
 }
 
 export type AccountConfig = { id: string; title: string; egressIp: string }

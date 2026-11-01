@@ -92,6 +92,21 @@ async function turn(id: string, o: Partial<typeof convTurn.$inferInsert> = {}) {
 }
 
 describe('the draft card', () => {
+  it('FR-CONV-3: after the switch the card is a short head, the draft as a quote, one line of why and a fold', async () => {
+    await turn('t-1')
+    await db
+      .update(convTurn)
+      .set({ decisionReason: 'не прошло проверку: «нет примеров». Длинное объяснение..' })
+      .where(eq(convTurn.id, 't-1'))
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await sendTurnCard({ db, notifier }, 't-1')
+    const text = sent[0]?.text ?? ''
+    expect(text).toContain('<b>✍️ Ответ Сары:</b>')
+    expect(text).toContain('Почему черновик: не прошло проверку: «нет примеров».')
+    expect(text).toContain('<blockquote expandable>Длинное объяснение.')
+    expect(text).not.toMatch(/\.\.(?!\.)/)
+  })
+
   it('FR-CONV-3: the draft card shows the draft, what Sara would do and the mind ids', async () => {
     await turn('t-1')
     const r = await sendTurnCard({ db, notifier }, 't-1')
@@ -99,9 +114,14 @@ describe('the draft card', () => {
     const card = sent[0]
     expect(card?.text).toContain('Анна')
     expect(card?.text).toContain('Сайт для клиники')
-    expect(card?.text).toContain('Сколько стоит и когда начнём?')
+    // The client's words came a moment before as their own message; the mind's ids are not for Boris.
+    expect(card?.text).not.toContain('Сколько стоит и когда начнём?')
+    expect(card?.text).toContain('<blockquote>')
+    expect(card?.text).toContain('<b>Ответила бы так:</b>')
+    expect(card?.text).not.toContain('Опора')
+    expect(card?.text).not.toMatch(/\.\.(?!\.)/)
     expect(card?.text).toContain('Начнём с короткого созвона')
-    expect(card?.text).toContain('k-process-start')
+    expect(card?.text).not.toContain('k-process-start')
     expect(card?.text).toContain('сомнение')
     expect(card?.text).toMatch(/Режим тени: клиенту ничего не ушло/)
     const actions = card?.rows.flat().map((b) => b.callbackData.split(':')[2])
@@ -160,7 +180,7 @@ describe('the draft card', () => {
   })
 
   describe('a call for Boris with a draft', () => {
-    const DRAFT = 'Понимаю, вопрос о стоимости. Борис ответит вам лично, когда посмотрит задачу.'
+    const DRAFT = 'Понимаю, вопрос о стоимости. Уложимся в ваш бюджет, детали посмотрим на созвоне.'
     const call = (id: string, o: Partial<typeof convTurn.$inferInsert> = {}) =>
       turn(id, {
         decision: 'call_boris',

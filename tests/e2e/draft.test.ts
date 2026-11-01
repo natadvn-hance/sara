@@ -244,7 +244,7 @@ describe('the draft on the card', () => {
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
     expect(cards()[0]?.text).toContain(`<blockquote>${DRAFT}</blockquote>`)
-    expect(cards()[0]?.text).toContain(`услуга 90${NBSP}000${NBSP}₽`)
+    expect(cards()[0]?.text).toContain(`услуга от 90${NBSP}000${NBSP}₽ до 135${NBSP}000${NBSP}₽`)
     expect(cards()[0]?.text).toContain(
       '<b>Хочет:</b> Боится долгого запуска\n<b>Риск:</b> Объём больше, чем звучит\n<b>Брать, если:</b> сроки понятны',
     )
@@ -279,7 +279,7 @@ describe('the draft on the card', () => {
     await fake.emitOrder({
       order_id: orderId(),
       client_name: 'Ирина',
-      text: 'Меня зовут Ирина, нужен сайт для клиники.',
+      text: 'Меня зовут Ирина, нужен сайт для клиники. Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.',
     })
     await until(() => cards().length === 1)
     const stdins = (await readFile(claudeLog, 'utf8'))
@@ -365,7 +365,7 @@ describe('the order page name', () => {
     await fake.emitOrder({
       order_id: id,
       client_name: '',
-      text: 'Меня зовут Ольга Петрова, нужен сайт для клиники.',
+      text: 'Меня зовут Ольга Петрова, нужен сайт для клиники. Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.',
     })
     await until(async () => (await leadOf(id))?.status === 'scored_out')
     await db
@@ -404,7 +404,24 @@ describe('the bid', () => {
     tg.pushPress(111, button(cards()[0], 'bid'))
     await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
-    expect(fake.bids[0]).toMatchObject({ order_id: id, text: DRAFT, price_rub: 90000 })
+    expect(fake.bids[0]).toMatchObject({
+      order_id: id,
+      text: DRAFT,
+      price_rub: 90000,
+      price_to_rub: 135000,
+    })
+  })
+
+  it('FR-LEAD-8: the Analyst’s own range goes to the card and the form, «до» not above the budget (31.10.2026)', async () => {
+    byRole = { ...byRole, analyst: { ...ANALYST, price_rub: 40000, price_to_rub: 90000 } }
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.text).toContain(`услуга от 40${NBSP}000${NBSP}₽ до 90${NBSP}000${NBSP}₽`)
+    expect(await leadOf(id)).toMatchObject({ draftPriceRub: 40000, draftPriceToRub: 90000 })
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.shown('✅ Отклик отправлен'))
+    expect(fake.bids[0]).toMatchObject({ price_rub: 40000, price_to_rub: 90000 })
   })
 
   it('FR-LEAD-7: «Откликнуться» without a draft asks for «Изменить» and records nothing', async () => {
@@ -443,6 +460,19 @@ describe('the pult', { timeout: 30000 }, () => {
     })
     return { status: r.status, body: (await r.json()) as { message?: string; error?: string } }
   }
+
+  it('FR-LEAD-7: a range from the pult goes to the bid, and a price alone brings back half again over «от» (31.10.2026)', async () => {
+    const cookie = await owner()
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => cards().length === 1)
+    const r = await post(cookie, `/api/leads/${id}/text`, { priceRub: 30000, priceToRub: 60000 })
+    expect(r.status).toBe(200)
+    expect(await leadOf(id)).toMatchObject({ draftPriceRub: 30000, draftPriceToRub: 60000 })
+    tg.pushPress(111, button(cards()[0], 'bid'))
+    await until(() => tg.shown('✅ Отклик отправлен'))
+    expect(fake.bids[0]).toMatchObject({ price_rub: 30000, price_to_rub: 60000 })
+  })
 
   it('FR-LEAD-7: the pult saves a new text and price with no new card, and the bid goes with them', async () => {
     const cookie = await owner()
@@ -502,7 +532,7 @@ describe('«Изменить»', { timeout: 30000 }, () => {
     await until(() => said(SAVED))
     expect(cards()).toHaveLength(2)
     expect(cards()[1]?.text).toContain(`<blockquote>Ирина, добрый день!\n\n${NEW}</blockquote>`)
-    expect(cards()[1]?.text).toContain(`услуга 90${NBSP}000${NBSP}₽`)
+    expect(cards()[1]?.text).toContain(`услуга от 90${NBSP}000${NBSP}₽ до 135${NBSP}000${NBSP}₽`)
     expect(await leadOf(id)).toMatchObject({
       draftText: `Ирина, добрый день!\n\n${NEW}`,
       draftPriceRub: 90000,

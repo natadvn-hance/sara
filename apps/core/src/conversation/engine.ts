@@ -1,4 +1,7 @@
 import { InterlocutorOutput } from '@sara/shared'
+import { fillCallOffer, isCallOffer, type SlotSource } from '../leads/callSlots'
+import { addressName } from '../leads/clientName'
+import { chosenSites, siteLine, sitesForBid } from '../leads/siteOrder'
 import { agreesToCallProposal, detectCallRequest } from './callDetector'
 import { caseLink } from './caseLink'
 import { namesCase } from './check/caseChecks'
@@ -147,6 +150,24 @@ const recalledIds = (r: Recall, cases: CaseHit[]) =>
     ...cases,
   ].map((h) => h.id)
 
+/** The times a call can be offered, none without a source or when it fails. */
+async function callTimesFor(
+  slots: SlotSource | undefined,
+  now: Date,
+  leadId?: string | null,
+): Promise<Date[]> {
+  if (!slots) return []
+  try {
+    return await slots.slots(now, leadId ? { leadId } : undefined)
+  } catch (e) {
+    console.error('call slots failed', e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
+/** Where the mark stands when there are no times: the question stays whole. */
+const NO_TIMES = 'в удобное для вас время'
+
 /** A fault of the case in a reply: the rewrite after one may not tell a case at all. */
 const isCaseIssue = (x: CheckIssue) => x.id.startsWith('case.') || x.id === 'checker.case'
 
@@ -156,7 +177,13 @@ const isCaseIssue = (x: CheckIssue) => x.id.startsWith('case.') || x.id === 'che
  */
 export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<TurnPlan> {
   const d = input.dossier
-  const r = await recall(deps.mind, d)
+  // The times of a call are the program's (Boris, 31.10.2026): the model puts a mark, the program puts real times in.
+  const callTimes = await callTimesFor(deps.slots, input.now, input.leadId)
+  const r: Recall = {
+    ...(await recall(deps.mind, d)),
+    sites: d.order ? await sitesForBid(deps.mind, d.order, input.settings.blockedLinks) : [],
+    hasCallSlots: callTimes.length > 0,
+  }
   const said = clientTurn(d)
   // A phone or a word of a call, or a bare «да» to our message that proposed a call.
   const firstOfTurn = d.messages.findIndex((m) => d.turnMessageIds.includes(m.platformMessageId))
@@ -221,7 +248,12 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
       clientTurnText: said,
       ourPrevious,
       bannedPhrases: banned,
-      cases: { offered, told, choice },
+      cases: {
+        offered,
+        told,
+        choice,
+        sitesShown: (r.sites?.length ?? 0) > 0 && (output.sites?.length ?? 0) > 0,
+      },
     })
     if (output.move === 'reply' && output.text) {
       const checker = await runCheckerRole(deps.gateway, {
@@ -246,8 +278,21 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     if (output.move === 'call_boris') break
     withoutCase = issues.some(isCaseIssue)
   }
+  const sendable = issues.length === 0 || output?.move === 'call_boris'
+  if (sendable && output && output.move !== 'none' && output.text && isCallOffer(output.text))
+    output = { ...output, text: fillCallOffer(output.text, callTimes, input.now, NO_TIMES) }
+  // The name is called by its formal first name, or left out when the profile gives none (Boris, 01.11.2026).
+  if (output?.text) output = { ...output, text: addressName(output.text, input.names) }
+  // The sites of Hance shown to a client of a site order are the code's too: the lines come from the record, never from
+  // the model's text (Boris, 31.10.2026: to «покажите примеры» show sites, not a case of another niche).
+  const shownSites =
+    issues.length === 0 && output?.move === 'reply' && output.text && output.sites?.length
+      ? chosenSites(r.sites ?? [], output.sites)
+      : []
+  if (shownSites.length > 0 && output)
+    output = { ...output, text: `${output.text}\n\n${shownSites.map(siteLine).join('\n')}` }
   // The link of a case is the code's: put after the checks, when the client asked and the case allows it.
-  if (issues.length === 0 && output?.move === 'reply' && output.text && chosen) {
+  else if (issues.length === 0 && output?.move === 'reply' && output.text && chosen) {
     const link = caseLink(chosen, output.case?.moment ?? null, input.settings.blockedLinks)
     if (link) output = { ...output, text: `${output.text}\n\n${link}` }
   }

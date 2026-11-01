@@ -95,9 +95,9 @@ export const SETTINGS = {
    */
   'conv.autopilot': { schema: z.boolean(), default: false },
   /** FR-CONV-7: the turn waits this long after the last client message the core heard... */
-  'conv.quiet_after_message_s': { schema: z.number().int().positive(), default: 45 },
+  'conv.quiet_after_message_s': { schema: z.number().int().positive(), default: 15 },
   /** ...and this long after the last «печатает». */
-  'conv.quiet_after_typing_s': { schema: z.number().int().positive(), default: 20 },
+  'conv.quiet_after_typing_s': { schema: z.number().int().positive(), default: 10 },
   /** FR-CONV-7: never longer than this from the first message of the turn. */
   'conv.max_wait_s': { schema: z.number().int().positive(), default: 600 },
   /** FR-CONV-8: Moscow hours when only urgent replies go to a client. */
@@ -120,6 +120,17 @@ export const SETTINGS = {
   'links.blocked': {
     schema: z.array(z.string().trim().min(3).max(200)).max(50),
     default: ['nexum.su'] as string[],
+  },
+  /**
+   * Boris's Telegram nick for the last message of the series, «@bmnoian» (31.10.2026); an empty one turns the message
+   * off.
+   */
+  'series.telegram': {
+    schema: z
+      .string()
+      .trim()
+      .regex(/^(@[A-Za-z0-9_]{4,32})?$/),
+    default: '@bmnoian',
   },
   /** Boris's working days for calls, 1 Monday to 7 Sunday. */
   'calls.work_days': {

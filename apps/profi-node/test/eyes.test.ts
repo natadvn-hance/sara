@@ -287,13 +287,13 @@ describe('eyes', () => {
     const e = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
     expect(e.board()).toBeNull()
     await e.onParsed({ recognized: true, what: 'feed', signals: [], more: true }, 'response')
-    expect(e.board()).toEqual({ seq: 1, more: true })
+    expect(e.board()).toEqual({ seq: 1, more: true, total: null })
     await e.onParsed({ recognized: true, what: 'feed', signals: [], more: false }, 'response')
-    expect(e.board()).toEqual({ seq: 2, more: false })
+    expect(e.board()).toEqual({ seq: 2, more: false, total: null })
     // The feed page read from its elements is no board answer; nor is one the readers did not recognize.
     await e.onParsed({ recognized: true, what: 'feed', signals: [] }, 'dom')
     await e.onParsed({ recognized: false, signals: [] }, 'response')
-    expect(e.board()).toEqual({ seq: 2, more: false })
+    expect(e.board()).toEqual({ seq: 2, more: false, total: null })
   })
 
   const boardOrder = (id: string) => ({

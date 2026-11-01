@@ -29,7 +29,7 @@ export type Notifier = {
   sendButtons(
     text: string,
     rows: { text: string; callbackData: string }[][],
-    o?: { loud?: boolean; place?: Place; notice?: NoticeHint },
+    o?: { html?: boolean; loud?: boolean; place?: Place; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
   typing?(): Promise<void>
@@ -43,6 +43,7 @@ export type Notifier = {
     messageId: number,
     text: string,
     rows?: { text: string; callbackData: string }[][],
+    o?: { html?: boolean },
   ): Promise<void>
   /**
    * The client's topic ends (the conversation closed): `outcome` is its last line, the name says so and the topic
