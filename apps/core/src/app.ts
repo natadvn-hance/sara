@@ -27,6 +27,8 @@ import { registerConversationRoutes } from './conversation/routes'
 import { setSendDeps, startSendJob } from './conversation/sendFlow'
 import { prepareJob } from './conversation/sendJob'
 import { SEND_TEXTS } from './conversation/sendTexts'
+import { backfillTalking } from './conversation/stage'
+import { resetFalseClosedSteps } from './conversation/topicSteps'
 import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
@@ -476,7 +478,17 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
-  const owed = startOwed({ db, notifier: bot.notifier }, o.learningTickMs)
+  // Once each: deals whose client already answered move on to talking, and the false «закрыт на сайте» marks go.
+  void backfillTalking(db).catch((e) =>
+    console.error('deal stages pass failed', e instanceof Error ? e.message : e),
+  )
+  void resetFalseClosedSteps(db).catch((e) =>
+    console.error('closed steps reset failed', e instanceof Error ? e.message : e),
+  )
+  const owed = startOwed(
+    { db, notifier: bot.notifier, getOrder: (a, id) => profi.getOrder(a, id) },
+    o.learningTickMs,
+  )
   // The conversations whose last client word got no real turn (a site line once hid it, a node restart cut the turn)
   // get theirs, once the node answers and then every ten minutes.
   const catchUp = startCatchUp({

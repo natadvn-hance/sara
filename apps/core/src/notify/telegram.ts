@@ -713,11 +713,17 @@ export function createTelegramRuntime(d: {
           if (!f || !t) return
           const name = `${dot} ${withoutDot(t.name)}`.slice(0, 128 - CLOSED_MARK.length)
           if (name === t.name) return
-          await bot.api
-            .editForumTopic(f.chatId, t.threadId, {
+          try {
+            await bot.api.editForumTopic(f.chatId, t.threadId, {
               name: t.closedAt ? `${name}${CLOSED_MARK}` : name,
             })
-            .catch(logTopic('topic not renamed'))
+          } catch (e) {
+            // Deleted by hand: the topic is forgotten, so the next message makes a new one (and its history is shown again).
+            if (TOPIC_GONE.test(short(e))) return void (await dropTopic(d.db, f.chatId, t.key))
+            // Telegram refused: the name we keep stays the one Telegram has. The same name already is no refusal.
+            if (!/TOPIC_NOT_MODIFIED|not modified/i.test(short(e)))
+              return logTopic('topic not renamed')(e)
+          }
           await renameTopic(d.db, f.chatId, t.key, name)
         } catch (e) {
           console.error('topic stage', short(e))

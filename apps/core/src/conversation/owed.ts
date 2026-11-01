@@ -11,7 +11,7 @@ import { NOT_TEST } from '../testLeads/sql'
 import { rowsFor } from './cards'
 import { CONV_TEXTS } from './texts'
 import { moscowHour } from './time'
-import { topicStages, topicSteps } from './topicSteps'
+import { type StepDeps, topicStages, topicSteps } from './topicSteps'
 
 /**
  * A client must not be left without an answer (Boris, 31.10: «вот тут не ответили клиенту, нельзя»). In drafts mode an
@@ -34,6 +34,8 @@ const MORNING = 9
 
 export type OwedDeps = {
   db: Db
+  /** The order page, for the step «Заказ закрыт на сайте» (see topicSteps). */
+  getOrder?: StepDeps['getOrder']
   notifier: Pick<
     Notifier,
     'sendText' | 'sendButtons' | 'markDone' | 'topicLink' | 'forumOn' | 'setTopicStage'
