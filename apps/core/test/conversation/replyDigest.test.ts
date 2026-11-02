@@ -274,6 +274,13 @@ describe('which replies of Boris get in', () => {
     expect(sent[0]?.rows.every((r) => r.length === 2)).toBe(true)
   })
 
+  it('FR-SPEECH-5: a reply close to the draft is no lesson, even with nothing else to show', async () => {
+    const draft = 'Стоимость зависит от объема работ, обсудим на созвоне завтра.'
+    await pair({ draft, reply: `${draft} Хорошо` })
+    expect(await replyDigest(d(), NOW)).toBe('empty')
+    expect(calls).toHaveLength(0)
+  })
+
   it('FR-SPEECH-5: test orders stay out', async () => {
     await pair({ chatId: '99000000001' })
     expect(await replyDigest(d(), NOW)).toBe('empty')
@@ -383,6 +390,35 @@ describe('the post', () => {
     expect(calls[0]?.opts?.redact?.restore).toBe(false)
   })
 
+  it('NFR-PRIV-2: a chat with no name on the board stays out, whatever word stands before the first comma', async () => {
+    await pair({ name: null, reply: 'Ничем, если нужен просто сайт, начнем с разбора' })
+    expect(await replyDigest(d(), NOW)).toBe('empty')
+    expect(calls).toHaveLength(0)
+  })
+
+  it('NFR-PRIV-2: a word of Boris before the first comma is his word, not a name to hide', async () => {
+    const p = await pair({ name: 'Анна', reply: 'Ничем, если нужен просто сайт, начнем с разбора' })
+    expect(await replyDigest(d(), NOW)).toBe('sent')
+    expect((await pickOf(p.turnId)).replyText).toBe(
+      'Ничем, если нужен просто сайт, начнем с разбора',
+    )
+  })
+
+  it('NFR-PRIV-2: the name from the order page is hidden too, not only the one on the board', async () => {
+    const p = await pair({
+      name: 'Ирина',
+      client: 'Волкова беспокоит, Ирина',
+      reply: 'Добрый день! Ответила бы Волковой так, начнем с разбора',
+    })
+    await db
+      .update(lead)
+      .set({ clientInfo: { name: 'Ирина Волкова' } })
+      .where(eq(lead.id, p.chatId))
+    expect(await replyDigest(d(), NOW)).toBe('sent')
+    expect(sent[0]?.text).not.toMatch(/Ирин|Волков/)
+    expect(calls[0]?.input).not.toMatch(/Ирин|Волков/)
+  })
+
   it('NFR-PRIV-2: the journal keeps only numbers and references, no text of a chat', async () => {
     const p = await pair({ client: 'Секрет клиента в словах', reply: 'Секрет Бориса в его ответе' })
     await replyDigest(d(), NOW)
@@ -405,7 +441,7 @@ describe('the post', () => {
       })
     expect(await replyDigest(d(), NOW)).toBe('sent')
     expect(sent[0]?.text.length).toBeLessThanOrEqual(4096)
-    expect(sent[0]?.text).not.toMatch(/[—–]/)
+    expect(sent[0]?.text).not.toMatch(/[\u2014\u2013]/)
   })
 
   it('FR-SPEECH-5: the pairs wait in no inbox of the pult: the post is their one place', async () => {

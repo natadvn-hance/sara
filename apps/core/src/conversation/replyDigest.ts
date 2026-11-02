@@ -20,6 +20,7 @@ import {
   conversation,
   convTurn,
   jobRun,
+  lead,
   meeting,
   mindProposal,
   replyPick,
@@ -36,9 +37,7 @@ import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { notTest } from '../testLeads/sql'
 import { similarity } from './compare'
-import { clientNames } from './dossier'
 import { dealOf } from './stage'
-import { rowOf } from './store'
 
 /**
  * The daily post of Boris's own replies (FR-SPEECH-5, docs/product/boris-replies-digest.md). Code picks the replies that
@@ -225,7 +224,15 @@ async function hideData(db: Db, list: Candidate[]): Promise<Hidden[]> {
   const out: Hidden[] = []
   for (const c of list) {
     if (out.length === MAX_PAIRS) break
-    const names = namesToHide(...(await clientNames(db, rowOf(c.conv))))
+    // Only the names the order itself gives: guessing one from the first words of a chat would hide Boris's own word
+    // («Ничем, если...») and let a chat through with its real name unknown. A chat old Sara began has no lead here.
+    const [known] = c.conv.orderId
+      ? await db
+          .select({ name: lead.clientName, info: lead.clientInfo })
+          .from(lead)
+          .where(eq(lead.id, c.conv.orderId))
+      : []
+    const names = namesToHide(known?.name, (known?.info as { name?: string | null } | null)?.name)
     if (names.length === 0) continue
     const r = createRedactor(names)
     out.push({
