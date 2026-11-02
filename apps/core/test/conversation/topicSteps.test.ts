@@ -140,10 +140,10 @@ describe('the steps in the topic', () => {
     await ev('profi.order_gone', { kind: 'order', id: ORDER, payload: {} })
     const closed = { ...deps, getOrder: async () => ({ open: false, from_page: true }) }
     expect(await topicSteps(closed, new Date())).toBe(3)
-    expect(steps.map((s) => s.text).sort()).toEqual([
-      '👁 Клиент прочитал отклик',
-      '📁 Заказ закрыт на сайте',
-      '📞 Созвон назначен',
+    expect(steps.map((s) => s.text.replace(/ · .*$/, '')).sort()).toEqual([
+      '<i>👁 Клиент прочитал отклик',
+      '<i>📁 Заказ закрыт на сайте',
+      '<i>📞 Созвон назначен',
     ])
     expect(steps.every((s) => s.quiet && (s.place as { order: string }).order === ORDER)).toBe(true)
     // Never twice.
@@ -164,7 +164,7 @@ describe('the steps in the topic', () => {
     // The page itself says closed: shown, once.
     answer = { open: false, from_page: true }
     expect(await topicSteps(withPage, new Date(Date.now() + 80 * 60_000))).toBe(1)
-    expect(steps.map((x) => x.text)).toEqual(['📁 Заказ закрыт на сайте'])
+    expect(steps.map((x) => x.text.replace(/ · .*$/, ''))).toEqual(['<i>📁 Заказ закрыт на сайте'])
     expect(await topicSteps(withPage, new Date(Date.now() + 120 * 60_000))).toBe(0)
   })
 

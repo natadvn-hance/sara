@@ -161,7 +161,7 @@ describe('a conversation end to end', () => {
     const saidNow = () => tg.sent.filter((m) => !m.reply_markup && m.text.startsWith('💬 '))
     await until(() => saidNow().length === 3)
     const said = saidNow()
-    expect(said.map((m) => m.text.replace(/^💬 [^:]+: /, ''))).toEqual([
+    expect(said.map((m) => /<blockquote>(.*)<\/blockquote>/s.exec(m.text)?.[1])).toEqual([
       'Здравствуйте',
       'Как начнём?',
       'И по срокам',

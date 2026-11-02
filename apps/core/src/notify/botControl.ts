@@ -69,6 +69,7 @@ export function createBotControl(d: {
         closeTopic: async (place, outcome) => current().notifier.closeTopic?.(place, outcome),
         topicLink: async (place) => (await current().notifier.topicLink?.(place)) ?? null,
         setTopicStage: async (place, dot) => current().notifier.setTopicStage?.(place, dot),
+        topicPosts: async (place) => (await current().notifier.topicPosts?.(place)) ?? [],
         forumOn: async () => (await current().notifier.forumOn?.()) ?? false,
       },
       d.db,

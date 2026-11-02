@@ -29,6 +29,7 @@ import {
   topicByThread,
   topicIntro,
   topicKey,
+  topicPostRefs,
   unbindForum,
   withoutDot,
 } from './forum'
@@ -476,9 +477,8 @@ export function createTelegramRuntime(d: {
         conversationId: k.conversationId,
         name,
       })
-      const m = await bot.api.sendMessage(chatId, intro, {
+      const m = await sendHtml(chatId, intro, {
         message_thread_id: thread,
-        link_preview_options: { is_disabled: true },
         disable_notification: true,
       })
       await postRef(d.db, chatId, m.message_id, thread)
@@ -539,9 +539,21 @@ export function createTelegramRuntime(d: {
    */
   async function post(
     place: Place | undefined,
-    send: (to: number, where: { message_thread_id?: number }) => Promise<Message>,
+    send0: (to: number, where: { message_thread_id?: number }) => Promise<Message>,
   ): Promise<number> {
     const where = (s: Spot) => (s.thread === undefined ? {} : { message_thread_id: s.thread })
+    // A flood limit is waited out (Telegram says for how long), a few times; any other refusal goes on as it did.
+    const send: typeof send0 = async (to, w) => {
+      for (let tries = 0; ; tries++) {
+        try {
+          return await send0(to, w)
+        } catch (err) {
+          const wait = err instanceof GrammyError ? err.parameters?.retry_after : undefined
+          if (!wait || tries >= 3) throw err
+          await new Promise((r) => setTimeout(r, (wait + 1) * 1000))
+        }
+      }
+    }
     try {
       let s = await spot(place)
       if (!s.forum) return (await send(s.to, {})).message_id
@@ -728,6 +740,13 @@ export function createTelegramRuntime(d: {
         } catch (e) {
           console.error('topic stage', short(e))
         }
+      },
+      async topicPosts(place) {
+        const f = await forumOf(d.db).catch(() => null)
+        const k = f ? await topicKey(d.db, place) : null
+        const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+        if (!f || !t) return []
+        return topicPostRefs(d.db, f.chatId, t.threadId)
       },
       async forumOn() {
         return (await forumOf(d.db).catch(() => null)) !== null

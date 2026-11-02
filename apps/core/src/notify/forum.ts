@@ -1,9 +1,17 @@
 import type { FunnelStage } from '@sara/shared'
-import { and, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
-import { conversation, forumTopic, lead, telegramForum, telegramPost } from '../db/schema'
+import {
+  conversation,
+  forumTopic,
+  lead,
+  telegramForum,
+  telegramPost,
+  topicShown,
+} from '../db/schema'
 import { firstName } from '../leads/clientName'
 import type { Place } from './notifier'
+import { introPost } from './topicPosts'
 
 /** Boris's forum (docs/product/telegram-forum.md), null while he has none: then everything goes to his chat. */
 export type Forum = { chatId: number; title: string | null; leadsThreadId: number | null }
@@ -156,21 +164,13 @@ export function topicName(o: {
   return `${dot}${[head, cut].filter(Boolean).join(' · ') || 'Клиент'}`
 }
 
-const orderUrl = (orderId: string) =>
-  `https://profi.ru/backoffice/n.php?o=${encodeURIComponent(orderId)}`
-
-/** The name of a new topic and its first message: what the order is, in a few lines, with its link. */
+/** The name of a new topic and its first message: what the order is, laid out (HTML). */
 export async function topicIntro(
   db: DbOrTx,
   key: string,
 ): Promise<{ name: string; intro: string }> {
   const orderId = key.startsWith('conv:') ? null : key
-  const [l] = orderId
-    ? await db
-        .select({ title: lead.title, clientName: lead.clientName, text: lead.text })
-        .from(lead)
-        .where(eq(lead.id, orderId))
-    : []
+  const [l] = orderId ? await db.select().from(lead).where(eq(lead.id, orderId)) : []
   // The stage is the pult's own (loaded here, not at the top: the pult reaches back into the notifier).
   const { stageForKey } = await import('../pult/clients')
   const stage = await stageForKey(db, key)
@@ -180,17 +180,53 @@ export async function topicIntro(
     title: l?.title ?? null,
     stage,
   })
-  const text = l?.text ? oneLine(l.text) : ''
-  const intro = [
-    `📌 ${l?.title ?? (orderId ? `Заказ №${orderId}` : 'Клиент без заказа')}`,
-    l?.clientName ? `Клиент: ${l.clientName}` : null,
-    text ? (text.length > 400 ? `${text.slice(0, 399).trimEnd()}…` : text) : null,
-    orderId ? orderUrl(orderId) : null,
-    'Здесь всё по этому клиенту. Напиши сюда текст, и я предложу отправить его клиенту.',
-  ]
-    .filter(Boolean)
-    .join('\n')
+  const intro = introPost({
+    title: l?.title ?? null,
+    orderId,
+    clientName: l?.clientName ? firstName(l.clientName) : null,
+    city: l?.city ?? null,
+    budget: l?.budgetText ?? null,
+    seenAt: l?.seenAt ?? null,
+    text: l?.text ?? null,
+  })
   return { name, intro }
+}
+
+/** What the topic shows of this key already. */
+export async function shownRefs(db: DbOrTx, key: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ ref: topicShown.ref })
+    .from(topicShown)
+    .where(eq(topicShown.key, key))
+  return new Set(rows.map((r) => r.ref))
+}
+
+/** Writes down that the topic shows `ref`; false when it was written down already. */
+export async function markShown(db: DbOrTx, key: string, ref: string): Promise<boolean> {
+  const rows = await db
+    .insert(topicShown)
+    .values({ key, ref })
+    .onConflictDoNothing()
+    .returning({ ref: topicShown.ref })
+  return rows.length > 0
+}
+
+export async function unmarkShown(db: DbOrTx, key: string, ref: string): Promise<void> {
+  await db.delete(topicShown).where(and(eq(topicShown.key, key), eq(topicShown.ref, ref)))
+}
+
+/** The references of the bot's posts in a topic, the oldest first. */
+export async function topicPostRefs(
+  db: DbOrTx,
+  chatId: number,
+  threadId: number,
+): Promise<number[]> {
+  const rows = await db
+    .select({ id: telegramPost.id })
+    .from(telegramPost)
+    .where(and(eq(telegramPost.chatId, chatId), eq(telegramPost.threadId, threadId)))
+    .orderBy(asc(telegramPost.messageId))
+  return rows.map((r) => -r.id)
 }
 
 export async function renameTopic(
@@ -232,6 +268,8 @@ export async function linkTopic(
 }
 
 export async function dropTopic(db: DbOrTx, chatId: number, key: string): Promise<void> {
+  // A new topic made for this key shows nothing yet: what the dropped one showed is forgotten with it.
+  await db.delete(topicShown).where(eq(topicShown.key, key))
   await db.delete(forumTopic).where(and(eq(forumTopic.chatId, chatId), eq(forumTopic.key, key)))
 }
 
