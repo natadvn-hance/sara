@@ -289,8 +289,19 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     issues.length === 0 && output?.move === 'reply' && output.text && output.sites?.length
       ? chosenSites(r.sites ?? [], output.sites)
       : []
-  if (shownSites.length > 0 && output)
-    output = { ...output, text: `${output.text}\n\n${shownSites.map(siteLine).join('\n')}` }
+  if (shownSites.length > 0 && output) {
+    // The sites come before the closing question (Boris, 02.11.2026: examples first, then the call offer).
+    const lines = shownSites.map(siteLine).join('\n')
+    const paragraphs = output.text?.split('\n\n') ?? []
+    const last = paragraphs.at(-1) ?? ''
+    output = {
+      ...output,
+      text:
+        paragraphs.length > 1 && last.trim().endsWith('?')
+          ? `${paragraphs.slice(0, -1).join('\n\n')}\n\n${lines}\n\n${last}`
+          : `${output.text}\n\n${lines}`,
+    }
+  }
   // The link of a case is the code's: put after the checks, when the client asked and the case allows it.
   else if (issues.length === 0 && output?.move === 'reply' && output.text && chosen) {
     const link = caseLink(chosen, output.case?.moment ?? null, input.settings.blockedLinks)
