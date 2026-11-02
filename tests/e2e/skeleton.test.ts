@@ -135,7 +135,7 @@ describe('walking skeleton', () => {
       'profi.order_seen',
       'lead.found',
       'model.called',
-      'lead.screened',
+      // A clean order leaves no 'lead.screened': the screen is journaled only when it found something.
       'lead.routed',
       'lead.page_read',
       'model.called',
