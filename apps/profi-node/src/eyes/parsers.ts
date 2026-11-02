@@ -16,19 +16,24 @@ export type Signal =
   | { t: 'presence'; on: boolean }
   /** The event stream says a chat has news: its page is read on the next minute check. */
   | { t: 'chat_touched'; chatId: string; messageId: string | null }
+  /** The chats list says the client of this chat has seen our bid: it says so on every read from then on. */
+  | { t: 'client_saw_bid'; chatId: string }
   /** The order page's own answer: the fee for a bid now. It completes an order, never makes one. */
   | { t: 'order_fee'; orderId: string; rub: number; baseRub: number | null; hasBid: boolean | null }
 
 /** recognized: the source had the shape we know (even if empty). False is how a layout change shows. */
 export type ParseResult = {
   recognized: boolean
-  what?: 'feed' | 'chat' | 'order' | 'stream' | 'client'
+  what?: 'feed' | 'chat' | 'order' | 'stream' | 'client' | 'chats'
   signals: Signal[]
   /** A board answer: the board has more pages, which the page loads when scrolled (nextCursor). */
   more?: boolean
   /** A board answer: how many orders the whole board holds (totalCount); a new order moves it, wherever it landed. */
   total?: number
 }
+
+/** The chats list's words for a chat whose client opened our bid; before that it says «Вы откликнулись». */
+export const isClientSawBid = (status: string) => /^\s*клиент увидел отклик\s*$/i.test(status)
 
 export type FeedRef = { orderId: string; snippet: string }
 
@@ -162,6 +167,16 @@ export const standInParsers: Parsers = {
     }
     if (path.startsWith('/api/order/') && isObj(body) && typeof body.id === 'string') {
       return { recognized: true, what: 'order', signals: [order(body as unknown as StandInOrder)] }
+    }
+    if (path === '/api/chats' && isObj(body) && Array.isArray(body.chats)) {
+      const seen = body.chats as { id?: unknown; status?: unknown }[]
+      return {
+        recognized: true,
+        what: 'chats',
+        signals: seen
+          .filter((c) => typeof c?.status === 'string' && isClientSawBid(c.status))
+          .map((c) => ({ t: 'client_saw_bid', chatId: String(c.id) })),
+      }
     }
     const chat = /^\/api\/chat\/(.+)$/.exec(path)
     if (chat?.[1] && isObj(body) && Array.isArray(body.messages)) {

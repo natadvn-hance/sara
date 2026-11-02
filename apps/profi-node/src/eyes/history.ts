@@ -5,6 +5,7 @@ import type { NodeDb } from '../db/client'
 import { nodeFlag, rawEvent, rawMessage } from '../db/schema'
 import { type StoredMessage, upsertMessage } from '../store/raw'
 import type { Insurance } from './insurance'
+import { isClientSawBid } from './parsers'
 
 /**
  * The archive reader (study of past bids, 28.10.2026): once, when the flag `history_read` says «go», the node opens
@@ -36,7 +37,10 @@ type Edge = {
   node?: {
     messengerType?: unknown
     messengerExtId?: unknown
-    order?: { rboFilterId?: unknown } | null
+    order?: {
+      rboFilterId?: unknown
+      listView?: { status?: { s4status?: unknown } | null } | null
+    } | null
     chats?: {
       unreadMessageCount?: unknown
       messagesCount?: unknown
@@ -90,6 +94,24 @@ export function listedChats(bodies: unknown[]): {
     if (filter !== null && typeof m.totalCount === 'number') total[filter] = m.totalCount
   }
   return { chats: [...byId.values()], total }
+}
+
+/**
+ * The order chats whose client has seen our bid, from one list answer: its status line (order.listView.status.s4status,
+ * read live on 29.10.2026, 50 chats of 127 said «Клиент увидел отклик»). Only reading: the list marks nothing.
+ */
+export function chatsClientSaw(body: unknown): string[] {
+  const m = (body as { data?: { me?: { rboMessengersByFilter?: { edges?: unknown } } } } | null)
+    ?.data?.me?.rboMessengersByFilter
+  if (!m || !Array.isArray(m.edges)) return []
+  const out: string[] = []
+  for (const e of m.edges as Edge[]) {
+    const n = e?.node
+    if (n?.messengerType !== 'ORDER' || n.messengerExtId == null) continue
+    const status = n.order?.listView?.status?.s4status
+    if (typeof status === 'string' && isClientSawBid(status)) out.push(String(n.messengerExtId))
+  }
+  return out
 }
 
 /**

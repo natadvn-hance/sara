@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { outboxNode, rawEvent } from '../src/db/schema'
+import { bidAttempt, clientSawBid, outboxNode, rawEvent } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { type Insurance, startInsurance } from '../src/eyes/insurance'
 import { type Parsers, standInParsers } from '../src/eyes/parsers'
@@ -22,6 +22,8 @@ let eyes: Eyes
 let visited: string[] = []
 // Only the stream frames reach the eyes, and only when a test opens the stream: the live eyes read no chat answers.
 let streamOn = false
+// The list's own answer, for the mark that the client saw the bid.
+let answersOn = false
 const running: Insurance[] = []
 
 beforeAll(async () => {
@@ -38,7 +40,8 @@ beforeAll(async () => {
     rtpHost: site.rtpHost,
     profiHosts: [new URL(site.url).host],
     onRaw: async (r) => {
-      if (streamOn && r.kind === 'rtp') await eyes.onRaw(r)
+      if ((streamOn && r.kind === 'rtp') || (answersOn && r.url?.endsWith('/api/chats')))
+        await eyes.onRaw(r)
     },
   })
   ab.page.on('framenavigated', (f) => {
@@ -61,6 +64,7 @@ beforeEach(async () => {
   await resetNodeDb(db)
   site.streamNamesOnly(false)
   streamOn = false
+  answersOn = false
   eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
   visited = []
 })
@@ -172,4 +176,77 @@ describe('a chat the event stream names is read at once', () => {
     // And the tab is back on the feed, where the stream lives.
     await expect.poll(() => visited.at(-1), { timeout: 10000 }).toBe('/backoffice/a.php')
   }, 60000)
+})
+
+describe('the client saw the bid, by the chats list', () => {
+  /** A bid Sara made on this order: its press is written down. */
+  const pressed = (id: string) =>
+    db.insert(bidAttempt).values({
+      idempotencyKey: `k-${id}`,
+      accountId: 'hance-marketing',
+      orderId: id,
+      dueRub: 100,
+      pressedAt: new Date().toISOString(),
+    })
+  const reads = async () =>
+    (await db.select().from(outboxNode))
+      .map(
+        (r) =>
+          r.payload as {
+            type: string
+            entity: { kind: string; id: string }
+            payload: { chat_id: string; order_id: string; platform_message_id: string | null }
+          },
+      )
+      .filter((e) => e.type === 'profi.client_read')
+
+  it('FR-CONV-12: the mark goes once, from the list page the check reads anyway: no chat opened, nothing pressed', async () => {
+    answersOn = true
+    site.addMessage('95700001', 'specialist', 'Здравствуйте! Сделаем.')
+    await pressed('95700001')
+    insurance({ chatsEveryMs: 400 })
+    await expect.poll(async () => (await checks()).length, { timeout: 20000 }).toBeGreaterThan(0)
+    // Our bid stands in the chat, and the client has not opened it: nothing yet.
+    expect(await reads()).toEqual([])
+    site.clientSawBid('95700001')
+    await expect.poll(async () => (await reads()).length, { timeout: 20000 }).toBe(1)
+    const seen = (await checks()).length
+    await expect.poll(async () => (await checks()).length, { timeout: 20000 }).toBeGreaterThan(seen)
+    const [read] = await reads()
+    expect(await reads()).toHaveLength(1)
+    expect(read?.entity).toEqual({ kind: 'chat', id: '95700001' })
+    expect(read?.payload).toMatchObject({
+      chat_id: '95700001',
+      order_id: '95700001',
+      platform_message_id: null,
+    })
+    expect(chatVisits('95700001')).toBe(0)
+  }, 60000)
+
+  it('FR-CONV-12: after a restart of the node the same chat gets no second mark', async () => {
+    await pressed('95700002')
+    const signal = {
+      recognized: true,
+      what: 'chats',
+      signals: [{ t: 'client_saw_bid', chatId: '95700002' }],
+    } as const
+    await eyes.onParsed({ ...signal, signals: [...signal.signals] }, 'response')
+    await eyes.onParsed({ ...signal, signals: [...signal.signals] }, 'response')
+    const again = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    await again.onParsed({ ...signal, signals: [...signal.signals] }, 'response')
+    expect(await reads()).toHaveLength(1)
+  }, 30000)
+
+  it('FR-CONV-12: an older chat with no bid of Sara is written down without a mark, so the core makes no empty client', async () => {
+    await eyes.onParsed(
+      {
+        recognized: true,
+        what: 'chats',
+        signals: [{ t: 'client_saw_bid', chatId: '95700003' }],
+      },
+      'response',
+    )
+    expect(await reads()).toEqual([])
+    expect((await db.select().from(clientSawBid)).map((r) => r.chatId)).toEqual(['95700003'])
+  }, 30000)
 })
