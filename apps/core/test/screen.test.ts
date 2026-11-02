@@ -328,6 +328,48 @@ describe('the rules of application', () => {
     expect(JSON.stringify(e)).not.toContain('Директе')
   })
 
+  it('an account made on the day of the order stops it with the switch off too (Boris, 01.11.2026)', () => {
+    const made = newAccount(
+      {
+        name: null,
+        on_profi_since: 'На Профи.ру с 1 ноября',
+        phone_verified: null,
+        reviews: null,
+        review_tags: [],
+      },
+      new Date('2026-11-01T16:03:00Z'),
+    )
+    expect(screenOf([made], {}, { stops: false, ownWords: 8, at: when }).stops).toBe(true)
+    // Another criterion with the switch off only marks.
+    const other = { hit: { criterion: 'direct' as const, basis: 'x' } }
+    expect(screenOf([other], {}, { stops: false, ownWords: 8, at: when }).stops).toBe(false)
+    // The board's text knew nothing of the account; the page tells, and the merge keeps the stop.
+    const byText = screenOf(
+      [{ noData: 'new_account' }],
+      {},
+      { stops: false, ownWords: 8, at: when },
+    )
+    const merged = mergeScreens(
+      byText,
+      screenOf([made], {}, { stops: false, ownWords: 8, at: when }),
+      ['new_account'],
+    )
+    expect(merged.stops).toBe(true)
+    expect(merged.no_data).toEqual([])
+    // An account of another day does not stop.
+    const old = newAccount(
+      {
+        name: null,
+        on_profi_since: 'На Профи.ру с 8 ноября',
+        phone_verified: null,
+        reviews: null,
+        review_tags: [],
+      },
+      new Date('2026-11-01T16:03:00Z'),
+    )
+    expect(screenOf([old], {}, { stops: false, ownWords: 8, at: when }).stops).toBe(false)
+  })
+
   it('the summary counts stopped orders by criterion, and says when the screen only marks', () => {
     const hit = (c: LeadScreen['hits'][number]['criterion']) => ({ criterion: c, basis: 'x' })
     expect(
@@ -341,6 +383,14 @@ describe('the rules of application', () => {
       'Отсеяла бы 1 (отсев пока только отмечает): Новый аккаунт 1',
     )
     expect(screenSummary([{ stops: true, hits: [] }])).toBeNull()
+    expect(
+      screenSummary([
+        { stops: true, hits: [hit('new_account')] },
+        { stops: false, hits: [hit('short_text')] },
+      ]),
+    ).toBe(
+      'Отсеяно 1: Новый аккаунт 1. Отсеяла бы ещё 1 (отсев пока только отмечает): Короткий текст 1',
+    )
   })
 })
 

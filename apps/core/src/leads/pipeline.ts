@@ -11,6 +11,7 @@ import {
   type OrderAttachment,
   ProfiOrder,
   priceRange,
+  SCREEN_RU,
   type ScreenMark,
   type SorterOutput,
   type TaskAction,
@@ -847,14 +848,19 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           async () => {
             const s = await screenByPage(before, { ...order, ...withPage })
             const news = s.hits.length > before.hits.length
+            // A test order's card comes anyway and says where the live Sara would have stopped.
+            const kept = test ? { ...s, stops: false } : s
             return {
-              screen: s,
-              stop: await storeScreen({ id: order.order_id, correlationId }, s, news, sorted),
+              screen: kept,
+              wouldStop: test && s.stops ? s.hits.map((h) => SCREEN_RU[h.criterion]) : [],
+              stop: await storeScreen({ id: order.order_id, correlationId }, kept, news, sorted),
             }
           },
           { name: 'screenPage', ...DB_STEP },
         )
         screen = byPage.screen
+        if (byPage.wouldStop?.length)
+          liveSkip.push(`отсев остановил бы: ${byPage.wouldStop.join(', ')}`)
         if (byPage.stop) return
       }
     }
@@ -971,6 +977,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           priceToRub:
             draft.priceRub === null ? null : priceRange(draft.priceRub, draft.priceToRub).to,
           followUps: seriesOf(draft) ?? [],
+          note: draft.styleNote ?? null,
         }
       : null,
     analysis: cardAnalysis(draft?.analysis),

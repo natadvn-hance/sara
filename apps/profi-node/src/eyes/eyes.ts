@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, max, sql } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
-import { rawMessage, rawOrder } from '../db/schema'
+import { bidAttempt, clientSawBid, rawMessage, rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
 import { saveRaw, upsertMessage, upsertOrder } from '../store/raw'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
@@ -107,6 +107,48 @@ export function createEyes(o: {
     }
   }
 
+  // Chats already noted this run: the list says it again on every read, every 2 minutes.
+  const sawNoted = new Set<string>()
+
+  /**
+   * The client of this chat has seen our bid, by the chats list: one profi.client_read a chat. Only for a bid Sara made
+   * (a press in node.bid_attempt): the list also names dozens of older chats, for which the core would make an empty
+   * conversation and which have no topic to mark. Those are written down without an event.
+   */
+  async function noteClientSaw(chatId: string) {
+    if (sawNoted.has(chatId)) return
+    const at = new Date().toISOString()
+    await o.db
+      .transaction(async (tx) => {
+        const fresh = await tx
+          .insert(clientSawBid)
+          .values({ accountId: o.accountId, chatId, seenAt: at })
+          .onConflictDoNothing()
+          .returning({ chatId: clientSawBid.chatId })
+        if (fresh.length === 0) return
+        const ours = await tx
+          .select({ key: bidAttempt.idempotencyKey })
+          .from(bidAttempt)
+          .where(and(eq(bidAttempt.accountId, o.accountId), eq(bidAttempt.orderId, chatId)))
+          .limit(1)
+        if (ours.length === 0) return
+        await queueEvent(tx, {
+          type: 'profi.client_read',
+          accountId: o.accountId,
+          entity: { kind: 'chat', id: chatId },
+          // The order chat lives under the order's number.
+          payload: { chat_id: chatId, order_id: chatId, platform_message_id: null, at },
+        })
+      })
+      .then(() => sawNoted.add(chatId))
+      .catch((err) =>
+        console.error(
+          'client saw bid not noted',
+          err instanceof Error ? err.message.slice(0, 120) : err,
+        ),
+      )
+  }
+
   async function onSignals(
     signals: Signal[],
     body: unknown,
@@ -145,6 +187,10 @@ export function createEyes(o: {
       }
       if (s.t === 'presence') {
         presence = s.on
+        continue
+      }
+      if (s.t === 'client_saw_bid') {
+        await noteClientSaw(s.chatId)
         continue
       }
       // One broken signal (an odd date, a missing field) must not stop the rest of the batch; its raw record stays.

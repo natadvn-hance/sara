@@ -10,6 +10,7 @@ import { queueMessage } from '../../apps/core/src/conversation/outbox'
 import { conversation, event, lead, outbox } from '../../apps/core/src/db/schema'
 import { isApprovedText, isCallOffer, SLOTS_MARK } from '../../apps/core/src/leads/callSlots'
 import { resumeStoppedSeries } from '../../apps/core/src/leads/series'
+import { forumOf } from '../../apps/core/src/notify/forum'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
@@ -199,6 +200,51 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     expect(sentTo(id)).toHaveLength(2)
     expect(await events('bid.series_stopped', id)).toEqual([])
   })
+
+  it('ST-M7-16: with a forum the bid opens the client topic at once: its text, then the series, and the ✅ links to it', async () => {
+    const FORUM = -1009876543210
+    tg.topics.length = 0
+    tg.pushGroupText({ chatId: FORUM, fromId: 111, text: '/forum' })
+    await until(async () => (await forumOf(db)) !== null)
+    try {
+      const id = await cardFor()
+      const card = cards().at(-1)
+      tg.pushGroupPress(
+        FORUM,
+        111,
+        button('bid', card)?.callback_data ?? '',
+        card?.message_thread_id,
+      )
+      await until(() => sentTo(id).length === 2)
+      const topic = tg.topics.find((t) => t.name.includes(`№${id}`))
+      expect(topic).toBeDefined()
+      // The circle of the client's stage (a bid: yellow) is in the name from the start.
+      expect(topic?.name.startsWith('🟡 ')).toBe(true)
+      const inTopic = () =>
+        tg.sent.filter(
+          (m) => m.chat_id === FORUM && m.message_thread_id === topic?.message_thread_id,
+        )
+      await until(() =>
+        inTopic().some((m) => m.text.includes('Вдогонку 2 из 2') && m.text.includes(SECOND)),
+      )
+      expect(
+        inTopic().some(
+          (m) => m.text.includes('Отклик отправлен') && m.text.includes('Прочитал описание'),
+        ),
+      ).toBe(true)
+      expect(inTopic().filter((m) => m.text.includes('Вдогонку'))).toHaveLength(2)
+      // The ✅ of «Заявки» stays and links to the topic.
+      const linked = [...tg.sent, ...tg.edited].some(
+        (m) =>
+          m.text.includes('✅ Отклик отправлен') &&
+          m.text.includes(`t.me/c/9876543210/${topic?.message_thread_id}`),
+      )
+      expect(linked).toBe(true)
+    } finally {
+      tg.pushText(111, '/forum_off')
+      await until(async () => (await forumOf(db)) === null)
+    }
+  }, 40000)
 
   it('FR-CONV-9: a message the node cannot answer for waits, is read for in the chat and goes again, once each (01.11.2026)', async () => {
     // The node is restarting: the first two tries of the first message are lost, nothing is typed.

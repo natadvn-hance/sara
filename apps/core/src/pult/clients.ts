@@ -10,7 +10,7 @@ import {
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { conversation, deal, meeting } from '../db/schema'
-import { TransitionError, transition } from '../domain/deal'
+import { advanceTo, TransitionError, transition } from '../domain/deal'
 import { appendEvent } from '../journal/journal'
 import { funnelStage } from './analytics'
 import { conversationList, conversationView } from './conversations'
@@ -47,6 +47,23 @@ export function stageOf(
   if (c.closedAt && s !== 'Закрыта') return 'Отвалился'
   // A chat that has a client's words is a conversation, even before the deal moved.
   return s
+}
+
+/** The stage of the client behind a forum topic (its key is the order's number, or `conv:` and the conversation). */
+export async function stageForKey(db: DbOrTx, key: string): Promise<FunnelStage> {
+  const [c] = key.startsWith('conv:')
+    ? await db
+        .select()
+        .from(conversation)
+        .where(eq(conversation.id, key.slice(5)))
+    : await db.select().from(conversation).where(eq(conversation.orderId, key))
+  const dealRows = c?.dealId
+    ? await db.select({ stage: deal.stage }).from(deal).where(eq(deal.id, c.dealId))
+    : key.startsWith('conv:')
+      ? []
+      : await db.select({ stage: deal.stage }).from(deal).where(eq(deal.leadId, key))
+  const dealStage = dealRows[0]?.stage ?? null
+  return c ? stageOf(c, dealStage) : funnelStage(dealStage)
 }
 
 async function dealStages(db: DbOrTx, convs: ConvRow[]): Promise<Map<string, string>> {
@@ -315,6 +332,15 @@ export async function addMeeting(
     client: c ? c.id : null,
     at: m.at,
   })
+  // A call written down is a call booked (the stage moves by itself, Boris, 01.11).
+  if (c?.dealId)
+    await advanceTo(db, {
+      dealId: c.dealId,
+      to: 'call_booked',
+      actor: 'boris',
+      reason: 'встреча записана',
+      correlationId: c.id,
+    }).catch((e) => console.error('deal not moved on the meeting', e))
   return CLIENT_TEXTS.meetingAdded
 }
 
@@ -334,6 +360,17 @@ export async function meetingOutcome(
     outcome: o.outcome,
     amount_rub: o.amountRub,
   })
+  if (o.outcome === 'held' && m.conversationId) {
+    const [c] = await db.select().from(conversation).where(eq(conversation.id, m.conversationId))
+    if (c?.dealId)
+      await advanceTo(db, {
+        dealId: c.dealId,
+        to: 'call_done',
+        actor: 'boris',
+        reason: 'встреча состоялась',
+        correlationId: c.id,
+      }).catch((e) => console.error('deal not moved on the meeting outcome', e))
+  }
   if (o.outcome === 'held' && o.amountRub !== null && m.conversationId)
     await recordOutcome(db, m.conversationId, {
       outcome: 'won',

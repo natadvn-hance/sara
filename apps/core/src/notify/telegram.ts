@@ -23,12 +23,15 @@ import {
   markTopic,
   postOf,
   postRef,
+  renameTopic,
   saveTopic,
   topicByKey,
   topicByThread,
   topicIntro,
   topicKey,
+  topicPostRefs,
   unbindForum,
+  withoutDot,
 } from './forum'
 import type { Notifier, Place } from './notifier'
 
@@ -474,9 +477,8 @@ export function createTelegramRuntime(d: {
         conversationId: k.conversationId,
         name,
       })
-      const m = await bot.api.sendMessage(chatId, intro, {
+      const m = await sendHtml(chatId, intro, {
         message_thread_id: thread,
-        link_preview_options: { is_disabled: true },
         disable_notification: true,
       })
       await postRef(d.db, chatId, m.message_id, thread)
@@ -537,9 +539,21 @@ export function createTelegramRuntime(d: {
    */
   async function post(
     place: Place | undefined,
-    send: (to: number, where: { message_thread_id?: number }) => Promise<Message>,
+    send0: (to: number, where: { message_thread_id?: number }) => Promise<Message>,
   ): Promise<number> {
     const where = (s: Spot) => (s.thread === undefined ? {} : { message_thread_id: s.thread })
+    // A flood limit is waited out (Telegram says for how long), a few times; any other refusal goes on as it did.
+    const send: typeof send0 = async (to, w) => {
+      for (let tries = 0; ; tries++) {
+        try {
+          return await send0(to, w)
+        } catch (err) {
+          const wait = err instanceof GrammyError ? err.parameters?.retry_after : undefined
+          if (!wait || tries >= 3) throw err
+          await new Promise((r) => setTimeout(r, (wait + 1) * 1000))
+        }
+      }
+    }
     try {
       let s = await spot(place)
       if (!s.forum) return (await send(s.to, {})).message_id
@@ -655,7 +669,7 @@ export function createTelegramRuntime(d: {
         await closeHtml(messageId, closedLeadCardText(c))
       },
       async sendText(text, o) {
-        const silent = await silentNow(o?.loud)
+        const silent = o?.quiet || (await silentNow(o?.loud))
         const extra: Omit<SendOptions, 'parse_mode'> = silent ? { disable_notification: true } : {}
         const messageId = await post(o?.place, (to, where) =>
           o?.html
@@ -702,6 +716,53 @@ export function createTelegramRuntime(d: {
             // The same text again is not an error worth a retry.
             if (!String((e as Error).message).includes('message is not modified')) throw e
           })
+      },
+      async setTopicStage(place, dot) {
+        try {
+          const f = await forumOf(d.db)
+          const k = f ? await topicKey(d.db, place) : null
+          const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+          if (!f || !t) return
+          const name = `${dot} ${withoutDot(t.name)}`.slice(0, 128 - CLOSED_MARK.length)
+          if (name === t.name) return
+          try {
+            await bot.api.editForumTopic(f.chatId, t.threadId, {
+              name: t.closedAt ? `${name}${CLOSED_MARK}` : name,
+            })
+          } catch (e) {
+            // Deleted by hand: the topic is forgotten, so the next message makes a new one (and its history is shown again).
+            if (TOPIC_GONE.test(short(e))) return void (await dropTopic(d.db, f.chatId, t.key))
+            // Telegram refused: the name we keep stays the one Telegram has. The same name already is no refusal.
+            if (!/TOPIC_NOT_MODIFIED|not modified/i.test(short(e)))
+              return logTopic('topic not renamed')(e)
+          }
+          await renameTopic(d.db, f.chatId, t.key, name)
+        } catch (e) {
+          console.error('topic stage', short(e))
+        }
+      },
+      async topicPosts(place) {
+        const f = await forumOf(d.db).catch(() => null)
+        const k = f ? await topicKey(d.db, place) : null
+        const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+        if (!f || !t) return []
+        return topicPostRefs(d.db, f.chatId, t.threadId)
+      },
+      async forumOn() {
+        return (await forumOf(d.db).catch(() => null)) !== null
+      },
+      async topicLink(place) {
+        try {
+          const f = await forumOf(d.db)
+          const k = f ? await topicKey(d.db, place) : null
+          const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+          return f && t
+            ? `https://t.me/c/${String(f.chatId).replace(/^-100/, '')}/${t.threadId}`
+            : null
+        } catch (e) {
+          console.error('topic link', short(e))
+          return null
+        }
       },
       async closeTopic(place, outcome) {
         try {

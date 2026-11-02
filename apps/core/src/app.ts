@@ -14,14 +14,22 @@ import { startCatchUp } from './conversation/catchUp'
 import { onClientText, onConvEdit, onConvPress, onConvReply } from './conversation/commands'
 import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
-import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
+import {
+  type ConversationEventDeps,
+  createConversationEvents,
+  showClientWords,
+} from './conversation/events'
 import { sendTurnReply } from './conversation/outbox'
+import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
 import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
 import { registerConversationRoutes } from './conversation/routes'
 import { setSendDeps, startSendJob } from './conversation/sendFlow'
 import { prepareJob } from './conversation/sendJob'
 import { SEND_TEXTS } from './conversation/sendTexts'
+import { backfillTalking } from './conversation/stage'
+import { startTopicRestore } from './conversation/topicRestore'
+import { resetFalseClosedSteps } from './conversation/topicSteps'
 import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
@@ -268,6 +276,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     delayMs: o.seriesDelayMs ?? SERIES_DELAYS,
     slots: o.callSlots ?? workHoursSource(db),
+    notifier: bot.notifier,
     unsureWaitsMs: o.seriesUnsureWaitsMs ?? SERIES_UNSURE_WAITS_MS,
   })
   setReminderHandler((taskId) => lp.onReminder(taskId))
@@ -313,6 +322,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     // In shadow the turn never reaches a send; after the switch it goes through the message outbox.
     send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
+    show: (conv, added) => showClientWords({ db, notifier: bot.notifier }, conv, added),
   })
   // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
   setRemindDeps({ db, profi, gateway, mind, notifier: bot.notifier })
@@ -469,6 +479,19 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
+  // Once each: deals whose client already answered move on to talking, and the false «закрыт на сайте» marks go.
+  void backfillTalking(db).catch((e) =>
+    console.error('deal stages pass failed', e instanceof Error ? e.message : e),
+  )
+  void resetFalseClosedSteps(db).catch((e) =>
+    console.error('closed steps reset failed', e instanceof Error ? e.message : e),
+  )
+  const owed = startOwed(
+    { db, notifier: bot.notifier, getOrder: (a, id) => profi.getOrder(a, id) },
+    o.learningTickMs,
+  )
+  // The topics as the chat with the client: old ones laid out anew and given their history, bids without one get it.
+  const topicRestore = startTopicRestore({ db, notifier: bot.notifier }, o.learningTickMs)
   // The conversations whose last client word got no real turn (a site line once hid it, a node restart cut the turn)
   // get theirs, once the node answers and then every ten minutes.
   const catchUp = startCatchUp({
@@ -531,6 +554,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       reconcile.stop()
       clearInterval(mindTimer)
       conversationSummary.stop()
+      owed.stop()
+      topicRestore.stop()
       catchUp.stop()
       gateway.stop()
       await bot.stop()

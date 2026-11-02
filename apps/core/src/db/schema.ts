@@ -432,6 +432,42 @@ export const conversation = core.table(
   (t) => [uniqueIndex('conversation_account_chat').on(t.accountId, t.chatId)],
 )
 
+/**
+ * Where the reminders «клиент ждёт ответа» of a conversation stand (Boris, 31.10: a client must never be left without
+ * an answer): the last client message they are about, how many steps of the ladder went, when, and the message of the
+ * last one in Telegram, which the next one replaces. The row goes when the client is answered, taken or closed.
+ */
+export const convOwed = core.table('conv_owed', {
+  conversationId: uuid('conversation_id')
+    .primaryKey()
+    .references(() => conversation.id),
+  anchorMessageId: text('anchor_message_id').notNull(),
+  steps: integer('steps').notNull().default(0),
+  lastAt: ts('last_at'),
+  messageId: bigint('message_id', { mode: 'number' }),
+})
+
+/**
+ * The once-only micro-steps shown in a client's topic («Клиент прочитал отклик», «Созвон назначен», «Заказ закрыт на
+ * сайте»), by the topic's key and the step: a row is the step shown.
+ */
+export const topicStep = core.table(
+  'topic_step',
+  { key: text('key').notNull(), step: text('step').notNull() },
+  (t) => [primaryKey({ columns: [t.key, t.step] })],
+)
+
+/**
+ * What a client's topic already shows (Boris, 01.11: the topic is the chat with the client, every message once): the
+ * intro, the bid, the messages after it and the chat messages, by the topic's key and a reference (`bid`, `series:2`,
+ * `msg:<platform id>`, `restored`). The restore of old history reads it so that nothing is shown twice.
+ */
+export const topicShown = core.table(
+  'topic_shown',
+  { key: text('key').notNull(), ref: text('ref').notNull() },
+  (t) => [primaryKey({ columns: [t.key, t.ref] })],
+)
+
 /** Every chat message Sara knows, live or exported from history, with whose voice it is (FR-CONV-2, FR-TRAIN-1). */
 export const chatMessage = core.table(
   'chat_message',

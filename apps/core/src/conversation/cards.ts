@@ -71,7 +71,7 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
   }
 }
 
-function rowsFor(
+export function rowsFor(
   taskId: string,
   t: Row,
   shadow: boolean,

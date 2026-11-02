@@ -30,6 +30,8 @@ export type TurnDeps = {
   mind: MindSearch
   /** The card of a decided turn to Boris: the shadow draft, a draft, a call (part C4). */
   card(turnId: string): Promise<void>
+  /** What is new in the chat the turn reads, told to Boris at once (the client's words, shown by whoever reads first). */
+  show?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
   /** The client's words to Boris: a client he took, a closed conversation. */
   forward(turnId: string): Promise<void>
   /**
