@@ -1,7 +1,7 @@
+import { insightsStep } from '../analytics/insights/job'
 import type { Db } from '../db/client'
 import type { Gateway } from '../gateway/gateway'
 import type { Notifier } from '../notify/notifier'
-import { insightsStep } from '../analytics/insights/job'
 import { sweepIgnored } from './labels'
 import { maybePropose } from './proposals'
 import { dailySummary } from './summary'
