@@ -43,6 +43,13 @@
       "when": 1793527193339,
       "tag": "0005_bid_attempt_wallet",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793606132389,
+      "tag": "0006_client_saw_bid",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,13 @@ const parse = (s: Sample): ParseResult =>
 type BoardItem = { id: string; type: string; snippets?: BoardItem[] }
 
 describe('Profi.ru samples', () => {
+  it('FR-CONV-12: the chats list says whose client saw the bid: only «Клиент увидел отклик», only an order chat', () => {
+    const r = parse(sample('response', 'chats-list'))
+    expect(r.recognized).toBe(true)
+    expect(r.what).toBe('chats')
+    expect(r.signals).toEqual([{ t: 'client_saw_bid', chatId: '10000001' }])
+  })
+
   it('ST-M1-10: the board sample gives each order card, the carousel ones too, as an order with the words of the board and a fee not known yet', () => {
     const s = sample('response', 'board')
     const r = parse(s)

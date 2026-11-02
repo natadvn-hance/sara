@@ -1,0 +1,74 @@
+{
+  "kind": "response",
+  "url": "https://profi.ru/graphql",
+  "body": {
+    "data": {
+      "me": {
+        "rboMessengersByFilter": {
+          "totalCount": 4,
+          "edges": [
+            {
+              "node": {
+                "messengerType": "ORDER",
+                "messengerExtId": "10000001",
+                "order": {
+                  "rboFilterId": "open",
+                  "listView": { "status": { "s4status": "Клиент увидел отклик" } }
+                },
+                "chats": [
+                  {
+                    "unreadMessageCount": 0,
+                    "messagesCount": 3,
+                    "messageCountByType": [
+                      { "id": "1", "type": "CLIENT", "value": 0 },
+                      { "id": "2", "type": "PROFILE", "value": 2 },
+                      { "id": "3", "type": "BOT", "value": 1 }
+                    ],
+                    "lastMessage": { "dateCreated": "Sun Nov 01 2026 12:51:00 GMT+0300 (MSK)" }
+                  }
+                ]
+              }
+            },
+            {
+              "node": {
+                "messengerType": "ORDER",
+                "messengerExtId": "10000002",
+                "order": {
+                  "rboFilterId": "open",
+                  "listView": { "status": { "s4status": "Вы откликнулись" } }
+                },
+                "chats": [
+                  {
+                    "unreadMessageCount": 0,
+                    "messagesCount": 2,
+                    "lastMessage": { "dateCreated": "Sun Nov 01 2026 13:00:00 GMT+0300 (MSK)" }
+                  }
+                ]
+              }
+            },
+            {
+              "node": {
+                "messengerType": "ORDER",
+                "messengerExtId": "10000003",
+                "order": {
+                  "rboFilterId": "archive",
+                  "listView": { "status": { "s4status": "Клиент выбрал другого специалиста" } }
+                },
+                "chats": []
+              }
+            },
+            {
+              "node": {
+                "messengerType": "SUPPORT",
+                "messengerExtId": "10000004",
+                "order": null,
+                "chats": []
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "receivedAt": "2026-11-01T13:00:00.000Z"
+}

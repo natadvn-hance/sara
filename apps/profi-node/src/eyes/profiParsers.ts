@@ -1,7 +1,7 @@
 import type { MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
 import { clientInfoFromAnswer } from './clientInfo'
-import { chatHistory, listedChats } from './history'
+import { chatHistory, chatsClientSaw, listedChats } from './history'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
@@ -155,6 +155,16 @@ function fromOrderAnswer(orders: unknown[]): ParseResult {
 }
 
 export function fromSiteAnswer(url: string, body: unknown): ParseResult {
+  // The chats list: told by its shape, as chatsFromAnswer tells it. It is read by whatever page asked for it.
+  if (
+    (body as { data?: { me?: { rboMessengersByFilter?: unknown } } } | null)?.data?.me
+      ?.rboMessengersByFilter
+  )
+    return {
+      recognized: true,
+      what: 'chats',
+      signals: chatsClientSaw(body).map((chatId) => ({ t: 'client_saw_bid', chatId })),
+    }
   if (/\/backoffice\/api\//.test(url)) {
     const profile = fromProfileAnswer(body)
     // The client of an order page (getKlientInfo) is read by get_order itself; here it is only a known answer.
