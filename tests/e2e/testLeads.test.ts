@@ -60,7 +60,9 @@ const chat = (id: string) =>
   t.stand.fake
     .snapshot()
     .chats.find((c) => c.chatId === id)
-    ?.messages.map((m) => `${m.author}: ${m.text}`) ?? []
+    // The site's own line behind the client's first word is no part of what is said here.
+    ?.messages.filter((m) => m.author !== 'system')
+    .map((m) => `${m.author}: ${m.text}`) ?? []
 /** Every order and chat number the spy node was asked about. */
 const nodeSaw = () => [
   ...node.orderReads,
