@@ -1012,7 +1012,7 @@ describe('a call is offered with real times (Boris, 31.10.2026)', () => {
     const d = await dossierOf()
     const gw = await gateway({
       interlocutor: interlocutorAnswer({
-        text: 'Вот несколько наших сайтов. Лучше голосом всё проговорить и познакомиться. Вам удобно {слоты}?',
+        text: 'Вот несколько наших сайтов.\n\nЛучше голосом всё проговорить и познакомиться. Вам удобно {слоты}?',
         sites: ['zmksk.ru', 'hance.pro/cognio', 'royalty-teams.ru'],
       }),
       checker: CLEAN_CHECK,
@@ -1026,6 +1026,8 @@ describe('a call is offered with real times (Boris, 31.10.2026)', () => {
     expect(text).toContain('сегодня в 16:00 или 17:30, или лучше завтра')
     expect(text).toContain('https://zmksk.ru/')
     expect(text).toContain('https://hance.pro/cognio/')
+    // The links stand before the closing question.
+    expect(text.indexOf('https://zmksk.ru/')).toBeLessThan(text.indexOf('Вам удобно'))
   })
 
   it('FR-CONV-13: without times the model is told to ask when it suits, and a stray mark is made a plain phrase', async () => {
