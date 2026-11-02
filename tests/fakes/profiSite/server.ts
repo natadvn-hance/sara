@@ -114,6 +114,8 @@ export type ProfiSite = {
   /** The next `n` page requests are cut off before any answer, as one lost request is. */
   dropNext(n: number): void
   muteRtp(on: boolean): void
+  /** The client opened our bid: the chats list says so from now on. */
+  clientSawBid(chatId: string): void
   /** The stream only names the chat with news and the message number, as the live one does; the words are on its page. */
   streamNamesOnly(on: boolean): void
   changeLayout(): void
@@ -234,6 +236,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
   let drops = 0
   let rtpMuted = false
   let namesOnly = false
+  const sawBid = new Set<string>()
   let layout: Layout = NORMAL_LAYOUT
   const code = String(100000 + Math.floor(Math.random() * 899999))
   const state = {
@@ -365,6 +368,7 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
           id,
           unread: m.filter((x) => !x.read).length,
           last: m.at(-1)?.ts ?? null,
+          status: sawBid.has(id) ? 'Клиент увидел отклик' : 'Вы откликнулись',
         })),
       })
     }
@@ -577,6 +581,9 @@ export async function startProfiSite(o: { port?: number } = {}): Promise<ProfiSi
         for (const s of sockets) s.destroy()
         for (const c of clients) c.terminate()
       }
+    },
+    clientSawBid(chatId) {
+      sawBid.add(chatId)
     },
     streamNamesOnly(on) {
       namesOnly = on

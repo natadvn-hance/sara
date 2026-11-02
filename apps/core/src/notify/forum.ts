@@ -135,20 +135,28 @@ export const CLOSED_MARK = ' · закрыт'
 /**
  * The circle in front of a topic's name is the client's stage in Boris's funnel (the same stage the pult and the client
  * log show, Boris, 01.11); Telegram does not let a topic's icon colour change, so the colour is in the name. Boris will
- * correct the colours by his table.
+ * correct the colours by his table (confirmed 01.11: Отклик жёлтый, Переговоры светло-зелёный, Отвалился красный,
+ * Закрыта тёмно-зелёная, which Telegram has only as ✅; «В работе» he has not named, it stays orange).
  */
 export const STAGE_DOT: Record<FunnelStage, string> = {
   Отклик: '🟡',
-  Переговоры: '🔵',
+  Переговоры: '🟢',
   'В работе': '🟠',
-  Закрыта: '🟢',
+  Закрыта: '✅',
   Отвалился: '🔴',
 }
-const DOTS = Object.values(STAGE_DOT)
-/** The name of a topic without the circle of its stage. */
+/** The circles of the stages and the ones of earlier colours, so that an old one never stays beside the new. */
+const DOTS = [...Object.values(STAGE_DOT), '🔵', '🟢']
+/** The name of a topic without the circle of its stage (any circle that was ever one, however many in a row). */
 export const withoutDot = (name: string) => {
-  const dot = DOTS.find((x) => name.startsWith(`${x} `))
-  return dot ? name.slice(dot.length + 1) : name
+  let rest = name
+  for (
+    let dot = DOTS.find((x) => rest.startsWith(`${x} `));
+    dot;
+    dot = DOTS.find((x) => rest.startsWith(`${x} `))
+  )
+    rest = rest.slice(dot.length + 1)
+  return rest
 }
 
 const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim()

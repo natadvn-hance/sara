@@ -1,6 +1,6 @@
 {
   "name": "analyst",
-  "version": 15,
+  "version": 17,
   "model": "opus",
   "fallbackModel": "sonnet",
   "priority": "P1",

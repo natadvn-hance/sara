@@ -1114,6 +1114,38 @@ describe('a call is offered with real times (Boris, 31.10.2026)', () => {
     expect(plan.output?.text).toMatch(/^Александр, здравствуйте!/)
   })
 
+  it('FR-CONV-15: a «не X, а Y» reply is sent back for a rewrite with the reason', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Вам нужен не подрядчик, а человек, который ведет задачи. Давайте созвонимся.',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues.map((x) => x.id)).toContain('style.neuro')
+  })
+
+  it('FR-CONV-13: a reply that keeps a fault still has real times in its call offer, never the raw mark', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Нужен не подрядчик, а человек, который ведет задачи. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind(), slots: callSource },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues.map((x) => x.id)).toContain('style.neuro')
+    expect(plan.output?.text).not.toContain('{слоты}')
+    expect(plan.output?.text).toContain('16:00')
+  })
+
   it('FR-CONV-14: a first-person answer, a signature and «меня зовут Борис» are not third person', () => {
     for (const text of [
       'Добрый день! Картину понял: amoCRM, МИС и номера под каналы. По цене уложимся, это не проблема. Давайте созвонимся, когда вам удобно?',

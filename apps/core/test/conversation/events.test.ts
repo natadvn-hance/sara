@@ -184,6 +184,35 @@ describe('conversation events', () => {
     expect(specialist).toBe(1)
   })
 
+  it('FR-CONV-12: the mark from the chats list names the order, so a new conversation belongs to it and all ours are read', async () => {
+    const { onEvent, chat } = setup()
+    await onEvent(
+      envelope('profi.client_read', {
+        chat_id: CHAT,
+        order_id: CHAT,
+        platform_message_id: null,
+        at: new Date().toISOString(),
+      }),
+    )
+    const [c] = await db.select().from(conversation)
+    expect(c?.orderId).toBe(CHAT)
+    chat.chat.push({
+      ...chatMsg('m-4', 'specialist', 'Ответ', new Date().toISOString()),
+      read: false,
+    })
+    await onEvent(envelope('profi.specialist_message', ref('m-4', 'specialist')))
+    await onEvent(
+      envelope('profi.client_read', {
+        chat_id: CHAT,
+        order_id: CHAT,
+        platform_message_id: null,
+        at: new Date().toISOString(),
+      }),
+    )
+    const [m] = await db.select().from(chatMessage)
+    expect(m?.read).toBe(true)
+  })
+
   it('FR-CONV-12: the client read our message', async () => {
     const { onEvent, chat } = setup()
     chat.chat.push({

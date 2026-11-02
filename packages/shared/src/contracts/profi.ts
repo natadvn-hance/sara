@@ -256,6 +256,9 @@ export const PROFI_EVENT_PAYLOADS = {
   'profi.client_read': z
     .object({
       chat_id: z.string().min(1),
+      /** The order of the chat: without it the core would make a chat it does not know an old one, with no order. */
+      order_id: z.string().min(1).nullable().optional(),
+      /** Null: the site says only that the client saw the bid, not up to which message. */
       platform_message_id: z.string().min(1).nullable(),
       at: z.iso.datetime(),
     })

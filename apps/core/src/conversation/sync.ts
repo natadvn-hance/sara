@@ -11,6 +11,7 @@ import { chatMessage, outbox } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import type { ProfiClient } from '../profi/client'
 import { getSettingChangedAt } from '../settings/store'
+import { promoteOnClientWord } from './stage'
 import type { ConversationRow, StoredMessage } from './types'
 
 export type SyncResult = {
@@ -226,6 +227,8 @@ export async function syncChat(
   const messages = chat
     .map((m) => byId.get(m.platform_message_id))
     .filter((m): m is StoredMessage => m !== undefined)
+  // A client's word moves the deal on, whoever read the chat first (an event, a waiting turn, a check).
+  if (added.some((m) => m.side === 'client')) await promoteOnClientWord(d.db, conv)
   if (added.length > 0)
     await d.show?.(conv, added).catch((e) => console.error('news of the chat not shown', e))
   return {

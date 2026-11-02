@@ -279,6 +279,15 @@ describe('M4 contracts', () => {
         text: 'x',
       }).success,
     ).toBe(false)
+    // With the order of the chat, and without it as the fake site sends it.
+    expect(
+      PROFI_EVENT_PAYLOADS['profi.client_read'].safeParse({
+        chat_id: 'c',
+        order_id: 'c',
+        platform_message_id: null,
+        at: ref.sent_at,
+      }).success,
+    ).toBe(true)
   })
 
   it('FR-CONV-6: sending names the last message the core saw and the node can refuse a changed chat', () => {

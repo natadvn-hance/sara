@@ -278,8 +278,8 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
     if (output.move === 'call_boris') break
     withoutCase = issues.some(isCaseIssue)
   }
-  const sendable = issues.length === 0 || output?.move === 'call_boris'
-  if (sendable && output && output.move !== 'none' && output.text && isCallOffer(output.text))
+  // The mark is filled whatever the checks said: a draft Boris reads with a fault must not carry a raw «{слоты}».
+  if (output && output.move !== 'none' && output.text && isCallOffer(output.text))
     output = { ...output, text: fillCallOffer(output.text, callTimes, input.now, NO_TIMES) }
   // The name is called by its formal first name, or left out when the profile gives none (Boris, 01.11.2026).
   if (output?.text) output = { ...output, text: addressName(output.text, input.names) }

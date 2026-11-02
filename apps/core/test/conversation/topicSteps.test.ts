@@ -2,8 +2,8 @@ import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { ensureConversation, updateConversation } from '../../src/conversation/store'
-import { topicStages, topicSteps } from '../../src/conversation/topicSteps'
-import { deal, forumTopic, lead } from '../../src/db/schema'
+import { resetFalseClosedSteps, topicStages, topicSteps } from '../../src/conversation/topicSteps'
+import { deal, forumTopic, lead, topicStep } from '../../src/db/schema'
 import { createDeal } from '../../src/domain/deal'
 import { appendEvent } from '../../src/journal/journal'
 import { topicName } from '../../src/notify/forum'
@@ -79,7 +79,7 @@ beforeEach(async () => {
 })
 
 describe('the stage in the topic name', () => {
-  it('ST-M7-16: a bid is yellow, talking blue, a booked call orange, a won deal green, a lost one red', async () => {
+  it('ST-M7-16: a bid is yellow, talking light green, a booked call orange, a won deal ✅, a lost one red', async () => {
     const dealId = await createDeal(db, {
       leadId: ORDER,
       accountId: ACC,
@@ -93,11 +93,11 @@ describe('the stage in the topic name', () => {
       await topicStages(deps)
       return stages[0]?.dot
     }
-    expect(await named('talking')).toBe('🔵')
+    expect(await named('talking')).toBe('🟢')
     expect(await named('call_booked')).toBe('🟠')
     const conv = await ensureConversation(db, { accountId: ACC, chatId: ORDER, orderId: ORDER })
     await updateConversation(db, conv.id, { outcome: 'won' })
-    expect(await named('call_booked')).toBe('🟢')
+    expect(await named('call_booked')).toBe('✅')
     await updateConversation(db, conv.id, { outcome: 'lost' })
     expect(await named('call_booked')).toBe('🔴')
   })
@@ -138,7 +138,8 @@ describe('the steps in the topic', () => {
       payload: { from: 'talking', to: 'call_booked' },
     })
     await ev('profi.order_gone', { kind: 'order', id: ORDER, payload: {} })
-    expect(await topicSteps(deps, new Date())).toBe(3)
+    const closed = { ...deps, getOrder: async () => ({ open: false, from_page: true }) }
+    expect(await topicSteps(closed, new Date())).toBe(3)
     expect(steps.map((s) => s.text.replace(/ · .*$/, '')).sort()).toEqual([
       '<i>👁 Клиент прочитал отклик',
       '<i>📁 Заказ закрыт на сайте',
@@ -146,7 +147,35 @@ describe('the steps in the topic', () => {
     ])
     expect(steps.every((s) => s.quiet && (s.place as { order: string }).order === ORDER)).toBe(true)
     // Never twice.
+    expect(await topicSteps(closed, new Date())).toBe(0)
+  })
+
+  it('ST-M7-16: an order that left the board with a bid on it is not closed: the step waits for the page to say so', async () => {
+    await ev('profi.order_gone', { kind: 'order', id: ORDER, payload: {} })
+    // No way to read the page: never shown.
     expect(await topicSteps(deps, new Date())).toBe(0)
+    // The page says open, or an old reading says closed: not shown.
+    let answer = { open: true, from_page: true }
+    const withPage = { ...deps, getOrder: async () => answer }
+    expect(await topicSteps(withPage, new Date())).toBe(0)
+    answer = { open: false, from_page: false }
+    expect(await topicSteps(withPage, new Date(Date.now() + 40 * 60_000))).toBe(0)
+    expect(steps).toEqual([])
+    // The page itself says closed: shown, once.
+    answer = { open: false, from_page: true }
+    expect(await topicSteps(withPage, new Date(Date.now() + 80 * 60_000))).toBe(1)
+    expect(steps.map((x) => x.text.replace(/ · .*$/, ''))).toEqual(['<i>📁 Заказ закрыт на сайте'])
+    expect(await topicSteps(withPage, new Date(Date.now() + 120 * 60_000))).toBe(0)
+  })
+
+  it('ST-M7-16: the false «закрыт» marks of before are cleared once', async () => {
+    await db.insert(topicStep).values([
+      { key: ORDER, step: 'order_closed' },
+      { key: ORDER, step: 'read' },
+    ])
+    expect(await resetFalseClosedSteps(db)).toBe(1)
+    expect(await resetFalseClosedSteps(db)).toBe(0)
+    expect((await db.select().from(topicStep)).map((r) => r.step)).toEqual(['read'])
   })
 
   it('ST-M7-16: news from before the topic, and a stage that is not a call, show nothing', async () => {
