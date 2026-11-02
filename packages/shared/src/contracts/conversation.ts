@@ -163,6 +163,7 @@ export const CHECK_SEVERITY = {
   'robotic.length': 'S3',
   'robotic.repeat': 'S3',
   'robotic.quote': 'S3',
+  'style.neuro': 'S3',
   'promise.call': 'S1',
   empty: 'S2',
   'checker.unsupported': 'S1',

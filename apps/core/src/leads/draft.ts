@@ -19,6 +19,7 @@ import {
 import type { Gateway } from '../gateway/gateway'
 import { siteSection } from '../site/view'
 import { fixClientText, greetingFor, moscowPartOfDay } from '../text/clientText'
+import { neuroSpeech, neuroSpeechReason } from '../text/neuroSpeech'
 import { bidCaseProblems, bidCasesText, chosenCase } from './bidCases'
 import { firstName, namesToHide } from './clientName'
 import { chosenSites, type HanceSite, SITES_SHOWN, sameUrl, siteLine, sitesText } from './siteOrder'
@@ -58,11 +59,15 @@ export type Draft = {
   followUpsDropped?: FollowUpMiss[]
   /** The sites of Hance the series shows by their links, for an order of a site (Boris, 30.10.2026). */
   followUpSites?: string[]
+  /** The text still has a «не X, а Y» turn after the last try; the card says so, and Boris decides (01.11.2026). */
+  styleNote?: string
   /** The call offer that ends the series, its times still to be put in (Boris, 30.10.2026); none when it is off. */
   callOffer?: string
   /** The last message of the series: Boris's Telegram (31.10.2026). */
   telegram?: string
 }
+/** What the card says about a bid that kept a «не X, а Y» turn. */
+export const NEURO_NOTE = '⚠️ В тексте остался оборот «не X, а Y». Поправьте перед отправкой.'
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
   text: null
@@ -598,7 +603,12 @@ export async function writeDraft(
   const redact = { names: namesToHide(o.client_name, o.client_info?.name) }
   // The program puts the links in: the model only named the ids, and only the library's count. They are fitted
   // behind the longest greeting of the day, so the bid fits whenever it is sent.
-  const accept = (out: AnalystOutput, text: string, attempts: number): Draft => {
+  const accept = (
+    out: AnalystOutput,
+    text: string,
+    attempts: number,
+    styleNote?: string,
+  ): Draft => {
     const hello = greetingOf(o.client_name, now)
     // A case of the mind is told in the text itself, with no link: only its id is kept.
     const told = chosenCase(mindCases, out.case_ids)
@@ -618,6 +628,7 @@ export async function writeDraft(
         o.budget_text,
       ),
       attempts,
+      ...(styleNote && { styleNote }),
       analysis: analysisOf(out),
       cases: told ? [...placed.shown, told.id] : placed.shown,
       followUps: series.texts,
@@ -660,7 +671,18 @@ export async function writeDraft(
     } else if (longestLength > ceiling) {
       reason = 'too_long'
       input = `${base}\n\nПрошлый вариант вышел ${chars(longestLength)} вместе с приветствием, а форма принимает не больше ${ceiling}. Напиши короче, не больше ${chars(maxBody)}, сохрани смысл и вопрос.`
-    } else return accept(r.output, text, attempts)
+    } else {
+      // Boris does not want «не X, а Y» (01.11.2026): one more try with the reason; if it stays, the bid still goes to
+      // him, with a note on the card, never without a draft.
+      // The series after the bid is checked the same way (Boris, 01.11.2026).
+      const neuro =
+        neuroSpeech(body) ??
+        (r.output.follow_ups ?? []).map((f) => neuroSpeech(f.text)).find((h) => h !== null) ??
+        null
+      if (!neuro) return accept(r.output, text, attempts)
+      if (attempts >= 2) return accept(r.output, text, attempts, NEURO_NOTE)
+      input = `${base}\n\nВ прошлом варианте ${neuroSpeechReason(neuro)}. Перепиши без таких оборотов, остальное сохрани.`
+    }
   }
   return { text: null, reason, attempts: 2, analysis }
 }
