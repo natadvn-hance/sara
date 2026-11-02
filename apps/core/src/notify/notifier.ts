@@ -29,7 +29,7 @@ export type Notifier = {
   sendButtons(
     text: string,
     rows: { text: string; callbackData: string }[][],
-    o?: { html?: boolean; loud?: boolean; place?: Place; notice?: NoticeHint },
+    o?: { html?: boolean; loud?: boolean; quiet?: boolean; place?: Place; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
   typing?(): Promise<void>

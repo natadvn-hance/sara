@@ -18,6 +18,12 @@ export const RoleMeta = z.object({
 })
 export type RoleMeta = z.infer<typeof RoleMeta>
 
+/** FR-SPEECH-5: Boris's replies by their number, with only the typos fixed. */
+export const ReplyCleanerOutput = z.object({
+  replies: z.array(z.object({ n: z.number().int().positive(), text: z.string().min(1) })),
+})
+export type ReplyCleanerOutput = z.infer<typeof ReplyCleanerOutput>
+
 export const SorterOutput = z.object({
   verdict: z.enum(['fit', 'maybe', 'reject']),
   reason: z.string().max(200),

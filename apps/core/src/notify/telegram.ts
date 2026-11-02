@@ -679,7 +679,7 @@ export function createTelegramRuntime(d: {
         return { messageId }
       },
       async sendButtons(text, rows, o) {
-        const silent = await silentNow(o?.loud)
+        const silent = o?.quiet || (await silentNow(o?.loud))
         const extra: Omit<SendOptions, 'parse_mode'> = {
           ...(silent && { disable_notification: true }),
           reply_markup: { inline_keyboard: keyboard(rows) },

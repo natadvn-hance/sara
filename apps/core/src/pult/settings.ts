@@ -113,6 +113,12 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'count',
   },
+  'digest.boris_replies': {
+    title: 'Разбор твоих ответов раз в день',
+    hint: 'Утром пост без звука: где ты ответил не как Сара, и кнопки «В образцы», «Не надо». Один дешевый вызов Claude в день, только когда есть что показать.',
+    edit: 'free',
+    kind: 'flag',
+  },
   'calls.offer': {
     title: 'Предлагает созвон после отклика',
     hint: 'Последнее сообщение серии: созвониться на полчаса, три времени на выбор.',
@@ -186,6 +192,7 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'conv.night',
       'conv.reminder_quiet',
       'secretary.turns_per_day',
+      'digest.boris_replies',
     ],
   },
   {
