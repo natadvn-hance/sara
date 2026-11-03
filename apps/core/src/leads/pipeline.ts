@@ -15,6 +15,7 @@ import {
   type ScreenMark,
   type SorterOutput,
   type TaskAction,
+  thresholdFor,
 } from '@sara/shared'
 import { and, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import type { MindSearch } from '../conversation/types'
@@ -734,7 +735,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           return {
             ...s,
             score,
-            decision: !s.stopFactor && score >= rules.threshold ? 'show' : 'drop',
+            decision:
+              !s.stopFactor && score >= thresholdFor(rules, order.category) ? 'show' : 'drop',
             reason:
               `${s.reason} (минус ${cut}: ${screen.soft.map((m) => (m.criterion === 'vacancy' ? 'похоже на вакансию' : 'мало слов клиента')).join(', ')})`.slice(
                 0,

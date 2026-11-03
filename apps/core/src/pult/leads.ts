@@ -4,6 +4,7 @@ import {
   colorMark,
   combinedScore,
   formatRub,
+  type LeadKind,
   type LeadQueue,
   type LeadRow,
   type LeadScores,
@@ -12,6 +13,7 @@ import {
   priceRange,
   type QueueOrder,
   shownTitle,
+  thresholdFor,
 } from '@sara/shared'
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
@@ -219,7 +221,11 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
         )
     : []
   const r = rules?.rules as
-    | { threshold?: number; axes?: { id: string; title: string; weight: number }[] }
+    | {
+        threshold?: number
+        kind_thresholds?: Partial<Record<LeadKind, number>>
+        axes?: { id: string; title: string; weight: number }[]
+      }
     | undefined
   const axisOf = new Map((r?.axes ?? []).map((a) => [a.id, a]))
   const axes = ((s?.axes ?? []) as { id: string; score: number; why: string }[]).map((a) => ({
@@ -280,7 +286,13 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
           value: s.score,
           scores: scoresOf(s),
           confidence: s.confidence,
-          threshold: r?.threshold ?? null,
+          threshold:
+            r?.threshold === undefined
+              ? null
+              : thresholdFor(
+                  { threshold: r.threshold, kind_thresholds: r.kind_thresholds },
+                  l.category,
+                ),
           rulesVersion: s.version,
           reason: s.reason,
           stopFactor: s.stopFactor,

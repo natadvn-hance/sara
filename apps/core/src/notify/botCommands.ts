@@ -46,6 +46,7 @@ export const COMMAND_TEXTS = {
   noPult: 'Адрес пульта не настроен.',
   pult: 'Пульт Сары: заявки, клиенты, настройки.',
   openPult: 'Открыть пульт',
+  settings: 'Настройки: пороги заявок по видам, паузы, лимиты.',
   paused:
     'Пауза: не пишу клиентам и не трачу деньги на отклики. Чаты читаю и всё присылаю, как раньше. Снять: /resume',
   notPaused: 'Паузы нет: пишу клиентам и откликаюсь, как обычно. Поставить: /pause',
@@ -137,6 +138,15 @@ async function pult(c: CommandContext): Promise<CommandReply> {
   return { text: COMMAND_TEXTS.pult, open: { text: COMMAND_TEXTS.openPult, url: c.publicUrl } }
 }
 
+/** /settings: the settings screen of the pult as the Mini App (the thresholds by kind are there, 3.11). */
+async function settings(c: CommandContext): Promise<CommandReply> {
+  if (!c.publicUrl) return COMMAND_TEXTS.noPult
+  return {
+    text: COMMAND_TEXTS.settings,
+    open: { text: COMMAND_TEXTS.openPult, url: `${c.publicUrl}/settings` },
+  }
+}
+
 /** The menu, in its order. /test and /test_clear go to the test orders; without them they say «скоро». */
 export const COMMANDS: BotCommand[] = [
   { name: 'status', description: 'Что сейчас: состояние, кошелёк, ждёт тебя', run: status },
@@ -154,6 +164,7 @@ export const COMMANDS: BotCommand[] = [
   { name: 'pause', description: 'Пауза: не пишу клиентам и не трачу деньги', run: pause },
   { name: 'resume', description: 'Снять паузу', run: resume },
   { name: 'pult', description: 'Открыть пульт', run: pult },
+  { name: 'settings', description: 'Настройки: пороги заявок, паузы', run: settings },
   { name: 'forum', description: 'Привязать группу с темами' },
   { name: 'forum_off', description: 'Вернуть всё в личный чат' },
   { name: 'help', description: 'Что умеют команды', run: async () => helpText() },

@@ -53,13 +53,13 @@ export async function droppedLead(
   db: Db,
   id: string,
   score: number,
-  o: { seenAt: string; stopFactor?: string | null; title?: string },
+  o: { seenAt: string; stopFactor?: string | null; title?: string; category?: string },
 ): Promise<void> {
   await db.insert(lead).values({
     id,
     accountId: 'hance-marketing',
     title: o.title ?? `Заказ ${id}`,
-    category: 'Маркетинг',
+    category: o.category ?? 'Маркетинг',
     city: 'Москва',
     text: 'Описание',
     clientName: 'Ирина',

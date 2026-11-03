@@ -409,6 +409,12 @@ export const SettingsView = z.object({
       title: z.string(),
       version: z.number().int(),
       threshold: z.number().int(),
+      /** The thresholds in force by the kind of the order (marketing, sites, the rest). */
+      thresholds: z.object({
+        marketing: z.number().int(),
+        sites: z.number().int(),
+        other: z.number().int(),
+      }),
       stops: z.array(z.string()),
       axes: z.array(z.object({ title: z.string(), weight: z.number().int() })),
     }),

@@ -1,5 +1,13 @@
-import { NOTICE_KIND_RU, NOTICE_KINDS, type SettingRow, type SettingsView } from '@sara/shared'
-import { useState } from 'react'
+import {
+  LEAD_KIND_TITLES,
+  LEAD_KINDS,
+  type LeadKind,
+  NOTICE_KIND_RU,
+  NOTICE_KINDS,
+  type SettingRow,
+  type SettingsView,
+} from '@sara/shared'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { usePress, useScreen } from '../app/data'
 import { ago, rub } from '../app/format'
@@ -224,91 +232,105 @@ function Row({ r }: { r: SettingRow }) {
   )
 }
 
-type Hint = {
+type KindHint = {
   value: number
   current: number
-  version: number
   cardsNow: number
   cardsWould: number
   lostYes: number
   gainedNo: number
 }
+type Hint = { version: number; kinds: Record<LeadKind, KindHint> }
 
-/** The minimum score with a hint of the last 7 days; «Сохранить» makes a new version of the rules (M3). */
+const SLIDER = { min: 30, max: 70, step: 5 } as const
+
+/**
+ * The minimum score by the kind of the order, three sliders with a hint of the last 7 days for each (3.11, Boris:
+ * «мы в первую очередь маркетинг»). Nothing is saved on a move: «Сохранить» makes a new version of the rules (M3).
+ */
 function Threshold({ d }: { d: SettingsView['directions'][number] }) {
   const { press, busy } = usePress()
-  const [value, setValue] = useState(d.threshold)
+  const [values, setValues] = useState(d.thresholds)
   const [hint, setHint] = useState<Hint | null>(null)
-  const changed = value !== d.threshold
-  const shift = async (n: number) => {
-    const next = Math.max(0, Math.min(100, value + n))
-    setValue(next)
-    try {
-      setHint(
-        await api<Hint>(`/api/settings/threshold/${encodeURIComponent(d.accountId)}?value=${next}`),
-      )
-    } catch {
-      setHint(null)
+  const changed = LEAD_KINDS.some((k) => values[k] !== d.thresholds[k])
+  const query = LEAD_KINDS.map((k) => `${k}=${values[k]}`).join('&')
+  // The hint is counted on stored scores, without a model; a short pause keeps a drag from asking at every step.
+  useEffect(() => {
+    let live = true
+    const t = setTimeout(async () => {
+      try {
+        const h = await api<Hint>(
+          `/api/settings/threshold/${encodeURIComponent(d.accountId)}?${query}`,
+        )
+        if (live) setHint(h)
+      } catch {
+        if (live) setHint(null)
+      }
+    }, 250)
+    return () => {
+      live = false
+      clearTimeout(t)
     }
-  }
+  }, [d.accountId, query])
   return (
-    <div className="grid" style={{ gap: 10 }}>
-      <div className="actions">
-        <div className="stepper">
-          <button
-            type="button"
-            aria-label={`Меньше: минимальный балл ${d.title}`}
-            onClick={() => shift(-1)}
+    <div className="grid" style={{ gap: 14 }}>
+      {LEAD_KINDS.map((k) => {
+        const h = hint?.kinds[k]
+        return (
+          <div key={k} className="grid" style={{ gap: 4 }}>
+            <div className="bar-top">
+              <label htmlFor={`thr-${k}`}>{LEAD_KIND_TITLES[k]}</label>
+              <span className="mono">
+                <b>{values[k]}</b>
+                {values[k] !== d.thresholds[k] ? ` (сейчас ${d.thresholds[k]})` : ''}
+              </span>
+            </div>
+            <input
+              id={`thr-${k}`}
+              type="range"
+              aria-label={`Минимальный балл: ${LEAD_KIND_TITLES[k]}`}
+              {...SLIDER}
+              value={values[k]}
+              onChange={(e) => setValues({ ...values, [k]: Number(e.target.value) })}
+              style={{ width: '100%', height: 36, accentColor: 'var(--accent)' }}
+            />
+            <span className="muted" style={{ fontSize: 13 }}>
+              {h === undefined
+                ? ' '
+                : values[k] === d.thresholds[k]
+                  ? `За 7 дней карточек: ${h.cardsNow}.`
+                  : `За 7 дней было бы ${h.cardsWould} карточек вместо ${h.cardsNow}; из твоих «да» потерялось бы ${h.lostYes}, из «нет» пришло бы ${h.gainedNo}.`}
+            </span>
+          </div>
+        )
+      })}
+      {changed ? (
+        <div className="actions">
+          <Btn
+            size="sm"
+            look="primary"
+            disabled={busy !== null}
+            onClick={async () => {
+              await press(
+                'threshold',
+                `/api/settings/threshold/${encodeURIComponent(d.accountId)}`,
+                {
+                  ...values,
+                  expectedVersion: d.version,
+                },
+              )
+            }}
           >
-            −
-          </button>
-          <input aria-label={`Минимальный балл ${d.title}`} readOnly value={value} />
-          <button
-            type="button"
-            aria-label={`Больше: минимальный балл ${d.title}`}
-            onClick={() => shift(1)}
-          >
-            +
-          </button>
+            Сохранить как правила v{d.version + 1}
+          </Btn>
+          <Btn size="sm" onClick={() => setValues(d.thresholds)}>
+            Отмена
+          </Btn>
         </div>
-        {changed ? (
-          <>
-            <Btn
-              size="sm"
-              look="primary"
-              disabled={busy !== null}
-              onClick={async () => {
-                const ok = await press(
-                  'threshold',
-                  `/api/settings/threshold/${encodeURIComponent(d.accountId)}`,
-                  { value, expectedVersion: d.version },
-                )
-                if (ok) setHint(null)
-              }}
-            >
-              Сохранить как правила v{d.version + 1}
-            </Btn>
-            <Btn
-              size="sm"
-              onClick={() => {
-                setValue(d.threshold)
-                setHint(null)
-              }}
-            >
-              Отмена
-            </Btn>
-          </>
-        ) : null}
-      </div>
-      {hint && changed ? (
-        <p className="callout tone-wait">
-          За 7 дней было бы {hint.cardsWould} карточек вместо {hint.cardsNow}; из твоих «да»
-          потерялось бы {hint.lostYes}, из «нет» пришло бы {hint.gainedNo}.
-        </p>
       ) : (
         <p className="muted" style={{ fontSize: 13 }}>
-          Ниже балла заявка не приходит карточкой. Порог это часть правил отбора: сохранение создаёт
-          новую версию, старую можно вернуть.
+          Ниже балла заявка своего вида не приходит карточкой. Пороги это часть правил отбора:
+          сохранение создаёт новую версию, старую можно вернуть.
         </p>
       )}
     </div>
@@ -434,10 +456,6 @@ function Body({ v }: { v: SettingsView }) {
             i={v.groups.length + i + 1}
             end={<Pill>правила v{d.version}</Pill>}
           >
-            <div className="num">
-              <b>{d.threshold}</b>
-              <small>минимальный балл</small>
-            </div>
             <Threshold d={d} />
             <div className="bars">
               {d.axes.map((a) => (
