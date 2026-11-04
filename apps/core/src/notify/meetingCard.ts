@@ -7,7 +7,7 @@ import { stamp } from './topicPosts'
  */
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-const hyphen = (s: string) => esc(s.replace(/[—–]/g, '-'))
+const hyphen = (s: string) => esc(s.replace(/[\u2014\u2013]/g, '-'))
 
 const WEEKDAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
 const HOW: Record<string, string> = {
