@@ -27,7 +27,7 @@ describe('the card of a bid, folded', () => {
     expect(t).toContain('<a href="https://t.me/c/123/45">Чат с клиентом</a>')
     // The title is escaped as markup, not left to break it.
     expect(t).toContain('Нужен сайт &lt;для&gt; клиники')
-    expect(t).not.toMatch(/[–—]/)
+    expect(t).not.toMatch(/[–\u2014]/)
   })
 
   it('FR-UI-1: without a forum there is no chat link, without a fee no money, a free bid shows none', () => {

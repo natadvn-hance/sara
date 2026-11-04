@@ -198,8 +198,6 @@ export const TEXTS = {
   },
   notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
   voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',
-  summaryHead: (n: number) => `Сегодня отсеяла ${orders(n)}. На грани:`,
-  summaryNone: (n: number) => `Сегодня отсеяла ${orders(n)}, пограничных не было`,
   wantButton: (n: number) => `Взял бы №${n}`,
   wantCard: 'Пишу черновик, пришлю карточку',
   cardSent: 'Прислала карточку заявки',
@@ -308,7 +306,8 @@ const TEXT_HEADING = '<b>Полный текст заявки</b>'
 const ENTITY = /&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);/gi
 
 /** Every value from the site or the model goes into the HTML through this: <, > and & become entities. */
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+export const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /** The text Telegram counts against its limit: without tags, an entity as one character (UTF-16 units). */
 export function telegramTextLength(html: string): number {

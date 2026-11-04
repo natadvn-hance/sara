@@ -28,6 +28,12 @@ beforeEach(async () => {
   await seedDirection(db, 'hance-marketing')
   sent = []
 })
+
+/** The numbered orders of a report: «Заказ 930001 55», in their order. */
+const orders = (text = '') =>
+  [
+    ...text.matchAll(/^\d+\. <a [^>]*>([^<]+)<\/a>, (?:балл )?([^\n]*?)(?: при пороге \d+)?$/gm),
+  ].map((m) => `${m[1]} ${m[2]}`)
 // 25.10.2026: 19:30 and 18:59 in Moscow (UTC+3); orders seen that morning.
 const AT_1930 = new Date('2026-10-25T16:30:00Z')
 const AT_1859 = new Date('2026-10-25T15:59:00Z')
@@ -48,12 +54,8 @@ describe('daily summary', () => {
     await droppedLead(db, '930007', 55, { seenAt: '2026-10-24T07:00:00Z' })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     expect(sent).toHaveLength(1)
-    expect(sent[0]?.text.split('\n')).toEqual([
-      'Сегодня отсеяла 6 заявок. На грани:',
-      '1. Заказ 930001, балл 55: причина 930001',
-      '2. Заказ 930002, балл 50: причина 930002',
-      '3. Заказ 930003, балл 47: причина 930003',
-    ])
+    expect(sent[0]?.text).toContain('Балл или стоп-фактор: 6')
+    expect(orders(sent[0]?.text)).toEqual(['Заказ 930001 55', 'Заказ 930002 50', 'Заказ 930003 47'])
     expect(sent[0]?.rows.map((r) => r.map((b) => b.text))).toEqual([
       ['Взял бы №1'],
       ['Взял бы №2'],
@@ -85,12 +87,7 @@ describe('daily summary', () => {
     await db.update(leadScore).set({ version: 2 })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     // 35 is five under marketing's 40, 45 is ten under the sites' 55, 44 is six under the rest's 50: all «на грани».
-    expect(sent[0]?.text.split('\n')).toEqual([
-      'Сегодня отсеяла 3 заявки. На грани:',
-      '1. Заказ 930022, балл 45: причина 930022',
-      '2. Заказ 930023, балл 44: причина 930023',
-      '3. Заказ 930021, балл 35: причина 930021',
-    ])
+    expect(orders(sent[0]?.text)).toEqual(['Заказ 930022 45', 'Заказ 930023 44', 'Заказ 930021 35'])
   })
 
   it('FR-LEAD-7: a score above its kind’s threshold is not «на грани», ten under it still is', async () => {
@@ -112,7 +109,7 @@ describe('daily summary', () => {
     await db.update(leadScore).set({ version: 2 })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     // 45 is above marketing's 40 (it would have shown), 30 is ten under: on the edge of the band.
-    expect(sent[0]?.text.split('\n')[1]).toBe('1. Заказ 930031, балл 30: причина 930031')
+    expect(orders(sent[0]?.text)).toEqual(['Заказ 930031 30'])
     expect(sent[0]?.text).not.toContain('930032')
   })
 
@@ -139,7 +136,9 @@ describe('daily summary', () => {
   it('FR-LEAD-7: without borderline orders the summary is one line', async () => {
     await droppedLead(db, '930031', 20, { seenAt: MORNING })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
-    expect(sent).toEqual([{ text: 'Сегодня отсеяла 1 заявку, пограничных не было', rows: [] }])
+    expect(sent[0]?.rows).toEqual([])
+    expect(sent[0]?.text).toContain('Балл или стоп-фактор: 1')
+    expect(sent[0]?.text).not.toContain('Почти прошли')
   })
 
   it('FR-LEAD-7: a day without dropped orders sends nothing', async () => {
@@ -165,10 +164,7 @@ describe('daily summary', () => {
     // 19:10 Moscow today: after today's summary time, it waits for tomorrow's.
     await droppedLead(db, '930052', 53, { seenAt: '2026-10-25T16:10:00Z' })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
-    expect(sent[0]?.text.split('\n')).toEqual([
-      'Сегодня отсеяла 1 заявку. На грани:',
-      '1. Заказ 930051, балл 52: причина 930051',
-    ])
+    expect(orders(sent[0]?.text)).toEqual(['Заказ 930051 52'])
     sent = []
     expect(await dailySummary({ db, notifier }, new Date('2026-10-26T16:30:00Z'))).toBe('sent')
     expect(sent[0]?.text).toContain('Заказ 930052')
@@ -183,12 +179,12 @@ describe('daily summary', () => {
     await heldLead(db, '940005', { seenAt: '2026-10-24T07:00:00Z', score: 90 })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     expect(sent).toHaveLength(1)
-    expect(sent[0]?.text.split('\n')).toEqual([
-      'Ещё показала бы, карточек за день было больше лимита:',
-      '1. Заказ 940002, балл 80',
-      '2. Заказ 940003, балл 70',
-      '3. Заказ 940001, балл 70',
-      '4. Заказ 940004, без оценки',
+    expect(sent[0]?.text).toContain('Ещё показала бы')
+    expect(orders(sent[0]?.text)).toEqual([
+      'Заказ 940002 80',
+      'Заказ 940003 70',
+      'Заказ 940001 70',
+      'Заказ 940004 без оценки',
     ])
     expect(sent[0]?.rows.map((r) => r.map((b) => b.text))).toEqual([
       ['Показать №1'],
@@ -240,13 +236,7 @@ describe('daily summary', () => {
     await droppedLead(db, '930061', 55, { seenAt: MORNING })
     await heldLead(db, '940011', { seenAt: MORNING, score: 70 })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
-    expect(sent[0]?.text.split('\n')).toEqual([
-      'Сегодня отсеяла 1 заявку. На грани:',
-      '1. Заказ 930061, балл 55: причина 930061',
-      '',
-      'Ещё показала бы, карточек за день было больше лимита:',
-      '2. Заказ 940011, балл 70',
-    ])
+    expect(orders(sent[0]?.text)).toEqual(['Заказ 930061 55', 'Заказ 940011 70'])
     expect(sent[0]?.rows.map((r) => r.map((b) => b.text))).toEqual([
       ['Взял бы №1'],
       ['Показать №2'],
@@ -258,12 +248,7 @@ describe('daily summary', () => {
     for (let i = 10; i < 22; i++) await heldLead(db, `9400${i}`, { seenAt: MORNING, score: 60 + i })
     expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
     const lines = sent[0]?.text.split('\n') ?? []
-    expect(lines.slice(0, 4)).toEqual([
-      'Сегодня отсеяла 1 заявку, пограничных не было',
-      '',
-      'Ещё показала бы, карточек за день было больше лимита:',
-      '1. Заказ 940021, балл 81',
-    ])
+    expect(orders(sent[0]?.text)[0]).toBe('Заказ 940021 81')
     expect(lines.at(-1)).toBe('И ещё 2 заявки')
     expect(sent[0]?.rows).toHaveLength(10)
   })
