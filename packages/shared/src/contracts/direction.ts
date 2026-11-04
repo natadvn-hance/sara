@@ -28,13 +28,26 @@ export const DirectionRulesShape = z.object({
   notes: z.array(z.string()),
 })
 
+/**
+ * The threshold by the kind of the order (marketing, sites, the rest; see leadKind). A kind that is not set takes
+ * `threshold`. Apart from the shape the model answers with: the model never sets it, Boris does, from the settings.
+ */
+export const KindThresholds = z
+  .object({
+    marketing: z.number().int().min(0).max(100),
+    sites: z.number().int().min(0).max(100),
+    other: z.number().int().min(0).max(100),
+  })
+  .partial()
+export type KindThresholds = z.infer<typeof KindThresholds>
+
 /** The rules of an account's direction (FR-ACC-2): what is never taken, what lowers a lead, how it is scored. */
-export const DirectionRules = DirectionRulesShape.refine(
-  (r) => r.axes.reduce((s, a) => s + a.weight, 0) === 100,
-  {
+export const DirectionRules = DirectionRulesShape.extend({
+  kind_thresholds: KindThresholds.optional(),
+})
+  .refine((r) => r.axes.reduce((s, a) => s + a.weight, 0) === 100, {
     message: 'axis weights must add up to 100',
-  },
-)
+  })
   .refine((r) => new Set(r.axes.map((a) => a.id)).size === r.axes.length, {
     message: 'axis ids must be unique',
   })

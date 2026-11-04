@@ -1,5 +1,5 @@
 {
-  "id": "d386d554-1cd6-49e0-99d0-15bdc50a693f",
+  "id": "603f5c20-0068-4173-a078-d24f90a8b200",
   "prevId": "50d6ea71-4938-42d5-ae73-9e89c4703175",
   "version": "7",
   "dialect": "postgresql",
@@ -2637,6 +2637,44 @@
           "primaryKey": false,
           "notNull": false
         },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'booked'"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'boris'"
+        },
+        "how": {
+          "name": "how",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "caller": {
+          "name": "caller",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quote": {
+          "name": "quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "card_ref": {
+          "name": "card_ref",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "amount_rub": {
           "name": "amount_rub",
           "type": "integer",
@@ -3637,156 +3675,6 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "core.reply_pick": {
-      "name": "reply_pick",
-      "schema": "core",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "turn_id": {
-          "name": "turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "first_message_id": {
-          "name": "first_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "replied_at": {
-          "name": "replied_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "similarity": {
-          "name": "similarity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_text": {
-          "name": "client_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "draft_text": {
-          "name": "draft_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reply_text": {
-          "name": "reply_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "promises": {
-          "name": "promises",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "post_message_id": {
-          "name": "post_message_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decision": {
-          "name": "decision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "reply_pick_reply": {
-          "name": "reply_pick_reply",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "first_message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "reply_pick_conversation_id_conversation_id_fk": {
-          "name": "reply_pick_conversation_id_conversation_id_fk",
-          "tableFrom": "reply_pick",
-          "tableTo": "conversation",
-          "schemaTo": "core",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "reply_pick_turn_id_unique": {
-          "name": "reply_pick_turn_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "turn_id"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

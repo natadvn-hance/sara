@@ -220,9 +220,8 @@ describe('scoring in the lead pipeline', () => {
     expect(await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())).toBe(
       'sent',
     )
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1 заявку. На грани:')))
-    const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
-      ?.inline_keyboard[0]?.[0]
+    await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+    const want = tg.sent.find((m) => m.text.startsWith('📊'))?.reply_markup?.inline_keyboard[0]?.[0]
     expect(want?.text).toBe('Взял бы №1')
     tg.pushPress(111, want?.callback_data ?? '')
     await until(() =>
@@ -250,9 +249,8 @@ describe('scoring in the lead pipeline', () => {
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
     await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
-    const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
-      ?.inline_keyboard[0]?.[0]
+    await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+    const want = tg.sent.find((m) => m.text.startsWith('📊'))?.reply_markup?.inline_keyboard[0]?.[0]
     tg.pushPress(111, want?.callback_data ?? '')
     await until(() =>
       cards().some((m) =>
@@ -317,8 +315,8 @@ describe('scoring in the lead pipeline', () => {
       await fake.emitOrder({ order_id: dropped })
       await until(async () => (await statusOf(dropped)) === 'scored_out')
       await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())
-      await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
-      const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
+      await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+      const want = tg.sent.find((m) => m.text.startsWith('📊'))?.reply_markup
         ?.inline_keyboard[0]?.[0]
       tg.pushPress(111, want?.callback_data ?? '')
       await until(() => cards().length === 3)

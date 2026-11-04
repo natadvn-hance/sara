@@ -82,6 +82,7 @@ describe('the commands under the menu button', () => {
       'pause',
       'resume',
       'pult',
+      'settings',
       'forum',
       'forum_off',
       'help',
@@ -133,6 +134,15 @@ describe('the commands under the menu button', () => {
     const m = await command('/pult')
     expect(m?.text).toBe(COMMAND_TEXTS.pult)
     expect(buttonOf(m)).toEqual({ text: 'Открыть пульт', web_app: { url: PULT } })
+  })
+
+  it('ST-M7-17: /settings opens the settings screen as the Mini App, where the thresholds by kind are', async () => {
+    const m = await command('/settings')
+    expect(m?.text).toBe(COMMAND_TEXTS.settings)
+    expect(buttonOf(m)).toEqual({
+      text: 'Открыть пульт',
+      web_app: { url: `${PULT}/settings?focus=thresholds` },
+    })
   })
 
   it('ST-M7-17: without the pult’s address /pult says so', async () => {

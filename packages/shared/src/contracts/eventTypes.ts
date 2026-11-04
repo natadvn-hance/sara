@@ -114,6 +114,7 @@ export const EVENT_TYPES = [
   'conv.reply_dropped',
   'conv.owed_reminded',
   'conv.topic_restored',
+  'meeting.read',
   'mind.indexed',
   'mind.gap_recorded',
   'mind.proposed',

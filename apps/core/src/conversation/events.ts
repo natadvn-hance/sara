@@ -1,7 +1,7 @@
-import type { EventEnvelope } from '@sara/shared'
+import { type EventEnvelope, normalizeText } from '@sara/shared'
 import { and, eq, lte, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { chatMessage, conversation, lead } from '../db/schema'
+import { chatMessage, conversation, lead, outbox } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { isApprovedText } from '../leads/callSlots'
 import { firstName } from '../leads/clientName'
@@ -11,7 +11,7 @@ import { clientPost, ourPost } from '../notify/topicPosts'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { applyOwnerRule, ensureConversation, rowOf, updateConversation } from './store'
-import { syncChat } from './sync'
+import { looksLikeBidTail, syncChat } from './sync'
 import { CONV_TEXTS } from './texts'
 import type { ConversationRow, StoredMessage } from './types'
 
@@ -27,6 +27,8 @@ export type ConversationEventDeps = {
   onSpecialist(conv: ConversationRow, added: StoredMessage[]): Promise<void>
   /** The chat as read, whole: the reminders follow it (FR-CONV-12). Its failure never stops the reading. */
   onChatState?(conv: ConversationRow, messages: StoredMessage[]): Promise<void>
+  /** What is new in a chat, for the reader of a call booked in it (the meeting card). */
+  onNews?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
 }
 
 /** After three unclear authors in a row Boris hears of it once (FR-CONV-2). */
@@ -79,12 +81,23 @@ export async function showClientWords(
   const name = l?.clientName ? firstName(l.clientName) : null
   // What the topic shows already (the bid and the series are posted when they go, not read back from the chat).
   const posted = (l?.draftFollowUps ?? []) as string[]
+  const bids = conv.orderId
+    ? await d.db
+        .select({ payload: outbox.payload })
+        .from(outbox)
+        .where(and(eq(outbox.kind, 'bid'), sql`${outbox.payload}->>'leadId' = ${conv.orderId}`))
+    : []
+  const bidTexts = new Set(
+    bids.map((b) => normalizeText((b.payload as { text?: string }).text ?? '')),
+  )
   for (const m of added) {
     if (m.text.trim() === '') continue
     const mine =
       m.side === 'specialist' &&
       (m.authorBasis === 'outbox' || m.authorBasis === 'say') &&
-      !posted.some((f) => isApprovedText(f, m.text))
+      !posted.some((f) => isApprovedText(f, m.text)) &&
+      !bidTexts.has(normalizeText(m.text)) &&
+      !looksLikeBidTail(m.text)
     if (m.side !== 'client' && !mine) continue
     try {
       if (!(await markShown(d.db, key, `msg:${m.platformMessageId}`))) continue
@@ -120,7 +133,7 @@ export async function onChatNews(
     : conv0
   const v1Writes = await getSetting(d.db, 'conv.v1_writes')
   const r = await syncChat(
-    { db: d.db, profi: d.profi, show: (c, a) => showClientWords(d, c, a) },
+    { db: d.db, profi: d.profi, show: (c, a) => showClientWords(d, c, a), news: d.onNews },
     conv,
     now,
     { v1Writes },

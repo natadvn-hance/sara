@@ -341,13 +341,14 @@ describe('a page that could not be read', () => {
 describe('«Взял бы» on an order the Scorer dropped reads its page too', () => {
   /** Drops an order, brings the daily summary and presses «Взял бы» on it. */
   async function wantDropped(id: string) {
-    byRole = { ...byRole, scorer: scorerAnswer(50) }
+    // The board text is short, so the screen takes 5 points (Boris, 31.10.2026): 56 lands at 51, still borderline.
+    byRole = { ...byRole, scorer: scorerAnswer(56) }
     await fake.emitOrder({ order_id: id, ...BOARD })
     await until(async () => (await leadOf(id))?.status === 'scored_out')
     expect(fake.orderReads).toEqual([])
     await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
-    const summary = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+    const summary = tg.sent.find((m) => m.text.startsWith('📊'))
     tg.pushPress(111, summary?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data ?? '')
   }
 
