@@ -761,6 +761,14 @@ export function createTelegramRuntime(d: {
         if (!f || !t) return []
         return topicPostRefs(d.db, f.chatId, t.threadId)
       },
+      async pinPost(ref) {
+        try {
+          const at = await locate(ref)
+          if (at) await bot.api.pinChatMessage(at.to, at.id, { disable_notification: true })
+        } catch {
+          // No right to pin (or the post is gone): the card is there all the same, nothing to say about it.
+        }
+      },
       async forumOn() {
         return (await forumOf(d.db).catch(() => null)) !== null
       },

@@ -32,6 +32,8 @@ export type TurnDeps = {
   card(turnId: string): Promise<void>
   /** What is new in the chat the turn reads, told to Boris at once (the client's words, shown by whoever reads first). */
   show?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
+  /** The same news for the reader of a call booked in the chat. */
+  news?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
   /** The client's words to Boris: a client he took, a closed conversation. */
   forward(turnId: string): Promise<void>
   /**

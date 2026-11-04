@@ -75,6 +75,7 @@ export function createBotControl(d: {
         topicLink: async (place) => (await current().notifier.topicLink?.(place)) ?? null,
         setTopicStage: async (place, dot) => current().notifier.setTopicStage?.(place, dot),
         topicPosts: async (place) => (await current().notifier.topicPosts?.(place)) ?? [],
+        pinPost: async (ref) => current().notifier.pinPost?.(ref),
         forumOn: async () => (await current().notifier.forumOn?.()) ?? false,
       },
       d.db,

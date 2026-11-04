@@ -140,6 +140,8 @@ export async function syncChat(
      * a client's word reaches Boris once, by whichever read stored it first. Its failure never stops the reading.
      */
     show?: (conv: ConversationRow, added: StoredMessage[]) => Promise<void>
+    /** The same news for a reader that decides on them (a call booked in the chat); its failure never stops the reading. */
+    news?: (conv: ConversationRow, added: StoredMessage[]) => Promise<void>
   },
   conv: ConversationRow,
   heardAt: Date,
@@ -237,6 +239,8 @@ export async function syncChat(
   if (added.some((m) => m.side === 'client')) await promoteOnClientWord(d.db, conv)
   if (added.length > 0)
     await d.show?.(conv, added).catch((e) => console.error('news of the chat not shown', e))
+  if (added.length > 0)
+    await d.news?.(conv, added).catch((e) => console.error('news of the chat not read', e))
   return {
     added,
     specialistAfter: added.filter((m) => m.side === 'specialist'),

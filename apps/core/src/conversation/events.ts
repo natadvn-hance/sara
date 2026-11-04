@@ -27,6 +27,8 @@ export type ConversationEventDeps = {
   onSpecialist(conv: ConversationRow, added: StoredMessage[]): Promise<void>
   /** The chat as read, whole: the reminders follow it (FR-CONV-12). Its failure never stops the reading. */
   onChatState?(conv: ConversationRow, messages: StoredMessage[]): Promise<void>
+  /** What is new in a chat, for the reader of a call booked in it (the meeting card). */
+  onNews?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
 }
 
 /** After three unclear authors in a row Boris hears of it once (FR-CONV-2). */
@@ -131,7 +133,7 @@ export async function onChatNews(
     : conv0
   const v1Writes = await getSetting(d.db, 'conv.v1_writes')
   const r = await syncChat(
-    { db: d.db, profi: d.profi, show: (c, a) => showClientWords(d, c, a) },
+    { db: d.db, profi: d.profi, show: (c, a) => showClientWords(d, c, a), news: d.onNews },
     conv,
     now,
     { v1Writes },
