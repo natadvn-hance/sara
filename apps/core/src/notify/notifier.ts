@@ -20,6 +20,11 @@ export type Notifier = {
    * the buttons go. It never throws: a message Telegram will not edit (deleted, already closed) is only logged.
    */
   closeLeadCard(messageId: number, c: LeadCard): Promise<void>
+  /**
+   * The full card with its buttons back in the very message (a bid that did not go, folded to «Отправляю…» a moment
+   * ago); throws when Telegram will not take the edit, so the caller can send the card again.
+   */
+  restoreLeadCard?(messageId: number, c: LeadCard): Promise<void>
   /** `html`: the text is Telegram HTML (every value in it already escaped); the default is plain text. */
   sendText(
     text: string,

@@ -127,6 +127,8 @@ export type LeadPipeline = {
    */
   onReminder(taskId: string): Promise<void>
   resendCard(taskId: string): Promise<void>
+  /** The full card of a task back in its own message; false when that cannot be done (send it again then). */
+  restoreCard(taskId: string, messageId: number): Promise<boolean>
   /**
    * The order of this card closed on Profi.ru. `recheck`: the waiting task is ended as skipped (closed) and every
    * message of its card is edited (the closed line, no buttons); a task Boris decided meanwhile is left alone.
@@ -1816,6 +1818,23 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     resendCard: resendCardOf,
+
+    async restoreCard(taskId, messageId) {
+      try {
+        const card = await cardOfTask(taskId)
+        const restore = d().notifier.restoreLeadCard
+        if (!card || !restore) return false
+        await restore.call(d().notifier, messageId, card)
+        return true
+      } catch (err) {
+        console.error(
+          'card not restored',
+          taskId,
+          err instanceof Error ? err.message.slice(0, 200) : err,
+        )
+        return false
+      }
+    },
 
     async closeOnSite(taskId, via) {
       const found = await leadOfTask(taskId)

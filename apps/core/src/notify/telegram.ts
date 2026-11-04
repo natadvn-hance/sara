@@ -665,6 +665,19 @@ export function createTelegramRuntime(d: {
         )
         return { messageId }
       },
+      async restoreLeadCard(messageId, c) {
+        const at = await locate(messageId)
+        if (!at) throw new Error('card unknown')
+        await bot.api
+          .editMessageText(at.to, at.id, leadCardText(c), {
+            parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
+            reply_markup: leadCardKeyboard(c),
+          })
+          .catch((e: unknown) => {
+            if (!String((e as Error).message).includes('message is not modified')) throw e
+          })
+      },
       async closeLeadCard(messageId, c) {
         await closeHtml(messageId, closedLeadCardText(c))
       },

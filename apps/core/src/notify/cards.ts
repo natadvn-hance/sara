@@ -651,6 +651,73 @@ const READING_PARTS = [
   ['job', 'Какую задачу решает для клиента'],
 ] as const
 
+/**
+ * The card of a bid, in short, in the very message Boris pressed (Boris, 03.11: «то же сообщение меняет оформление,
+ * становится короче, остаётся важная инфа»): the state, the order, the client and the range of the service, two links
+ * in words and no buttons. `sending` while the bid goes, `sent`, `found` (the bid was found on the order later),
+ * `unsure` (not known whether it went).
+ */
+export function foldedBidCard(o: {
+  state: 'sending' | 'sent' | 'found' | 'unsure'
+  title: string
+  clientName: string | null
+  orderId: string
+  at?: string | null
+  feeRub?: number | null
+  priceFromRub?: number | null
+  priceToRub?: number | null
+  /** The client's topic in the forum; none without one. */
+  chatUrl?: string | null
+  /** A line under the card (how the series went, why it did not). */
+  note?: string | null
+}): string {
+  const fee = o.feeRub && o.feeRub > 0 ? formatRub(o.feeRub) : null
+  const head =
+    o.state === 'sending'
+      ? '⏳ <b>Отправляю отклик</b>'
+      : o.state === 'unsure'
+        ? '⚠️ <b>Не знаю, ушёл ли отклик</b>'
+        : [
+            o.state === 'found'
+              ? '✅ <b>Отклик найден на Профи.ру</b>'
+              : '✅ <b>Отклик отправлен</b>',
+            o.at ? mskClock(o.at) : null,
+            fee,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+  const range = o.priceFromRub
+    ? (() => {
+        const r = priceRange(o.priceFromRub, o.priceToRub)
+        return `услуга от ${formatRub(r.from)} до ${formatRub(r.to)}`
+      })()
+    : null
+  const who = [o.clientName ? clean(o.clientName, CAP.title) : null, range]
+    .filter(Boolean)
+    .join(' · ')
+  const links =
+    o.state === 'sending'
+      ? null
+      : [
+          `<a href="${orderUrl(o.orderId)}">Заказ на Профи.ру</a>`,
+          o.chatUrl ? `<a href="${esc(o.chatUrl)}">Чат с клиентом</a>` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+  return [
+    head,
+    `<b>${clean(o.title, CAP.title)}</b>`,
+    who || null,
+    o.state === 'unsure'
+      ? esc('Площадка не ответила. Проверь заявку на Профи.ру, прежде чем откликаться вручную.')
+      : null,
+    links,
+    o.note ? esc(o.note) : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 /** The order text in expandable quotes after the heading, in as many pieces as the messages need. */
 function addOrderText(text: string, room: { used(): number; flush(): void; add(b: string): void }) {
   let rest = text
