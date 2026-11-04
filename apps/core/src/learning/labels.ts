@@ -1,4 +1,4 @@
-import { DirectionRules, newEventId } from '@sara/shared'
+import { DirectionRules, newEventId, thresholdFor } from '@sara/shared'
 import { and, desc, eq, lt, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { directionVersion, event, lead, leadLabel, leadScore, task } from '../db/schema'
@@ -65,7 +65,12 @@ export async function recordLabel(
 ): Promise<{ created: boolean; surprise: boolean }> {
   return db.transaction(async (tx) => {
     const [sc] = await tx
-      .select({ score: leadScore.score, version: leadScore.version, accountId: lead.accountId })
+      .select({
+        score: leadScore.score,
+        version: leadScore.version,
+        accountId: lead.accountId,
+        category: lead.category,
+      })
       .from(leadScore)
       .innerJoin(lead, eq(lead.id, leadScore.leadId))
       .where(and(eq(leadScore.leadId, l.leadId), eq(leadScore.backtest, false)))
@@ -82,7 +87,9 @@ export async function recordLabel(
             eq(directionVersion.version, sc.version),
           ),
         )
-      if (v) surprise = sc.score >= DirectionRules.parse(v.rules).threshold + SURPRISE_ABOVE
+      if (v)
+        surprise =
+          sc.score >= thresholdFor(DirectionRules.parse(v.rules), sc.category) + SURPRISE_ABOVE
     }
     const rows = await tx
       .insert(leadLabel)

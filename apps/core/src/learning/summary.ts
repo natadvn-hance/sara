@@ -1,4 +1,11 @@
-import { formatCallback, LeadScreen, newEventId, plural } from '@sara/shared'
+import {
+  formatCallback,
+  type KindThresholds,
+  LeadScreen,
+  newEventId,
+  plural,
+  thresholdFor,
+} from '@sara/shared'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun, task } from '../db/schema'
@@ -123,8 +130,12 @@ export async function dailySummary(
   const held = heldRows.rows
   if (dropped === 0 && held.length === 0 && screened === null) return 'none'
 
-  const rows = await d.db.execute<Borderline>(sql`
-    select l.id as "leadId", l.title, s.score, s.reason
+  // The threshold depends on the kind of the order, so the band under it is cut here and not in the query.
+  const rows = await d.db.execute<
+    Borderline & { category: string; threshold: number; kindThresholds: KindThresholds | null }
+  >(sql`
+    select l.id as "leadId", l.title, s.score, s.reason, l.category,
+      (v.rules->>'threshold')::int as threshold, v.rules->'kind_thresholds' as "kindThresholds"
     from core.lead l
     join lateral (
       select * from core.lead_score s
@@ -134,11 +145,17 @@ export async function dailySummary(
     join core.direction_version v on v.account_id = l.account_id and v.version = s.version
     left join core.lead_label b on b.lead_id = l.id
     where l.status = 'scored_out' and ${today} and s.stop_factor is null and b.lead_id is null
-      and s.score < (v.rules->>'threshold')::int
-      and s.score >= (v.rules->>'threshold')::int - ${BORDERLINE_BELOW}
-    order by s.score desc, l.seen_at
-    limit ${BORDERLINE_MAX}`)
-  const picks = rows.rows
+    order by s.score desc, l.seen_at`)
+  const picks: Borderline[] = rows.rows
+    .filter((r) => {
+      const t = thresholdFor(
+        { threshold: r.threshold, kind_thresholds: r.kindThresholds ?? undefined },
+        r.category,
+      )
+      return r.score < t && r.score >= t - BORDERLINE_BELOW
+    })
+    .slice(0, BORDERLINE_MAX)
+    .map(({ leadId, title, score, reason }) => ({ leadId, title, score, reason }))
   const shown = held.slice(0, HELD_MAX)
   const lines: string[] = []
   if (dropped > 0) {

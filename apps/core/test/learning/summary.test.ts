@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { event, lead, task } from '../../src/db/schema'
-import { seedDirection } from '../../src/direction/store'
+import { event, lead, leadScore, task } from '../../src/db/schema'
+import { activeRules, insertVersion, seedDirection } from '../../src/direction/store'
 import { dailySummary } from '../../src/learning/summary'
 import type { Notifier } from '../../src/notify/notifier'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -62,6 +62,58 @@ describe('daily summary', () => {
     expect(sent[0]?.rows[0]?.[0]?.callbackData).toMatch(/^t:.+:want$/)
     const reviews = await db.select().from(task).where(eq(task.kind, 'lead_review'))
     expect(reviews.map((t) => t.entityId).sort()).toEqual(['930001', '930002', '930003'])
+  })
+
+  it('FR-LEAD-7: the band «на грани» is under the threshold of each kind: marketing 40, sites 55', async () => {
+    const rules = await activeRules(db, 'hance-marketing')
+    await db.transaction((tx) =>
+      insertVersion(tx, {
+        accountId: 'hance-marketing',
+        rules: {
+          ...rules.rules,
+          threshold: 50,
+          kind_thresholds: { marketing: 40, sites: 55, other: 50 },
+        },
+        createdBy: 'boris',
+        reason: 'тест',
+      }),
+    )
+    // The scores were given under v1 (56): the band reads the version they were scored under, so score them under v2.
+    await droppedLead(db, '930021', 35, { seenAt: MORNING, category: 'Маркетолог' })
+    await droppedLead(db, '930022', 45, { seenAt: MORNING, category: 'Создание сайтов' })
+    await droppedLead(db, '930023', 44, { seenAt: MORNING, category: 'Авитолог' })
+    await db.update(leadScore).set({ version: 2 })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    // 35 is five under marketing's 40, 45 is ten under the sites' 55, 44 is six under the rest's 50: all «на грани».
+    expect(sent[0]?.text.split('\n')).toEqual([
+      'Сегодня отсеяла 3 заявки. На грани:',
+      '1. Заказ 930022, балл 45: причина 930022',
+      '2. Заказ 930023, балл 44: причина 930023',
+      '3. Заказ 930021, балл 35: причина 930021',
+    ])
+  })
+
+  it('FR-LEAD-7: a score above its kind’s threshold is not «на грани», ten under it still is', async () => {
+    const rules = await activeRules(db, 'hance-marketing')
+    await db.transaction((tx) =>
+      insertVersion(tx, {
+        accountId: 'hance-marketing',
+        rules: {
+          ...rules.rules,
+          threshold: 50,
+          kind_thresholds: { marketing: 40, sites: 55, other: 50 },
+        },
+        createdBy: 'boris',
+        reason: 'тест',
+      }),
+    )
+    await droppedLead(db, '930031', 30, { seenAt: MORNING, category: 'Маркетолог' })
+    await droppedLead(db, '930032', 45, { seenAt: MORNING, category: 'Маркетолог' })
+    await db.update(leadScore).set({ version: 2 })
+    expect(await dailySummary({ db, notifier }, AT_1930)).toBe('sent')
+    // 45 is above marketing's 40 (it would have shown), 30 is ten under: on the edge of the band.
+    expect(sent[0]?.text.split('\n')[1]).toBe('1. Заказ 930031, балл 30: причина 930031')
+    expect(sent[0]?.text).not.toContain('930032')
   })
 
   it('FR-LEAD-7: before 19:00 there is no summary; a second tick the same day sends nothing', async () => {
