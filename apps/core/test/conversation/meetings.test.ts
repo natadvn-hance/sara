@@ -265,6 +265,47 @@ describe('a call booked in the chat', () => {
     expect(calls).toHaveLength(callsBefore)
   })
 
+  it('FR-CONV-12: a card still comes when the bot may not pin: no error, no noise', async () => {
+    const quiet = {
+      ...deps,
+      notifier: {
+        ...notifier,
+        pinPost: async () => {
+          throw new Error('not enough rights to pin a message')
+        },
+      },
+    }
+    const { conv, added } = await chat([
+      ['specialist', 'наберу завтра в 12', 60],
+      ['client', 'Договорились', 50],
+    ])
+    reads.push({ status: 'booked', at: '2026-11-05 12:00', quote: 'Договорились' })
+    await readMeeting(quiet, conv, added)
+    expect(sent).toHaveLength(1)
+    expect(await stageNow()).toBe('call_booked')
+  })
+
+  it('FR-CONV-12 (и): "мне удобно сейчас и не голосом, завтра не актуально" withdraws a standing «похоже»', async () => {
+    const first = await chat([['client', 'Хорошо. Как получится, созвон ближе к 16:00', 40]])
+    reads.push({ status: 'maybe', at: null, quote: 'Как получится' })
+    await readMeeting(deps, first.conv, first.added)
+    const second = await chat([
+      ['client', 'Хорошо. Как получится, созвон ближе к 16:00', 40],
+      [
+        'client',
+        'мне удобно сейчас и не голосом. завтра уже будет не актуально, созвон не нужен в 16:00',
+        5,
+      ],
+    ])
+    reads.push({ status: 'cancelled', quote: 'мне удобно сейчас и не голосом' })
+    await readMeeting(deps, second.conv, second.added)
+    expect((await db.select().from(meeting))[0]).toMatchObject({
+      status: 'cancelled',
+      outcome: 'cancelled',
+    })
+    expect(edits.at(-1)?.html).toContain('Договорённость о созвоне снята')
+  })
+
   it('FR-CONV-12: a model that gives no answer (a limit) leaves the message to be read again', async () => {
     const { conv, added } = await chat([['client', 'давайте созвонимся завтра в 15:00', 5]])
     const limited = {

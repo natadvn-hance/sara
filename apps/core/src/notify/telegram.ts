@@ -765,8 +765,8 @@ export function createTelegramRuntime(d: {
         try {
           const at = await locate(ref)
           if (at) await bot.api.pinChatMessage(at.to, at.id, { disable_notification: true })
-        } catch (e) {
-          console.error('post not pinned', short(e))
+        } catch {
+          // No right to pin (or the post is gone): the card is there all the same, nothing to say about it.
         }
       },
       async forumOn() {

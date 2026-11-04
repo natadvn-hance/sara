@@ -42,7 +42,9 @@ export function meetingCard(v: MeetingCardView, now: Date = new Date()): string 
     v.status === 'booked'
       ? '📞 <b>Созвон назначен</b>'
       : v.status === 'cancelled'
-        ? '🚫 <b>Созвон отменён</b>'
+        ? v.at
+          ? '🚫 <b>Созвон отменён</b>'
+          : '🚫 <b>Договорённость о созвоне снята</b>'
         : '🤔 <b>Похоже, договорились о созвоне</b>'
   const how = [v.how ? HOW[v.how] : null, v.caller ? CALLER[v.caller] : null]
     .filter(Boolean)

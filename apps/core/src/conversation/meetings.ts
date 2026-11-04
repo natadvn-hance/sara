@@ -131,6 +131,33 @@ async function activeMeeting(db: Db, conversationId: string) {
   return m ?? null
 }
 
+/** What the model is given: the time now, the meeting already on record and the last words, each with its Moscow time. */
+export function meetingInput(i: {
+  now: Date
+  known: { status: string; at: string | null } | null
+  messages: { at: string; client: boolean; text: string }[]
+}): string {
+  const standing =
+    i.known?.status === 'booked' && i.known.at
+      ? `${mskStamp(i.known.at)} по Москве`
+      : i.known?.status === 'maybe'
+        ? 'похоже, договорились, но твёрдого времени нет'
+        : 'ничего'
+  return [
+    '## Сейчас',
+    mskNow(i.now),
+    '',
+    '## Уже записано',
+    standing,
+    '',
+    '## Переписка',
+    ...i.messages.map(
+      (m) =>
+        `[${mskStamp(m.at)}] ${m.client ? 'Клиент' : 'Мы'}: ${m.text.replace(/\s+/g, ' ').trim()}`,
+    ),
+  ].join('\n')
+}
+
 /** Reads the new messages of a conversation; never throws (the reading of the chat comes first). */
 export async function readMeeting(
   d: MeetingDeps,
@@ -150,21 +177,16 @@ export async function readMeeting(
     if (!(await markShown(d.db, key, `meetread:${last.platformMessageId}`))) return
     const now = d.now?.() ?? new Date()
     const known = await activeMeeting(d.db, conv.id)
-    const input = [
-      '## Сейчас',
-      mskNow(now),
-      '',
-      '## Уже записано',
-      known?.startsAt && known.status === 'booked'
-        ? `${mskStamp(new Date(known.startsAt).toISOString())} по Москве`
-        : 'ничего',
-      '',
-      '## Переписка',
-      ...rows.map(
-        (r) =>
-          `[${mskStamp(r.sentAt)}] ${r.side === 'client' ? 'Клиент' : 'Мы'}: ${r.text.replace(/\s+/g, ' ').trim()}`,
-      ),
-    ].join('\n')
+    const input = meetingInput({
+      now,
+      known: known
+        ? {
+            status: known.status,
+            at: known.startsAt ? new Date(known.startsAt).toISOString() : null,
+          }
+        : null,
+      messages: rows.map((r) => ({ at: r.sentAt, client: r.side === 'client', text: r.text })),
+    })
     const res = await d.gateway.call('meeting', input, MeetingRead, {
       correlationId: conv.id,
       limitWaitMs: 0,
@@ -368,8 +390,6 @@ async function card(
     place: { conversation: conv.id },
   })
   await d.db.update(meeting).set({ cardRef: sent.messageId }).where(eq(meeting.id, id))
-  if (pin)
-    await d.notifier
-      .pinPost?.(sent.messageId)
-      .catch((e) => console.error('meeting card not pinned', e))
+  // No right to pin is no error: the card is there all the same.
+  if (pin) await Promise.resolve(d.notifier.pinPost?.(sent.messageId)).catch(() => {})
 }
