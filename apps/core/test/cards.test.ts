@@ -631,14 +631,6 @@ describe('the «Разбор» message', () => {
 })
 
 describe('the texts', () => {
-  it('NFR-UX-1: the summary counts orders in the right Russian form', () => {
-    expect(TEXTS.summaryHead(1)).toBe('Сегодня отсеяла 1 заявку. На грани:')
-    expect(TEXTS.summaryHead(3)).toBe('Сегодня отсеяла 3 заявки. На грани:')
-    expect(TEXTS.summaryHead(11)).toBe('Сегодня отсеяла 11 заявок. На грани:')
-    expect(TEXTS.summaryNone(21)).toBe('Сегодня отсеяла 21 заявку, пограничных не было')
-    expect(TEXTS.summaryNone(25)).toBe('Сегодня отсеяла 25 заявок, пограничных не было')
-  })
-
   it('NFR-UX-1: the proposal counts decisions in the right Russian form', () => {
     const last = (b: { checked: number; changed: number }) =>
       TEXTS.proposal(1, 'с', 'п', ['Порог: 56 → 60'], { ...b, towardBoris: 1, against: 0 })

@@ -482,6 +482,33 @@ export function screenEvent(s: LeadScreen): Record<string, unknown> {
   }
 }
 
+/** The same day in two parts for the evening report: what the screen stopped, and what it only marked. */
+export function screenBreakdown(rows: Pick<LeadScreen, 'hits' | 'stops'>[]): {
+  stopped: number
+  stoppedBy: string
+  marked: number
+  markedBy: string
+} {
+  const by = (some: Pick<LeadScreen, 'hits' | 'stops'>[]) => {
+    const counts = new Map<ScreenCriterion, number>()
+    for (const r of some)
+      for (const h of r.hits) counts.set(h.criterion, (counts.get(h.criterion) ?? 0) + 1)
+    return [...counts]
+      .sort((a, b) => order(a[0]) - order(b[0]))
+      .map(([c, n]) => `${SCREEN_RU[c].toLowerCase()} ${n}`)
+      .join(', ')
+  }
+  const out = rows.filter((r) => r.hits.length > 0)
+  const stopped = out.filter((r) => r.stops)
+  const marked = out.filter((r) => !r.stops)
+  return {
+    stopped: stopped.length,
+    stoppedBy: by(stopped),
+    marked: marked.length,
+    markedBy: by(marked),
+  }
+}
+
 /** The summary's line: how many orders the screen stopped (or would have, in the shadow) and by which criteria. */
 export function screenSummary(rows: Pick<LeadScreen, 'hits' | 'stops'>[]): string | null {
   const out = rows.filter((r) => r.hits.length > 0)
