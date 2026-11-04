@@ -748,6 +748,14 @@ export function createTelegramRuntime(d: {
         if (!f || !t) return []
         return topicPostRefs(d.db, f.chatId, t.threadId)
       },
+      async pinPost(ref) {
+        try {
+          const at = await locate(ref)
+          if (at) await bot.api.pinChatMessage(at.to, at.id, { disable_notification: true })
+        } catch (e) {
+          console.error('post not pinned', short(e))
+        }
+      },
       async forumOn() {
         return (await forumOf(d.db).catch(() => null)) !== null
       },

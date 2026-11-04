@@ -111,6 +111,7 @@ export const EVENT_TYPES = [
   'conv.day_summary',
   'conv.owed_reminded',
   'conv.topic_restored',
+  'meeting.read',
   'mind.indexed',
   'mind.gap_recorded',
   'mind.proposed',

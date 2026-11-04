@@ -54,6 +54,8 @@ export type Notifier = {
   setTopicStage?(place: { conversation: string } | { order: string }, dot: string): Promise<void>
   /** The references of the bot's posts in the client's topic, the oldest first (the intro is the first); empty without one. */
   topicPosts?(place: { conversation: string } | { order: string }): Promise<number[]>
+  /** Pins a post of the bot in its topic or chat, quietly; it never throws. */
+  pinPost?(ref: number): Promise<void>
   /** Whether Boris's forum is bound: a message for a client's topic is worth sending only then. It never throws. */
   forumOn?(): Promise<boolean>
   /**
