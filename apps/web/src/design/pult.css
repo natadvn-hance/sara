@@ -724,6 +724,24 @@
   align-items: center;
 }
 
+/* «Сохранить» stays in view above the tab bar while its sliders are on the screen. */
+.actions.save-bar {
+  position: sticky;
+  z-index: 30;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  padding: 8px;
+  border-radius: 18px;
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+@media (min-width: 1024px) {
+  .actions.save-bar {
+    bottom: 16px;
+  }
+}
+
 /* Lists */
 
 .list {

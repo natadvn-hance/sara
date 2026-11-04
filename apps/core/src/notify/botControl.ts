@@ -61,6 +61,11 @@ export function createBotControl(d: {
       {
         sendLeadCard: (c, o) => current().notifier.sendLeadCard(c, o),
         closeLeadCard: (id, c) => current().notifier.closeLeadCard(id, c),
+        restoreLeadCard: async (id, c) => {
+          const restore = current().notifier.restoreLeadCard
+          if (!restore) throw new Error('no restore')
+          await restore.call(current().notifier, id, c)
+        },
         sendText: (t, o) => current().notifier.sendText(t, o),
         sendButtons: (t, rows, o) => current().notifier.sendButtons(t, rows, o),
         editText: async (id, t, rows, o) => current().notifier.editText?.(id, t, rows, o),

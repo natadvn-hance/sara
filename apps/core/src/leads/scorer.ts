@@ -1,4 +1,12 @@
-import { type DirectionRules, type ProfiOrder, ScorerOutput, weightedScore } from '@sara/shared'
+import {
+  type DirectionRules,
+  LEAD_KIND_TITLES,
+  LEAD_KINDS,
+  type ProfiOrder,
+  ScorerOutput,
+  thresholdFor,
+  weightedScore,
+} from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
 import { namesToHide } from './clientName'
 import { sorterInput } from './sorter'
@@ -15,7 +23,7 @@ export type Scored = {
 }
 
 /** The direction rules as the model reads them, section by section. */
-export function rulesText(r: DirectionRules): string {
+export function rulesText(r: DirectionRules, category?: string): string {
   const lines = [
     'Правила направления',
     '',
@@ -36,22 +44,36 @@ export function rulesText(r: DirectionRules): string {
     lines.push('', 'Уточнения:')
     for (const n of r.notes) lines.push(`- ${n}`)
   }
-  lines.push('', `Порог: ${r.threshold}`)
+  lines.push('', thresholdLine(r, category))
   return lines.join('\n')
+}
+
+/** The threshold line: the one of the order's kind, or all of them when there is no order (a proposal, advice). */
+function thresholdLine(r: DirectionRules, category?: string): string {
+  if (!r.kind_thresholds) return `Порог: ${r.threshold}`
+  if (category !== undefined) return `Порог: ${thresholdFor(r, category)}`
+  const by = LEAD_KINDS.map(
+    (k) => `${LEAD_KIND_TITLES[k]} ${r.kind_thresholds?.[k] ?? r.threshold}`,
+  )
+  return `Порог: ${r.threshold} (по видам заказа: ${by.join(', ')})`
 }
 
 /** What the Scorer sees: the rules, then the order. The client's name is never put in it, and one inside the text is hidden by the gateway (ADR-016). */
 export function scorerInput(o: ProfiOrder, rules: DirectionRules): string {
-  return `${rulesText(rules)}\n\nЗаказ\n\n${sorterInput(o)}`
+  return `${rulesText(rules, o.category)}\n\nЗаказ\n\n${sorterInput(o)}`
 }
 
 /** The total and the decision are the code's: weights stay data, one set of axis scores gives one result. */
 export function decide(
   rules: DirectionRules,
   out: ScorerOutput,
+  category?: string,
 ): { score: number; decision: 'show' | 'drop' } {
   const score = weightedScore(rules, Object.fromEntries(out.axes.map((a) => [a.id, a.score])))
-  return { score, decision: !out.stop_factor && score >= rules.threshold ? 'show' : 'drop' }
+  return {
+    score,
+    decision: !out.stop_factor && score >= thresholdFor(rules, category) ? 'show' : 'drop',
+  }
 }
 
 /** An answer that names a stop factor or axes the rules do not have is not a score. */
@@ -63,8 +85,8 @@ function fits(rules: DirectionRules, out: ScorerOutput): boolean {
 }
 
 /** Near the threshold or unsure: such a score is redone on the stronger model. */
-const borderline = (rules: DirectionRules, score: number, confidence: number) =>
-  Math.abs(score - rules.threshold) <= 10 || confidence < 0.6
+const borderline = (rules: DirectionRules, score: number, confidence: number, category: string) =>
+  Math.abs(score - thresholdFor(rules, category)) <= 10 || confidence < 0.6
 
 export async function scoreOrder(
   gw: Gateway,
@@ -92,7 +114,7 @@ export async function scoreOrder(
     if (!r.ok) opts.onFailure?.(r.errorClass)
     if (!r.ok || !fits(rules, r.output)) return null
     return {
-      ...decide(rules, r.output),
+      ...decide(rules, r.output, o.category),
       stopFactor: r.output.stop_factor,
       redFlags: r.output.red_flags,
       axes: r.output.axes,
@@ -102,7 +124,7 @@ export async function scoreOrder(
     }
   }
   const first = await once('haiku')
-  const doubt = !first || borderline(rules, first.score, first.confidence)
+  const doubt = !first || borderline(rules, first.score, first.confidence, o.category)
   if (opts.escalate === false || !doubt) return first
   // The stronger model decides when it answers; a failed retry keeps haiku's score.
   return (await once('sonnet')) ?? first

@@ -220,7 +220,7 @@ describe('walking skeleton', () => {
     await until(() => cards().length === 1)
     fake.failAcks(10)
     tg.pushPress(111, lastCardData('bid'))
-    await until(() => tg.shown('Не знаю, ушёл ли отклик'))
+    await until(() => tg.shown('⚠️ Не знаю, ушёл ли отклик'))
     expect(tg.sent.concat(tg.edited).some((m) => m.text.startsWith('Отклик не ушёл'))).toBe(false)
     expect(fake.bids).toHaveLength(1)
     const [o] = await db.select().from(outbox)

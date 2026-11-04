@@ -347,8 +347,8 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     await until(async () => (await leadOf(id))?.status === 'scored_out')
     expect(fake.orderReads).toEqual([])
     await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
-    const summary = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))
+    await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+    const summary = tg.sent.find((m) => m.text.startsWith('📊'))
     tg.pushPress(111, summary?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data ?? '')
   }
 

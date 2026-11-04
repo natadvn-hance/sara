@@ -1,7 +1,7 @@
 import { plural } from '@sara/shared'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { outbox } from '../db/schema'
+import { outbox, task } from '../db/schema'
 import type { Notifier } from '../notify/notifier'
 
 /**
@@ -10,7 +10,14 @@ import type { Notifier } from '../notify/notifier'
  * notices: the message is the outbox row's `status` (the Telegram message and the text it shows now).
  */
 
-export type BidStatus = { messageId: number; text: string }
+export type BidStatus = {
+  messageId: number
+  text: string
+  /** The text is Telegram HTML. */
+  html?: boolean
+  /** The message is the order's own card, folded in place (Boris, 03.11), not a message of its own. */
+  card?: boolean
+}
 
 type StatusDeps = { db: Db; notifier: Pick<Notifier, 'sendText' | 'editText'> }
 
@@ -23,8 +30,12 @@ const d = (): StatusDeps => {
   return deps
 }
 
-/** The latest bid row of an order and its status message, if any. */
-async function rowOf(leadId: string): Promise<{ id: string; status: BidStatus | null } | null> {
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/** The latest bid row of an order, its status message and the task of the card it was pressed on. */
+async function rowOf(
+  leadId: string,
+): Promise<{ id: string; status: BidStatus | null; taskId: string | null } | null> {
   const [row] = await d()
     .db.select({ id: outbox.id, payload: outbox.payload })
     .from(outbox)
@@ -32,8 +43,13 @@ async function rowOf(leadId: string): Promise<{ id: string; status: BidStatus | 
     .orderBy(desc(outbox.createdAt))
     .limit(1)
   if (!row) return null
-  const status = (row.payload as { status?: BidStatus }).status
-  return { id: row.id, status: status ?? null }
+  const p = row.payload as { status?: BidStatus; taskId?: string }
+  return { id: row.id, status: p.status ?? null, taskId: p.taskId ?? null }
+}
+
+/** What the order's status message is now, if there is one (read before a give-back deletes the row). */
+export async function statusOf(leadId: string): Promise<BidStatus | null> {
+  return (await rowOf(leadId))?.status ?? null
 }
 
 async function store(id: string, status: BidStatus): Promise<void> {
@@ -43,24 +59,65 @@ async function store(id: string, status: BidStatus): Promise<void> {
     .where(eq(outbox.id, id))
 }
 
-/** The status message at the press; once per bid row (a second call finds it and does nothing). */
-export async function openStatus(leadId: string, text: string): Promise<void> {
+/**
+ * The status message at the press; once per bid row (a second call finds it and does nothing). With `fold` the card
+ * Boris pressed on is the message: it is edited into `text` (HTML) without its buttons, and no message of its own is
+ * sent; a card that is not known, or that Telegram will not edit, gets a message of its own as before.
+ */
+export async function openStatus(
+  leadId: string,
+  text: string,
+  o: { fold?: boolean } = {},
+): Promise<void> {
   const row = await rowOf(leadId)
   if (!row || row.status) return
-  const { messageId } = await d().notifier.sendText(text, { place: 'leads' })
-  await store(row.id, { messageId, text })
+  const edit = d().notifier.editText
+  if (o.fold && row.taskId && edit) {
+    const [t] = await d()
+      .db.select({ messageId: task.telegramMessageId })
+      .from(task)
+      .where(eq(task.id, row.taskId))
+    if (t?.messageId != null) {
+      const folded = await edit
+        .call(d().notifier, t.messageId, text, [], { html: true })
+        .then(() => true)
+        .catch(() => false)
+      if (folded) return store(row.id, { messageId: t.messageId, text, html: true, card: true })
+    }
+  }
+  const { messageId } = await d().notifier.sendText(text, {
+    place: 'leads',
+    ...(o.fold && { html: true }),
+  })
+  await store(row.id, { messageId, text, ...(o.fold && { html: true }) })
 }
 
 /**
  * The status message shows `text` now; false when there is none (the caller says it in a message of its own). An edit
- * Telegram refuses (the same text, a deleted message) is no failure: the text is kept all the same.
+ * Telegram will not take (a limit, a deleted message) is no loss of the news: it goes as a short message of its own.
+ * The same text again is no edit at all.
  */
-export async function setStatus(leadId: string, text: string): Promise<boolean> {
+export async function setStatus(
+  leadId: string,
+  text: string,
+  o: { html?: boolean } = {},
+): Promise<boolean> {
   const row = await rowOf(leadId)
   const edit = d().notifier.editText
   if (!row?.status || !edit) return false
-  await edit.call(d().notifier, row.status.messageId, text).catch(() => {})
-  await store(row.id, { messageId: row.status.messageId, text })
+  const html = o.html ?? row.status.html ?? false
+  try {
+    await edit.call(d().notifier, row.status.messageId, text, row.status.card ? [] : undefined, {
+      html,
+    })
+    await store(row.id, { ...row.status, text, html })
+  } catch {
+    const { messageId } = await d().notifier.sendText(text, {
+      place: 'leads',
+      ...(html && { html }),
+    })
+    await store(row.id, { messageId, text, html })
+  }
   return true
 }
 
@@ -68,7 +125,11 @@ export async function setStatus(leadId: string, text: string): Promise<boolean> 
 export async function addStatusLine(leadId: string, line: string): Promise<void> {
   const row = await rowOf(leadId)
   if (!row?.status) return
-  await setStatus(leadId, `${row.status.text}\n${line}`)
+  await setStatus(
+    leadId,
+    `${row.status.text}\n${row.status.html ? esc(line) : line}`,
+    row.status.html ? { html: true } : {},
+  )
 }
 
 const STOPPED: Record<string, string> = {
