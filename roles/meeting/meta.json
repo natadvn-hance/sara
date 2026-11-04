@@ -1,0 +1,8 @@
+{
+  "name": "meeting",
+  "version": 1,
+  "model": "haiku",
+  "fallbackModel": "sonnet",
+  "priority": "P2",
+  "timeoutMs": 60000
+}

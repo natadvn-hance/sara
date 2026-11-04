@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { createConversationEvents } from '../../src/conversation/events'
 import { reconcileChats } from '../../src/conversation/reconcile'
 import type { ConversationRow } from '../../src/conversation/types'
-import { chatMessage, conversation } from '../../src/db/schema'
+import { chatMessage, conversation, outbox } from '../../src/db/schema'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -111,6 +111,35 @@ describe('conversation events', () => {
     expect(texts[1]).toContain('<blockquote>И цены</blockquote>')
     const [c] = await db.select().from(conversation)
     expect(places).toEqual([{ conversation: c?.id }, { conversation: c?.id }])
+  })
+
+  it('FR-CONV-1: the bid and the site\u2019s line after it are not posted again; our later message is (Boris, 04.11)', async () => {
+    await setSetting(db, 'pipeline.conversations', true, 'system')
+    const bid = 'Николай, добрый вечер!\n\nПрочитал описание.'
+    const reply = 'Николай, отправил материалы.'
+    const row = (kind: string, key: string, payload: Record<string, unknown>) => ({
+      id: newEventId(),
+      kind,
+      idempotencyKey: key,
+      payload: { accountId: ACC, ...payload },
+      state: 'confirmed',
+    })
+    await db
+      .insert(outbox)
+      .values([
+        row('bid', 'b-1', { leadId: CHAT, text: bid }),
+        row('message', 'm-1', { chatId: CHAT, text: reply }),
+      ])
+    const at = new Date().toISOString()
+    const { onEvent, chat } = setup()
+    chat.chat.push(chatMsg('b-1', 'specialist', bid, at))
+    chat.chat.push(
+      chatMsg('b-2', 'specialist', 'Стоимость от 5000 до 8000 руб. / усл.\nКонтакты:\n+7-900', at),
+    )
+    chat.chat.push(chatMsg('r-1', 'specialist', reply, at))
+    await onEvent(envelope('profi.specialist_message', ref('r-1', 'specialist')))
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toContain(reply)
   })
 
   it('FR-CONV-1: with conversations off nothing is shown at once', async () => {

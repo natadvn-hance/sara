@@ -52,6 +52,18 @@ const button = (action: string, m = cards().at(-1)) =>
 /** The edits of cards (a bid's own status message is edited too). */
 const cardEdits = () =>
   tg.edited.filter((e) => tg.sent.some((m) => m.message_id === e.message_id && m.reply_markup))
+/** The card folded to «Отклик отправлен» with this fee, as Boris reads it. */
+const foldedSent = (fee: number) =>
+  tg.edited.some((e) => {
+    const t = e.text.replace(/<[^>]*>/g, '').replace(/[\u00a0\u202f]/g, ' ')
+    return (
+      t.startsWith('✅ Отклик отправлен') &&
+      t.includes(formatRub(fee).replace(/[\u00a0\u202f]/g, ' '))
+    )
+  })
+/** The card edited back to its full view, with the buttons. */
+const restored = () =>
+  cardEdits().some((e) => (e.reply_markup?.inline_keyboard.flat().length ?? 0) > 0)
 const said = (t: string) => tg.sent.some((m) => m.text === t) || tg.edited.some((m) => m.text === t)
 const leadOf = async (id: string) => (await db.select().from(lead).where(eq(lead.id, id)))[0]
 const taskOf = async (id: string) => (await db.select().from(task).where(eq(task.entityId, id)))[0]
@@ -235,7 +247,9 @@ describe('the node refuses (B1)', () => {
     fake.refuseNext('NO_MONEY')
     press()
     await until(() => said(TEXTS.bidRefused(TITLE, 'NO_MONEY')))
-    await until(() => cards().length === 2)
+    // The card is put back in its own message, with its buttons (Boris, 03.11): no second card.
+    await until(() => restored())
+    expect(cards()).toHaveLength(1)
     expect(await db.select().from(outbox)).toHaveLength(0)
     expect((await taskOf(id))?.state).toBe('open')
     expect((await leadOf(id))?.status).toBe('queued')
@@ -281,15 +295,15 @@ describe('the node refuses (B1)', () => {
     fake.refuseNext('ORDER_CLOSED')
     press()
     await until(() => said(TEXTS.bidRefused(TITLE, 'ORDER_CLOSED')))
-    await until(() => cardEdits().length === 1)
-    expect(cardEdits()[0]).toMatchObject({
+    await until(() => cardEdits().at(-1)?.text.includes(TEXTS.closedCard) === true)
+    expect(cardEdits().at(-1)).toMatchObject({
       message_id: card?.message_id,
       reply_markup: { inline_keyboard: [] },
     })
-    expect(cardEdits()[0]?.text).toContain(TEXTS.closedCard)
+    expect(cardEdits().at(-1)?.text).toContain(TEXTS.closedCard)
     // Its page was read open moments before, when the card was made: the closing is dated.
-    expect(cardEdits()[0]?.text).toMatch(/закрылась через \d+ мин/)
-    expect(cardEdits()[0]?.text).not.toContain('Откликнуться')
+    expect(cardEdits().at(-1)?.text).toMatch(/закрылась через \d+ мин/)
+    expect(cardEdits().at(-1)?.text).not.toContain('Откликнуться')
     // What Boris pressed stays: the task is his decision, the bid is the failed one.
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
     expect(await payloads('lead.closed_on_site', id)).toEqual([{ via: 'press' }])
@@ -301,8 +315,44 @@ describe('the node refuses (B1)', () => {
     fake.refuseNext('NO_MONEY')
     press()
     await until(() => said(TEXTS.bidRefused(TITLE, 'NO_MONEY')))
+    await until(() => restored())
     await settle()
-    expect(cardEdits()).toHaveLength(0)
+    // The card was folded for the press and is back in its own message with its buttons, not sent again.
+    expect(cards()).toHaveLength(1)
+    expect(cardEdits().at(-1)?.reply_markup?.inline_keyboard.flat().length).toBeGreaterThan(0)
+  })
+})
+
+describe('the card folds itself (Boris, 03.11.2026)', () => {
+  const plain = (t: string) => t.replace(/<[^>]*>/g, '').replace(/[\u00a0\u202f]/g, ' ')
+
+  it('FR-UI-1: «Откликнуться» edits the card into «Отправляю…» and then into the short view, with no message of its own', async () => {
+    await cardFor()
+    const card = cards().at(-1)
+    press()
+    await until(() => foldedSent(210))
+    const edits = tg.edited.filter((e) => e.message_id === card?.message_id)
+    expect(plain(edits.at(0)?.text ?? '')).toMatch(/^⏳ Отправляю отклик/)
+    expect(edits.at(0)?.reply_markup).toEqual({ inline_keyboard: [] })
+    const last = edits.at(-1)
+    expect(plain(last?.text ?? '')).toMatch(/^✅ Отклик отправлен · \d\d:\d\d · 210 ₽/)
+    expect(last?.text).toContain(TITLE)
+    expect(last?.text).toContain('>Заказ на Профи.ру</a>')
+    // No forum here: the chat link has nowhere to point.
+    expect(last?.text).not.toContain('Чат с клиентом')
+    expect(last?.reply_markup).toEqual({ inline_keyboard: [] })
+    expect(cards()).toHaveLength(1)
+    expect(tg.sent.filter((m) => !m.reply_markup && /отклик/i.test(m.text))).toHaveLength(0)
+  })
+
+  it('FR-UI-1: a card Telegram will not edit is not lost: the bid is told in a message of its own', async () => {
+    await cardFor()
+    const card = cards().at(-1)
+    tg.setEditError(card?.message_id ?? 0, 'Bad Request: message to edit not found')
+    press()
+    await until(() => tg.shown('✅ Отклик отправлен'))
+    expect(fake.bids).toHaveLength(1)
+    expect(tg.sent.some((m) => plain(m.text).startsWith('⏳ Отправляю отклик'))).toBe(true)
   })
 })
 
@@ -351,12 +401,18 @@ describe('the fee Boris pressed (B2)', () => {
     fake.setFee(250)
     press()
     await until(() => said(TEXTS.bidDearer(TITLE, 210, 250)))
-    await until(() => cards().length === 2)
-    expect(button('bid')?.text).toBe(`Откликнуться за ${formatRub(250)}`)
+    await until(() => restored())
+    expect(cards()).toHaveLength(1)
+    expect(
+      cardEdits()
+        .at(-1)
+        ?.reply_markup?.inline_keyboard.flat()
+        .some((b) => b.text === `Откликнуться за ${formatRub(250)}`),
+    ).toBe(true)
     expect((await leadOf(id))?.bidPriceRub).toBe(250)
     expect(fake.bids).toHaveLength(0)
     press()
-    await until(() => said(TEXTS.bidSent(TITLE, 250)))
+    await until(() => foldedSent(250))
     expect(fake.bids[0]?.max_fee_rub).toBe(250)
   })
 
@@ -364,7 +420,7 @@ describe('the fee Boris pressed (B2)', () => {
     await cardFor()
     fake.setFee(190)
     press()
-    await until(() => said(TEXTS.bidSent(TITLE, 190)))
+    await until(() => foldedSent(190))
   })
 })
 
@@ -379,7 +435,8 @@ describe('a second press after a give-back (B3) and the pause in the delivery (M
     })
     press()
     await until(() => said(TEXTS.bidsPaused))
-    await until(() => cards().length === 2)
+    await until(() => restored())
+    expect(cards()).toHaveLength(1)
     expect(fake.bids).toHaveLength(0)
     expect((await taskOf(id))?.state).toBe('open')
     await setSetting(db, 'outbound.bids', true, 'boris')
@@ -428,8 +485,8 @@ describe('unsure bids and bids already there (B4, M6)', () => {
     const id = await cardFor()
     fake.failAcks(10)
     press()
-    await until(() => said(TEXTS.bidUncertain))
-    await until(() => said(TEXTS.bidFoundLater(TITLE, 210)), 10000)
+    await until(() => tg.shown('⚠️ Не знаю, ушёл ли отклик'))
+    await until(() => tg.shown('✅ Отклик найден на Профи.ру'), 10000)
     const [o] = await db.select().from(outbox)
     expect(o?.state).toBe('confirmed')
     expect(await payloads('spend.recorded', id)).toEqual([

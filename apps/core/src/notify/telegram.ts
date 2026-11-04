@@ -693,6 +693,19 @@ export function createTelegramRuntime(d: {
         )
         return { messageId }
       },
+      async restoreLeadCard(messageId, c) {
+        const at = await locate(messageId)
+        if (!at) throw new Error('card unknown')
+        await bot.api
+          .editMessageText(at.to, at.id, leadCardText(c), {
+            parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
+            reply_markup: leadCardKeyboard(c),
+          })
+          .catch((e: unknown) => {
+            if (!String((e as Error).message).includes('message is not modified')) throw e
+          })
+      },
       async closeLeadCard(messageId, c) {
         await closeHtml(messageId, closedLeadCardText(c))
       },
@@ -775,6 +788,14 @@ export function createTelegramRuntime(d: {
         const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
         if (!f || !t) return []
         return topicPostRefs(d.db, f.chatId, t.threadId)
+      },
+      async pinPost(ref) {
+        try {
+          const at = await locate(ref)
+          if (at) await bot.api.pinChatMessage(at.to, at.id, { disable_notification: true })
+        } catch {
+          // No right to pin (or the post is gone): the card is there all the same, nothing to say about it.
+        }
       },
       async forumOn() {
         return (await forumOf(d.db).catch(() => null)) !== null

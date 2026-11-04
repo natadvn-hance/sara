@@ -1,11 +1,20 @@
-import { formatCallback, LeadScreen, newEventId, plural } from '@sara/shared'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import {
+  formatCallback,
+  type KindThresholds,
+  LeadScreen,
+  leadKind,
+  newEventId,
+  thresholdFor,
+} from '@sara/shared'
+import { and, eq, inArray, type SQL, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { jobRun, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
-import { screenSummary } from '../leads/screen'
+import { screenBreakdown } from '../leads/screen'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
+import { NOT_TEST } from '../testLeads/sql'
+import { type DayCounts, summaryText } from './summaryText'
 
 /** The summary comes at 19:00 Moscow time with up to this many borderline orders. */
 export const SUMMARY_HOUR_MSK = 19
@@ -19,14 +28,8 @@ const HELD_MAX_AGE = "interval '25 hours'"
 /** A held order is waiting for Boris once a summary has offered it: it is not offered, or aged out, a second time. */
 const OFFERED = `exists (select 1 from core.task k where k.kind = 'lead_held' and k.entity_id = l.id and k.state = 'open')`
 
-/** The «ещё показала бы» part (FR-NOTIF-3); the texts stay here while part C owns notify/cards.ts. */
-const HELD_TEXTS = {
-  head: 'Ещё показала бы, карточек за день было больше лимита:',
-  line: (n: number, h: Held) =>
-    `${n}. ${h.title}, ${h.score === null ? 'без оценки' : `балл ${h.score}`}`,
-  more: (n: number) => `И ещё ${n} ${plural(n, ['заявка', 'заявки', 'заявок'])}`,
-  button: (n: number) => `Показать №${n}`,
-}
+/** The button of a held order; the texts of the report are in summaryText. */
+const heldButton = (n: number) => `Показать №${n}`
 
 export const mskParts = (d: Date) => {
   const p = new Intl.DateTimeFormat('en-CA', {
@@ -41,8 +44,44 @@ export const mskParts = (d: Date) => {
   return { day: `${v('year')}-${v('month')}-${v('day')}`, hour: Number(v('hour')) }
 }
 
-type Borderline = { leadId: string; title: string; score: number; reason: string }
+type Borderline = {
+  leadId: string
+  title: string
+  score: number
+  reason: string
+  threshold: number
+}
 type Held = { leadId: string; title: string; score: number | null }
+
+/** The day's way from the board to the bids; test orders never count. */
+async function dayCounts(db: Db, today: SQL, end: SQL): Promise<DayCounts> {
+  const seen = await db.execute<{ seen: number; sorted: number; scored: number }>(sql`
+    select count(*)::int as seen,
+      (count(*) filter (where l.status = 'sorted_out'))::int as sorted,
+      (count(*) filter (where l.status = 'scored_out'))::int as scored
+    from core.lead l where ${today} and ${NOT_TEST('l.id')}`)
+  const cards = await db.execute<{ category: string }>(sql`
+    select l.category from core.lead l
+    where ${today} and ${NOT_TEST('l.id')}
+      and exists (select 1 from core.task t where t.kind = 'lead_decision' and t.entity_id = l.id)`)
+  const bids = await db.execute<{ bids: number; spent: number }>(sql`
+    select count(*)::int as bids, coalesce(sum((e.payload->>'spent_rub')::int), 0)::int as spent
+    from core.event e
+    where e.type = 'bid.sent' and ${NOT_TEST('e.entity_id')}
+      and e.occurred_at > ${end} - interval '1 day' and e.occurred_at <= ${end}`)
+  const kinds = cards.rows.map((c) => leadKind(c.category))
+  const count = (k: string) => kinds.filter((x) => x === k).length
+  return {
+    seen: seen.rows[0]?.seen ?? 0,
+    sorted: seen.rows[0]?.sorted ?? 0,
+    scored: seen.rows[0]?.scored ?? 0,
+    marketing: count('marketing'),
+    sites: count('sites'),
+    other: count('other'),
+    bids: bids.rows[0]?.bids ?? 0,
+    spentRub: bids.rows[0]?.spent ?? 0,
+  }
+}
 
 /**
  * Once a Moscow day after 19:00: how many orders Sara dropped since yesterday's summary, and the borderline ones with «Взял бы»
@@ -75,7 +114,7 @@ export async function dailySummary(
   const screens = await d.db.execute<{ screen: unknown }>(
     sql`select l.screen from core.lead l where l.screen is not null and ${today}`,
   )
-  const screened = screenSummary(
+  const screen = screenBreakdown(
     screens.rows.flatMap((r) => {
       const s = LeadScreen.safeParse(r.screen)
       return s.success ? [s.data] : []
@@ -121,10 +160,14 @@ export async function dailySummary(
     where l.status = 'held' and l.seen_at > ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
     order by s.score desc nulls last, l.bid_price_rub, l.seen_at`)
   const held = heldRows.rows
-  if (dropped === 0 && held.length === 0 && screened === null) return 'none'
+  if (dropped === 0 && held.length === 0 && screen.stopped + screen.marked === 0) return 'none'
 
-  const rows = await d.db.execute<Borderline>(sql`
-    select l.id as "leadId", l.title, s.score, s.reason
+  // The threshold depends on the kind of the order, so the band under it is cut here and not in the query.
+  const rows = await d.db.execute<
+    Borderline & { category: string; threshold: number; kindThresholds: KindThresholds | null }
+  >(sql`
+    select l.id as "leadId", l.title, s.score, s.reason, l.category,
+      (v.rules->>'threshold')::int as threshold, v.rules->'kind_thresholds' as "kindThresholds"
     from core.lead l
     join lateral (
       select * from core.lead_score s
@@ -134,34 +177,36 @@ export async function dailySummary(
     join core.direction_version v on v.account_id = l.account_id and v.version = s.version
     left join core.lead_label b on b.lead_id = l.id
     where l.status = 'scored_out' and ${today} and s.stop_factor is null and b.lead_id is null
-      and s.score < (v.rules->>'threshold')::int
-      and s.score >= (v.rules->>'threshold')::int - ${BORDERLINE_BELOW}
-    order by s.score desc, l.seen_at
-    limit ${BORDERLINE_MAX}`)
-  const picks = rows.rows
-  const shown = held.slice(0, HELD_MAX)
-  const lines: string[] = []
-  if (dropped > 0) {
-    if (picks.length === 0) lines.push(TEXTS.summaryNone(dropped))
-    else
-      lines.push(
-        TEXTS.summaryHead(dropped),
-        ...picks.map((p, i) => `${i + 1}. ${p.title}, балл ${p.score}: ${p.reason}`),
+    order by s.score desc, l.seen_at`)
+  const picks: Borderline[] = rows.rows
+    .flatMap((r) => {
+      const threshold = thresholdFor(
+        { threshold: r.threshold, kind_thresholds: r.kindThresholds ?? undefined },
+        r.category,
       )
-  }
-  if (shown.length > 0) {
-    if (lines.length > 0) lines.push('')
-    lines.push(HELD_TEXTS.head, ...shown.map((h, i) => HELD_TEXTS.line(picks.length + i + 1, h)))
-    if (held.length > shown.length) lines.push(HELD_TEXTS.more(held.length - shown.length))
-  }
-  // The screen's count comes last: the summary keeps its head, and the buttons their numbers.
-  if (screened) {
-    if (lines.length > 0) lines.push('')
-    lines.push(screened)
-  }
+      return r.score < threshold && r.score >= threshold - BORDERLINE_BELOW
+        ? [{ leadId: r.leadId, title: r.title, score: r.score, reason: r.reason, threshold }]
+        : []
+    })
+    .slice(0, BORDERLINE_MAX)
+  const shown = held.slice(0, HELD_MAX)
+  const text = summaryText({
+    now,
+    counts: await dayCounts(d.db, today, end),
+    screen,
+    near: picks.map((p) => ({
+      orderId: p.leadId,
+      title: p.title,
+      score: p.score,
+      threshold: p.threshold,
+      reason: p.reason,
+    })),
+    held: shown.map((h) => ({ orderId: h.leadId, title: h.title, score: h.score })),
+    heldMore: held.length - shown.length,
+  })
   try {
     if (picks.length === 0 && shown.length === 0) {
-      await d.notifier.sendText(lines.join('\n'))
+      await d.notifier.sendText(text, { html: true })
       return 'sent'
     }
     const items = [
@@ -176,13 +221,14 @@ export async function dailySummary(
       )
     try {
       await d.notifier.sendButtons(
-        lines.join('\n'),
+        text,
         items.map((x, i) => [
           {
-            text: x.action === 'want' ? TEXTS.wantButton(i + 1) : HELD_TEXTS.button(i + 1),
+            text: x.action === 'want' ? TEXTS.wantButton(i + 1) : heldButton(i + 1),
             callbackData: formatCallback(x.id, x.action),
           },
         ]),
+        { html: true },
       )
     } catch (e) {
       await d.db

@@ -8,6 +8,7 @@ import { markShown, shownRefs, topicIntro } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
 import { bidPost, clientPost, ourPost, restoredNote, seriesPost } from '../notify/topicPosts'
 import { NOT_TEST } from '../testLeads/sql'
+import { looksLikeBidTail } from './sync'
 
 /**
  * The topic as the chat with the client (Boris, 01.11: «имитация чата, с настоящими датами и всеми письмами»): the
@@ -69,7 +70,8 @@ export async function historyOf(db: Db, key: string): Promise<Item[]> {
         .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
     : []
   const name = l?.clientName ? firstName(l.clientName) : null
-  const ours = msgs.filter((m) => m.side === 'specialist')
+  // The site's own line after the bid is no message of ours: the bid's post says the price.
+  const ours = msgs.filter((m) => m.side === 'specialist' && !looksLikeBidTail(m.text))
   const t = (iso: string) => new Date(iso).getTime()
 
   const items: Item[] = []

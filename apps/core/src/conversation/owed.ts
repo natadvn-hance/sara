@@ -9,6 +9,7 @@ import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { NOT_TEST } from '../testLeads/sql'
 import { rowsFor } from './cards'
+import { isFarewell } from './meetings'
 import { CONV_TEXTS } from './texts'
 import { moscowHour } from './time'
 import { type StepDeps, topicStages, topicSteps } from './topicSteps'
@@ -100,15 +101,23 @@ export async function waitingClients(d: { db: Db }, now: Date): Promise<Waiting[
     ) m on true
     where c.closed_at is null and c.owner = 'sara' and m.side = 'client' and m.sent_at >= ${since}
       and ${NOT_TEST('c.chat_id')}
+      and not exists (
+        select 1 from core.meeting mt
+        where mt.conversation_id = c.id and mt.status = 'booked' and mt.outcome is null)
     order by m.sent_at asc`)
-  return (res.rows as Record<string, unknown>[]).map((r) => ({
-    conversationId: String(r.conversation_id),
-    chatId: String(r.chat_id),
-    orderId: (r.order_id as string | null) ?? null,
-    anchor: String(r.anchor),
-    words: String(r.words ?? ''),
-    sentAt: new Date(r.sent_at as string),
-  }))
+  return (
+    (res.rows as Record<string, unknown>[])
+      // A parting word («Большое спасибо)», «Договорились) Благодарю») asks nothing: nobody is waiting for an answer.
+      .filter((r) => !isFarewell(String(r.words ?? '')))
+      .map((r) => ({
+        conversationId: String(r.conversation_id),
+        chatId: String(r.chat_id),
+        orderId: (r.order_id as string | null) ?? null,
+        anchor: String(r.anchor),
+        words: String(r.words ?? ''),
+        sentAt: new Date(r.sent_at as string),
+      }))
+  )
 }
 
 async function clientOf(db: Db, w: Waiting) {

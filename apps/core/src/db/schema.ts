@@ -990,8 +990,22 @@ export const meeting = core.table(
     startsAt: ts('starts_at'),
     channel: text('channel'),
     note: text('note'),
-    /** `held`, `missed`, `moved`; null before. */
+    /** `held`, `missed`, `moved`, `cancelled`; null before. */
     outcome: text('outcome'),
+    /**
+     * `booked` (a call on the calendar), `maybe` (the chat says they agreed but no firm time: no slot is taken, the stage
+     * does not move) or `cancelled`. Meetings Boris wrote down himself are `booked`.
+     */
+    status: text('status').notNull().default('booked'),
+    /** Where the meeting came from: `boris` (written in the pult), `chat` (read from the correspondence), later `call`. */
+    source: text('source').notNull().default('boris'),
+    /** How the call goes and who calls, as the chat says (`phone`, `telegram`, `video`; `we`, `client`). */
+    how: text('how'),
+    caller: text('caller'),
+    /** The words of the chat the meeting stands on. */
+    quote: text('quote'),
+    /** The card of the meeting in the client's topic (a post reference), edited in place. */
+    cardRef: bigint('card_ref', { mode: 'number' }),
     amountRub: integer('amount_rub'),
     createdBy: text('created_by').notNull().default('boris'),
     createdAt: ts('created_at').notNull().defaultNow(),

@@ -141,7 +141,7 @@ describe('the code checks of a reply', () => {
     // The same phone written another way, the same time and day.
     expect(
       ids({
-        text: 'Записала ваш номер 8 (918) 123-45-67, передам Борису.',
+        text: 'Записал ваш номер 8 (918) 123-45-67, созвонимся.',
         clientTurnText: 'Мой номер +79181234567',
       }),
     ).toEqual([])
@@ -277,9 +277,11 @@ describe('the code checks of a reply', () => {
       'robotic.phrase',
     ])
     expect(ids({ text: 'Буду рада обсудить.' })).toEqual(['robotic.phrase'])
+    // The same stamps are also a chatbot turn of speech (style.neuro, Boris, 01.11.2026).
     expect(ids({ text: 'Отличный вопрос! Надеюсь это поможет.' })).toEqual([
       'robotic.phrase',
       'robotic.phrase',
+      'style.neuro',
     ])
     expect(ids({ text: 'Радость клиента важна.' })).toEqual([])
   })
@@ -333,7 +335,8 @@ describe('the code checks of a reply', () => {
 
   it('FR-CONV-4: a reply too long for the client turn is robotic', () => {
     const words = (n: number) => 'слово '.repeat(n).trim()
-    expect(ids({ text: words(101), clientTurnText: 'Расскажите подробнее' })).toEqual([
+    // The ceiling is 1200 signs (Boris, 01.11.2026: a long letter gets a full answer).
+    expect(ids({ text: words(201), clientTurnText: 'Расскажите подробнее' })).toEqual([
       'robotic.length',
     ])
     const turn = 'Нам нужен лендинг для курсов английского языка'
@@ -466,7 +469,14 @@ describe('the code checks of a reply', () => {
       input({ newDay: true, factIds: [], text: `Отличный вопрос ${LONG} лендинг за 90 000.` }),
     )
     expect(issues.map((x) => x.id).sort()).toEqual(
-      ['dash', 'facts.none', 'facts.numbers', 'greeting.missing', 'robotic.phrase'].sort(),
+      [
+        'dash',
+        'facts.none',
+        'facts.numbers',
+        'greeting.missing',
+        'robotic.phrase',
+        'style.neuro',
+      ].sort(),
     )
     for (const x of issues) expect(CHECK_IDS).toContain(x.id)
   })
