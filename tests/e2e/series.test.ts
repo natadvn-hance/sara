@@ -236,8 +236,10 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
       // The ✅ of «Заявки» stays and links to the topic.
       const linked = [...tg.sent, ...tg.edited].some(
         (m) =>
-          m.text.includes('✅ Отклик отправлен') &&
-          m.text.includes(`t.me/c/9876543210/${topic?.message_thread_id}`),
+          m.text.replace(/<[^>]*>/g, '').includes('✅ Отклик отправлен') &&
+          m.text.includes(
+            `<a href="https://t.me/c/9876543210/${topic?.message_thread_id}">Чат с клиентом</a>`,
+          ),
       )
       expect(linked).toBe(true)
     } finally {
@@ -448,20 +450,22 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     expect(conv?.owner ?? 'sara').toBe('sara')
   })
 
-  it('FR-UI-1: Boris gets one message for the whole bid: sending, sent, then the line about the series (31.10.2026)', async () => {
+  it('FR-UI-1: the card Boris pressed is the one message of the whole bid: sending, sent, then the line about the series (03.11.2026)', async () => {
     const id = await cardFor()
+    const card = cards().at(-1)
     press()
-    await until(() => tg.sent.some((m) => m.text.startsWith('⏳ Отправляю отклик')))
     await until(() => sentTo(id).length === 2)
     await until(() => tg.edited.some((m) => m.text.includes('Вдогонку ушло 2 сообщения')))
-    const [first] = tg.sent.filter((m) => m.text.startsWith('⏳'))
-    const edits = tg.edited.filter(
-      (m) => m.message_id === (first as { message_id: number }).message_id,
-    )
-    expect(edits.at(0)?.text).toMatch(/^✅ Отклик отправлен/)
-    expect(edits.at(-1)?.text).toMatch(/^✅ Отклик отправлен.*\nВдогонку ушло 2 сообщения/)
-    // No pile of notices: nothing else about the bid was sent.
-    expect(tg.sent.filter((m) => /Отклик|отклик/.test(m.text) && !m.reply_markup)).toHaveLength(1)
+    const plain = (t: string) => t.replace(/<[^>]*>/g, '')
+    const edits = tg.edited.filter((m) => m.message_id === card?.message_id)
+    expect(plain(edits.at(0)?.text ?? '')).toMatch(/^⏳ Отправляю отклик/)
+    expect(edits.at(0)?.reply_markup).toEqual({ inline_keyboard: [] })
+    expect(plain(edits.at(-1)?.text ?? '')).toMatch(/^✅ Отклик отправлен/)
+    expect(edits.at(-1)?.text).toContain('Заказ на Профи.ру')
+    expect(edits.at(-1)?.text).toContain('Вдогонку ушло 2 сообщения')
+    expect(edits.at(-1)?.reply_markup).toEqual({ inline_keyboard: [] })
+    // No pile of notices: no message of its own about the bid was sent.
+    expect(tg.sent.filter((m) => /Отклик|отклик/.test(m.text) && !m.reply_markup)).toHaveLength(0)
   })
 
   it('FR-LEAD-4: an unsure bid is looked for within seconds, and «не знаю, ушёл ли» is not said when it shows (31.10.2026)', async () => {
@@ -471,7 +475,9 @@ describe('the series after a bid (Boris, 29.10.2026)', () => {
     await until(async () => (await events('bid.sent', id)).length === 1)
     await until(() => sentTo(id).length === 2)
     expect(tg.shown('Не знаю, ушёл ли отклик')).toBe(false)
-    expect(tg.edited.some((m) => m.text.startsWith('✅ Отклик отправлен'))).toBe(true)
+    expect(
+      tg.edited.some((m) => m.text.replace(/<[^>]*>/g, '').startsWith('✅ Отклик отправлен')),
+    ).toBe(true)
   })
 
   it('FR-CONV-9: the last message of the series is his Telegram, after the call offer, once, and an empty nick turns it off (31.10.2026)', async () => {

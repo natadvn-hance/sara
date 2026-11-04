@@ -6,13 +6,14 @@ import { lead, outbox, task } from '../db/schema'
 import { lostRoute } from '../direction/router'
 import { createDeal } from '../domain/deal'
 import { appendEvent } from '../journal/journal'
-import { TEXTS } from '../notify/cards'
+import { foldedBidCard, TEXTS } from '../notify/cards'
 import { markShown } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
 import { bidPost } from '../notify/topicPosts'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
-import { openStatus, setBidStatusDeps, setStatus } from './bidStatus'
+import { openStatus, setBidStatusDeps, setStatus, statusOf } from './bidStatus'
+import { firstName } from './clientName'
 import { bidTextDetail } from './draft'
 import { startSeries } from './series'
 
@@ -32,6 +33,8 @@ export type OutboxDeps = {
   quickLookDelaysMs: number[]
   /** Called when a bid that was not pressed gives the order back to Boris: resend its card. */
   resendCard(taskId: string): Promise<void>
+  /** The full card with its buttons back in its own message (folded for the bid); false: send it again instead. */
+  restoreCard?(taskId: string, messageId: number): Promise<boolean>
   /** Called when a bid ended ORDER_CLOSED: the card of that order is closed in Telegram (FR-LEAD-5). */
   closeCard(taskId: string): Promise<void>
   /** The clock of the greeting: a bid is greeted at the moment it is sent (Moscow time of day). Tests fix it. */
@@ -292,6 +295,37 @@ async function giveBack(outboxId: string, p: BidPayload, reason: string): Promis
   })
 }
 
+const bidCard = (p: BidPayload) => ({
+  title: p.title,
+  clientName: p.clientName ? firstName(p.clientName) : null,
+  orderId: p.leadId,
+  priceFromRub: p.servicePriceRub ?? null,
+  priceToRub: p.servicePriceToRub ?? null,
+})
+
+/**
+ * The news of a bid in the card Boris pressed on, folded in place (Boris, 03.11): when the card is the status message
+ * it becomes the short view; a status message of the earlier kind, or none, gets the plain `fallback` as before, so a
+ * run that began before this change ends as it began.
+ */
+async function tellFolded(
+  view: Omit<Parameters<typeof foldedBidCard>[0], 'title' | 'clientName' | 'orderId'>,
+  p: BidPayload,
+  fallback: string,
+  o: { client?: boolean } = {},
+): Promise<void> {
+  const st = await statusOf(p.leadId)
+  if (!st?.html) return tell(fallback, p, o)
+  try {
+    await setStatus(p.leadId, foldedBidCard({ ...bidCard(p), ...view }), { html: true })
+  } catch (err) {
+    await appendEvent(d().db, {
+      ...ev('notify.failed', p, { kind: 'lead', id: p.leadId }, { channel: 'telegram' }),
+      reason: err instanceof Error ? err.message.slice(0, 200) : 'message was not sent',
+    })
+  }
+}
+
 /**
  * The client's topic opens with the bid (Boris, 01.11: «после того как она откликнулась, в форуме должен же создаваться
  * чат с клиентом»): the intro, the bid's text and its price go in, and the link comes back for the ✅ in «Заявки».
@@ -333,7 +367,7 @@ const withTopic = (text: string, link: string | null) =>
 async function tell(text: string, p: BidPayload, o: { client?: boolean } = {}): Promise<void> {
   try {
     // The message Boris got at the press (bidStatus) says it; a bid without one gets a message of its own.
-    if (await setStatus(p.leadId, text)) return
+    if (await setStatus(p.leadId, text, { html: false })) return
     await d().notifier.sendText(text, { place: o.client ? { order: p.leadId } : 'leads' })
   } catch (err) {
     await appendEvent(d().db, {
@@ -480,6 +514,10 @@ async function backToBoris(outboxId: string, p: BidPayload, reason: string): Pro
     }
     return
   }
+  // The card folded for the bid is read before the give-back deletes its row, to be put back in the same message.
+  const folded = (await DBOS.patch('bid-card-restore'))
+    ? await DBOS.runStep(() => statusOf(p.leadId), { name: 'statusBefore' })
+    : null
   await DBOS.runStep(() => giveBack(outboxId, p, reason), { name: 'giveBack', ...DB_STEP })
   const text =
     reason === 'paused'
@@ -492,13 +530,25 @@ async function backToBoris(outboxId: string, p: BidPayload, reason: string): Pro
   })
   if (p.taskId) {
     const taskId = p.taskId
-    await DBOS.runStep(
-      () =>
-        d()
-          .resendCard(taskId)
-          .catch(() => {}),
-      { name: 'resendCard' },
-    )
+    const messageId = folded?.card ? folded.messageId : null
+    const restored =
+      messageId === null
+        ? false
+        : await DBOS.runStep(
+            async () =>
+              (await d()
+                .restoreCard?.(taskId, messageId)
+                .catch(() => false)) ?? false,
+            { name: 'restoreCard' },
+          )
+    if (!restored)
+      await DBOS.runStep(
+        () =>
+          d()
+            .resendCard(taskId)
+            .catch(() => {}),
+        { name: 'resendCard' },
+      )
   }
 }
 
@@ -538,9 +588,24 @@ async function foundOnOrder(outboxId: string, p: BidPayload, quick = false): Pro
   const link = (await DBOS.patch('bid-topic'))
     ? await DBOS.runStep(() => openTopic(p, p.priceRub), { name: 'openTopicFound' })
     : null
-  await DBOS.runStep(() => tell(withTopic(text, link), p, { client: true }), {
-    name: 'tellFound',
-  })
+  await DBOS.runStep(
+    () =>
+      tellFolded(
+        {
+          state: quick ? 'sent' : 'found',
+          at: (d().now?.() ?? new Date()).toISOString(),
+          feeRub: p.priceRub,
+          chatUrl: link,
+          note: late
+            ? 'Сообщения вдогонку не отправляла: с нажатия прошло больше 15 минут, они бы читались как напоминание'
+            : null,
+        },
+        p,
+        withTopic(text, link),
+        { client: true },
+      ),
+    { name: 'tellFound' },
+  )
   if (series.length > 0 && !late)
     await startSeries({
       leadId: p.leadId,
@@ -582,9 +647,13 @@ async function deliver(outboxId: string): Promise<void> {
 
   // One message to Boris from the press to the end of the series (31.10.2026); the replies below edit it.
   if (await DBOS.patch('bid-status-message'))
-    await DBOS.runStep(() => openStatus(p.leadId, TEXTS.bidSending(p.title)).catch(() => {}), {
-      name: 'openStatus',
-    })
+    await DBOS.runStep(
+      () =>
+        openStatus(p.leadId, foldedBidCard({ ...bidCard(p), state: 'sending' }), {
+          fold: true,
+        }).catch(() => {}),
+      { name: 'openStatus' },
+    )
 
   // Steps keep their names and order: a run recorded before a change resumes along the steps it took.
   const delays = d().retryDelaysMs
@@ -634,7 +703,18 @@ async function deliver(outboxId: string): Promise<void> {
         ? await DBOS.runStep(() => openTopic(p, final.spent), { name: 'openTopic' })
         : null
       await DBOS.runStep(
-        () => tell(withTopic(TEXTS.bidSent(p.title, final.spent), link), p, { client: true }),
+        () =>
+          tellFolded(
+            {
+              state: 'sent',
+              at: (d().now?.() ?? new Date()).toISOString(),
+              feeRub: final.spent,
+              chatUrl: link,
+            },
+            p,
+            withTopic(TEXTS.bidSent(p.title, final.spent), link),
+            { client: true },
+          ),
         { name: 'tellSent' },
       )
     }
@@ -662,7 +742,9 @@ async function deliver(outboxId: string): Promise<void> {
         if (seen) return foundOnOrder(outboxId, p, true)
       }
     }
-    await DBOS.runStep(() => tell(TEXTS.bidUncertain, p), { name: 'tellUncertain' })
+    await DBOS.runStep(() => tellFolded({ state: 'unsure' }, p, TEXTS.bidUncertain), {
+      name: 'tellUncertain',
+    })
     await lookForUnsure(outboxId, p)
   } else if (final.kind === 'failed' && !(await DBOS.patch('bid-give-back'))) {
     // A run that recorded its failure before the give-back existed ends as it began.

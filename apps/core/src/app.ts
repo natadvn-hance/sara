@@ -268,6 +268,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       (o.reconcileDelaysMs || o.retryDelaysMs ? [] : [3_000, 5_000, 7_000, 10_000, 15_000, 20_000]),
     reconcileDelaysMs: o.reconcileDelaysMs ?? [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
+    restoreCard: (taskId, messageId) => lp.restoreCard(taskId, messageId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
   })
