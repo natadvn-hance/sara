@@ -207,6 +207,7 @@ const VIEWS: Record<string, string> = {
   analytics: '/analytics',
   mind: '/mind',
   prefs: '/settings',
+  thresholds: '/settings?focus=thresholds',
   health: '/health',
 }
 startInMemory(VIEWS[window.location.hash.slice(1)] ?? '/inbox')

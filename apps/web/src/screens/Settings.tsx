@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { usePress, useScreen } from '../app/data'
 import { ago, rub } from '../app/format'
-import { idOf, usePath } from '../app/router'
+import { focusOf, idOf, usePath } from '../app/router'
 import { MORE } from '../app/Shell'
 import { CalibrationPage } from '../pages/Calibration'
 import { DirectionPage } from '../pages/Direction'
@@ -305,7 +305,7 @@ function Threshold({ d }: { d: SettingsView['directions'][number] }) {
         )
       })}
       {changed ? (
-        <div className="actions">
+        <div className="actions save-bar">
           <Btn
             size="sm"
             look="primary"
@@ -436,6 +436,11 @@ const GROUP_ICON: Record<string, string> = {
 }
 
 function Body({ v }: { v: SettingsView }) {
+  // A link such as /settings?focus=thresholds (the bot's /settings) opens the screen on that block.
+  const focus = focusOf(usePath())
+  useEffect(() => {
+    if (focus) document.getElementById(focus)?.scrollIntoView({ block: 'start' })
+  }, [focus])
   return (
     <>
       <div className="grid grid-2">
@@ -449,45 +454,50 @@ function Body({ v }: { v: SettingsView }) {
           </Card>
         ))}
         {v.directions.map((d, i) => (
-          <Card
+          <div
             key={d.accountId}
-            title={`Отбор: ${d.title}`}
-            icon="target"
-            i={v.groups.length + i + 1}
-            end={<Pill>правила v{d.version}</Pill>}
+            id={i === 0 ? 'thresholds' : `thresholds-${d.accountId}`}
+            style={{ scrollMarginTop: 72 }}
           >
-            <Threshold d={d} />
-            <div className="bars">
-              {d.axes.map((a) => (
-                <div className="bar" key={a.title}>
-                  <div className="bar-top">
-                    <span>{a.title}</span>
-                    <span className="mono">{a.weight}%</span>
+            <Card
+              title={`Отбор: ${d.title}`}
+              icon="target"
+              i={v.groups.length + i + 1}
+              end={<Pill>правила v{d.version}</Pill>}
+            >
+              <Threshold d={d} />
+              <div className="bars">
+                {d.axes.map((a) => (
+                  <div className="bar" key={a.title}>
+                    <div className="bar-top">
+                      <span>{a.title}</span>
+                      <span className="mono">{a.weight}%</span>
+                    </div>
+                    <div className="bar-track">
+                      <span style={{ width: `${a.weight}%` }} />
+                    </div>
                   </div>
-                  <div className="bar-track">
-                    <span style={{ width: `${a.weight}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            {d.stops.length ? (
-              <details>
-                <summary>
-                  <Icon name="right" /> Не предлагать ({d.stops.length})
-                </summary>
-                <ul className="grid" style={{ margin: '10px 0 0', paddingLeft: 18, gap: 6 }}>
-                  {d.stops.map((s) => (
-                    <li key={s} className="text-2">
-                      {s}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
-            <A to={`/settings/rules/${encodeURIComponent(d.accountId)}`} className="link">
-              Правила отбора, версии и откат <Icon name="arrow" />
-            </A>
-          </Card>
+                ))}
+              </div>
+              {d.stops.length ? (
+                <details>
+                  <summary>
+                    <Icon name="right" /> Не предлагать ({d.stops.length})
+                  </summary>
+                  <ul className="grid" style={{ margin: '10px 0 0', paddingLeft: 18, gap: 6 }}>
+                    {d.stops.map((s) => (
+                      <li key={s} className="text-2">
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              <A to={`/settings/rules/${encodeURIComponent(d.accountId)}`} className="link">
+                Правила отбора, версии и откат <Icon name="arrow" />
+              </A>
+            </Card>
+          </div>
         ))}
         <Card title="Разделы" icon="more" className="only-narrow">
           <div className="list">

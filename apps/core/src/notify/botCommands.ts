@@ -143,7 +143,7 @@ async function settings(c: CommandContext): Promise<CommandReply> {
   if (!c.publicUrl) return COMMAND_TEXTS.noPult
   return {
     text: COMMAND_TEXTS.settings,
-    open: { text: COMMAND_TEXTS.openPult, url: `${c.publicUrl}/settings` },
+    open: { text: COMMAND_TEXTS.openPult, url: `${c.publicUrl}/settings?focus=thresholds` },
   }
 }
 
