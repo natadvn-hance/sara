@@ -10,6 +10,8 @@ export type Config = {
   profiScreenUrl: string
   accounts: { id: string; title: string; egressIp: string }[]
   nodeToken: string
+  /** The token of Lora's input for meeting outcomes; none: the input is off. */
+  loraToken: string | undefined
   permitSecret: string
   claudeBin: string
   telegramApiRoot: string | undefined
@@ -62,6 +64,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         '[{"id":"hance-marketing","title":"Hance маркетинг","egressIp":"127.0.0.1"}]',
     ),
     nodeToken: required('SARA_NODE_TOKEN', 'dev-node-token'),
+    loraToken: env.SARA_LORA_TOKEN || undefined,
     permitSecret: required('SARA_PERMIT_SECRET', 'dev-permit-secret'),
     claudeBin: env.SARA_CLAUDE_BIN ?? 'claude',
     telegramApiRoot: env.SARA_TELEGRAM_API_ROOT || undefined,

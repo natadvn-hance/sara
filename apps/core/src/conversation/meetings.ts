@@ -12,6 +12,7 @@ import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { clientNames } from './dossier'
 import { dealOf } from './stage'
+import { getConversation as getConversationRow } from './store'
 import type { ConversationRow, StoredMessage } from './types'
 
 /**
@@ -82,6 +83,8 @@ export async function hasBookedMeeting(db: Db, conversationId: string): Promise<
     .limit(1)
   return m !== undefined
 }
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 export type MeetingDeps = {
   db: Db
@@ -392,4 +395,282 @@ async function card(
   await d.db.update(meeting).set({ cardRef: sent.messageId }).where(eq(meeting.id, id))
   // No right to pin is no error: the card is there all the same.
   if (pin) await Promise.resolve(d.notifier.pinPost?.(sent.messageId)).catch(() => {})
+}
+
+/** What came of a call: told by Lora (her note of Boris's story) or by Boris in the topic. */
+export type MeetingResult = {
+  held: boolean
+  /** When the call was (ISO); none: the time of the meeting on record stands. */
+  at?: string | null
+  result: string | null
+  nextStep: string | null
+  /** The day of the next step, `YYYY-MM-DD` (Moscow). */
+  nextStepOn: string | null
+  source: 'lora' | 'boris'
+}
+
+/** The meeting an outcome belongs to: the latest one with no outcome yet. */
+async function openMeeting(db: Db, conversationId: string) {
+  const [m] = await db
+    .select()
+    .from(meeting)
+    .where(
+      and(
+        eq(meeting.conversationId, conversationId),
+        isNull(meeting.outcome),
+        ne(meeting.status, 'cancelled'),
+      ),
+    )
+    .orderBy(desc(meeting.createdAt))
+    .limit(1)
+  return m ?? null
+}
+
+/**
+ * Writes down the outcome of a call (Boris, 03.11: «после проведения встречи хочу, чтобы внутри чата с клиентом была
+ * информация о том что встреча была проведена и следующие шаги»): the meeting gets its result and next step, a held
+ * one moves the deal to the done call, and the card becomes «Встреча прошла» in place. Time alone proves nothing: only
+ * a word of Lora's or Boris's gets here.
+ */
+export async function recordMeetingResult(
+  d: MeetingDeps,
+  conv: ConversationRow,
+  r: MeetingResult,
+  now: Date,
+): Promise<string> {
+  const at = r.at ? new Date(r.at) : null
+  const known = await openMeeting(d.db, conv.id)
+  const id = known?.id ?? newEventId()
+  const outcome = r.held ? 'held' : 'missed'
+  const startsAt = known?.startsAt ?? (at && !Number.isNaN(at.getTime()) ? at.toISOString() : null)
+  const fields = {
+    outcome,
+    status: 'booked',
+    result: r.result,
+    nextStep: r.nextStep,
+    nextStepOn: r.nextStepOn,
+    resultSource: r.source,
+    resultAt: now.toISOString(),
+    startsAt,
+    updatedAt: now.toISOString(),
+  }
+  if (known) await d.db.update(meeting).set(fields).where(eq(meeting.id, known.id))
+  else
+    await d.db.insert(meeting).values({
+      id,
+      conversationId: conv.id,
+      title: 'Созвон',
+      source: r.source,
+      createdBy: r.source === 'lora' ? 'lora' : 'boris',
+      ...fields,
+    })
+  if (r.held) {
+    const deal = await dealOf(d.db, conv)
+    if (deal)
+      await advanceTo(d.db, {
+        dealId: deal.id,
+        to: 'call_done',
+        actor: r.source === 'boris' ? 'boris' : 'sara',
+        reason: 'встреча прошла',
+        correlationId: conv.id,
+      }).catch((e) => console.error('deal not moved on the result', e))
+  }
+  // The journal keeps the fact and the day, never the words of the result (ADR-016).
+  await appendEvent(d.db, {
+    type: 'meeting.result',
+    v: 1,
+    entity: { kind: 'conversation', id: conv.id },
+    account_id: conv.accountId,
+    actor: r.source === 'boris' ? 'boris' : 'sara',
+    occurred_at: now.toISOString(),
+    causation_id: null,
+    correlation_id: conv.id,
+    reason: null,
+    payload: { held: r.held, source: r.source, next_step_on: r.nextStepOn },
+  })
+  await card(
+    d,
+    conv,
+    id,
+    {
+      status: r.held ? 'held' : 'missed',
+      at: startsAt ? new Date(startsAt).toISOString() : null,
+      how: known?.how ?? null,
+      caller: known?.caller ?? null,
+      quote: null,
+      result: r.result,
+      nextStep: r.nextStep,
+      nextStepOn: r.nextStepOn,
+    },
+    now,
+    false,
+  )
+  return id
+}
+
+export const ResultRead = z.object({
+  kind: z.enum(['result', 'not_held', 'for_client', 'other']),
+  result: z.string().nullable().optional(),
+  next_step: z.string().nullable().optional(),
+  next_step_on: z.string().nullable().optional(),
+})
+export type ResultRead = z.infer<typeof ResultRead>
+
+const REPORT =
+  /созвонил|созвонились|поговорил|поговорили|пообщал|обсудил|обсудили|позвонил|дозвонил|переговорил|(разговор|звонок|созвон|встреча|встречу)\s+(был|была|прошл|состоял)|встреч[аиуы]?\s+(прошл|состоял|не состоял)|не\s+(вышел|вышла|ответил|ответила|взял|взяла)/iu
+
+/** The cheap gate for Boris's own words: does it sound like a report of a call. */
+export const looksLikeReport = (text: string): boolean => REPORT.test(text)
+
+/** The day `YYYY-MM-DD` of a model's answer, or null. */
+const asDay = (s: string | null | undefined) =>
+  /^\d{4}-\d{2}-\d{2}$/.test((s ?? '').trim()) ? (s as string).trim() : null
+
+/**
+ * Boris's words in a client's topic, typed or spoken: when they tell how a call went, the outcome and the next step go
+ * on the card (no question to him; a line says so), and the words are not offered to the client. Words for the client,
+ * or anything else, are left to the usual flow (null). Never throws.
+ */
+export async function readBorisResult(
+  d: MeetingDeps,
+  conv: ConversationRow,
+  text: string,
+  now: Date = d.now?.() ?? new Date(),
+): Promise<string | null> {
+  try {
+    if (!looksLikeReport(text) || conv.closedAt) return null
+    const known = await openMeeting(d.db, conv.id)
+    const input = [
+      '## Сейчас',
+      mskNow(now),
+      '',
+      '## Запись о созвоне',
+      known?.startsAt ? `${mskStamp(new Date(known.startsAt).toISOString())} по Москве` : 'нет',
+      '',
+      '## Сообщение Бориса',
+      text.replace(/\s+/g, ' ').trim(),
+    ].join('\n')
+    const res = await d.gateway.call('meeting-result', input, ResultRead, {
+      correlationId: conv.id,
+      limitWaitMs: 0,
+      redact: { names: await clientNames(d.db, conv) },
+    })
+    if (!res.ok) return null
+    const o = res.output
+    if (o.kind !== 'result' && o.kind !== 'not_held') return null
+    await recordMeetingResult(
+      d,
+      conv,
+      {
+        held: o.kind === 'result',
+        result: o.result?.trim() || null,
+        nextStep: o.next_step?.trim() || null,
+        nextStepOn: asDay(o.next_step_on),
+        source: 'boris',
+      },
+      now,
+    )
+    return o.kind === 'result'
+      ? 'Записала итог встречи на карточке в теме. Клиенту ничего не ушло.'
+      : 'Записала, что встреча не состоялась. Клиенту ничего не ушло.'
+  } catch (e) {
+    console.error(
+      'result of the meeting not read',
+      e instanceof Error ? e.message.slice(0, 200) : e,
+    )
+    return null
+  }
+}
+
+const mskDay = (t: Date) => new Date(t.getTime() + 3 * 3600_000).toISOString().slice(0, 10)
+const mskHour = (t: Date) => new Date(t.getTime() + 3 * 3600_000).getUTCHours()
+/** Meetings whose time passed with no outcome are told so, this long after their start. */
+const EXPIRE_AFTER_MS = 3 * 3600_000
+
+/**
+ * The two quiet jobs after a call: a booked meeting whose time has passed with no word of its outcome gets its card
+ * edited to «время прошло, итога нет» (no message, no question; it does not count as held), and on the day of a next
+ * step one short reminder goes into the topic, in working hours (9 to 19 Moscow), once.
+ */
+export async function meetingsTick(
+  d: MeetingDeps,
+  now: Date = d.now?.() ?? new Date(),
+): Promise<number> {
+  if (!(await d.notifier.forumOn?.())) return 0
+  let done = 0
+  const passed = await d.db
+    .select()
+    .from(meeting)
+    .where(
+      and(
+        eq(meeting.status, 'booked'),
+        isNull(meeting.outcome),
+        isNull(meeting.expiredAt),
+        sql`${meeting.startsAt} < ${new Date(now.getTime() - EXPIRE_AFTER_MS).toISOString()}`,
+        sql`${meeting.cardRef} is not null`,
+      ),
+    )
+  for (const m of passed) {
+    const conv = m.conversationId ? await getConversationRow(d.db, m.conversationId) : null
+    await d.db.update(meeting).set({ expiredAt: now.toISOString() }).where(eq(meeting.id, m.id))
+    if (!conv) continue
+    await card(
+      d,
+      conv,
+      m.id,
+      {
+        status: 'expired',
+        at: m.startsAt ? new Date(m.startsAt).toISOString() : null,
+        how: m.how,
+        caller: m.caller,
+        quote: null,
+      },
+      now,
+      false,
+    ).catch((e) => console.error('expired meeting card not edited', e))
+    done++
+  }
+  const hour = mskHour(now)
+  if (hour >= 9 && hour < 19) {
+    const due = await d.db
+      .select()
+      .from(meeting)
+      .where(
+        and(
+          eq(meeting.outcome, 'held'),
+          isNull(meeting.nextRemindedAt),
+          sql`${meeting.nextStep} is not null`,
+          sql`${meeting.nextStepOn} <= ${mskDay(now)}`,
+        ),
+      )
+    for (const m of due) {
+      if (!m.conversationId || !m.nextStep) continue
+      await d.db
+        .update(meeting)
+        .set({ nextRemindedAt: now.toISOString() })
+        .where(eq(meeting.id, m.id))
+      await d.notifier
+        .sendText(`⏰ <b>Сегодня шаг по клиенту:</b> ${esc(m.nextStep)}`, {
+          html: true,
+          place: { conversation: m.conversationId },
+        })
+        .catch((e) => console.error('next step reminder not sent', e))
+      done++
+    }
+  }
+  return done
+}
+
+export function startMeetingTick(d: MeetingDeps, tickMs = 60_000): { stop(): void } {
+  let running = false
+  const timer = setInterval(() => {
+    if (running) return
+    running = true
+    void meetingsTick(d)
+      .catch((e) => console.error('meeting tick failed', e instanceof Error ? e.message : e))
+      .finally(() => {
+        running = false
+      })
+  }, tickMs)
+  return { stop: () => clearInterval(timer) }
 }

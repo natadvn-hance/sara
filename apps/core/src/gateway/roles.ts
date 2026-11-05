@@ -28,6 +28,7 @@ export type RoleName =
   | 'links-digest'
   | 'analytics-insights'
   | 'meeting'
+  | 'meeting-result'
 
 export async function loadRole(
   rolesDir: string,

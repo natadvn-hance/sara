@@ -1006,6 +1006,17 @@ export const meeting = core.table(
     quote: text('quote'),
     /** The card of the meeting in the client's topic (a post reference), edited in place. */
     cardRef: bigint('card_ref', { mode: 'number' }),
+    /** What came of the call, in a line or two, the next step and its day (Moscow, `YYYY-MM-DD`). */
+    result: text('result'),
+    nextStep: text('next_step'),
+    nextStepOn: text('next_step_on'),
+    /** Who told it: `lora` (her note of Boris's story), `boris` (his words in the topic). */
+    resultSource: text('result_source'),
+    resultAt: ts('result_at'),
+    /** The time passed with no outcome: the card said so, quietly. */
+    expiredAt: ts('expired_at'),
+    /** The reminder of the next step, sent once on its day. */
+    nextRemindedAt: ts('next_reminded_at'),
     amountRub: integer('amount_rub'),
     createdBy: text('created_by').notNull().default('boris'),
     createdAt: ts('created_at').notNull().defaultNow(),
