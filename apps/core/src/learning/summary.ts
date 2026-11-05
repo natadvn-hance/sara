@@ -11,6 +11,7 @@ import type { Db } from '../db/client'
 import { jobRun, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { screenBreakdown } from '../leads/screen'
+import { staleCardsSince } from '../leads/waiting'
 import { TEXTS } from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { NOT_TEST } from '../testLeads/sql'
@@ -160,7 +161,9 @@ export async function dailySummary(
     where l.status = 'held' and l.seen_at > ${at} - ${sql.raw(HELD_MAX_AGE)} and not ${sql.raw(OFFERED)}
     order by s.score desc nulls last, l.bid_price_rub, l.seen_at`)
   const held = heldRows.rows
-  if (dropped === 0 && held.length === 0 && screen.stopped + screen.marked === 0) return 'none'
+  const expired = await staleCardsSince(d.db, new Date(now.getTime() - 24 * 3600_000))
+  if (dropped === 0 && held.length === 0 && screen.stopped + screen.marked === 0 && expired === 0)
+    return 'none'
 
   // The threshold depends on the kind of the order, so the band under it is cut here and not in the query.
   const rows = await d.db.execute<
@@ -203,6 +206,7 @@ export async function dailySummary(
     })),
     held: shown.map((h) => ({ orderId: h.leadId, title: h.title, score: h.score })),
     heldMore: held.length - shown.length,
+    expired,
   })
   try {
     if (picks.length === 0 && shown.length === 0) {

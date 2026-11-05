@@ -121,6 +121,8 @@ describe('one rule of what waits for Boris, in the bot and the pult (FR-LEAD-10)
     }
     // 30.10.2026, 19:30 in Moscow.
     expect(await dailySummary({ db, notifier }, new Date('2026-10-30T16:30:00Z'))).toBe('sent')
-    expect(sent).toEqual(['Убрала 3 заявки старше суток, их карточки в боте свёрнуты'])
+    // One report, the folded cards in one line of it.
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('Убрала 3 заявки старше суток, их карточки в боте свёрнуты')
   })
 })

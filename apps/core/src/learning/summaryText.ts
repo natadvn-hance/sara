@@ -64,6 +64,8 @@ export function summaryText(o: {
   near: NearOrder[]
   held: HeldOrder[]
   heldMore: number
+  /** Cards folded as stale in the day (leads/staleCards.ts): one line, never a message of their own. */
+  expired?: number
 }): string {
   const c = o.counts
   const cards = c.marketing + c.sites + c.other
@@ -99,6 +101,11 @@ export function summaryText(o: {
     lines.push(
       '',
       `<blockquote expandable>Отсев отметил ещё ${o.screen.marked} и пропустил дальше: ${esc(o.screen.markedBy)}</blockquote>`,
+    )
+  if (o.expired)
+    lines.push(
+      '',
+      `Убрала ${o.expired} ${plural(o.expired, ['заявку', 'заявки', 'заявок'])} старше суток, их карточки в боте свёрнуты`,
     )
   return lines.join('\n')
 }
