@@ -1,6 +1,6 @@
 {
-  "id": "c636a0c6-2c43-4f26-8d04-186ecaa51043",
-  "prevId": "603f5c20-0068-4173-a078-d24f90a8b200",
+  "id": "783840db-9bca-4b76-b4cc-ffc463adb03e",
+  "prevId": "378b09ec-c965-493b-bdf9-da5e8b534c6c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -71,6 +71,68 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "core.analytics_hypothesis": {
+      "name": "analytics_hypothesis",
+      "schema": "core",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facts": {
+          "name": "facts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -4425,6 +4487,12 @@
         },
         "leads_thread_id": {
           "name": "leads_thread_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "analytics_thread_id": {
+          "name": "analytics_thread_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
