@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { account, directionVersion, setting, settingHistory } from '../db/schema'
 import { getSetting } from '../settings/store'
+import { type Thresholds, thresholdsOf } from './threshold'
 
 /**
  * «Настройки» (M7 design 6.4). The pult changes money and card limits freely; a flag that takes Sara out of the
@@ -270,6 +271,7 @@ export async function settingsView(db: DbOrTx): Promise<SettingsView> {
     const r = v?.rules as
       | {
           threshold: number
+          kind_thresholds?: Partial<Thresholds>
           stop_factors: { text: string }[]
           axes: { title: string; weight: number }[]
         }
@@ -280,6 +282,7 @@ export async function settingsView(db: DbOrTx): Promise<SettingsView> {
       title: a.title,
       version: v.version,
       threshold: r.threshold,
+      thresholds: thresholdsOf(r),
       stops: r.stop_factors.map((s) => s.text),
       axes: r.axes.map((x) => ({ title: x.title, weight: x.weight })),
     })

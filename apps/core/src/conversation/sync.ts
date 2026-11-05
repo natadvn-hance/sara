@@ -77,6 +77,12 @@ async function ourTexts(db: Db, conv: ConversationRow): Promise<Map<string, 'sar
 
 /** The tail the site adds to a bid a moment after it: «Стоимость от 30000 до 45000 руб. усл. Контакты: +7…». */
 const BID_TAIL = /^\s*Стоимость(?![\p{L}])[\s\S]{0,300}?(?:руб|₽)/iu
+/**
+ * The same tail by its text alone, for what is shown to Boris: the site writes «Стоимость … Контакты: …» into the chat
+ * from the bid's form, and the bid's post in the topic says the price already.
+ */
+export const looksLikeBidTail = (text: string) => BID_TAIL.test(text) && /Контакты/iu.test(text)
+
 /** How near to the bid its tail lands (it was 1 ms in the chat of order 95583456). */
 const BID_TAIL_MS = 10_000
 
@@ -134,6 +140,8 @@ export async function syncChat(
      * a client's word reaches Boris once, by whichever read stored it first. Its failure never stops the reading.
      */
     show?: (conv: ConversationRow, added: StoredMessage[]) => Promise<void>
+    /** The same news for a reader that decides on them (a call booked in the chat); its failure never stops the reading. */
+    news?: (conv: ConversationRow, added: StoredMessage[]) => Promise<void>
   },
   conv: ConversationRow,
   heardAt: Date,
@@ -231,6 +239,8 @@ export async function syncChat(
   if (added.some((m) => m.side === 'client')) await promoteOnClientWord(d.db, conv)
   if (added.length > 0)
     await d.show?.(conv, added).catch((e) => console.error('news of the chat not shown', e))
+  if (added.length > 0)
+    await d.news?.(conv, added).catch((e) => console.error('news of the chat not read', e))
   return {
     added,
     specialistAfter: added.filter((m) => m.side === 'specialist'),

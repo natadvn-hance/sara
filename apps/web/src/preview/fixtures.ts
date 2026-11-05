@@ -891,7 +891,8 @@ export const settings: SettingsView = {
       accountId: 'hance-marketing',
       title: 'Hance маркетинг',
       version: 4,
-      threshold: 56,
+      threshold: 50,
+      thresholds: { marketing: 40, sites: 55, other: 50 },
       stops: [
         'Только исполнение: ведение соцсетей, таргет, дизайн без стратегии',
         'Бюджет меньше 15 000 ₽',

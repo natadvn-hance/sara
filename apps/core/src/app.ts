@@ -19,6 +19,7 @@ import {
   createConversationEvents,
   showClientWords,
 } from './conversation/events'
+import { hasBookedMeeting, readMeeting } from './conversation/meetings'
 import { sendTurnReply } from './conversation/outbox'
 import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
@@ -268,6 +269,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       (o.reconcileDelaysMs || o.retryDelaysMs ? [] : [3_000, 5_000, 7_000, 10_000, 15_000, 20_000]),
     reconcileDelaysMs: o.reconcileDelaysMs ?? [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
+    restoreCard: (taskId, messageId) => lp.restoreCard(taskId, messageId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
   })
@@ -310,6 +312,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const mindTimer = setInterval(() => void refreshMind(), MIND_REFRESH_MS)
   mindTimer.unref()
   const cardDeps = { db, notifier: bot.notifier }
+  // A call booked in the chat is read from every new message and becomes a meeting with a card in the topic.
+  const meetingDeps = { db, gateway, notifier: bot.notifier, now: o.now }
   setTurnDeps({
     db,
     profi,
@@ -323,9 +327,18 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
     show: (conv, added) => showClientWords({ db, notifier: bot.notifier }, conv, added),
+    news: (conv, added) => readMeeting(meetingDeps, conv, added),
   })
   // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
-  setRemindDeps({ db, profi, gateway, mind, notifier: bot.notifier })
+  // A booked call stops the reminders to the client (Boris, 03.11: she kept reminding after they had agreed).
+  setRemindDeps({
+    db,
+    profi,
+    gateway,
+    mind,
+    notifier: bot.notifier,
+    isBooked: (conversationId) => hasBookedMeeting(db, conversationId),
+  })
   setSendDeps({ db, profi, notifier: bot.notifier, ground: reminderGround })
   const conversationDeps: ConversationEventDeps = {
     db,
@@ -336,6 +349,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     onSpecialist: (c, added) => compareTurn(cardDeps, c.id, added),
     // The reminders follow the chat as read: our message last starts one, a client's message cancels it.
     onChatState: (c, messages) => syncReminders(c, messages),
+    onNews: (c, added) => readMeeting(meetingDeps, c, added),
   }
   const conversationEvents = createConversationEvents(conversationDeps)
   const accountEvents = createProfiEventDispatcher({

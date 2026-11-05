@@ -29,7 +29,7 @@ import { searchView } from './search'
 import { pultMay, SWITCH_ON_KEYS, settingsView } from './settings'
 import { registerStreamRoute } from './stream'
 import { systemView } from './system'
-import { setThreshold, thresholdHint } from './threshold'
+import { setThresholds, thresholdHint } from './threshold'
 import { todayView } from './today'
 
 export const PULT_TEXTS = {
@@ -102,9 +102,16 @@ const DecideBody = z.object({
   decision: z.enum(['yes', 'no']),
   reason: z.string().trim().min(1).max(500).nullable().default(null),
 })
-const ThresholdQuery = z.object({ value: z.coerce.number().int().min(0).max(100) })
+const score = z.number().int().min(0).max(100)
+const ThresholdQuery = z.object({
+  marketing: z.coerce.number().pipe(score),
+  sites: z.coerce.number().pipe(score),
+  other: z.coerce.number().pipe(score),
+})
 const ThresholdBody = z.object({
-  value: z.number().int().min(0).max(100),
+  marketing: score,
+  sites: score,
+  other: score,
   expectedVersion: z.number().int().positive(),
 })
 const LeadsQuery = z.object({ order: z.enum(QUEUE_ORDERS).default('combined') })
@@ -380,7 +387,7 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       const q = ThresholdQuery.safeParse(req.query ?? {})
       if (!q.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
       try {
-        return await thresholdHint(d.db, accountId, q.data.value)
+        return await thresholdHint(d.db, accountId, q.data)
       } catch {
         return reply.code(404).send({ error: PULT_TEXTS.notFound })
       }
@@ -389,7 +396,8 @@ export function registerPultRoutes(app: FastifyInstance, d: AppDeps): void {
       const { accountId } = req.params as { accountId: string }
       const body = ThresholdBody.safeParse(req.body ?? {})
       if (!body.success) return reply.code(400).send({ error: PULT_TEXTS.badValue })
-      const r = await setThreshold(d.db, accountId, body.data.value, body.data.expectedVersion)
+      const { expectedVersion, ...values } = body.data
+      const r = await setThresholds(d.db, accountId, values, expectedVersion)
       return r.ok
         ? { message: r.message, version: r.version }
         : reply.code(409).send({ error: r.message })

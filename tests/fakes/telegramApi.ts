@@ -384,8 +384,14 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     username: 'sara_dev_bot',
     sent,
     edited,
-    shown: (prefix) =>
-      sent.some((m) => m.text.startsWith(prefix)) || edited.some((m) => m.text.startsWith(prefix)),
+    // As Boris reads it: the markup of a message is not part of its words.
+    shown: (prefix) => {
+      const plain = (t: string) => t.replace(/<[^>]*>/g, '')
+      return (
+        sent.some((m) => plain(m.text).startsWith(prefix)) ||
+        edited.some((m) => plain(m.text).startsWith(prefix))
+      )
+    },
     markups,
     answers,
     actions,
