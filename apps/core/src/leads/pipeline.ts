@@ -4,13 +4,18 @@ import {
   ClientInfo,
   type EventEnvelope,
   type GetOrderOutput,
+  isTestOrder,
   LeadScreen,
   type LeadSite,
   newEventId,
   type OrderAttachment,
   ProfiOrder,
+  priceRange,
+  SCREEN_RU,
+  type ScreenMark,
   type SorterOutput,
   type TaskAction,
+  thresholdFor,
 } from '@sara/shared'
 import { and, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import type { MindSearch } from '../conversation/types'
@@ -34,10 +39,14 @@ import { analysisMessages, type ClosedWhen, type LeadCard, TEXTS } from '../noti
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { onSheetPress } from '../sheet/backfill'
+import { SHEET_TASK_ID } from '../sheet/sync'
 import { leadSiteOf, studyLeadSite } from '../site'
 import type { Fetched } from '../site/fetch'
+import { seriesWithoutBlocked } from '../text/blockedLinks'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { casesForBid } from './bidCases'
+import { callOfferTemplate } from './callSlots'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import { namesToHide } from './clientName'
 import {
@@ -74,7 +83,9 @@ import {
   vacancy,
   vacancySoft,
 } from './screen'
+import { sitesForBid } from './siteOrder'
 import { sortOrder } from './sorter'
+import { telegramLineOf } from './telegramLine'
 
 export type LeadPipelineDeps = {
   db: Db
@@ -87,8 +98,11 @@ export type LeadPipelineDeps = {
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** The clock of the greeting a bid text carries (Moscow time of day); tests fix it. */
   now?: () => Date
-  /** The case search of the mind: a bid may tell a case that fits the order (Boris, 28.10.2026). */
-  mind?: Pick<MindSearch, 'cases'>
+  /**
+   * The mind: its case search (a bid may tell a case that fits the order, Boris 28.10.2026) and its records by id (the
+   * sites of Hance for an order of a site, Boris 30.10.2026).
+   */
+  mind?: Pick<MindSearch, 'cases' | 'byIds'>
   /** How a page of the client's site is fetched; tests give a made-up site, the default is the safe fetch from the server. */
   siteFetch?: (url: string) => Promise<Fetched>
   /** How a file attached to the order is downloaded; tests give bytes, the default is the safe fetch from Profi.ru's hosts. */
@@ -113,6 +127,8 @@ export type LeadPipeline = {
    */
   onReminder(taskId: string): Promise<void>
   resendCard(taskId: string): Promise<void>
+  /** The full card of a task back in its own message; false when that cannot be done (send it again then). */
+  restoreCard(taskId: string, messageId: number): Promise<boolean>
   /**
    * The order of this card closed on Profi.ru. `recheck`: the waiting task is ended as skipped (closed) and every
    * message of its card is edited (the closed line, no buttons); a task Boris decided meanwhile is left alone.
@@ -136,6 +152,8 @@ export type LeadPipeline = {
     taskId: string
     text: string | null
     priceRub: number | null
+    /** The «до» of the range; absent: half again over «от». */
+    priceToRub?: number | null
     followUps?: string[] | null
   }): Promise<{
     saved: boolean
@@ -335,18 +353,39 @@ async function draftFor(
     const mindCases =
       profile && profile.cases.length > 0 ? [] : await casesForBid(d().mind, o, opts.accountId)
     const { accountId: _account, site: _site, ...rest } = opts
-    return await writeDraft(d().gateway, o, {
+    const blocked = await getSetting(d().db, 'links.blocked')
+    const dr = await writeDraft(d().gateway, o, {
       ...rest,
       ...(profile ? { profile } : {}),
       mindCases,
       recentBids: await recentBids(opts.accountId),
+      sites: await sitesForBid(d().mind, o, blocked),
+      blockedLinks: blocked,
       site: opts.site ?? null,
       now: greetingMoment(),
     })
+    // The series ends with an offer to talk for half an hour (Boris, 30.10.2026); its times go in when it is sent.
+    const withCall =
+      dr.text !== null && (await getSetting(d().db, 'calls.offer'))
+        ? { ...dr, callOffer: callOfferTemplate(`${o.title}\n${o.text}`) }
+        : dr
+    // And last, his Telegram in his words (31.10.2026), when the setting names one.
+    const tg = dr.text !== null ? telegramLineOf(await getSetting(d().db, 'series.telegram')) : null
+    return tg ? ({ ...withCall, telegram: tg } as Draft) : withCall
   } catch (err) {
     console.error('draft failed', err instanceof Error ? err.message.slice(0, 200) : err)
     return { text: null, reason: 'no_answer', attempts: 1, analysis: null }
   }
+}
+
+/** The whole series a draft brings: the Analyst's messages, then the call offer; null when there are none. */
+function seriesOf(dr: Draft): string[] | null {
+  const all = [
+    ...(dr.followUps ?? []),
+    ...(dr.callOffer ? [dr.callOffer] : []),
+    ...(dr.telegram ? [dr.telegram] : []),
+  ]
+  return all.length > 0 ? all : null
 }
 
 /** The texts of the account's latest drafts, newest first: the Analyst opens the next bid differently. */
@@ -404,7 +443,8 @@ function storeDraft(
         .set({
           draftText: dr.text,
           draftPriceRub: dr.priceRub,
-          draftFollowUps: dr.followUps && dr.followUps.length > 0 ? dr.followUps : null,
+          draftPriceToRub: 'priceToRub' in dr ? (dr.priceToRub ?? null) : null,
+          draftFollowUps: seriesOf(dr),
         })
         .where(and(eq(lead.id, l.id), isNull(lead.draftText)))
     }
@@ -438,6 +478,7 @@ const draftedPayload = (dr: Draft | DraftMiss) =>
           follow_ups: dr.followUps?.length ?? 0,
           follow_up_cases: dr.followUpCases ?? [],
           follow_ups_dropped: dr.followUpsDropped ?? [],
+          ...(dr.followUpSites && { follow_up_sites: dr.followUpSites }),
         }),
       }
     : {
@@ -513,15 +554,18 @@ async function screenByPage(
   const at = new Date(o.published_at ?? o.seen_at)
   const checks: Check[] = [newAccount(o.client_info, at), negativeReviews(o.client_info)]
   let words = before.own_words
+  const soft: ScreenMark[] = []
   if (before.no_data.includes('short_text') && o.text.trim()) {
     const form = await loadFormParts(db)
     checks.push(shortText(o, form, await getSetting(db, 'screen.min_own_words')))
     checks.push(vacancy(o))
+    const v = vacancySoft(o)
+    if (v) soft.push(v)
     words = ownWords(o, form).length
   }
   return mergeScreens(
     before,
-    screenOf(checks, {}, { stops: before.stops, ownWords: words, at: new Date() }),
+    screenOf(checks, { soft }, { stops: before.stops, ownWords: words, at: new Date() }),
     checkedOf(checks),
   )
 }
@@ -561,6 +605,10 @@ async function storeScreen(
 async function processOrder(e: EventEnvelope): Promise<void> {
   const order = ProfiOrder.parse(e.payload)
   const correlationId = e.correlation_id
+  // A test order (docs/ops/test-leads.md) goes the whole way and always reaches Boris: where the live Sara would stop,
+  // the card says so instead. Every check of `test` below is the order's number, so a live run never changes its steps.
+  const test = isTestOrder(order.order_id)
+  const liveSkip: string[] = []
   // Runs recorded before M2 return a boolean; 'stale' is a new order too old to offer (FR-LEAD-10).
   const isNew = await DBOS.runStep(
     (): Promise<boolean | 'stale'> =>
@@ -638,7 +686,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           byText,
           screenOf([], sense, { stops: byText.stops, ownWords: byText.own_words, at: new Date() }),
         )
-        const news = s.hits.length > 0 || s.clarify.length > 0
+        const news = s.hits.length > 0 || s.clarify.length > 0 || s.soft.length > 0
         return {
           screen: s,
           stop: await storeScreen({ id: order.order_id, correlationId }, s, news, sorted),
@@ -650,7 +698,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     if (bySense.stop) return
   }
 
-  if (sorted.verdict === 'reject') {
+  if (sorted.verdict === 'reject' && test)
+    liveSkip.push(`Сортировщик отсеял бы: ${sorted.reason ?? 'чужая заявка'}`)
+  if (sorted.verdict === 'reject' && !test) {
     await DBOS.runStep(
       () =>
         d().db.transaction(async (tx) => {
@@ -687,8 +737,13 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           return {
             ...s,
             score,
-            decision: !s.stopFactor && score >= rules.threshold ? 'show' : 'drop',
-            reason: `${s.reason} (минус ${cut}: похоже на вакансию)`.slice(0, 300),
+            decision:
+              !s.stopFactor && score >= thresholdFor(rules, order.category) ? 'show' : 'drop',
+            reason:
+              `${s.reason} (минус ${cut}: ${screen.soft.map((m) => (m.criterion === 'vacancy' ? 'похоже на вакансию' : 'мало слов клиента')).join(', ')})`.slice(
+                0,
+                300,
+              ),
             version,
           }
         }
@@ -717,7 +772,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             confidence: scored.confidence,
             model: scored.model,
           })
-          if (scored.decision === 'drop') {
+          // A test order goes on to its card, so it never stands among the day's dropped orders.
+          if (scored.decision === 'drop' && !test) {
             await tx.update(lead).set({ status: 'scored_out' }).where(eq(lead.id, order.order_id))
             // A dropped order never reaches the task step, so its sorter verdict is journaled here.
             if (sorted.verdict) {
@@ -755,10 +811,17 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       { name: 'route', ...DB_STEP },
     )
     // An order another direction got, or none (a direction in the shadow or still a draft never wins): no card.
-    if (!route.mine) return
+    if (!route.mine && !test) return
+    if (!route.mine) liveSkip.push('заявка ушла бы другому направлению')
   }
   // Below the threshold or a stop factor: kept for the daily summary, nothing goes to Boris.
-  if (scored?.decision === 'drop') return
+  if (scored?.decision === 'drop' && !test) return
+  if (scored?.decision === 'drop')
+    liveSkip.push(
+      scored.stopFactor
+        ? `стоп-фактор: ${scored.stopFactor}`
+        : `оценка ${scored.score} ниже порога`,
+    )
 
   // Only an order that passed the Sorter and the Scorer on what the board showed costs a visit of the one tab. A run
   // recorded before this step existed resumes along its old steps and keeps the board's data.
@@ -769,7 +832,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   if (await DBOS.patch('order-page')) {
     // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
     // (with its draft, draftThenCard).
-    const held = await DBOS.runStep(() => capSpent().catch(() => false), { name: 'capBeforePage' })
+    const held = await DBOS.runStep(async () => !test && (await capSpent().catch(() => false)), {
+      name: 'capBeforePage',
+    })
     if (!held) {
       const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
         name: 'orderPage',
@@ -787,14 +852,19 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           async () => {
             const s = await screenByPage(before, { ...order, ...withPage })
             const news = s.hits.length > before.hits.length
+            // A test order's card comes anyway and says where the live Sara would have stopped.
+            const kept = test ? { ...s, stops: false } : s
             return {
-              screen: s,
-              stop: await storeScreen({ id: order.order_id, correlationId }, s, news, sorted),
+              screen: kept,
+              wouldStop: test && s.stops ? s.hits.map((h) => SCREEN_RU[h.criterion]) : [],
+              stop: await storeScreen({ id: order.order_id, correlationId }, kept, news, sorted),
             }
           },
           { name: 'screenPage', ...DB_STEP },
         )
         screen = byPage.screen
+        if (byPage.wouldStop?.length)
+          liveSkip.push(`отсев остановил бы: ${byPage.wouldStop.join(', ')}`)
         if (byPage.stop) return
       }
     }
@@ -821,7 +891,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   const draft = (await DBOS.patch('analyst-draft'))
     ? await DBOS.runStep(
         async () =>
-          (await capSpent().catch(() => false))
+          !test && (await capSpent().catch(() => false))
             ? null
             : draftFor(
                 { ...order, ...withPage },
@@ -843,8 +913,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       d().db.transaction(async (tx) => {
         const id = newEventId()
         await lockCards(tx)
+        // A test order takes no place in the day's cards and is never held for the summary.
         const full =
-          (await cardsToday(tx, new Date())) >= (await getSetting(tx, 'cards.max_per_day'))
+          !test && (await cardsToday(tx, new Date())) >= (await getSetting(tx, 'cards.max_per_day'))
         if (sorted.verdict) {
           await appendEvent(
             tx,
@@ -895,7 +966,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     // What the order page added (a name or a text the board lacked) is on the card too.
     clientName: withPage.client_name,
     text: withPage.text,
-    verdict: sorted.verdict,
+    // Only a test order comes this far rejected; its card says the Sorter would have stopped it (liveSkip).
+    verdict: sorted.verdict === 'reject' ? 'maybe' : sorted.verdict,
     reason: sorted.reason,
     bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
@@ -906,10 +978,14 @@ async function processOrder(e: EventEnvelope): Promise<void> {
       ? {
           text: bidTextAt(draft.text, withPage.client_name, greetingMoment()),
           priceRub: draft.priceRub,
-          followUps: draft.followUps ?? [],
+          priceToRub:
+            draft.priceRub === null ? null : priceRange(draft.priceRub, draft.priceToRub).to,
+          followUps: seriesOf(draft) ?? [],
+          note: draft.styleNote ?? null,
         }
       : null,
     analysis: cardAnalysis(draft?.analysis),
+    ...(liveSkip.length > 0 && { liveSkip: liveSkip.join('; ') }),
     site,
   }
   const retry = d().notifyRetry ?? { maxAttempts: 5, intervalSeconds: 2 }
@@ -1008,8 +1084,11 @@ async function cardOfFound(
     // that the greeting may change; it is built again when the bid is sent.
     draft: l.draftText
       ? {
-          ...draftOnCard(l.draftText, l.clientName, l.draftPriceRub),
-          followUps: l.draftFollowUps ?? [],
+          ...draftOnCard(l.draftText, l.clientName, l.draftPriceRub, l.draftPriceToRub),
+          followUps: seriesWithoutBlocked(
+            l.draftFollowUps ?? [],
+            await getSetting(d().db, 'links.blocked'),
+          ),
         }
       : null,
     analysis: cardAnalysis(l.draftAnalysis),
@@ -1025,7 +1104,8 @@ function draftOnCard(
   stored: string,
   clientName: string,
   priceRub: number | null,
-): { text: string; priceRub: number | null; note: string | null } {
+  priceToRub: number | null,
+): { text: string; priceRub: number | null; priceToRub: number | null; note: string | null } {
   const { text, fallback } = bidTextDetail(stored, clientName, greetingMoment())
   const note =
     fallback === 'name_dropped'
@@ -1033,7 +1113,12 @@ function draftOnCard(
       : fallback === 'greeting_kept'
         ? TEXTS.greetingKept
         : null
-  return { text, priceRub, note }
+  return {
+    text,
+    priceRub,
+    priceToRub: priceRub === null ? null : priceRange(priceRub, priceToRub).to,
+    note,
+  }
 }
 
 /** The lead card for an open task. */
@@ -1117,7 +1202,7 @@ async function closedWhenOf(l: LeadRow, at: Date): Promise<ClosedWhen> {
  */
 async function closeCardMessages(
   found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>,
-  o: { stale?: Date } = {},
+  o: { stale?: Date; byBoris?: boolean } = {},
 ) {
   const sent = await d()
     .db.select({ payload: event.payload, at: event.occurredAt })
@@ -1146,9 +1231,11 @@ async function closeCardMessages(
   )
   const card = {
     ...(await cardOfFound(found, false)),
-    ...(o.stale
-      ? { stale: { since: new Date(first).toISOString(), at: o.stale.toISOString() } }
-      : { closed: await closedWhenOf(found.lead, new Date()) }),
+    ...(o.byBoris
+      ? { closedByBoris: true }
+      : o.stale
+        ? { stale: { since: new Date(first).toISOString(), at: o.stale.toISOString() } }
+        : { closed: await closedWhenOf(found.lead, new Date()) }),
   }
   for (const id of [...ids].sort((a, b) => a - b)) {
     try {
@@ -1355,7 +1442,10 @@ async function onDraftText(a: DraftAnswer): Promise<string> {
       )
     }
     if (said.priceRub !== null) {
-      await tx.update(lead).set({ draftPriceRub: said.priceRub }).where(eq(lead.id, l.id))
+      await tx
+        .update(lead)
+        .set({ draftPriceRub: said.priceRub, draftPriceToRub: said.priceToRub })
+        .where(eq(lead.id, l.id))
       await appendEvent(
         tx,
         ev('draft.priced', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
@@ -1377,6 +1467,7 @@ async function saveBidText(p: {
   taskId: string
   text: string | null
   priceRub: number | null
+  priceToRub?: number | null
   followUps?: string[] | null
 }): Promise<{ saved: boolean; message: string }> {
   const found = await leadOfTask(p.taskId)
@@ -1426,8 +1517,12 @@ async function saveBidText(p: {
         }),
       )
     }
-    if (p.priceRub !== null && p.priceRub !== l.draftPriceRub) {
-      await tx.update(lead).set({ draftPriceRub: p.priceRub }).where(eq(lead.id, l.id))
+    const toRub = p.priceToRub ?? null
+    if (p.priceRub !== null && (p.priceRub !== l.draftPriceRub || toRub !== l.draftPriceToRub)) {
+      await tx
+        .update(lead)
+        .set({ draftPriceRub: p.priceRub, draftPriceToRub: toRub })
+        .where(eq(lead.id, l.id))
       await appendEvent(
         tx,
         ev('draft.priced', { kind: 'lead', id: l.id }, l.correlationId, 'boris', {
@@ -1544,6 +1639,8 @@ function learnFrom(
   /** The reason came with the press (the pult): nothing to ask. */
   ask = true,
 ): void {
+  // A test order teaches nothing: no label, no «почему?» (docs/ops/test-leads.md).
+  if (isTestOrder(label.leadId)) return
   void (async () => {
     const labeled = await recordLabel(d().db, label)
     if (labeled.surprise && ask)
@@ -1564,6 +1661,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     async onPress({ taskId, action, source, reason }) {
+      // The preview of the past bids for Boris's sheet has no task row: its id only carries the press.
+      if (taskId === SHEET_TASK_ID) return onSheetPress(d(), action)
       if (action === 'want') return onWant(taskId)
       if (action === 'open') return onOpen(taskId)
       if (action === 'edit') return onEdit(taskId)
@@ -1578,7 +1677,9 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (action === 'bid' && found.task.state === 'open') {
         // Before anything is closed or spent: the task stays open for whoever the order really belongs to.
         if (await lostRoute(d().db, l.id, l.accountId)) return TEXTS.lostRoute
-        if (!(await getSetting(d().db, 'outbound.bids'))) return TEXTS.bidsPausedPress
+        // A test order spends nothing and reaches no client: neither the pause nor the wallet holds it.
+        if (!isTestOrder(l.id) && !(await getSetting(d().db, 'outbound.bids')))
+          return TEXTS.bidsPausedPress
         // No text to send yet: the card waits for «Изменить», and the wallet need not be read.
         if (l.draftText === null) return TEXTS.noDraft
         // The fee is the most the node may pay, so an unknown one never goes: the page is read now (#89 could not).
@@ -1596,7 +1697,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
           await askForDraft(d(), { taskId, title: l.title }, new Date(), 'price')
           return TEXTS.waitingPrice
         }
-        wallet = await readWallet(d().profi, l.accountId)
+        if (!isTestOrder(l.id)) wallet = await readWallet(d().profi, l.accountId)
       }
       let outboxId: string | null = null
       let refusal: string | null = null
@@ -1620,11 +1721,13 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
                 ? TEXTS.noDraft
                 : now.draftPriceRub === null
                   ? TEXTS.noPrice
-                  : await refuseSpend(tx, {
-                      feeRub: now.bidPriceRub,
-                      balanceRub: wallet,
-                      now: new Date(),
-                    })
+                  : isTestOrder(l.id)
+                    ? null
+                    : await refuseSpend(tx, {
+                        feeRub: now.bidPriceRub,
+                        balanceRub: wallet,
+                        now: new Date(),
+                      })
             // Rolled back: the task stays open and nothing about the bid is written.
             if (refusal) tx.rollback()
           }
@@ -1651,8 +1754,16 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
               title: l.title,
               priceRub: now.bidPriceRub,
               servicePriceRub: now.draftPriceRub,
-              // The same press approves the series as it stands now (Boris, 29.10.2026).
-              followUps: now.draftFollowUps ?? [],
+              servicePriceToRub:
+                now.draftPriceRub === null
+                  ? null
+                  : priceRange(now.draftPriceRub, now.draftPriceToRub).to,
+              // The same press approves the series as it stands now (Boris, 29.10.2026), without the links a client
+              // is never given (30.10.2026: a draft made before a site was put on the list may still hold one).
+              followUps: seriesWithoutBlocked(
+                now.draftFollowUps ?? [],
+                await getSetting(tx, 'links.blocked'),
+              ),
               taskId,
             })
             // The order went to another direction after all: rolled back like a refused spend, the task stays open.
@@ -1683,8 +1794,19 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         },
         'why_skip',
         l.title,
-        !fromPult,
+        // No «почему?» after a close (Boris, 31.10.2026): the label keeps what the rules need to guess the reason.
+        action === 'bid' && !fromPult,
       )
+      // «Закрыть заявку»: the card he pressed is edited into «📁 Заявка закрыта», whoever pressed (the bot, the pult,
+      // the secretary); a card that never went out has nothing to edit.
+      if (action === 'skip' && found.task.kind === 'lead_decision')
+        await closeCardMessages(found, { byBoris: true }).catch((err) =>
+          console.error(
+            'closed card not edited',
+            taskId,
+            err instanceof Error ? err.message.slice(0, 200) : err,
+          ),
+        )
       return action === 'skip' ? TEXTS.skipped : TEXTS.bidQueued
     },
 
@@ -1696,6 +1818,23 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
     },
 
     resendCard: resendCardOf,
+
+    async restoreCard(taskId, messageId) {
+      try {
+        const card = await cardOfTask(taskId)
+        const restore = d().notifier.restoreLeadCard
+        if (!card || !restore) return false
+        await restore.call(d().notifier, messageId, card)
+        return true
+      } catch (err) {
+        console.error(
+          'card not restored',
+          taskId,
+          err instanceof Error ? err.message.slice(0, 200) : err,
+        )
+        return false
+      }
+    },
 
     async closeOnSite(taskId, via) {
       const found = await leadOfTask(taskId)

@@ -1,15 +1,19 @@
 import {
   AnalystOutput,
   ClientInfo,
+  colorMark,
   combinedScore,
   formatRub,
+  type LeadKind,
   type LeadQueue,
   type LeadRow,
   type LeadScores,
   LeadScreen,
   type LeadView,
-  priceUpTo,
+  priceRange,
   type QueueOrder,
+  shownTitle,
+  thresholdFor,
 } from '@sara/shared'
 import { and, desc, eq, gt, inArray } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
@@ -20,6 +24,7 @@ import { leadTaskWaits, waitingCounts } from '../leads/waiting'
 import { getSetting } from '../settings/store'
 import { leadSiteOf } from '../site'
 import { siteCardView, studiedLine } from '../site/view'
+import { seriesWithoutBlocked } from '../text/blockedLinks'
 
 /** «Заявки» (M7 design 5.3): the queue by value and one lead with its score, разбор, bid text and obstacles. */
 
@@ -130,7 +135,7 @@ export async function leadQueue(
     .map(({ t, l }) => ({
       id: l.id,
       taskId: t.id,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       city: l.city,
       category: l.category,
       score: scores.get(l.id)?.score ?? null,
@@ -170,7 +175,7 @@ export async function leadQueue(
     older: 0,
     decided: decidedRows.map(({ t, l, reason }) => ({
       id: l.id,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       decision: decision(t, l),
       at: t.resolvedAt ?? t.createdAt,
       feeRub: l.bidPriceRub,
@@ -224,7 +229,11 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
         )
     : []
   const r = rules?.rules as
-    | { threshold?: number; axes?: { id: string; title: string; weight: number }[] }
+    | {
+        threshold?: number
+        kind_thresholds?: Partial<Record<LeadKind, number>>
+        axes?: { id: string; title: string; weight: number }[]
+      }
     | undefined
   const axisOf = new Map((r?.axes ?? []).map((a) => [a.id, a]))
   const axes = ((s?.axes ?? []) as { id: string; score: number; why: string }[]).map((a) => ({
@@ -254,14 +263,24 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
     lead: {
       id: l.id,
       accountId: l.accountId,
-      title: l.title,
+      title: shownTitle(l.id, l.title),
       city: l.city,
       category: l.category,
       text: l.text,
       budgetText: l.budgetText,
       clientName: l.clientName,
       client: info.success
-        ? { since: info.data.on_profi_since, phone: info.data.phone_verified, reviews }
+        ? {
+            since: info.data.on_profi_since,
+            phone: info.data.phone_verified,
+            reviews,
+            ...(info.data.summaries && {
+              summaries: info.data.summaries.map((s) => ({
+                mark: colorMark(s.color_theme),
+                text: s.description,
+              })),
+            }),
+          }
         : null,
       site: siteView(l.clientSite),
       seenAt: l.seenAt,
@@ -275,7 +294,13 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
           value: s.score,
           scores: scoresOf(s),
           confidence: s.confidence,
-          threshold: r?.threshold ?? null,
+          threshold:
+            r?.threshold === undefined
+              ? null
+              : thresholdFor(
+                  { threshold: r.threshold, kind_thresholds: r.kind_thresholds },
+                  l.category,
+                ),
           rulesVersion: s.version,
           reason: s.reason,
           stopFactor: s.stopFactor,
@@ -299,9 +324,13 @@ export async function leadView(db: DbOrTx, id: string): Promise<LeadView | null>
     bid: {
       text: l.draftText,
       priceFromRub: l.draftPriceRub,
-      priceToRub: l.draftPriceRub === null ? null : priceUpTo(l.draftPriceRub),
+      priceToRub:
+        l.draftPriceRub === null ? null : priceRange(l.draftPriceRub, l.draftPriceToRub).to,
       limit: BID_LIMIT,
-      followUps: l.draftFollowUps ?? [],
+      followUps: seriesWithoutBlocked(
+        l.draftFollowUps ?? [],
+        await getSetting(db, 'links.blocked'),
+      ),
       followUpLimit: FOLLOW_UP_EDIT_MAX,
     },
     task: t ? { id: t.id, open: t.state === 'open', resolution: t.resolution } : null,

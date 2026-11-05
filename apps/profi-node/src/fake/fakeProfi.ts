@@ -32,6 +32,19 @@ export type FakeOrderPage = Partial<
   >
 > & { fail?: ProfiErrorClass; delayMs?: number }
 
+/** Everything the fake keeps about the site, to carry it over a restart of the core (test orders, docs/ops/test-leads.md). */
+export type FakeSnapshot = {
+  orders: ProfiOrder[]
+  pages: [string, FakeOrderPage][]
+  chats: { chatId: string; orderId: string | null; messages: ChatMessage[] }[]
+  onSite: string[]
+  bidResults: [string, SubmitBidOutput][]
+  sentMessages: [string, SendMessageOutput][]
+  health: SessionHealthOutput
+  balance: number
+  lastMessageNo: number
+}
+
 export type FakeProfi = {
   url: string
   bids: SubmitBidInput[]
@@ -52,11 +65,19 @@ export type FakeProfi = {
     read?: boolean
     sentAt?: string
   }): Promise<{ platformMessageId: string; eventId: string | null }>
+  /**
+   * The line the real site puts into a chat right behind the client's first word («Сообщите, если договоритесь
+   * работать с клиентом»); on by default, null turns it off. It is the last message the core reads, and it hides
+   * the client's word from a check that looks only at the last message (Boris, 31.10).
+   */
+  setSystemLineAfterFirstClient(text: string | null): void
   emitTyping(chatId: string): Promise<void>
   emitRead(chatId: string, platformMessageId: string): Promise<void>
   redeliver(eventId: string): Promise<void>
   failNextAck(): void
   failAcks(n: number): void
+  /** The next `times` sends are refused with this class and nothing is typed (UNCERTAIN: the node was restarting). */
+  refuseSends(errorClass: ProfiErrorClass, times?: number): void
   /** The next send goes out and is recorded, then its answer is lost. */
   failNextSendAck(): void
   setCoreEventsUrl(url: string): void
@@ -69,6 +90,22 @@ export type FakeProfi = {
   markBid(orderId: string): void
   /** Called at the start of every submit_bid, before the fake decides anything. */
   onSubmit(hook: ((i: SubmitBidInput) => Promise<void> | void) | null): void
+  /** Called once a new bid is on the fake site, never for a repeat or a refusal: the stand puts it into the chat. */
+  onPlaced(hook: ((i: SubmitBidInput, out: SubmitBidOutput) => Promise<void> | void) | null): void
+  /** Called once a new message of ours is in its chat, never for a repeat. */
+  onSent(
+    hook: ((i: SendMessageInput, platformMessageId: string) => Promise<void> | void) | null,
+  ): void
+  /** Called after anything the snapshot holds has changed. */
+  onChange(hook: (() => void) | null): void
+  snapshot(): FakeSnapshot
+  /** The wallet now: what session_health answers and what the next bid is taken from. */
+  setBalance(rub: number): void
+  /**
+   * Forgets every order, chat and bid, the wallet back to `balance`. Message numbers go on counting, so a message of
+   * before is never mistaken for a new one.
+   */
+  reset(balance: number): void
   /** session_health answers only after this many milliseconds. */
   delayHealth(ms: number): void
   /** send_message works (and answers) only after this many milliseconds: a tab that is busy; 0 is at once. */
@@ -94,6 +131,10 @@ export async function createFakeProfi(o: {
   nodeToken: string
   permitSecret: string
   extra?: ExtraRoute
+  /** What a snapshot kept: the fake starts where it stopped. */
+  initial?: FakeSnapshot
+  /** Where it listens (default 127.0.0.1); the test stand listens for the core in another container. */
+  host?: string
 }): Promise<FakeProfi> {
   const bids: SubmitBidInput[] = []
   const orderReads: string[] = []
@@ -114,6 +155,7 @@ export async function createFakeProfi(o: {
   let balance = 5000
   let dropAcks = 0
   let dropSendAcks = 0
+  let sendRefusal: { errorClass: ProfiErrorClass; times: number } | null = null
   let coreEventsUrl = o.coreEventsUrl
   // The fee of the fake site for every order; null: each order's own, as emitted (210 when it has none).
   let fee: number | null = null
@@ -121,10 +163,29 @@ export async function createFakeProfi(o: {
   let hook: ((i: SubmitBidInput) => Promise<void> | void) | null = null
   let healthDelay = 0
   let sendDelay = 0
+  let placed: ((i: SubmitBidInput, out: SubmitBidOutput) => Promise<void> | void) | null = null
+  let afterSend: ((i: SendMessageInput, platformMessageId: string) => Promise<void> | void) | null =
+    null
+  let changed: (() => void) | null = null
   // Orders with this account's bid on the fake site.
   const onSite = new Set<string>()
+  if (o.initial) {
+    const i = o.initial
+    for (const order of i.orders) emitted.set(order.order_id, order)
+    for (const [id, page] of i.pages) pages.set(id, page)
+    for (const c of i.chats) chats.set(c.chatId, { orderId: c.orderId, messages: c.messages })
+    for (const id of i.onSite) onSite.add(id)
+    for (const [key, out] of i.bidResults) results.set(key, out)
+    for (const [key, out] of i.sentMessages) sentMessages.set(key, out)
+    health = i.health
+    balance = i.balance
+    lastMessageNo = i.lastMessageNo
+  }
+  const change = () => changed?.()
 
   /** Appends to the chat in page order; a message without its own time comes after the chat's last one. */
+  let systemLine: string | null = 'Сообщите, если договоритесь работать с клиентом'
+
   function append(
     chatId: string,
     m: {
@@ -158,6 +219,7 @@ export async function createFakeProfi(o: {
       read: m.read,
     }
     chat.messages.push(message)
+    change()
     return { message, orderId: chat.orderId }
   }
 
@@ -234,6 +296,8 @@ export async function createFakeProfi(o: {
         bids.push(i)
         onSite.add(i.order_id)
         results.set(i.idempotency_key, out)
+        change()
+        await placed?.(i, out)
       }
       // A lost answer: the bid is on the site, the caller never hears back.
       if (dropAcks > 0) {
@@ -248,11 +312,28 @@ export async function createFakeProfi(o: {
       if (!verifyMessagePermit(o.permitSecret, m, i.permit)) {
         throw new ProfiToolError('INTERNAL', 'permit does not match this message')
       }
+      if (sendRefusal && sendRefusal.times > 0 && !sentMessages.has(i.idempotency_key)) {
+        sendRefusal.times--
+        throw new ProfiToolError(
+          sendRefusal.errorClass,
+          `the fake refuses to send: ${sendRefusal.errorClass}`,
+        )
+      }
       // A repeat answers first, before the check: its chat already has the message it sent.
       let out = sentMessages.get(i.idempotency_key)
       if (!out) {
         const last = chats.get(i.chat_id)?.messages.at(-1)?.platform_message_id ?? null
-        if (i.expect_last_message_id !== last) {
+        // The series after a bid: lines of our own side after the expected one are no change.
+        const seen = chats.get(i.chat_id)?.messages ?? []
+        const at =
+          i.expect_last_message_id === null
+            ? -1
+            : seen.findIndex((m) => m.platform_message_id === i.expect_last_message_id)
+        const ownOnly =
+          i.after_own === true &&
+          (i.expect_last_message_id === null || at >= 0) &&
+          seen.slice(at + 1).every((m) => m.author === 'specialist' || m.author === 'system')
+        if (i.expect_last_message_id !== last && !ownOnly) {
           throw new ProfiToolError(
             'CHAT_CHANGED',
             `chat ${i.chat_id} ends with ${last ?? 'nothing'}, not ${i.expect_last_message_id ?? 'nothing'}`,
@@ -262,6 +343,8 @@ export async function createFakeProfi(o: {
         messages.push(i)
         out = { found_on_page: true, platform_message_id: message.platform_message_id }
         sentMessages.set(i.idempotency_key, out)
+        change()
+        await afterSend?.(i, message.platform_message_id)
       }
       // A lost answer: the message is in the chat, the caller never hears back.
       if (dropSendAcks > 0) {
@@ -272,7 +355,7 @@ export async function createFakeProfi(o: {
     },
   }
 
-  const server = await serveMcp(() => createProfiMcpServer(impl), o.port, o.extra)
+  const server = await serveMcp(() => createProfiMcpServer(impl), o.port, o.extra, o.host)
 
   async function deliver(e: EventEnvelope): Promise<void> {
     let lastError: unknown
@@ -326,12 +409,17 @@ export async function createFakeProfi(o: {
     orderReads,
     setOrderPage(orderId, page) {
       pages.set(orderId, page)
+      change()
     },
     async emitOrder(partial) {
       const base = sampleOrders()[0]
       if (!base) throw new Error('no sample orders')
-      const order: ProfiOrder = { ...base, seen_at: new Date().toISOString(), ...partial }
+      // The sample text is short; a few more sentences give it the client's own words the screen asks for (15), so a
+      // test order is not marked as a thin one and keeps its score. A test that needs a thin text passes its own.
+      const text = `${base.text} Хотим понять, какие каналы дадут записи на приём, и выстроить продвижение так, чтобы заявок хватало на весь год.`
+      const order: ProfiOrder = { ...base, text, seen_at: new Date().toISOString(), ...partial }
       emitted.set(order.order_id, order)
+      change()
       const e: EventEnvelope = {
         id: newEventId(),
         type: 'profi.order_seen',
@@ -350,7 +438,11 @@ export async function createFakeProfi(o: {
       return e.id
     },
     async addChatMessage(m) {
+      const firstClient =
+        m.author === 'client' && !chats.get(m.chatId)?.messages.some((x) => x.author === 'client')
       const { message, orderId } = append(m.chatId, { ...m, read: m.read ?? false })
+      if (firstClient && systemLine)
+        append(m.chatId, { author: 'system', text: systemLine, read: true })
       const type = MESSAGE_EVENTS[m.author]
       const eventId = type
         ? await shipChatEvent(type, m.chatId, () => ({
@@ -362,6 +454,9 @@ export async function createFakeProfi(o: {
           }))
         : null
       return { platformMessageId: message.platform_message_id, eventId }
+    },
+    setSystemLineAfterFirstClient(text) {
+      systemLine = text
     },
     async emitTyping(chatId) {
       await shipChatEvent('profi.client_typing', chatId, (at) => ({ chat_id: chatId, at }))
@@ -384,6 +479,9 @@ export async function createFakeProfi(o: {
     failAcks(n) {
       dropAcks = n
     },
+    refuseSends(errorClass, times = 1) {
+      sendRefusal = { errorClass, times }
+    },
     failNextSendAck() {
       dropSendAcks = 1
     },
@@ -392,6 +490,7 @@ export async function createFakeProfi(o: {
     },
     setHealth(h) {
       health = { ...health, ...h }
+      change()
     },
     setFee(rub) {
       fee = rub
@@ -401,9 +500,47 @@ export async function createFakeProfi(o: {
     },
     markBid(orderId) {
       onSite.add(orderId)
+      change()
     },
     onSubmit(h) {
       hook = h
+    },
+    onPlaced(h) {
+      placed = h
+    },
+    onSent(h) {
+      afterSend = h
+    },
+    onChange(h) {
+      changed = h
+    },
+    snapshot() {
+      return structuredClone({
+        orders: [...emitted.values()],
+        pages: [...pages],
+        chats: [...chats].map(([chatId, c]) => ({ chatId, ...c })),
+        onSite: [...onSite],
+        bidResults: [...results],
+        sentMessages: [...sentMessages],
+        health,
+        balance,
+        lastMessageNo,
+      })
+    },
+    setBalance(rub) {
+      balance = rub
+      health = { ...health, balance_rub: rub }
+      change()
+    },
+    reset(rub) {
+      for (const m of [emitted, pages, results, sentMessages, sent, chats]) m.clear()
+      onSite.clear()
+      bids.length = 0
+      messages.length = 0
+      orderReads.length = 0
+      balance = rub
+      health = { ...health, balance_rub: rub }
+      change()
     },
     delayHealth(ms) {
       healthDelay = ms

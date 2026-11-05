@@ -523,12 +523,83 @@ describe('the pult on the live data (28.10.2026)', () => {
     expect(v.parts.find((p) => p.id === 'claude')).toMatchObject({ tone: 'ok', fix: null })
   })
 
+  // 29.10.2026: node restarts lost the «back», and «Нет связи» stayed for days while orders came every few minutes.
+  it('FR-UI-1, FR-SET-5: a «lost» with orders seen after it no longer says «Нет связи»', async () => {
+    await db
+      .insert(event)
+      .values([
+        ev(
+          'profi.connection_lost',
+          'account',
+          'hance-marketing',
+          { since: minutesAgo(2900) },
+          2870,
+        ),
+        ev('profi.order_seen', 'order', '95000003', {}, 2860),
+        ev('profi.order_seen', 'order', '95000004', {}, 3),
+      ])
+    const today = TodayView.parse((await get('/api/today')).body)
+    expect([today.state.text, today.state.detail].join(' ')).not.toContain('Нет связи')
+    const v = SystemView.parse((await get('/api/system')).body)
+    const link = v.parts.find((p) => p.id === 'link')
+    expect(link).toMatchObject({ tone: 'ok', text: 'Связь есть, последний перерыв закончился' })
+    // The break ended with the first order seen after it.
+    expect(new Date(link?.at ?? '').getTime()).toBeCloseTo(Date.parse(minutesAgo(2860)), -5)
+  })
+
+  it('FR-UI-1, FR-SET-5: a «lost» with nothing from the site after it still says «Нет связи»', async () => {
+    await db.insert(event).values([
+      ev('profi.order_seen', 'order', '95000003', {}, 50),
+      ev('profi.connection_lost', 'account', 'hance-marketing', { since: minutesAgo(70) }, 40),
+      // A test order comes from the made-up site in the core, not from Profi.ru.
+      ev('profi.order_seen', 'order', '99000000001', {}, 10),
+    ])
+    const today = TodayView.parse((await get('/api/today')).body)
+    expect(today.state).toMatchObject({ tone: 'bad', text: 'Нет связи с Профи.ру' })
+    const v = SystemView.parse((await get('/api/system')).body)
+    expect(v.parts.find((p) => p.id === 'link')).toMatchObject({
+      tone: 'bad',
+      text: 'Профи.ру не открывается с сервера',
+    })
+  })
+
+  it("FR-UI-5: a lead shows the site's own lines about the client with their colour; an older lead has none", async () => {
+    const before = LeadView.parse((await get(`/api/leads/${LEAD}`)).body)
+    expect(before.lead.client).not.toHaveProperty('summaries')
+    await db.update(lead).set({
+      clientInfo: {
+        name: 'Вероника',
+        on_profi_since: 'На Профи.ру с 2022',
+        phone_verified: true,
+        reviews: { positive: 3, negative: 0 },
+        review_tags: [],
+        summaries: [
+          {
+            description: 'Договаривается меньше, чем в 20% заказов',
+            color_theme: 'RED',
+            percent: 20,
+          },
+        ],
+      },
+    })
+    const v = LeadView.parse((await get(`/api/leads/${LEAD}`)).body)
+    expect(v.lead.client?.summaries).toEqual([
+      { mark: '🔴', text: 'Договаривается меньше, чем в 20% заказов' },
+    ])
+  })
+
   it('FR-LEAD-7: the bid text is edited from the pult only while the decision is open', async () => {
     expect((await post(`/api/leads/${LEAD}/text`, {})).status).toBe(400)
     const r = await post(`/api/leads/${LEAD}/text`, { text: 'Новый текст', priceRub: 50000 })
     expect(r).toEqual({ status: 200, body: { message: 'Записала.' } })
     expect(edits).toEqual([
-      { taskId: LEAD_TASK, text: 'Новый текст', priceRub: 50000, followUps: null },
+      {
+        taskId: LEAD_TASK,
+        text: 'Новый текст',
+        priceRub: 50000,
+        priceToRub: null,
+        followUps: null,
+      },
     ])
     // The series after the bid alone is an edit too (Boris, 29.10.2026).
     expect((await post(`/api/leads/${LEAD}/text`, { followUps: ['Из недавнего)'] })).status).toBe(
@@ -538,6 +609,7 @@ describe('the pult on the live data (28.10.2026)', () => {
       taskId: LEAD_TASK,
       text: null,
       priceRub: null,
+      priceToRub: null,
       followUps: ['Из недавнего)'],
     })
     await db.update(task).set({ state: 'resolved', resolution: 'skip' })

@@ -51,6 +51,13 @@ export function idOf(path: string, section: string): string | null {
   return m?.[1] ? decodeURIComponent(m[1]) : null
 }
 
+/** The `focus` of `/settings?focus=thresholds`: the block a link wants the screen to open on. */
+export function focusOf(path: string): string | null {
+  const i = path.indexOf('?')
+  if (i < 0) return null
+  return new URLSearchParams(path.slice(i + 1)).get('focus')
+}
+
 /** The `q` of `/search?q=...`. */
 export function queryOf(path: string): string {
   const i = path.indexOf('?')

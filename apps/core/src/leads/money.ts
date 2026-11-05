@@ -4,6 +4,7 @@ import type { DbOrTx } from '../db/client'
 import { account, event } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { NOT_TEST } from '../testLeads/sql'
 
 /** Why a bid was not recorded, in Boris's words (Russian, plain, no long dash). */
 export const MONEY_TEXTS = {
@@ -49,7 +50,8 @@ type Day = { sent: number; spent: number; pending: number; pendingRub: number; q
 
 /**
  * The Moscow day of `now` from the journal (bid.sent, spend.recorded), plus the bids that may still spend:
- * queued ones and today's unsure ones. Failed and given back bids spent nothing.
+ * queued ones and today's unsure ones. Failed and given back bids spent nothing; test orders never count
+ * (docs/ops/test-leads.md).
  */
 export async function dayOf(tx: DbOrTx, now: Date): Promise<Day> {
   const r = await tx.execute<Day>(sql`
@@ -58,14 +60,14 @@ export async function dayOf(tx: DbOrTx, now: Date): Promise<Day> {
         at time zone 'Europe/Moscow') as s
     ), p as (
       select o.state, coalesce((o.payload->>'priceRub')::int, 0) as rub from core.outbox o, d
-      where o.kind = 'bid'
+      where o.kind = 'bid' and ${NOT_TEST("o.payload->>'leadId'")}
         and (o.state = 'queued' or (o.state = 'uncertain' and o.created_at >= d.s and o.created_at < d.s + interval '1 day'))
     )
     select
-      (select count(*)::int from core.event e, d where e.type = 'bid.sent'
+      (select count(*)::int from core.event e, d where e.type = 'bid.sent' and ${NOT_TEST('e.entity_id')}
          and e.occurred_at >= d.s and e.occurred_at < d.s + interval '1 day') as sent,
       (select coalesce(sum((e.payload->>'amount_rub')::int), 0)::int from core.event e, d
-         where e.type = 'spend.recorded' and e.occurred_at >= d.s and e.occurred_at < d.s + interval '1 day') as spent,
+         where e.type = 'spend.recorded' and ${NOT_TEST('e.entity_id')} and e.occurred_at >= d.s and e.occurred_at < d.s + interval '1 day') as spent,
       (select count(*)::int from p) as pending,
       (select coalesce(sum(rub), 0)::int from p) as "pendingRub",
       (select coalesce(sum(rub), 0)::int from p where state = 'queued') as "queuedRub"`)

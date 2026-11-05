@@ -18,7 +18,8 @@
   },
   "exports": {
     "./fake": "./src/fake/fakeProfi.ts",
-    "./mcp": "./src/mcp/server.ts"
+    "./mcp": "./src/mcp/server.ts",
+    "./stand": "./src/stand/stand.ts"
   },
   "devDependencies": {
     "@types/pg": "8.23.1",

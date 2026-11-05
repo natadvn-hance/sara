@@ -151,7 +151,7 @@ describe('the screen on: a criterion that fired stops the order', () => {
 
   it('criterion 3: fewer than 15 own words stop the order before any model call or page visit', async () => {
     const id = orderId()
-    await fake.emitOrder({ order_id: id, title: 'Сайт', text: 'Нужен сайт для клиники' })
+    await fake.emitOrder({ order_id: id, title: 'Сайт', text: '50 000' })
     await until(async () => (await leadOf(id))?.status === 'screened_out')
     await settle()
     expect(inputsOf('sorter')).toEqual([])
@@ -159,13 +159,13 @@ describe('the screen on: a criterion that fired stops the order', () => {
     expect(leadCards()).toHaveLength(0)
     const s = await screenOf(id)
     expect(s.hits).toEqual([
-      { criterion: 'short_text', basis: 'своими словами 4 слова: «Нужен сайт для клиники»' },
+      { criterion: 'short_text', basis: 'пустой заказ: нет ни своих слов, ни ответов формы' },
     ])
     expect(s.no_data).toEqual(['new_account', 'negative_reviews'])
     const e = (await journal(id)).find((x) => x.type === 'lead.screened')
     expect(e?.payload).toMatchObject({ stops: true, out: true, criteria: ['short_text'] })
-    // The quote is the client's words: on the lead, never in the journal.
-    expect(JSON.stringify(e?.payload)).not.toContain('клиники')
+    // The basis is on the lead, never in the journal.
+    expect(JSON.stringify(e?.payload)).not.toContain('пустой')
   })
 
   it('the threshold of own words is a setting', async () => {
@@ -174,6 +174,16 @@ describe('the screen on: a criterion that fired stops the order', () => {
     await fake.emitOrder({ order_id: id, title: 'Сайт', text: 'Нужен сайт для клиники' })
     await until(() => leadCards().length === 1)
     expect((await screenOf(id)).hits).toEqual([])
+  })
+
+  it('criterion 3 is soft when the client wrote a little: the order goes on and loses 5 points', async () => {
+    const id = orderId()
+    await fake.emitOrder({ order_id: id, title: 'Сайт', text: 'Нужен сайт для клиники' })
+    await until(() => leadCards().length === 1)
+    const s = await screenOf(id)
+    expect(s.hits).toEqual([])
+    expect(s).toMatchObject({ soft: [{ criterion: 'short_text' }], penalty: 5 })
+    expect((await leadOf(id))?.status).not.toBe('screened_out')
   })
 
   it('criterion 4: the Sorter names the core with a quote of the order: stopped, no Scorer call', async () => {
@@ -273,7 +283,7 @@ describe('the screen on: a criterion that fired stops the order', () => {
 
   it('the pult shows the stopped order with its basis, and the summary counts it by criterion', async () => {
     const id = orderId()
-    await fake.emitOrder({ order_id: id, title: 'Сайт', text: 'Нужен сайт для клиники' })
+    await fake.emitOrder({ order_id: id, title: 'Сайт', text: '50 000' })
     await until(async () => (await leadOf(id))?.status === 'screened_out')
     const v = await leadView(db, id)
     expect(v?.screen?.hits[0]?.criterion).toBe('short_text')
@@ -289,7 +299,7 @@ describe('the screen on: a criterion that fired stops the order', () => {
 describe('the shadow (the default): the screen only marks', () => {
   it('a criterion that fired is stored, the order goes on and the card comes', async () => {
     const id = orderId()
-    await fake.emitOrder({ order_id: id, title: 'Сайт', text: 'Нужен сайт для клиники' })
+    await fake.emitOrder({ order_id: id, title: 'Сайт', text: '50 000' })
     await until(() => leadCards().length === 1)
     expect((await leadOf(id))?.status).toBe('queued')
     const s = await screenOf(id)

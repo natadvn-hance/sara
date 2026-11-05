@@ -1,17 +1,21 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type EventType, newEventId, type ProfiErrorClass } from '@sara/shared'
+import { type EventType, isTestOrder, newEventId, type ProfiErrorClass } from '@sara/shared'
 import { and, eq, or, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { lead, outbox, task } from '../db/schema'
 import { lostRoute } from '../direction/router'
 import { createDeal } from '../domain/deal'
 import { appendEvent } from '../journal/journal'
-import { TEXTS } from '../notify/cards'
+import { foldedBidCard, TEXTS } from '../notify/cards'
+import { markShown } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
+import { bidPost } from '../notify/topicPosts'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { openStatus, setBidStatusDeps, setStatus, statusOf } from './bidStatus'
+import { firstName } from './clientName'
 import { bidTextDetail } from './draft'
-import { SERIES_LATE_MS, startSeries } from './series'
+import { startSeries } from './series'
 
 export type OutboxDeps = {
   db: Db
@@ -22,8 +26,15 @@ export type OutboxDeps = {
   busyRetry: { delayMs: number; tries: number }
   /** An unsure bid is looked for on its order page (get_order) after each of these waits. */
   reconcileDelaysMs: number[]
+  /**
+   * The first looks at the order page after an unsure bid, within a minute or so (Boris, 31.10.2026: «не говорить
+   * "проверь вручную" на первом же UNCERTAIN»); «не знаю, ушёл ли» is said only when they find nothing.
+   */
+  quickLookDelaysMs: number[]
   /** Called when a bid that was not pressed gives the order back to Boris: resend its card. */
   resendCard(taskId: string): Promise<void>
+  /** The full card with its buttons back in its own message (folded for the bid); false: send it again instead. */
+  restoreCard?(taskId: string, messageId: number): Promise<boolean>
   /** Called when a bid ended ORDER_CLOSED: the card of that order is closed in Telegram (FR-LEAD-5). */
   closeCard(taskId: string): Promise<void>
   /** The clock of the greeting: a bid is greeted at the moment it is sent (Moscow time of day). Tests fix it. */
@@ -33,6 +44,7 @@ export type OutboxDeps = {
 let deps: OutboxDeps | null = null
 export function setOutboxDeps(d: OutboxDeps): void {
   deps = d
+  setBidStatusDeps({ db: d.db, notifier: d.notifier })
 }
 function d(): OutboxDeps {
   if (!deps) throw new Error('outbox is not configured')
@@ -52,6 +64,8 @@ export type BidPayload = {
   priceRub: number
   /** The «Стоимость услуги» typed into the form; null or absent (rows from before M2) leaves it empty. */
   servicePriceRub?: number | null
+  /** The «До» of the range as pressed; absent in rows from before 31.10.2026: half again over «от». */
+  servicePriceToRub?: number | null
   /**
    * The series after the bid as it was when Boris pressed (Boris, 29.10.2026): his one press approves it with the bid.
    * Absent in rows from before the series; empty when the lead had none.
@@ -194,15 +208,17 @@ export async function confirmBid(db: Db, outboxId: string, r: Spent): Promise<bo
       tx,
       ev('bid.sent', p, { kind: 'lead', id: p.leadId }, { spent_rub: r.spent, ...later }),
     )
-    await appendEvent(
-      tx,
-      ev(
-        'spend.recorded',
-        p,
-        { kind: 'lead', id: p.leadId },
-        { amount_rub: r.spent, balance_after_rub: r.balanceAfter, ...later },
-      ),
-    )
+    // A test order's made-up wallet is no spending: the live wallet and the day's money never see it.
+    if (!isTestOrder(p.leadId))
+      await appendEvent(
+        tx,
+        ev(
+          'spend.recorded',
+          p,
+          { kind: 'lead', id: p.leadId },
+          { amount_rub: r.spent, balance_after_rub: r.balanceAfter, ...later },
+        ),
+      )
     await tx.update(lead).set({ status: 'bid_sent' }).where(eq(lead.id, p.leadId))
     await createDeal(tx, {
       leadId: p.leadId,
@@ -279,9 +295,79 @@ async function giveBack(outboxId: string, p: BidPayload, reason: string): Promis
   })
 }
 
+const bidCard = (p: BidPayload) => ({
+  title: p.title,
+  clientName: p.clientName ? firstName(p.clientName) : null,
+  orderId: p.leadId,
+  priceFromRub: p.servicePriceRub ?? null,
+  priceToRub: p.servicePriceToRub ?? null,
+})
+
+/**
+ * The news of a bid in the card Boris pressed on, folded in place (Boris, 03.11): when the card is the status message
+ * it becomes the short view; a status message of the earlier kind, or none, gets the plain `fallback` as before, so a
+ * run that began before this change ends as it began.
+ */
+async function tellFolded(
+  view: Omit<Parameters<typeof foldedBidCard>[0], 'title' | 'clientName' | 'orderId'>,
+  p: BidPayload,
+  fallback: string,
+  o: { client?: boolean } = {},
+): Promise<void> {
+  const st = await statusOf(p.leadId)
+  if (!st?.html) return tell(fallback, p, o)
+  try {
+    await setStatus(p.leadId, foldedBidCard({ ...bidCard(p), ...view }), { html: true })
+  } catch (err) {
+    await appendEvent(d().db, {
+      ...ev('notify.failed', p, { kind: 'lead', id: p.leadId }, { channel: 'telegram' }),
+      reason: err instanceof Error ? err.message.slice(0, 200) : 'message was not sent',
+    })
+  }
+}
+
+/**
+ * The client's topic opens with the bid (Boris, 01.11: «после того как она откликнулась, в форуме должен же создаваться
+ * чат с клиентом»): the intro, the bid's text and its price go in, and the link comes back for the ✅ in «Заявки».
+ * Nothing without a forum; a failure only costs the topic its early start (it opens on the first message anyway).
+ */
+async function openTopic(p: BidPayload, spent: number): Promise<string | null> {
+  try {
+    if (!(await d().notifier.forumOn?.())) return null
+    const now = d().now?.() ?? new Date()
+    // The text that really went to the client (the greeting of that hour, tidied), as the node is given it.
+    let text: string | null = null
+    try {
+      text = bidTextDetail(p.text, p.clientName ?? '', now).text
+    } catch {
+      text = p.text
+    }
+    await d().notifier.sendText(
+      bidPost({
+        at: now.toISOString(),
+        text,
+        feeRub: spent,
+        priceFromRub: p.servicePriceRub ?? null,
+        priceToRub: p.servicePriceToRub ?? null,
+      }),
+      { html: true, quiet: true, place: { order: p.leadId } },
+    )
+    await markShown(d().db, p.leadId, 'bid')
+    return (await d().notifier.topicLink?.({ order: p.leadId })) ?? null
+  } catch (err) {
+    console.error('client topic not opened', err instanceof Error ? err.message.slice(0, 200) : err)
+    return null
+  }
+}
+
+const withTopic = (text: string, link: string | null) =>
+  link ? `${text}\nТема клиента: ${link}` : text
+
 /** A word about a bid: by the card in «Заявки»; once the bid is on Profi.ru, in the client's own topic (`client`). */
 async function tell(text: string, p: BidPayload, o: { client?: boolean } = {}): Promise<void> {
   try {
+    // The message Boris got at the press (bidStatus) says it; a bid without one gets a message of its own.
+    if (await setStatus(p.leadId, text, { html: false })) return
     await d().notifier.sendText(text, { place: o.client ? { order: p.leadId } : 'leads' })
   } catch (err) {
     await appendEvent(d().db, {
@@ -345,8 +431,9 @@ async function attempt(
     .db.update(outbox)
     .set({ attempts: n + 1 })
     .where(eq(outbox.id, row.id))
-  // The pause is read again right before the node is called: Boris may have set it while the bid waited.
-  if (!(await getSetting(d().db, 'outbound.bids')))
+  // The pause is read again right before the node is called: Boris may have set it while the bid waited. A test
+  // order spends nothing and reaches no client, so no pause holds it (docs/ops/test-leads.md).
+  if (!isTestOrder(p.leadId) && !(await getSetting(d().db, 'outbound.bids')))
     return mayBeOnSite || ranBefore ? { kind: 'uncertain' } : { kind: 'paused' }
   // Greeted and tidied at this very moment, not at the press: the hour may have changed since the card (rule 5).
   // The text is built before the node is called, outside the try below: an error of ours here pressed nothing, so the
@@ -376,6 +463,7 @@ async function attempt(
       order_id: p.leadId,
       text: sent.text,
       price_rub: p.servicePriceRub ?? null,
+      price_to_rub: p.servicePriceToRub ?? null,
       // The fee on the card Boris pressed: the node pays no more than that.
       max_fee_rub: p.priceRub,
       idempotency_key: row.idempotencyKey,
@@ -426,6 +514,10 @@ async function backToBoris(outboxId: string, p: BidPayload, reason: string): Pro
     }
     return
   }
+  // The card folded for the bid is read before the give-back deletes its row, to be put back in the same message.
+  const folded = (await DBOS.patch('bid-card-restore'))
+    ? await DBOS.runStep(() => statusOf(p.leadId), { name: 'statusBefore' })
+    : null
   await DBOS.runStep(() => giveBack(outboxId, p, reason), { name: 'giveBack', ...DB_STEP })
   const text =
     reason === 'paused'
@@ -438,13 +530,25 @@ async function backToBoris(outboxId: string, p: BidPayload, reason: string): Pro
   })
   if (p.taskId) {
     const taskId = p.taskId
-    await DBOS.runStep(
-      () =>
-        d()
-          .resendCard(taskId)
-          .catch(() => {}),
-      { name: 'resendCard' },
-    )
+    const messageId = folded?.card ? folded.messageId : null
+    const restored =
+      messageId === null
+        ? false
+        : await DBOS.runStep(
+            async () =>
+              (await d()
+                .restoreCard?.(taskId, messageId)
+                .catch(() => false)) ?? false,
+            { name: 'restoreCard' },
+          )
+    if (!restored)
+      await DBOS.runStep(
+        () =>
+          d()
+            .resendCard(taskId)
+            .catch(() => {}),
+        { name: 'resendCard' },
+      )
   }
 }
 
@@ -458,38 +562,58 @@ async function lookForUnsure(outboxId: string, p: BidPayload): Promise<void> {
   for (let k = 0; k < waits.length; k++) {
     await DBOS.sleep(waits[k] ?? 0)
     const seen = await DBOS.runStep(() => bidOnOrder(p), { name: `look-${k}` })
-    if (!seen) continue
-    const first = await DBOS.runStep(
-      () =>
-        confirmBid(d().db, outboxId, { spent: p.priceRub, balanceAfter: null, foundLater: true }),
-      { name: 'confirmFound', ...DB_STEP },
-    )
-    if (!first) return
-    // The series Boris approved with the bid follows a bid found later too (30.10.2026: three bids of five on 28.10
-    // were unsure first). Found within a quarter of an hour of the press it goes at once; later it is left out, and
-    // the same message tells Boris so. Behind a patch, so a run recorded before it ends as it began.
-    const series = p.followUps ?? []
-    const age =
-      series.length > 0 && (await DBOS.patch('bid-series-found-later'))
-        ? await DBOS.runStep(() => sincePress(outboxId), { name: 'sincePress', ...DB_STEP })
-        : null
-    const late = age !== null && age > SERIES_LATE_MS
-    await DBOS.runStep(
-      () => tell(TEXTS.bidFoundLater(p.title, p.priceRub, late), p, { client: true }),
-      {
-        name: 'tellFound',
-      },
-    )
-    if (age !== null && !late)
-      await startSeries({
-        leadId: p.leadId,
-        accountId: p.accountId,
-        correlationId: p.correlationId,
-        followUps: series,
-        late: true,
-      })
-    return
+    if (seen) return foundOnOrder(outboxId, p)
   }
+}
+
+/** The unsure bid is on its order: confirmed, Boris told in the status message, and the series goes at once. */
+async function foundOnOrder(outboxId: string, p: BidPayload, quick = false): Promise<void> {
+  const first = await DBOS.runStep(
+    () => confirmBid(d().db, outboxId, { spent: p.priceRub, balanceAfter: null, foundLater: true }),
+    { name: 'confirmFound', ...DB_STEP },
+  )
+  if (!first) return
+  // The series Boris approved with the bid follows a bid found later too, at once like any other (31.10.2026: «все
+  // письма сразу»; no age limit any more). Behind a patch, so a run recorded before it ends as it began.
+  const series = p.followUps ?? []
+  const age =
+    series.length > 0 && !(await DBOS.patch('bid-series-at-once'))
+      ? await DBOS.runStep(() => sincePress(outboxId), { name: 'sincePress', ...DB_STEP })
+      : null
+  const late = age !== null && age > 15 * 60_000
+  // Found within the first minute it reads as a bid that went, not as a bid that had to be looked for.
+  const text = quick
+    ? TEXTS.bidSent(p.title, p.priceRub)
+    : TEXTS.bidFoundLater(p.title, p.priceRub, late)
+  const link = (await DBOS.patch('bid-topic'))
+    ? await DBOS.runStep(() => openTopic(p, p.priceRub), { name: 'openTopicFound' })
+    : null
+  await DBOS.runStep(
+    () =>
+      tellFolded(
+        {
+          state: quick ? 'sent' : 'found',
+          at: (d().now?.() ?? new Date()).toISOString(),
+          feeRub: p.priceRub,
+          chatUrl: link,
+          note: late
+            ? 'Сообщения вдогонку не отправляла: с нажатия прошло больше 15 минут, они бы читались как напоминание'
+            : null,
+        },
+        p,
+        withTopic(text, link),
+        { client: true },
+      ),
+    { name: 'tellFound' },
+  )
+  if (series.length > 0 && !late)
+    await startSeries({
+      leadId: p.leadId,
+      accountId: p.accountId,
+      correlationId: p.correlationId,
+      followUps: series,
+      late: true,
+    })
 }
 
 /** How long ago Boris pressed: the outbox row of the bid is written with his press. */
@@ -515,11 +639,21 @@ async function deliver(outboxId: string): Promise<void> {
   if (!row || !isBidRow(row)) return
   const p = row.payload as BidPayload
 
-  const allowed = await DBOS.runStep(() => getSetting(d().db, 'outbound.bids'), {
-    name: 'checkPause',
-    ...DB_STEP,
-  })
+  const allowed = await DBOS.runStep(
+    async () => isTestOrder(p.leadId) || (await getSetting(d().db, 'outbound.bids')),
+    { name: 'checkPause', ...DB_STEP },
+  )
   if (!allowed) return backToBoris(outboxId, p, 'paused')
+
+  // One message to Boris from the press to the end of the series (31.10.2026); the replies below edit it.
+  if (await DBOS.patch('bid-status-message'))
+    await DBOS.runStep(
+      () =>
+        openStatus(p.leadId, foldedBidCard({ ...bidCard(p), state: 'sending' }), {
+          fold: true,
+        }).catch(() => {}),
+      { name: 'openStatus' },
+    )
 
   // Steps keep their names and order: a run recorded before a change resumes along the steps it took.
   const delays = d().retryDelaysMs
@@ -563,10 +697,27 @@ async function deliver(outboxId: string): Promise<void> {
       ...DB_STEP,
     })
     // What was spent, not the fee on the card.
-    if (first)
-      await DBOS.runStep(() => tell(TEXTS.bidSent(p.title, final.spent), p, { client: true }), {
-        name: 'tellSent',
-      })
+    if (first) {
+      // Behind a patch, so a run recorded before it ends as it began.
+      const link = (await DBOS.patch('bid-topic'))
+        ? await DBOS.runStep(() => openTopic(p, final.spent), { name: 'openTopic' })
+        : null
+      await DBOS.runStep(
+        () =>
+          tellFolded(
+            {
+              state: 'sent',
+              at: (d().now?.() ?? new Date()).toISOString(),
+              feeRub: final.spent,
+              chatUrl: link,
+            },
+            p,
+            withTopic(TEXTS.bidSent(p.title, final.spent), link),
+            { client: true },
+          ),
+        { name: 'tellSent' },
+      )
+    }
     // The series Boris approved with the bid follows it in a process of its own (Boris, 29.10.2026); only a bid this
     // run confirmed has one. Behind a patch, so a run recorded before the series ends as it began.
     const series = p.followUps ?? []
@@ -583,7 +734,17 @@ async function deliver(outboxId: string): Promise<void> {
       name: 'markUncertain',
       ...DB_STEP,
     })
-    await DBOS.runStep(() => tell(TEXTS.bidUncertain, p), { name: 'tellUncertain' })
+    if (await DBOS.patch('bid-quick-look')) {
+      const quick = d().quickLookDelaysMs
+      for (let k = 0; k < quick.length; k++) {
+        await DBOS.sleep(quick[k] ?? 0)
+        const seen = await DBOS.runStep(() => bidOnOrder(p), { name: `qlook-${k}` })
+        if (seen) return foundOnOrder(outboxId, p, true)
+      }
+    }
+    await DBOS.runStep(() => tellFolded({ state: 'unsure' }, p, TEXTS.bidUncertain), {
+      name: 'tellUncertain',
+    })
     await lookForUnsure(outboxId, p)
   } else if (final.kind === 'failed' && !(await DBOS.patch('bid-give-back'))) {
     // A run that recorded its failure before the give-back existed ends as it began.

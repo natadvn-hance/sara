@@ -93,7 +93,7 @@ const insurance = (
 describe('the minute check scrolls the board for its next pages', () => {
   it('FR-LEAD-1: a pass loads the first pages of a long board by scrolling, as a person does, and no more', async () => {
     pagedBoard()
-    const ins = insurance({ board: { pages: 3, fullEvery: 1000 } })
+    const ins = insurance({ board: { pages: 3, deepEveryMs: 3_600_000 } })
     await ins.feedOnce()
     ins.stop()
     // The page itself asked for each part: the first and two more.
@@ -111,21 +111,111 @@ describe('the minute check scrolls the board for its next pages', () => {
     ])
   }, 60000)
 
-  it('FR-LEAD-1: every Nth pass reads the whole board, the others only the first pages', async () => {
-    pagedBoard()
-    const ins = insurance({ board: { pages: 2, fullEvery: 2, fullPages: 20 } })
-    await ins.feedOnce()
-    expect(await seen()).toBe(10)
-    await ins.feedOnce()
-    ins.stop()
-    expect(await seen()).toBe(30)
-    const notes = (await db.select().from(rawEvent))
+  /** How far each pass over the board got: its note says the pages it loaded and why it stopped. */
+  const passesOf = async () =>
+    (await db.select().from(rawEvent))
       .map((r) => r.body as { what?: string; pages?: number; stoppedBy?: string })
       .filter((b) => b.what === 'board_scroll')
-    expect(notes.map((b) => [b.pages, b.stoppedBy])).toEqual([
+      .map((b) => [b.pages, b.stoppedBy])
+
+  it('FR-LEAD-1: a new order deep in the board moves its count: the whole board is read at once, then the first pages again', async () => {
+    pagedBoard()
+    const ins = insurance({ board: { pages: 2, deepEveryMs: 3_600_000 } })
+    await ins.feedOnce()
+    expect(await seen()).toBe(10)
+    // 95612005: a new order of low relevance lands far down the board, not on its first pages.
+    const late = site.addOrder({ subject: 'Новый заказ внизу' })
+    site.orders.push(site.orders.shift() as (typeof site.orders)[number])
+    await ins.feedOnce()
+    const events = (await db.select().from(outboxNode)).map(
+      (r) => (r.payload as { type: string; entity: { id: string } }).entity.id,
+    )
+    expect(events).toContain(late)
+    await ins.feedOnce()
+    ins.stop()
+    expect(await passesOf()).toEqual([
+      [2, 'pages'],
+      [7, 'end'],
+      [2, 'pages'],
+    ])
+  }, 90000)
+
+  it('FR-LEAD-1: an order closed moves the count too, and a count that keeps jittering is not read every pass', async () => {
+    pagedBoard()
+    const ins = insurance({ board: { pages: 2, deepEveryMs: 3_600_000, deepGapMs: 3_600_000 } })
+    await ins.feedOnce()
+    site.orders.pop()
+    await ins.feedOnce()
+    // The first move is read at once.
+    site.orders.pop()
+    await ins.feedOnce()
+    ins.stop()
+    expect(await passesOf()).toEqual([
       [2, 'pages'],
       [6, 'end'],
+      [2, 'pages'],
     ])
+  }, 90000)
+
+  it('FR-LEAD-1: the whole board is read on a clock too, for a new order and a closed one cancelling out', async () => {
+    pagedBoard()
+    const ins = insurance({ board: { pages: 2, deepEveryMs: 0 } })
+    await ins.feedOnce()
+    ins.stop()
+    expect(await passesOf()).toEqual([[6, 'end']])
+  }, 90000)
+
+  it('FR-LEAD-1: a start or an outage reads the whole board, whatever its count says', async () => {
+    pagedBoard()
+    const ins = insurance({ board: { pages: 2, deepEveryMs: 3_600_000 } })
+    await ins.feedOnce({ deep: true })
+    await ins.reconcile(new Date().toISOString())
+    ins.stop()
+    expect((await passesOf()).map((p) => p[1])).toEqual(['end', 'end'])
+  }, 90000)
+
+  it('FR-LEAD-1: a whole pass that gave way to a press is read again on the next pass', async () => {
+    pagedBoard()
+    const ins = insurance({ board: { pages: 2, deepEveryMs: 3_600_000, pauseMs: 200 } })
+    await ins.feedOnce()
+    site.addOrder({ subject: 'Новый заказ' })
+    const deep = ins.feedOnce()
+    await expect.poll(() => site.feedRequests, { timeout: 20000 }).toBeGreaterThan(3)
+    await ins.inTab(async () => null, { urgent: true })
+    await deep
+    await ins.feedOnce()
+    ins.stop()
+    const stops = (await passesOf()).map((p) => p[1])
+    expect(stops).toEqual(['pages', 'press', 'end'])
+  }, 90000)
+
+  it('FR-LEAD-1: how the page asks for the board is kept once a run, without any cookie', async () => {
+    pagedBoard()
+    const asking = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: {
+        ...standInParsers,
+        isBoardRequest: (url) => url.includes('/api/feed'),
+      },
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+      board: { pages: 2, deepEveryMs: 3_600_000, pauseMs: 20 },
+    })
+    await asking.feedOnce()
+    await asking.feedOnce()
+    asking.stop()
+    await expect
+      .poll(
+        async () =>
+          (await db.select().from(rawEvent)).filter(
+            (r) => (r.body as { what?: string }).what === 'board_request',
+          ).length,
+        { timeout: 5000 },
+      )
+      .toBe(1)
   }, 90000)
 
   it('FR-LEAD-1: a board that is one page long is not scrolled', async () => {
@@ -156,7 +246,7 @@ describe('the minute check scrolls the board for its next pages', () => {
   it('FR-LEAD-1: the scrolling stops when the tab may not move any more', async () => {
     pagedBoard()
     const ins = insurance({
-      board: { pages: 6, fullEvery: 1000 },
+      board: { pages: 6, deepEveryMs: 3_600_000 },
       canNavigate: () => site.feedRequests < 2,
     })
     await ins.feedOnce()
@@ -210,7 +300,7 @@ describe('the ways to make the board load more', () => {
   it("FR-LEAD-1: a list in its own scroll box, out of the wheel's reach, loads by the last card scrolled into view, and the way is remembered", async () => {
     pagedBoard()
     site.boardLayout = 'box'
-    const ins = insurance({ board: { pages: 3, fullEvery: 1000 } })
+    const ins = insurance({ board: { pages: 3, deepEveryMs: 3_600_000 } })
     await ins.feedOnce()
     expect(await seen()).toBe(15)
     await ins.feedOnce()
@@ -237,7 +327,7 @@ describe('the ways to make the board load more', () => {
   it('FR-LEAD-1: the scroll box itself, taken to its bottom, loads the next part', async () => {
     pagedBoard()
     site.boardLayout = 'box'
-    const ins = insurance({ board: { pages: 3, ways: ['container'], fullEvery: 1000 } })
+    const ins = insurance({ board: { pages: 3, ways: ['container'], deepEveryMs: 3_600_000 } })
     await ins.feedOnce()
     ins.stop()
     expect(await seen()).toBe(15)
@@ -247,7 +337,7 @@ describe('the ways to make the board load more', () => {
   it('FR-LEAD-1: a board with a «Показать ещё» button loads by pressing it', async () => {
     pagedBoard()
     site.boardLayout = 'button'
-    const ins = insurance({ board: { pages: 3, fullEvery: 1000 } })
+    const ins = insurance({ board: { pages: 3, deepEveryMs: 3_600_000 } })
     await ins.feedOnce()
     ins.stop()
     expect(await seen()).toBe(15)
@@ -275,7 +365,7 @@ describe('the ways to make the board load more', () => {
   it('FR-LEAD-1: with every way tried and nothing loading, the pass gives up within seconds', async () => {
     pagedBoard()
     site.boardLayout = 'none'
-    const ins = insurance({ board: { pages: 3, fullEvery: 1000 } })
+    const ins = insurance({ board: { pages: 3, deepEveryMs: 3_600_000 } })
     const started = Date.now()
     await ins.feedOnce()
     ins.stop()
@@ -286,5 +376,28 @@ describe('the ways to make the board load more', () => {
       tried: ['wheel', 'last_card', 'container', 'button'],
     })
     expect(Date.now() - started).toBeLessThan(25000)
+  }, 60000)
+
+  it('FR-LEAD-1: a pass still running is not queued again by its timer, so the 30-second passes never stack', async () => {
+    pagedBoard()
+    const before = site.feedRequests
+    // Here a pass of a few slow scrolls takes about a second, its timer 50 ms.
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 50,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 10,
+      board: { pages: 3, deepEveryMs: 3_600_000, pauseMs: 300 },
+    })
+    await new Promise((r) => setTimeout(r, 2000))
+    ins.stop()
+    // Whatever the timer queued still runs before this.
+    await ins.inTab(async () => null)
+    const passes = (site.feedRequests - before) / 3
+    expect(passes).toBeGreaterThanOrEqual(1)
+    expect(passes).toBeLessThanOrEqual(4)
   }, 60000)
 })

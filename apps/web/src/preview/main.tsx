@@ -143,16 +143,27 @@ function answer(method: string, url: URL, body: unknown): unknown {
   if (p.startsWith('/api/mind/')) return f.mindRecord(decodeURIComponent(p.split('/')[3] ?? ''))
   if (p === '/api/settings') return f.settings
   if (p.startsWith('/api/settings/threshold/')) {
-    const value = Number(url.searchParams.get('value') ?? 56)
-    return {
-      value,
-      current: 56,
-      version: 3,
-      cardsNow: 12,
-      cardsWould: value < 56 ? 12 + (56 - value) * 2 : Math.max(2, 12 - (value - 56) * 2),
-      lostYes: value > 56 ? Math.min(3, value - 56) : 0,
-      gainedNo: value < 56 ? (56 - value) * 2 : 0,
-    }
+    // Invented counts, a few per kind, the same shape the service answers with.
+    const now = { marketing: 40, sites: 55, other: 50 }
+    const base = { marketing: 86, sites: 25, other: 37 }
+    const kinds = Object.fromEntries(
+      (['marketing', 'sites', 'other'] as const).map((k) => {
+        const value = Number(url.searchParams.get(k) ?? now[k])
+        const step = (now[k] - value) / 5
+        return [
+          k,
+          {
+            value,
+            current: now[k],
+            cardsNow: base[k],
+            cardsWould: Math.max(0, Math.round(base[k] * (1 + step * 0.25))),
+            lostYes: value > now[k] ? Math.min(3, Math.round(-step)) : 0,
+            gainedNo: value < now[k] ? Math.round(step) : 0,
+          },
+        ]
+      }),
+    )
+    return { version: 4, kinds }
   }
   if (p === '/api/system')
     return {
@@ -196,6 +207,7 @@ const VIEWS: Record<string, string> = {
   analytics: '/analytics',
   mind: '/mind',
   prefs: '/settings',
+  thresholds: '/settings?focus=thresholds',
   health: '/health',
 }
 startInMemory(VIEWS[window.location.hash.slice(1)] ?? '/inbox')

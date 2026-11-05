@@ -27,8 +27,9 @@
 | `raw_order` | `order_id`, `account_id`, `seen_at`, `body` | П | 30 дней |
 | `raw_message` | `platform_message_id`, `chat_id`, `account_id`, `author_side` (`client`, `specialist`), `sent_at`, `text` | П | 2 года для закрытых, как в ядре |
 | `outbox_node` | `event_id`, `payload`, `attempts`, `next_try_at`, `confirmed_at` | П | до подтверждения + 7 дней |
-| `bid_attempt` | `idempotency_key`, `account_id`, `order_id`, `due_rub`, `pressed_at`, `result` (jsonb): нажатие, записанное до кнопки, которая открывает форму, и подтверждённый ответ. Остановка до «Откликнуться» стирает запись, если кошелёк на странице не изменился | Н | 30 дней |
+| `bid_attempt` | `idempotency_key`, `account_id`, `order_id`, `due_rub`, `wallet_rub` (кошелёк прямо перед нажатием), `pressed_at`, `result` (jsonb): нажатие, записанное до кнопки, которая открывает форму, и подтверждённый ответ. Остановка до «Откликнуться» стирает запись, если кошелёк на странице не изменился | Н | 30 дней |
 | `message_attempt` | `idempotency_key`, `account_id`, `chat_id`, `expect_last_message_id`, `pressed_at`, `result` (jsonb): нажатие кнопки отправки сообщения, записанное до кнопки, и подтверждённый ответ. Текста сообщения нет | Н | 30 дней |
+| `client_saw_bid` | `account_id`, `chat_id`, `seen_at`: чат, о котором список чатов сказал «Клиент увидел отклик»; одно `profi.client_read` на чат, и только для отклика, который отправила Сара. Слов клиента нет | Н | не чистится |
 | `node_flag` | `account_id`, `name`, `reason`, `set_at`: остановка, которую узел поставил себе сам (например `form_calibration`: кошелёк уменьшился после открытия формы) | Н | пока человек не снимет |
 | `browser_profile` | папка профиля на диске, вне базы | С | пока аккаунт активен |
 
@@ -114,6 +115,8 @@
 | `bid_hold` (пульт v2) | `task_id` (ключ), `request_id` (уникален), `state` (`held`, `cancelled`, `fired`), `expected_fee_rub`, `execute_at`, `created_at`, `updated_at` | Н | отклик из пульта ждёт 10 секунд в ядре; процесс DBOS `held-bid:<request_id>` нажимает его тем же диспетчером, «Отменить» с любого устройства говорит правду |
 | `push_subscription` (пульт v2) | `endpoint` (ключ), `p256dh`, `auth`, `label` (браузер), `created_at`, `failed_at` | Н | браузеры, которые звонят (Web Push); push пустой, без данных, сервис-воркер сам берёт последнее уведомление у ядра |
 | `notice` (пульт v2) | `id`, `kind` (`lead`, `draft`, `client`, `meeting`, `urgent`, `summary`, `system`), `title`, `body` (до 400 знаков), `link` (путь в пульте), `task_id`, `question_id`, `telegram_message_id`, `seen_at`, `done_at` (только «Убрать» у уведомления без задачи), `created_at` | П (заголовок заявки, имя клиента, как в Telegram) | колокольчик пульта: каждое сообщение Сары Борису; «решено» не хранится, а читается по задаче или вопросу |
+| `sheet_row` (таблица Бориса) | `order_id` (ключ), `account_id`, `state` (`new`, `active`, `gone`: Борис удалил строку, `doubt`: две строки или похожее имя, Сара ждет решения Бориса), `written` (что Сара писала в каждую колонку в прошлый раз), `boris` (колонки, которые Борис поправил руками), `pending_since`, `created_at`, `updated_at` | П (имя клиента в `written`) | строка отклика в Google Таблице Бориса, `docs/ops/google-sheet.md`; очередь записи это разница между `logRows` и `written` |
+| `sheet_sync` (таблица Бориса) | `id` (одна строка), `since` (отклики с этого момента идут в таблицу; «Внести» двигает на начало журнала), `backfill` (`none`, `asked`, `running`, `done`, `declined`), `backfill_message_id`, `last_ok_at`, `last_write_at`, `last_error`, `last_error_at`, `failures`, `next_try_at` | Н | связь с таблицей для «Состояния»: отстала ли и почему |
 
 ### 3.4 Разум и учёба
 

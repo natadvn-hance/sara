@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { createConversationEvents } from '../../src/conversation/events'
 import { reconcileChats } from '../../src/conversation/reconcile'
 import type { ConversationRow } from '../../src/conversation/types'
-import { chatMessage, conversation } from '../../src/db/schema'
+import { chatMessage, conversation, outbox } from '../../src/db/schema'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -82,6 +82,92 @@ describe('conversation events', () => {
     expect(c?.lastClientHeardAt).not.toBeNull()
   })
 
+  it('FR-CONV-1: each new client message reaches Boris at once, in the client topic, before any draft', async () => {
+    await setSetting(db, 'pipeline.conversations', true, 'system')
+    const places: unknown[] = []
+    const chat = stubProfi([])
+    chat.chat.push(chatMsg('m-1', 'client', 'Покажите примеры', new Date().toISOString()))
+    const first = createConversationEvents({
+      db,
+      profi: chat,
+      notifier: {
+        sendText: async (t, o) => (
+          texts.push(t), places.push(o?.place), { messageId: texts.length }
+        ),
+      },
+      onTurnNeeded: async () => {},
+      onTyping: async () => {},
+      onSpecialist: async () => {},
+    })
+    await first(envelope('profi.client_message', ref('m-1')))
+    chat.chat.push(chatMsg('m-2', 'client', 'И цены', new Date().toISOString()))
+    await first(envelope('profi.client_message', ref('m-2')))
+    // The same message heard twice is shown once.
+    await first(envelope('profi.client_message', ref('m-2')))
+    expect(texts).toHaveLength(2)
+    expect(texts[0]).toMatch(
+      /^💬 <b>Клиент<\/b> · \d+ \S+, \d\d:\d\d\n<blockquote>Покажите примеры<\/blockquote>$/,
+    )
+    expect(texts[1]).toContain('<blockquote>И цены</blockquote>')
+    const [c] = await db.select().from(conversation)
+    expect(places).toEqual([{ conversation: c?.id }, { conversation: c?.id }])
+  })
+
+  it('FR-CONV-1: the bid and the site\u2019s line after it are not posted again; our later message is (Boris, 04.11)', async () => {
+    await setSetting(db, 'pipeline.conversations', true, 'system')
+    const bid = 'Николай, добрый вечер!\n\nПрочитал описание.'
+    const reply = 'Николай, отправил материалы.'
+    const row = (kind: string, key: string, payload: Record<string, unknown>) => ({
+      id: newEventId(),
+      kind,
+      idempotencyKey: key,
+      payload: { accountId: ACC, ...payload },
+      state: 'confirmed',
+    })
+    await db
+      .insert(outbox)
+      .values([
+        row('bid', 'b-1', { leadId: CHAT, text: bid }),
+        row('message', 'm-1', { chatId: CHAT, text: reply }),
+      ])
+    const at = new Date().toISOString()
+    const { onEvent, chat } = setup()
+    chat.chat.push(chatMsg('b-1', 'specialist', bid, at))
+    chat.chat.push(
+      chatMsg('b-2', 'specialist', 'Стоимость от 5000 до 8000 руб. / усл.\nКонтакты:\n+7-900', at),
+    )
+    chat.chat.push(chatMsg('r-1', 'specialist', reply, at))
+    await onEvent(envelope('profi.specialist_message', ref('r-1', 'specialist')))
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toContain(reply)
+  })
+
+  it('FR-CONV-1: with conversations off nothing is shown at once', async () => {
+    const { onEvent, chat } = setup()
+    chat.chat.push(chatMsg('m-2', 'client', 'Сколько стоит?', new Date().toISOString()))
+    await onEvent(envelope('profi.client_message', ref('m-2')))
+    expect(texts).toEqual([])
+  })
+
+  it('FR-CONV-1: the site’s own line right behind the client’s word does not hide it: the turn starts', async () => {
+    await setSetting(db, 'pipeline.conversations', true, 'system')
+    const { onEvent, chat } = setup()
+    chat.chat.push(chatMsg('m-1', 'specialist', 'Отклик', '2026-10-20T09:00:00.000Z'))
+    chat.chat.push(
+      chatMsg('m-2', 'client', 'Да, интересно', new Date(Date.now() - 2000).toISOString()),
+    )
+    chat.chat.push(
+      chatMsg(
+        'm-3',
+        'system',
+        'Сообщите, если договоритесь работать с клиентом',
+        new Date().toISOString(),
+      ),
+    )
+    await onEvent(envelope('profi.client_message', ref('m-2')))
+    expect(turns).toEqual([CHAT])
+  })
+
   it('FR-CONV-1: with conversations off the message is stored and no turn starts', async () => {
     const { onEvent, chat } = setup()
     chat.chat.push(chatMsg('m-2', 'client', 'Сколько стоит?', new Date().toISOString()))
@@ -127,6 +213,35 @@ describe('conversation events', () => {
     expect(specialist).toBe(1)
   })
 
+  it('FR-CONV-12: the mark from the chats list names the order, so a new conversation belongs to it and all ours are read', async () => {
+    const { onEvent, chat } = setup()
+    await onEvent(
+      envelope('profi.client_read', {
+        chat_id: CHAT,
+        order_id: CHAT,
+        platform_message_id: null,
+        at: new Date().toISOString(),
+      }),
+    )
+    const [c] = await db.select().from(conversation)
+    expect(c?.orderId).toBe(CHAT)
+    chat.chat.push({
+      ...chatMsg('m-4', 'specialist', 'Ответ', new Date().toISOString()),
+      read: false,
+    })
+    await onEvent(envelope('profi.specialist_message', ref('m-4', 'specialist')))
+    await onEvent(
+      envelope('profi.client_read', {
+        chat_id: CHAT,
+        order_id: CHAT,
+        platform_message_id: null,
+        at: new Date().toISOString(),
+      }),
+    )
+    const [m] = await db.select().from(chatMessage)
+    expect(m?.read).toBe(true)
+  })
+
   it('FR-CONV-12: the client read our message', async () => {
     const { onEvent, chat } = setup()
     chat.chat.push({
@@ -163,7 +278,6 @@ describe('reconcile', () => {
       ],
     })
     const { onEvent } = setup(p)
-    void onEvent
     const n = await reconcileChats(
       {
         db,

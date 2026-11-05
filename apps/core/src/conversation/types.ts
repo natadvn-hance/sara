@@ -14,6 +14,8 @@ import type {
   Topic,
 } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
+import type { SlotSource } from '../leads/callSlots'
+import type { HanceSite } from '../leads/siteOrder'
 
 /**
  * The types the M4 parts share (plan «Карта интерфейсов»). Part 0 lays them down with stub bodies at their paths;
@@ -93,6 +95,10 @@ export type Recall = {
   always: MindHit[]
   /** Up to three cases of Hance that fit the client's words, none of them already told in this chat. */
   cases: CaseHit[]
+  /** The sites of Hance of an order for a site (links.blocked left out); none for any other order. */
+  sites?: HanceSite[]
+  /** Whether there are real times for a call now; the reply then carries the mark where the program puts them. */
+  hasCallSlots?: boolean
 }
 
 export type MindSearch = {
@@ -159,6 +165,8 @@ export type CaseCheck = {
   told: { id: string; title: string }[]
   /** What the Interlocutor chose; null when its answer had no case. */
   choice: CaseChoice | null
+  /** The reply shows sites of Hance (a client of a site order asked for examples): no case, and no story either. */
+  sitesShown?: boolean
 }
 
 export type CheckInput = {
@@ -188,6 +196,8 @@ export type PolicySettings = {
   accountPaused: boolean
   night: { from: number; to: number }
   autonomy: Record<Topic, 'self' | 'draft' | 'call'>
+  /** Links a client is never given (links.blocked); a case's link of the list is left out of the reply. */
+  blockedLinks?: string[]
 }
 
 export type Decision = {
@@ -198,7 +208,14 @@ export type Decision = {
   holdUntil: string | null
 }
 
-export type TurnInput = { dossier: Dossier; names: string[]; settings: PolicySettings; now: Date }
+export type TurnInput = {
+  dossier: Dossier
+  names: string[]
+  settings: PolicySettings
+  now: Date
+  /** The lead of the chat: the call times offered to it skip the times that stand offered or booked to other clients. */
+  leadId?: string | null
+}
 
 export type TurnPlan = {
   recall: Recall
@@ -213,4 +230,9 @@ export type TurnPlan = {
   case?: CaseHit
 }
 
-export type EngineDeps = { gateway: Gateway; mind: MindSearch }
+export type EngineDeps = {
+  gateway: Gateway
+  mind: MindSearch
+  /** Where the times of a call come from (Boris's working hours); without it a reply never offers times. */
+  slots?: SlotSource
+}

@@ -111,30 +111,48 @@ describe('the form of Profi.ru is told from the client words', () => {
   })
 })
 
-describe('criterion 3: fewer than 15 own words', () => {
-  it('14 own words stop the order, with the words as the basis', () => {
+describe('criterion 3: fewer than 15 own words, softened (31.10.2026)', () => {
+  it('14 own words are a soft mark, not a stop, with the words as the basis', () => {
     const c = shortText({ title: '', text: words(14) }, NONE, 15)
-    expect(c).toMatchObject({ hit: { criterion: 'short_text' } })
-    expect(c && 'hit' in c ? c.hit.basis : '').toMatch(/^своими словами 14 слов: «слово0 /)
+    expect(c).toMatchObject({ soft: { criterion: 'short_text' } })
+    expect(c && 'soft' in c ? c.soft.basis : '').toMatch(
+      /^своими словами 14 слов: «слово0 .*в ответах формы 0 слов$/,
+    )
+  })
+
+  it('an order with no own words and next to no answers of the form is empty and stops', () => {
+    for (const text of ['50 000', 'Лендинг · Контента нет']) {
+      const c = shortText({ title: 'Лендинг', text }, FORM, 15)
+      expect(c).toEqual({
+        hit: {
+          criterion: 'short_text',
+          basis: 'пустой заказ: нет ни своих слов, ни ответов формы',
+        },
+      })
+    }
   })
 
   it('15 own words pass', () => {
     expect(shortText({ title: '', text: words(15) }, NONE, 15)).toEqual({ pass: 'short_text' })
   })
 
-  it('a long text of form answers only is short: the form is not the client', () => {
+  it('answers of the form count as text: no own words but a filled form is a soft mark', () => {
     const c = shortText(
-      { title: 'Лендинг', text: 'Лендинг · Платформа: по рекомендации специалиста · Контента нет' },
+      {
+        title: 'Лендинг',
+        text: 'Лендинг · Платформа: по рекомендации специалиста · Контента нет',
+      },
       FORM,
       15,
     )
-    expect(c).toEqual({
-      hit: { criterion: 'short_text', basis: 'своих слов нет, только ответы формы' },
-    })
+    expect(c).toMatchObject({ soft: { criterion: 'short_text' } })
+    expect(c && 'soft' in c ? c.soft.basis : '').toMatch(
+      /^своих слов нет, в ответах формы \d+ слов/,
+    )
   })
 
   it('the threshold is a setting', () => {
-    expect(shortText({ title: '', text: words(9) }, NONE, 10)).not.toBeNull()
+    expect(shortText({ title: '', text: words(9) }, NONE, 10)).toMatchObject({ soft: {} })
     expect(shortText({ title: '', text: words(10) }, NONE, 10)).toEqual({ pass: 'short_text' })
   })
 
@@ -252,16 +270,16 @@ describe('the rules of application', () => {
       [
         newAccount(info({ on_profi_since: 'На Профи.ру с 30 октября 2026', reviews: null }), when),
         negativeReviews(null),
-        shortText({ title: '', text: words(3) }, NONE, 15),
+        shortText({ title: '', text: '50 000' }, NONE, 15),
       ],
       { hits: [{ criterion: 'direct', basis: '«настроить Директ»' }] },
-      { stops: true, ownWords: 3, at: when },
+      { stops: true, ownWords: 0, at: when },
     )
     expect(s.hits.map((h) => h.criterion)).toEqual(['new_account', 'short_text', 'direct'])
     expect(s.no_data).toEqual(['negative_reviews'])
     expect(screenLines(s)).toEqual([
       '⛔ ОТСЕЯН - Новый аккаунт - «На Профи.ру с 30 октября 2026», заявка от 30.10.2026',
-      '⛔ ОТСЕЯН - Короткий текст - своими словами 3 слова: «слово0 слово1 слово2»',
+      '⛔ ОТСЕЯН - Короткий текст - пустой заказ: нет ни своих слов, ни ответов формы',
       '⛔ ОТСЕЯН - Яндекс Директ - «настроить Директ»',
     ])
     for (const l of screenLines(s)) expect(l).not.toContain(String.fromCharCode(0x2014))
@@ -310,6 +328,48 @@ describe('the rules of application', () => {
     expect(JSON.stringify(e)).not.toContain('Директе')
   })
 
+  it('an account made on the day of the order stops it with the switch off too (Boris, 01.11.2026)', () => {
+    const made = newAccount(
+      {
+        name: null,
+        on_profi_since: 'На Профи.ру с 1 ноября',
+        phone_verified: null,
+        reviews: null,
+        review_tags: [],
+      },
+      new Date('2026-11-01T16:03:00Z'),
+    )
+    expect(screenOf([made], {}, { stops: false, ownWords: 8, at: when }).stops).toBe(true)
+    // Another criterion with the switch off only marks.
+    const other = { hit: { criterion: 'direct' as const, basis: 'x' } }
+    expect(screenOf([other], {}, { stops: false, ownWords: 8, at: when }).stops).toBe(false)
+    // The board's text knew nothing of the account; the page tells, and the merge keeps the stop.
+    const byText = screenOf(
+      [{ noData: 'new_account' }],
+      {},
+      { stops: false, ownWords: 8, at: when },
+    )
+    const merged = mergeScreens(
+      byText,
+      screenOf([made], {}, { stops: false, ownWords: 8, at: when }),
+      ['new_account'],
+    )
+    expect(merged.stops).toBe(true)
+    expect(merged.no_data).toEqual([])
+    // An account of another day does not stop.
+    const old = newAccount(
+      {
+        name: null,
+        on_profi_since: 'На Профи.ру с 8 ноября',
+        phone_verified: null,
+        reviews: null,
+        review_tags: [],
+      },
+      new Date('2026-11-01T16:03:00Z'),
+    )
+    expect(screenOf([old], {}, { stops: false, ownWords: 8, at: when }).stops).toBe(false)
+  })
+
   it('the summary counts stopped orders by criterion, and says when the screen only marks', () => {
     const hit = (c: LeadScreen['hits'][number]['criterion']) => ({ criterion: c, basis: 'x' })
     expect(
@@ -323,6 +383,14 @@ describe('the rules of application', () => {
       'Отсеяла бы 1 (отсев пока только отмечает): Новый аккаунт 1',
     )
     expect(screenSummary([{ stops: true, hits: [] }])).toBeNull()
+    expect(
+      screenSummary([
+        { stops: true, hits: [hit('new_account')] },
+        { stops: false, hits: [hit('short_text')] },
+      ]),
+    ).toBe(
+      'Отсеяно 1: Новый аккаунт 1. Отсеяла бы ещё 1 (отсев пока только отмечает): Короткий текст 1',
+    )
   })
 })
 
@@ -381,7 +449,7 @@ describe('the dry run counts what the screen would stop, without the client word
     const r = dryScreen(
       [
         row('1', words(20)),
-        row('2', 'Нужен сайт', { shown: true }),
+        row('2', '100', { shown: true }),
         row('3', words(20), {
           clientInfo: info({ reviews: { positive: 0, negative: 5 } }),
           shown: true,

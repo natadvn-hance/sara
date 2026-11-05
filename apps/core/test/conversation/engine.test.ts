@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { type CaseMoment, newEventId, SETTINGS } from '@sara/shared'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { voiceIssues } from '../../src/conversation/check/caseChecks'
 import { buildDossier, clientNames } from '../../src/conversation/dossier'
 import { planTurn, recall } from '../../src/conversation/engine'
 import { formatInterlocutorInput } from '../../src/conversation/prompt'
@@ -11,8 +12,16 @@ import { syncChat } from '../../src/conversation/sync'
 import type { Dossier, PolicySettings } from '../../src/conversation/types'
 import { convTurn, lead } from '../../src/db/schema'
 import { createGateway } from '../../src/gateway/gateway'
+import { SITES_RECORD } from '../../src/leads/siteOrder'
 import { createSecretStore } from '../../src/secrets/store'
-import { caseOf, chatMsg, fakeMind, interlocutorAnswer, stubProfi } from '../helpers/conversation'
+import {
+  caseOf,
+  chatMsg,
+  fakeMind,
+  interlocutorAnswer,
+  mindHit,
+  stubProfi,
+} from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
@@ -282,7 +291,7 @@ describe('turn engine', () => {
   })
 
   const live = { ...settings, v1Writes: false, outboundMessages: true }
-  const DRAFT = 'Понимаю, вопрос о стоимости. Борис ответит вам лично, когда посмотрит задачу.'
+  const DRAFT = 'Понимаю, вопрос о стоимости. Уложимся в ваш бюджет, детали посмотрим на созвоне.'
 
   it('FR-CONV-3: a price question calls Boris and carries a short draft for him, with no price in it', async () => {
     const d = await dossierOf()
@@ -857,5 +866,295 @@ describe('cases in a turn', () => {
       { id: 'k-case-01', title: 'Лиса-Клиник: онлайн-запись' },
       { id: 'k-case-02', title: 'Сеть кофеен: реклама, Сочи' },
     ])
+  })
+})
+
+const SITES_BODY = `# Сайты Hance для показа клиенту
+
+## Стальной Каркас
+
+- Ссылка: https://zmksk.ru/
+- Подпись: металлоконструкции, корпоративный сайт
+- Что: многостраничный корпоративный сайт производителя.
+- Показывать: производство, B2B.
+
+## Бубочка
+
+- Ссылка: https://bubochkabrand.ru/
+- Подпись: магазин детской одежды на Tilda
+- Что: интернет-магазин на Tilda.
+- Показывать: магазин, бренд.
+
+## Royalty Teams
+
+- Ссылка: https://www.royalty-teams.ru/
+- Подпись: сайт IT-компании
+- Что: лендинг IT-компании.
+- Показывать: IT, услуги для бизнеса.
+
+## Cognio
+
+- Ссылка: https://hance.pro/cognio/
+- Подпись: сервис диагностики навыков
+- Что: страница продукта.
+- Показывать: онлайн-сервис.`
+
+const mindWithSites = () => {
+  const m = fakeMind()
+  return {
+    ...m,
+    byIds: async (ids: string[]) =>
+      ids.includes(SITES_RECORD)
+        ? [mindHit(SITES_RECORD, 'knowledge', { body: SITES_BODY })]
+        : m.byIds(ids),
+  }
+}
+
+describe('sites of Hance in a reply to a client of a site order (Boris, 31.10.2026)', () => {
+  it('FR-SITE-29: «покажите примеры» on a site order is answered with sites, not a case', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Вот несколько сайтов, которые мы делали. Какой из них ближе к тому, что вы хотите?',
+        sites: ['zmksk.ru', 'hance.pro/cognio', 'royalty-teams.ru'],
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: mindWithSites() },
+      { dossier: d, names: ['Анна'], settings, now: new Date() },
+    )
+    expect(plan.issues).toEqual([])
+    const text = plan.output?.text ?? ''
+    expect(text).toContain('https://zmksk.ru/ - металлоконструкции, корпоративный сайт')
+    expect(text).toContain('https://hance.pro/cognio/ - сервис диагностики навыков')
+    expect(text).toContain('https://www.royalty-teams.ru/ - сайт IT-компании')
+    expect(text).not.toContain('★')
+    const asked = (await callsOf('interlocutor'))[0]?.stdin ?? ''
+    expect(asked).toContain('## Сайты Hance')
+    // The gateway hides the addresses of the list behind labels and gives them back in the answer, as in the bid.
+    expect(asked).toContain('Стальной Каркас: многостраничный корпоративный сайт производителя.')
+  })
+
+  it('FR-SITE-30: a blocked link is not offered, and an order that is not for a site has no sites section', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({ sites: ['zmksk.ru', 'bubochkabrand.ru'] }),
+      checker: CLEAN_CHECK,
+    })
+    const blocked = await planTurn(
+      { gateway: gw, mind: mindWithSites() },
+      {
+        dossier: d,
+        names: ['Анна'],
+        settings: { ...settings, blockedLinks: ['zmksk.ru'] },
+        now: new Date(),
+      },
+    )
+    expect(blocked.recall.sites?.map((x) => x.id)).toEqual([
+      'bubochkabrand.ru',
+      'royalty-teams.ru',
+      'hance.pro/cognio',
+    ])
+    expect(blocked.output?.text).not.toContain('zmksk.ru')
+    const other = await planTurn(
+      { gateway: gw, mind: mindWithSites() },
+      {
+        dossier: {
+          ...d,
+          order: {
+            ...d.order!,
+            title: 'Продвижение клиники',
+            category: 'SEO',
+            text: 'Нужны заявки',
+          },
+        },
+        names: ['Анна'],
+        settings,
+        now: new Date(),
+      },
+    )
+    expect(other.recall.sites).toEqual([])
+    expect(other.output?.text).not.toContain('https://')
+  })
+})
+
+const CALL_NOW = new Date('2026-10-31T09:00:00Z')
+const CALL_SLOTS = [
+  new Date('2026-10-31T13:00:00Z'),
+  new Date('2026-10-31T14:30:00Z'),
+  new Date('2026-11-01T13:00:00Z'),
+]
+const callSource = { slots: async () => CALL_SLOTS }
+
+describe('a call is offered with real times (Boris, 31.10.2026)', () => {
+  it('FR-CONV-13: to «О чём вы?» the reply offers the voice, and the mark becomes real times', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Мы агентство Hance из Краснодара, делаем сайты. Можем и здесь, но лучше голосом: всё проговорим и познакомимся. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind(), slots: callSource },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues).toEqual([])
+    expect(plan.output?.text).toContain('Вам удобно сегодня в 16:00 или 17:30, или лучше завтра?')
+    expect(plan.output?.text).not.toContain('{слоты}')
+    const asked = (await callsOf('interlocutor'))[0]?.stdin ?? ''
+    expect(asked).toContain('## Время для созвона')
+    expect(asked).toContain('Свободные времена есть')
+  })
+
+  it('FR-CONV-13: «покажите примеры» on a site order gives the sites and the times of a call', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Вот несколько наших сайтов.\n\nЛучше голосом всё проговорить и познакомиться. Вам удобно {слоты}?',
+        sites: ['zmksk.ru', 'hance.pro/cognio', 'royalty-teams.ru'],
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: mindWithSites(), slots: callSource },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues).toEqual([])
+    const text = plan.output?.text ?? ''
+    expect(text).toContain('сегодня в 16:00 или 17:30, или лучше завтра')
+    expect(text).toContain('https://zmksk.ru/')
+    expect(text).toContain('https://hance.pro/cognio/')
+    // The links stand before the closing question.
+    expect(text.indexOf('https://zmksk.ru/')).toBeLessThan(text.indexOf('Вам удобно'))
+  })
+
+  it('FR-CONV-13: without times the model is told to ask when it suits, and a stray mark is made a plain phrase', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Лучше голосом всё проговорить. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.output?.text).toBe(
+      'Лучше голосом всё проговорить. Вам удобно в удобное для вас время?',
+    )
+    const asked = (await callsOf('interlocutor'))[0]?.stdin ?? ''
+    expect(asked).toContain('Свободных времён сейчас нет')
+  })
+
+  it('FR-CONV-13: «прямого кейса у меня нет» and its kin are refused by the code', async () => {
+    for (const text of [
+      'Прямого кейса по клиникам у меня нет, зато можно созвониться.',
+      'К сожалению, у нас нет примеров именно в вашей нише.',
+      'Нет такого опыта, если быть честным.',
+    ]) {
+      const d = await dossierOf()
+      const gw = await gateway({ interlocutor: interlocutorAnswer({ text }), checker: CLEAN_CHECK })
+      const plan = await planTurn(
+        { gateway: gw, mind: fakeMind() },
+        { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+      )
+      expect(
+        plan.issues.map((x) => x.id),
+        text,
+      ).toContain('case.no_examples')
+      await resetDb(db)
+    }
+  })
+
+  it('FR-CONV-14: Boris in the third person, or a hand-over to a colleague, goes back for a rewrite', async () => {
+    // The real draft that Boris called «полный ужас» (a client's long letter about a CRM and phone numbers).
+    for (const text of [
+      'Добрый день! Спасибо, что так подробно описали, картина понятна. По составу работ и стоимости лично ответит Борис, это удобно обсудить на созвоне. Когда вам удобно созвониться?',
+      'Передам Борису ваше письмо, он вернется с ответом.',
+      'Давайте созвонимся, Борис свяжется с вами в течение дня.',
+      'Наш менеджер уточнит детали и ответит.',
+      'Уточню у специалиста и вернусь с ответом.',
+      'Вопрос по сроку лучше обсудить с Борисом.',
+    ]) {
+      const d = await dossierOf()
+      const gw = await gateway({ interlocutor: interlocutorAnswer({ text }), checker: CLEAN_CHECK })
+      const plan = await planTurn(
+        { gateway: gw, mind: fakeMind() },
+        { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+      )
+      expect(
+        plan.issues.map((x) => x.id),
+        text,
+      ).toContain('voice.third_person')
+      await resetDb(db)
+    }
+  })
+
+  it('FR-CONV-14: the lead of the chat reaches the call times, and the client is called by a formal name', async () => {
+    const d = await dossierOf()
+    const asked: unknown[] = []
+    const source = {
+      slots: async (_now: Date, o?: { leadId?: string }) => {
+        asked.push(o)
+        return CALL_SLOTS
+      },
+    }
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'alexander, здравствуйте! Понял вас. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind(), slots: source },
+      { dossier: d, names: ['alexander'], settings, now: CALL_NOW, leadId: 'lead-1' },
+    )
+    expect(asked).toEqual([{ leadId: 'lead-1' }])
+    expect(plan.output?.text).toMatch(/^Александр, здравствуйте!/)
+  })
+
+  it('FR-CONV-15: a «не X, а Y» reply is sent back for a rewrite with the reason', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Вам нужен не подрядчик, а человек, который ведет задачи. Давайте созвонимся.',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind() },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues.map((x) => x.id)).toContain('style.neuro')
+  })
+
+  it('FR-CONV-13: a reply that keeps a fault still has real times in its call offer, never the raw mark', async () => {
+    const d = await dossierOf()
+    const gw = await gateway({
+      interlocutor: interlocutorAnswer({
+        text: 'Нужен не подрядчик, а человек, который ведет задачи. Вам удобно {слоты}?',
+      }),
+      checker: CLEAN_CHECK,
+    })
+    const plan = await planTurn(
+      { gateway: gw, mind: fakeMind(), slots: callSource },
+      { dossier: d, names: ['Анна'], settings, now: CALL_NOW },
+    )
+    expect(plan.issues.map((x) => x.id)).toContain('style.neuro')
+    expect(plan.output?.text).not.toContain('{слоты}')
+    expect(plan.output?.text).toContain('16:00')
+  })
+
+  it('FR-CONV-14: a first-person answer, a signature and «меня зовут Борис» are not third person', () => {
+    for (const text of [
+      'Добрый день! Картину понял: amoCRM, МИС и номера под каналы. По цене уложимся, это не проблема. Давайте созвонимся, когда вам удобно?',
+      'Меня зовут Борис, я веду проекты в Hance. Давайте созвонимся.',
+      'Понял вас, всё посмотрю и вернусь с ответом.\n\nБорис',
+      'Созвонимся, могу набрать вас сегодня.\nС уважением, Борис Мноян',
+    ])
+      expect(voiceIssues(text), text).toEqual([])
   })
 })

@@ -10,17 +10,27 @@ import { buildServer } from './api/server'
 import { requireSession } from './auth/session'
 import type { Config } from './config'
 import { forwardTurn, sendTurnCard } from './conversation/cards'
+import { startCatchUp } from './conversation/catchUp'
 import { onClientText, onConvEdit, onConvPress, onConvReply } from './conversation/commands'
 import { compareAfterTurn, compareTurn } from './conversation/compare'
 import { startConvDaySummary } from './conversation/daySummary'
-import { type ConversationEventDeps, createConversationEvents } from './conversation/events'
+import {
+  type ConversationEventDeps,
+  createConversationEvents,
+  showClientWords,
+} from './conversation/events'
+import { hasBookedMeeting, readMeeting } from './conversation/meetings'
 import { sendTurnReply } from './conversation/outbox'
+import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
 import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
 import { registerConversationRoutes } from './conversation/routes'
 import { setSendDeps, startSendJob } from './conversation/sendFlow'
 import { prepareJob } from './conversation/sendJob'
 import { SEND_TEXTS } from './conversation/sendTexts'
+import { backfillTalking } from './conversation/stage'
+import { startTopicRestore } from './conversation/topicRestore'
+import { resetFalseClosedSteps } from './conversation/topicSteps'
 import { pokeTurn, setTurnDeps, startTurnFor } from './conversation/turn'
 import { createDb, type Db } from './db/client'
 import { migrate } from './db/migrate'
@@ -30,12 +40,19 @@ import { seedProfile } from './direction/profile'
 import { resumeRuns } from './direction/runs'
 import { seedDirection } from './direction/store'
 import { createGateway, withoutLimitWait } from './gateway/gateway'
+import { type SlotSource, workHoursSource } from './leads/callSlots'
 import { cancelHold, holdBid, setHoldDeps } from './leads/hold'
 import { resumeQueuedOutbox, setOutboxDeps } from './leads/outbox'
 import { createLeadPipeline, type LeadPipeline } from './leads/pipeline'
 import { type CardRecheck, startCardRecheck } from './leads/recheck'
 import { createRecheckOne } from './leads/recheckOne'
-import { SERIES_DELAYS, type SeriesDeps, setSeriesDeps } from './leads/series'
+import {
+  resumeStoppedSeries,
+  SERIES_DELAYS,
+  SERIES_UNSURE_WAITS_MS,
+  type SeriesDeps,
+  setSeriesDeps,
+} from './leads/series'
 import { type StaleSweep, startStaleSweep } from './leads/staleCards'
 import { answerQuestion as answerBorisQuestion, handleBorisMessage } from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
@@ -59,8 +76,13 @@ import { createSecretary, type Secretary } from './secretary/secretary'
 import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
+import { startSheetSync } from './sheet/sync'
 import type { Fetched } from './site/fetch'
 import { createResolver, type Press } from './tasks/resolve'
+import { testCommand } from './testLeads/command'
+import { routeTestOrders } from './testLeads/router'
+import { registerTestRoutes } from './testLeads/routes'
+import { startTestLeads, type TestLeads } from './testLeads/testLeads'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
 
@@ -76,6 +98,8 @@ export type RunningApp = {
   pipeline: LeadPipeline
   /** The look at waiting cards (FR-LEAD-5); tests drive it with tick(at). */
   recheck: CardRecheck
+  /** Test orders inside the live Sara (docs/ops/test-leads.md); null when the made-up Profi.ru did not start. */
+  testLeads: TestLeads | null
   /** The sweep of cards that waited more than a day (FR-LEAD-10); tests call stale.tick instead. */
   stale: StaleSweep
   close(): Promise<void>
@@ -88,8 +112,14 @@ export type StartOptions = {
   busyRetry?: { delayMs: number; tries: number }
   /** When an unsure bid is looked for on its order (default after 5 minutes, 30 minutes and 2 hours). */
   reconcileDelaysMs?: number[]
+  /** The first looks at the order page after an unsure bid, within a minute (31.10.2026); empty when a test sets the retry or reconcile waits. */
+  quickLookDelaysMs?: number[]
   /** The waits of the series after a bid: before its first message and between the next ones (SERIES_DELAYS). */
   seriesDelayMs?: SeriesDeps['delayMs']
+  /** The waits after an unsure delivery of a message of the series (tests make them short). */
+  seriesUnsureWaitsMs?: number[]
+  /** Where the times of the call offer come from (default Boris's working hours); tests fix them. */
+  callSlots?: SlotSource
   remindAfterMs?: () => Promise<number>
   notifyRetry?: { maxAttempts: number; intervalSeconds: number }
   /** How often the learning jobs run (default a minute); tests call them directly instead. */
@@ -102,6 +132,8 @@ export type StartOptions = {
   staleTickMs?: number
   /** The clock of the greeting of a bid (default the real one); tests fix the hour. */
   now?: () => Date
+  /** How fast the clients of test orders answer and how much they may write (default a live client's pace, 40 a day). */
+  testLeads?: Pick<Parameters<typeof startTestLeads>[0], 'timing' | 'limits'>
   /** How a page of a client's site is fetched; the tests give a made-up site. */
   siteFetch?: (url: string) => Promise<Fetched>
   /** How a file attached to an order is downloaded; the tests give bytes. */
@@ -113,7 +145,18 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   await migrate(config.databaseUrl)
   const { db, close: closeDb } = createDb(config.databaseUrl)
   const secrets = createSecretStore(config.dataDir)
-  const profi = createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret })
+  // A test order goes to the made-up Profi.ru inside the core, everything else to the node behind its lock.
+  let testLeads: TestLeads | null = null
+  const profi = routeTestOrders(
+    createProfiClient({ url: config.profiMcpUrl, permitSecret: config.permitSecret }),
+    () => testLeads?.profi ?? null,
+  )
+
+  // The one function of /test, /test_clear and the Secretary's tools.
+  const testCommandOf = (args: string) =>
+    testLeads
+      ? testCommand(testLeads, args, config.publicUrl)
+      : Promise.resolve('Тестовые заявки ещё запускаются')
 
   let pipeline: LeadPipeline | null = null
   // ADR-027: Boris's free words go to the Secretary once the core listens; until then the bot says Sara is starting.
@@ -186,6 +229,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     voiceDir: join(config.dataDir, 'voice'),
     // Each new notice rings the phone and the computer of the kinds Boris chose (pult v2 design 6).
     onNotice: (kind) => void pushNotice({ db, secrets, publicUrl: config.publicUrl }, kind),
+    onTest: testCommandOf,
+    publicUrl: config.publicUrl,
   })
   const gateway = createGateway({
     db,
@@ -219,12 +264,23 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     busyRetry: o.busyRetry ?? { delayMs: 2 * 60_000, tries: 10 },
     // The first look a minute after: a bid the node could not see at once is usually on its page by then, and its
     // series still goes in time (30.10.2026).
+    quickLookDelaysMs:
+      o.quickLookDelaysMs ??
+      (o.reconcileDelaysMs || o.retryDelaysMs ? [] : [3_000, 5_000, 7_000, 10_000, 15_000, 20_000]),
     reconcileDelaysMs: o.reconcileDelaysMs ?? [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000],
     resendCard: (taskId) => lp.resendCard(taskId),
+    restoreCard: (taskId, messageId) => lp.restoreCard(taskId, messageId),
     closeCard: (taskId) => lp.closeOnSite(taskId, 'press'),
     now: o.now,
   })
-  setSeriesDeps({ db, profi, delayMs: o.seriesDelayMs ?? SERIES_DELAYS })
+  setSeriesDeps({
+    db,
+    profi,
+    delayMs: o.seriesDelayMs ?? SERIES_DELAYS,
+    slots: o.callSlots ?? workHoursSource(db),
+    notifier: bot.notifier,
+    unsureWaitsMs: o.seriesUnsureWaitsMs ?? SERIES_UNSURE_WAITS_MS,
+  })
   setReminderHandler((taskId) => lp.onReminder(taskId))
   secretaryTools = {
     db,
@@ -243,6 +299,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         a,
       ),
     system: () => systemView(deps),
+    test: (args) => testCommandOf(args),
   }
   // M4: conversations. The mind is read from its folder; an empty or missing mind only makes every turn a draft.
   const mind = createMindSearch(db)
@@ -255,6 +312,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const mindTimer = setInterval(() => void refreshMind(), MIND_REFRESH_MS)
   mindTimer.unref()
   const cardDeps = { db, notifier: bot.notifier }
+  // A call booked in the chat is read from every new message and becomes a meeting with a card in the topic.
+  const meetingDeps = { db, gateway, notifier: bot.notifier, now: o.now }
   setTurnDeps({
     db,
     profi,
@@ -267,9 +326,19 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     // In shadow the turn never reaches a send; after the switch it goes through the message outbox.
     send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
+    show: (conv, added) => showClientWords({ db, notifier: bot.notifier }, conv, added),
+    news: (conv, added) => readMeeting(meetingDeps, conv, added),
   })
   // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
-  setRemindDeps({ db, profi, gateway, mind, notifier: bot.notifier })
+  // A booked call stops the reminders to the client (Boris, 03.11: she kept reminding after they had agreed).
+  setRemindDeps({
+    db,
+    profi,
+    gateway,
+    mind,
+    notifier: bot.notifier,
+    isBooked: (conversationId) => hasBookedMeeting(db, conversationId),
+  })
   setSendDeps({ db, profi, notifier: bot.notifier, ground: reminderGround })
   const conversationDeps: ConversationEventDeps = {
     db,
@@ -280,6 +349,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     onSpecialist: (c, added) => compareTurn(cardDeps, c.id, added),
     // The reminders follow the chat as read: our message last starts one, a client's message cancels it.
     onChatState: (c, messages) => syncReminders(c, messages),
+    onNews: (c, added) => readMeeting(meetingDeps, c, added),
   }
   const conversationEvents = createConversationEvents(conversationDeps)
   const accountEvents = createProfiEventDispatcher({
@@ -315,6 +385,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         ? pipeline.saveBidText(p)
         : Promise.resolve({ saved: false, message: 'Сара ещё запускается' }),
     backupLog: config.backupLog,
+    sheetLinked: !!(config.sheet.url && config.sheet.secret),
   }
   await seedAccounts(db, config.accounts)
   for (const a of config.accounts) {
@@ -374,7 +445,24 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   registerSchoolRoutes(app, school)
   registerConversationRoutes(app, commandDeps())
   registerSecretaryMcp(app, { keys: turnKeys, deps: () => secretaryTools })
+  // The made-up Profi.ru of test orders: if it cannot start, the live Sara works on without test orders.
+  testLeads = await startTestLeads({
+    db,
+    dataDir: config.dataDir,
+    nodeToken: config.nodeToken,
+    permitSecret: config.permitSecret,
+    claudeBin: config.claudeBin,
+    rolesDir: config.rolesDir,
+    token: () => secrets.get('claude_oauth_token'),
+    claudeEnv: o.claudeEnv,
+    ...o.testLeads,
+  }).catch((e) => {
+    console.error('test orders did not start', e instanceof Error ? e.message : e)
+    return null
+  })
+  registerTestRoutes(app, { testLeads: () => testLeads })
   const url = await app.listen({ port: config.port, host: config.host })
+  testLeads?.listen(url)
   const port = (app.server.address() as AddressInfo).port
   secretary = createSecretary({
     db,
@@ -392,6 +480,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   // Bids whose delivery never started (a crash right after Boris's press) are picked up now, once the bot can
   // tell Boris about one given back.
   await resumeQueuedOutbox(db)
+  await resumeStoppedSeries(db).catch((e) =>
+    console.error('series not taken up again', e instanceof Error ? e.message : e),
+  )
   const learning = startLearningJobs({
     db,
     notifier: bot.notifier,
@@ -402,6 +493,30 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
+  // Once each: deals whose client already answered move on to talking, and the false «закрыт на сайте» marks go.
+  void backfillTalking(db).catch((e) =>
+    console.error('deal stages pass failed', e instanceof Error ? e.message : e),
+  )
+  void resetFalseClosedSteps(db).catch((e) =>
+    console.error('closed steps reset failed', e instanceof Error ? e.message : e),
+  )
+  const owed = startOwed(
+    { db, notifier: bot.notifier, getOrder: (a, id) => profi.getOrder(a, id) },
+    o.learningTickMs,
+  )
+  // The topics as the chat with the client: old ones laid out anew and given their history, bids without one get it.
+  const topicRestore = startTopicRestore({ db, notifier: bot.notifier }, o.learningTickMs)
+  // The conversations whose last client word got no real turn (a site line once hid it, a node restart cut the turn)
+  // get theirs, once the node answers and then every ten minutes.
+  const catchUp = startCatchUp({
+    db,
+    ready: async () => {
+      const first = config.accounts[0]
+      if (!first) return false
+      await profi.listChats(first.id)
+      return true
+    },
+  })
   const reconcile = startReconcile(
     conversationDeps,
     config.accounts.map((a) => a.id),
@@ -425,6 +540,14 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     now: o.now,
   })
 
+  // Boris's Google Sheet next to the pult (FR-ANL-7): its own pace, its failures never reach the work above.
+  const sheet = startSheetSync({
+    db,
+    url: config.sheet.url,
+    secret: config.sheet.secret,
+    notifier: bot.notifier,
+  })
+
   return {
     url,
     app,
@@ -433,15 +556,21 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     bot,
     pipeline: lp,
     recheck,
+    testLeads,
     stale,
     async close() {
       recheck.stop()
+      sheet.stop()
       stale.stop()
+      await testLeads?.close()
       learning.stop()
       schoolJobs.stop()
       reconcile.stop()
       clearInterval(mindTimer)
       conversationSummary.stop()
+      owed.stop()
+      topicRestore.stop()
+      catchUp.stop()
       gateway.stop()
       await bot.stop()
       await app.close()

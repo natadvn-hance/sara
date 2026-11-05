@@ -131,37 +131,43 @@ describe('bid text rules', () => {
 
 describe("Boris's price in his answer (K2)", () => {
   it('FR-LEAD-6: a price on its own line is taken out of the text', () => {
-    expect(priceOf('Сделаем за неделю.\n\n5000 ₽')).toEqual({
+    expect(priceOf('Сделаем за неделю.\n\n5000 ₽')).toMatchObject({
       text: 'Сделаем за неделю.',
       priceRub: 5000,
     })
-    expect(priceOf('Сделаем за неделю.\nцена 12 000')).toEqual({
+    expect(priceOf('Сделаем за неделю.\nцена 12 000')).toMatchObject({
       text: 'Сделаем за неделю.',
       priceRub: 12000,
     })
-    expect(priceOf('Стоимость: 7 500 руб.\nСделаем.')).toEqual({ text: 'Сделаем.', priceRub: 7500 })
+    expect(priceOf('Стоимость: 7 500 руб.\nСделаем.')).toMatchObject({
+      text: 'Сделаем.',
+      priceRub: 7500,
+    })
   })
 
   it('FR-LEAD-6: a price alone changes only the price', () => {
-    expect(priceOf('цена 5000')).toEqual({ text: null, priceRub: 5000 })
-    expect(priceOf('Цена: 5\u00a0000 рублей.')).toEqual({ text: null, priceRub: 5000 })
-    expect(priceOf('30 000 ₽')).toEqual({ text: null, priceRub: 30000 })
+    expect(priceOf('цена 5000')).toMatchObject({ text: null, priceRub: 5000 })
+    expect(priceOf('Цена: 5\u00a0000 рублей.')).toMatchObject({ text: null, priceRub: 5000 })
+    expect(priceOf('30 000 ₽')).toMatchObject({ text: null, priceRub: 30000 })
   })
 
   it('FR-LEAD-6: a sum inside a sentence is text, not the price', () => {
-    expect(priceOf('Сайт обойдётся в 5000 ₽, сроки неделя.')).toEqual({
+    expect(priceOf('Сайт обойдётся в 5000 ₽, сроки неделя.')).toMatchObject({
       text: 'Сайт обойдётся в 5000 ₽, сроки неделя.',
       priceRub: null,
     })
-    expect(priceOf('цена 0')).toEqual({ text: 'цена 0', priceRub: null })
-    expect(priceOf('цена 3000000000')).toEqual({ text: 'цена 3000000000', priceRub: null })
+    expect(priceOf('цена 0')).toMatchObject({ text: 'цена 0', priceRub: null })
+    expect(priceOf('цена 3000000000')).toMatchObject({ text: 'цена 3000000000', priceRub: null })
   })
 
   it('FR-LEAD-6: an answer to the price question may be a bare number', () => {
-    expect(priceOf('5000', { bare: true })).toEqual({ text: null, priceRub: 5000 })
-    expect(priceOf('5 000', { bare: true })).toEqual({ text: null, priceRub: 5000 })
-    expect(priceOf('5000')).toEqual({ text: '5000', priceRub: null })
-    expect(priceOf('пять тысяч', { bare: true })).toEqual({ text: 'пять тысяч', priceRub: null })
+    expect(priceOf('5000', { bare: true })).toMatchObject({ text: null, priceRub: 5000 })
+    expect(priceOf('5 000', { bare: true })).toMatchObject({ text: null, priceRub: 5000 })
+    expect(priceOf('5000')).toMatchObject({ text: '5000', priceRub: null })
+    expect(priceOf('пять тысяч', { bare: true })).toMatchObject({
+      text: 'пять тысяч',
+      priceRub: null,
+    })
   })
 })
 
@@ -178,8 +184,10 @@ describe('the Analyst', () => {
       'condition',
       'text',
       'price_rub',
+      'price_to_rub',
       'case_ids',
       'follow_ups',
+      'site_ids',
     ])
     const reading = (
       roleJsonSchema(AnalystOutput) as {
@@ -233,6 +241,36 @@ describe('the Analyst', () => {
     expect(d.attempts).toBe(2)
     expect(d.text).toBe('Ирина, добрый день!\n\nКоротко. Когда запуск?')
     expect(inputs[1]).toContain('Прошлый вариант вышел 622')
+  })
+
+  it('FR-CONV-15: a «не X, а Y» bid is asked once more, and one that keeps it goes to Boris with a note', async () => {
+    const bad =
+      'Нужен не подрядчик на разовые задачи, а человек, который ведет задачи. Когда запуск?'
+    const once = stubGateway([
+      answer(bad),
+      answer('Нужен человек, который ведет задачи. Когда запуск?'),
+    ])
+    const d1 = await write(once.gw, await order())
+    expect(d1).toMatchObject({ attempts: 2 })
+    expect((d1 as { styleNote?: string }).styleNote).toBeUndefined()
+    expect(once.inputs[1]).toContain('так пишет нейросеть')
+    const twice = stubGateway([answer(bad), answer(bad)])
+    const d2 = await write(twice.gw, await order())
+    expect(d2.text).toContain('Нужен не подрядчик')
+    expect((d2 as { styleNote?: string }).styleNote).toContain('не X, а Y')
+  })
+
+  it('FR-CONV-15: a «не X, а Y» in a follow-up is asked once more, and the series stays', async () => {
+    const bad = 'Тут важно не количество постов, а понятный путь к записи'
+    const withFollow = (): AnalystOutput => ({
+      ...answer('Нужен человек, который ведет задачи. Когда запуск?'),
+      follow_ups: [{ text: bad, case_id: null }],
+    })
+    const { gw, inputs } = stubGateway([withFollow(), withFollow()])
+    const d = await write(gw, await order())
+    expect(inputs[1]).toContain('так пишет нейросеть')
+    expect((d as { styleNote?: string }).styleNote).toContain('не X, а Y')
+    expect((d as { followUps?: string[] }).followUps).toEqual([bad])
   })
 
   it('FR-LEAD-6: still too long after the second ask gives no draft', async () => {
@@ -377,6 +415,28 @@ describe('what the Analyst is told about the client', () => {
       'Клиент на площадке: На Профи.ру с 7 сентября 2020; номер подтверждён; отзывы специалистов: 3 хороших, 1 плохой; отметки в отзывах: Перестала отвечать, Торгуется',
     )
     expect(input).not.toContain('Ирина')
+  })
+
+  it("FR-LEAD-6: the site's own line about the client goes to the Analyst as a fact", async () => {
+    const o = await order()
+    const input = analystInput(
+      {
+        ...o,
+        client_info: {
+          ...info,
+          summaries: [
+            {
+              description: 'Договаривается меньше, чем в 20% заказов',
+              color_theme: 'RED',
+              percent: 20,
+            },
+          ],
+        },
+      },
+      400,
+    )
+    expect(input).toContain('; сводка Профи.ру: Договаривается меньше, чем в 20% заказов')
+    expect(analystInput({ ...o, client_info: info }, 400)).not.toContain('сводка')
   })
 
   it('FR-LEAD-6: what the page did not show is left out, an unverified number is said', async () => {
@@ -526,8 +586,9 @@ describe('the Analyst reads the direction (FR-LEAD-6)', () => {
       required: string[]
     }
     // The series is written after the bid it follows (Boris, 29.10.2026).
-    expect(Object.keys(schema.properties).slice(-2)).toEqual(['case_ids', 'follow_ups'])
+    expect(Object.keys(schema.properties).slice(-3)).toEqual(['case_ids', 'follow_ups', 'site_ids'])
     expect(schema.required).not.toContain('case_ids')
     expect(schema.required).not.toContain('follow_ups')
+    expect(schema.required).not.toContain('site_ids')
   })
 })

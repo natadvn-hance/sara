@@ -20,16 +20,21 @@ export type Notifier = {
    * the buttons go. It never throws: a message Telegram will not edit (deleted, already closed) is only logged.
    */
   closeLeadCard(messageId: number, c: LeadCard): Promise<void>
+  /**
+   * The full card with its buttons back in the very message (a bid that did not go, folded to «Отправляю…» a moment
+   * ago); throws when Telegram will not take the edit, so the caller can send the card again.
+   */
+  restoreLeadCard?(messageId: number, c: LeadCard): Promise<void>
   /** `html`: the text is Telegram HTML (every value in it already escaped); the default is plain text. */
   sendText(
     text: string,
-    o?: { html?: boolean; loud?: boolean; place?: Place; notice?: NoticeHint },
+    o?: { html?: boolean; loud?: boolean; quiet?: boolean; place?: Place; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /** A message with inline buttons, row by row (the daily summary, rule proposals). */
   sendButtons(
     text: string,
     rows: { text: string; callbackData: string }[][],
-    o?: { loud?: boolean; place?: Place; notice?: NoticeHint },
+    o?: { html?: boolean; loud?: boolean; place?: Place; notice?: NoticeHint },
   ): Promise<{ messageId: number }>
   /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
   typing?(): Promise<void>
@@ -43,7 +48,21 @@ export type Notifier = {
     messageId: number,
     text: string,
     rows?: { text: string; callbackData: string }[][],
+    o?: { html?: boolean },
   ): Promise<void>
+  /** The link to the client's topic in the forum; null without a forum or before the topic exists. It never throws. */
+  topicLink?(place: { conversation: string } | { order: string }): Promise<string | null>
+  /**
+   * The circle of the client's stage in the name of his topic, changed in place (Telegram keeps a topic's icon colour,
+   * so the colour is in the name). Nothing without a forum or a topic, or when the circle is already that; it never throws.
+   */
+  setTopicStage?(place: { conversation: string } | { order: string }, dot: string): Promise<void>
+  /** The references of the bot's posts in the client's topic, the oldest first (the intro is the first); empty without one. */
+  topicPosts?(place: { conversation: string } | { order: string }): Promise<number[]>
+  /** Pins a post of the bot in its topic or chat, quietly; it never throws. */
+  pinPost?(ref: number): Promise<void>
+  /** Whether Boris's forum is bound: a message for a client's topic is worth sending only then. It never throws. */
+  forumOn?(): Promise<boolean>
   /**
    * The client's topic ends (the conversation closed): `outcome` is its last line, the name says so and the topic
    * closes. The next message to it opens it again. Nothing without a forum or a topic; it never throws.

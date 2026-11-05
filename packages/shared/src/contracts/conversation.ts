@@ -110,6 +110,8 @@ export const InterlocutorOutput = z.object({
   why: z.string().max(300),
   /** A case of Hance told in the text, with the moment that called for it (cases in a conversation). */
   case: CaseChoice.optional(),
+  /** The sites of Hance shown to a client of a site order who asked for examples: ids from «Сайты Hance» (the code adds the links). */
+  sites: z.array(z.string().max(80)).max(4).optional(),
   text: z.string().max(1500).nullable(),
   fact_ids: z.array(z.string()).max(12),
   example_ids: z.array(z.string()).max(8),
@@ -161,6 +163,7 @@ export const CHECK_SEVERITY = {
   'robotic.length': 'S3',
   'robotic.repeat': 'S3',
   'robotic.quote': 'S3',
+  'style.neuro': 'S3',
   'promise.call': 'S1',
   empty: 'S2',
   'checker.unsupported': 'S1',
@@ -175,6 +178,8 @@ export const CHECK_SEVERITY = {
   'case.closed': 'S1',
   'case.ad': 'S3',
   'case.link': 'S3',
+  'case.no_examples': 'S2',
+  'voice.third_person': 'S2',
   'checker.case': 'S2',
 } as const satisfies Record<string, 'S1' | 'S2' | 'S3'>
 export type CheckId = keyof typeof CHECK_SEVERITY

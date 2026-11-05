@@ -1,4 +1,17 @@
-import { type ClientInfo, formatCallback, formatRub, type LeadSite, plural } from '@sara/shared'
+import {
+  type ClientInfo,
+  colorMark,
+  formatCallback,
+  formatRub,
+  isTestOrder,
+  type LeadSite,
+  plural,
+  priceRange,
+  TEST_MARK,
+} from '@sara/shared'
+import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
+import { firstName } from '../leads/clientName'
+import { isTelegramLine } from '../leads/telegramLine'
 import { siteCardView, studiedLine } from '../site/view'
 
 /** The Analyst's full reading of an order (the lead's draft_analysis). */
@@ -62,6 +75,8 @@ export type LeadCard = {
   draft?: {
     text: string
     priceRub: number | null
+    /** The «до» of the range (31.10.2026); absent: half again over «от». */
+    priceToRub?: number | null
     note?: string | null
     followUps?: string[]
   } | null
@@ -70,10 +85,14 @@ export type LeadCard = {
    * full reading for «Разбор» (null: a lead whose reading was stored without it).
    */
   analysis?: { hiddenNeed: string; risk: string; condition: string; reading: Reading | null } | null
+  /** A test order only: where the live Sara would have stopped and sent no card (docs/ops/test-leads.md). */
+  liveSkip?: string | null
   /** The order closed on Profi.ru: when, for the short closed card. */
   closed?: ClosedWhen | null
   /** The card waited more than a day (FR-LEAD-10): from its first message to now, for the short stale card. */
   stale?: { since: string; at: string } | null
+  /** Boris closed the card himself («Закрыть заявку»): the short card says so and nothing else. */
+  closedByBoris?: boolean
   /**
    * The client's own site as Sara read it (Boris, 30.10.2026): its short summary against the order, or «сайт не
    * открылся»; and the example sites the client named. None: the order names no site.
@@ -126,8 +145,9 @@ export const TEXTS = {
   forumLost:
     'Меня убрали из группы с темами: снова пишу всё сюда, в личный чат. Привязать заново: /forum в группе.',
   leadsTopic: 'Заявки',
+  commandFailed: 'Не получилось ответить на команду. Попробуй ещё раз чуть позже.',
   alreadyDone: 'Уже сделано',
-  skipped: 'Пропущено',
+  skipped: 'Заявка закрыта',
   bidQueued: 'Отправляю отклик',
   bidsPaused: 'Отклик не ушёл: отправка откликов на паузе',
   bidFailed: 'Отклик не ушёл: площадка ответила ошибкой. Посмотри «Состояние системы».',
@@ -135,6 +155,7 @@ export const TEXTS = {
     'Не знаю, ушёл ли отклик: площадка не ответила. Проверь заявку на Профи.ру, прежде чем откликаться вручную.',
   bidsPausedPress: 'Отправка откликов на паузе. Включи её и нажми снова.',
   lostRoute: 'Эта заявка досталась другому направлению',
+  bidSending: (title: string) => `⏳ Отправляю отклик: ${title}…`,
   bidSent: (title: string, spentRub: number) =>
     `✅ Отклик отправлен: ${title}, ${formatRub(spentRub)}`,
   bidRefused: (title: string, errorClass: string) =>
@@ -177,8 +198,6 @@ export const TEXTS = {
   },
   notAnAnswer: 'Пока я понимаю только ответы на мои вопросы',
   voiceFailed: 'Не смогла разобрать голосовое, напиши текстом, пожалуйста',
-  summaryHead: (n: number) => `Сегодня отсеяла ${orders(n)}. На грани:`,
-  summaryNone: (n: number) => `Сегодня отсеяла ${orders(n)}, пограничных не было`,
   wantButton: (n: number) => `Взял бы №${n}`,
   wantCard: 'Пишу черновик, пришлю карточку',
   cardSent: 'Прислала карточку заявки',
@@ -233,6 +252,9 @@ export const TEXTS = {
   draftLate: 'Заявка уже решена, текст не поменяла',
   /** The card of an order closed on Profi.ru, in short (Boris, 30.10.2026): the buttons are gone. */
   closedCard: '🔒 Заявка закрыта',
+  /** Boris closed the card with the button: the same short card, a folder instead of a lock. */
+  closedByBorisCard: '📁 Заявка закрыта',
+  closeButton: 'Закрыть заявку',
   closedAfter: (span: string, published: boolean) =>
     `закрылась через ${span} ${published ? 'после публикации' : 'после того, как я её увидела'}`,
   closedBy: (clock: string, openFor: string | null) =>
@@ -284,7 +306,8 @@ const TEXT_HEADING = '<b>Полный текст заявки</b>'
 const ENTITY = /&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);/gi
 
 /** Every value from the site or the model goes into the HTML through this: <, > and & become entities. */
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+export const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /** The text Telegram counts against its limit: without tags, an entity as one character (UTF-16 units). */
 export function telegramTextLength(html: string): number {
@@ -329,7 +352,18 @@ const noPeriod = (s: string) => s.replace(/[.\s]+$/, '')
 const orderUrl = (orderId: string) =>
   `https://profi.ru/backoffice/n.php?o=${encodeURIComponent(orderId)}`
 const linkLine = (orderId: string) =>
-  `<a href="${orderUrl(orderId)}">Открыть заявку на Профи.ру</a>`
+  isTestOrder(orderId)
+    ? '<i>Заявка понарошку: на Профи.ру её нет, клиент на странице тестовых заявок</i>'
+    : `<a href="${orderUrl(orderId)}">Открыть заявку на Профи.ру</a>`
+
+/** The first lines of a test order's card: what it is, and where the live Sara would have stopped. */
+function testLines(c: LeadCard): string[] {
+  if (!isTestOrder(c.orderId)) return []
+  return [
+    `<b>${TEST_MARK}</b>: Профи.ру и деньги не трогаются`,
+    ...(c.liveSkip ? [`<i>В бою карточки бы не было: ${clean(c.liveSkip, CAP.reason)}</i>`] : []),
+  ]
+}
 
 function verdictLine(c: LeadCard): string {
   if (c.verdict === 'fit') return `Подходит: ${clean(c.reason, CAP.reason)}`
@@ -344,6 +378,7 @@ function headLines(c: LeadCard): string[] {
     c.bidPriceRub > 0 ? `отклик ${formatRub(c.bidPriceRub)}` : 'цена отклика пока неизвестна'
   const facts = [c.score ? `🎯 <b>балл ${c.score.value}</b>` : null, `💰 ${budget}`, `🧾 ${fee}`]
   return [
+    ...testLines(c),
     ...(c.reminder ? [`<b>⏰ ${title}</b>`, '<i>Заявка ждёт решения</i>'] : [`<b>🔔 ${title}</b>`]),
     ...(c.city.trim() ? [`📍 ${clean(c.city, CAP.short)}`] : []),
     facts.filter(Boolean).join('  ·  '),
@@ -354,13 +389,21 @@ function headLines(c: LeadCard): string[] {
 const sinceText = (s: string) =>
   /^на\s+профи\.ру/i.test(s) ? s : `на Профи.ру с ${s.replace(/^с\s+/i, '')}`
 
-/** The client in one line (Boris, sample 3, 27.10.2026): name, since when, the phone, the reviews. */
+/** The client in one line (Boris, sample 3, 27.10.2026): name, the site's lines, since when, the phone, the reviews. */
 function clientLines(c: LeadCard): string[] {
   const info = c.clientInfo ?? null
   // The order page's name is the fuller one; the list may give a first name or none.
-  const name = info?.name?.trim() || c.clientName.trim()
+  const raw = info?.name?.trim() || c.clientName.trim()
+  // The profile name as the site wrote it; a name in Latin letters is shown as Sara calls him, «Александр (alexander)»
+  // (01.11.2026). A profession or a company stays as it is: Boris sees what the profile says, only the greeting is
+  // without a name.
+  const first = raw ? firstName(raw) : null
+  const name = first && !/^\p{Script=Cyrillic}/u.test(raw) ? `${first} (${raw})` : raw
   const parts = [`👤 <b>${name ? clean(name, CAP.short) : 'имя не указано'}</b>`]
   if (info) {
+    // The site's own lines first (Boris, 01.11.2026: «Это очень важный показатель»).
+    for (const s of info.summaries ?? [])
+      parts.push(`${colorMark(s.color_theme)} ${clean(s.description, CAP.short)}`)
     const since = info.on_profi_since?.trim()
     if (since) parts.push(clean(sinceText(since).replace(/^На /, 'на '), CAP.short))
     if (info.phone_verified) parts.push('номер подтверждён')
@@ -459,21 +502,46 @@ function whyBlocks(c: LeadCard): string[][] {
 
 /**
  * The series under the bid (Boris, 29.10.2026): what goes into the chat a minute or two after it, each message as its
- * own quote. Nothing when the bid has none.
+ * own quote, and the call offer last (Boris, 30.10.2026), its times shown as words: the code picks them when it sends.
+ * Nothing when the bid has none.
  */
 function followUpLines(c: LeadCard): string[] {
-  const series = c.draft?.followUps ?? []
-  if (series.length === 0) return []
+  const all = c.draft?.followUps ?? []
+  const series = all.filter((t) => !isCallOffer(t) && !isTelegramLine(t))
+  const call = all.find(isCallOffer)
+  const telegram = all.find(isTelegramLine)
+  if (all.length === 0) return []
   return [
-    '<b>✍️ Вдогонку</b>  ·  через 1-2 минуты после отклика',
-    ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
-    '<i>Уйдёт тем же нажатием, если клиент ещё не ответил</i>',
+    ...(series.length > 0
+      ? [
+          '<b>✍️ Вдогонку</b>  ·  уйдет сразу за откликом',
+          ...series.map((t) => `<blockquote>${clean(t, CAP.followUp)}</blockquote>`),
+        ]
+      : []),
+    ...(call
+      ? [
+          '<b>📞 Созвон</b>  ·  следом, через пару секунд',
+          `<blockquote>${clip(call, CAP.followUp)
+            .split(SLOTS_MARK)
+            .map(esc)
+            .join('<i>[три времени по рабочим часам]</i>')}</blockquote>`,
+        ]
+      : []),
+    ...(telegram
+      ? [
+          '<b>💬 Телеграм</b>  ·  последним',
+          `<blockquote>${clean(telegram, CAP.followUp)}</blockquote>`,
+        ]
+      : []),
+    `<i>Уйдет тем же нажатием, сразу за откликом${call ? '. Время созвона Сара подставит при отправке, по твоим рабочим часам' : ''}</i>`,
   ]
 }
 
 function draftLines(c: LeadCard): string[] {
   if (!c.draft) return [NO_DRAFT]
-  const price = c.draft.priceRub ? `  ·  услуга ${formatRub(c.draft.priceRub)}` : ''
+  const price = c.draft.priceRub
+    ? `  ·  услуга от ${formatRub(c.draft.priceRub)} до ${formatRub(priceRange(c.draft.priceRub, c.draft.priceToRub).to)}`
+    : ''
   return [
     `<b>✍️ Отклик</b>${price}`,
     `<blockquote>${clean(c.draft.text, CAP.draft)}</blockquote>`,
@@ -560,6 +628,8 @@ function closedWhenText(w: ClosedWhen): string {
  * says so instead, with how long it waited.
  */
 export function closedLeadCardText(c: LeadCard): string {
+  if (c.closedByBoris)
+    return `${[`<b>${TEXTS.closedByBorisCard}</b>`, clean(c.title, CAP.title)].join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
   const head = c.stale
     ? [
         `<b>${TEXTS.staleCard}</b>`,
@@ -579,6 +649,73 @@ const READING_PARTS = [
   ['risks', 'Риски'],
   ['job', 'Какую задачу решает для клиента'],
 ] as const
+
+/**
+ * The card of a bid, in short, in the very message Boris pressed (Boris, 03.11: «то же сообщение меняет оформление,
+ * становится короче, остаётся важная инфа»): the state, the order, the client and the range of the service, two links
+ * in words and no buttons. `sending` while the bid goes, `sent`, `found` (the bid was found on the order later),
+ * `unsure` (not known whether it went).
+ */
+export function foldedBidCard(o: {
+  state: 'sending' | 'sent' | 'found' | 'unsure'
+  title: string
+  clientName: string | null
+  orderId: string
+  at?: string | null
+  feeRub?: number | null
+  priceFromRub?: number | null
+  priceToRub?: number | null
+  /** The client's topic in the forum; none without one. */
+  chatUrl?: string | null
+  /** A line under the card (how the series went, why it did not). */
+  note?: string | null
+}): string {
+  const fee = o.feeRub && o.feeRub > 0 ? formatRub(o.feeRub) : null
+  const head =
+    o.state === 'sending'
+      ? '⏳ <b>Отправляю отклик</b>'
+      : o.state === 'unsure'
+        ? '⚠️ <b>Не знаю, ушёл ли отклик</b>'
+        : [
+            o.state === 'found'
+              ? '✅ <b>Отклик найден на Профи.ру</b>'
+              : '✅ <b>Отклик отправлен</b>',
+            o.at ? mskClock(o.at) : null,
+            fee,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+  const range = o.priceFromRub
+    ? (() => {
+        const r = priceRange(o.priceFromRub, o.priceToRub)
+        return `услуга от ${formatRub(r.from)} до ${formatRub(r.to)}`
+      })()
+    : null
+  const who = [o.clientName ? clean(o.clientName, CAP.title) : null, range]
+    .filter(Boolean)
+    .join(' · ')
+  const links =
+    o.state === 'sending'
+      ? null
+      : [
+          `<a href="${orderUrl(o.orderId)}">Заказ на Профи.ру</a>`,
+          o.chatUrl ? `<a href="${esc(o.chatUrl)}">Чат с клиентом</a>` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+  return [
+    head,
+    `<b>${clean(o.title, CAP.title)}</b>`,
+    who || null,
+    o.state === 'unsure'
+      ? esc('Площадка не ответила. Проверь заявку на Профи.ру, прежде чем откликаться вручную.')
+      : null,
+    links,
+    o.note ? esc(o.note) : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
 
 /** The order text in expandable quotes after the heading, in as many pieces as the messages need. */
 function addOrderText(text: string, room: { used(): number; flush(): void; add(b: string): void }) {
@@ -675,7 +812,7 @@ export function leadCardKeyboard(c: LeadCard) {
       [
         { text: TEXTS.analysisButton, callback_data: formatCallback(c.taskId, 'razbor') },
         { text: TEXTS.editButton, callback_data: formatCallback(c.taskId, 'edit') },
-        { text: 'Пропустить', callback_data: formatCallback(c.taskId, 'skip') },
+        { text: TEXTS.closeButton, callback_data: formatCallback(c.taskId, 'skip') },
       ],
     ],
   }

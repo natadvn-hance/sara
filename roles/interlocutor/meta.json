@@ -1,8 +1,8 @@
 {
   "name": "interlocutor",
-  "version": 7,
-  "model": "sonnet",
-  "fallbackModel": "opus",
+  "version": 14,
+  "model": "opus",
+  "fallbackModel": "sonnet",
   "priority": "P0",
   "timeoutMs": 120000
 }

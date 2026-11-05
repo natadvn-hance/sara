@@ -8,6 +8,7 @@ describe('the Analyst role reads the client line of the order page', () => {
   it('FR-LEAD-6: the role says what «Клиент на площадке» is, where to use it and that it stays out of the text', async () => {
     const text = await readFile(join(ROLE, 'role.md'), 'utf8')
     expect(text).toContain('Клиент на площадке')
+    expect(text).toContain('сводка самого Профи.ру')
     expect(text).toMatch(/risks/)
     expect(text).toMatch(/condition/)
     expect(text).toMatch(/Не пиши в text[^\n]*(отзыв|клиент на площадке)/i)

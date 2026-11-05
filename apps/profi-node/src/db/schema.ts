@@ -76,6 +76,8 @@ export const bidAttempt = node.table('bid_attempt', {
   orderId: text('order_id').notNull(),
   /** What the form said it would charge. */
   dueRub: integer('due_rub').notNull(),
+  /** The wallet right before the press: a retry knows the press went by the wallet down from it (null: older rows). */
+  walletRub: integer('wallet_rub'),
   pressedAt: ts('pressed_at').notNull(),
   result: jsonb('result'),
 })
@@ -94,6 +96,20 @@ export const messageAttempt = node.table('message_attempt', {
   pressedAt: ts('pressed_at').notNull(),
   result: jsonb('result'),
 })
+
+/**
+ * A chat whose client the site says has seen our bid (the list's «Клиент увидел отклик»): one profi.client_read a chat,
+ * also after a restart, since the list says so on every read from then on. No words of anyone; never purged.
+ */
+export const clientSawBid = node.table(
+  'client_saw_bid',
+  {
+    accountId: text('account_id').notNull(),
+    chatId: text('chat_id').notNull(),
+    seenAt: ts('seen_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.chatId] })],
+)
 
 /** A stop the node set for itself and keeps until a person clears it; never purged. */
 export const nodeFlag = node.table(

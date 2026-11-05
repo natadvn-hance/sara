@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { account, directionVersion, setting, settingHistory } from '../db/schema'
 import { getSetting } from '../settings/store'
+import { type Thresholds, thresholdsOf } from './threshold'
 
 /**
  * «Настройки» (M7 design 6.4). The pult changes money and card limits freely; a flag that takes Sara out of the
@@ -56,7 +57,7 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
   'cards.max_per_day': { title: 'Карточек заявок в день', edit: 'free', kind: 'count' },
   'screen.stops': {
     title: 'Отсев останавливает заявки',
-    hint: 'Выключен: отсев только отмечает заявки, карточки идут как раньше.',
+    hint: 'Выключен: отсев только отмечает заявки, карточки идут как раньше. Аккаунт, созданный в день заявки, отсекается всегда.',
     edit: 'free',
     kind: 'flag',
   },
@@ -96,6 +97,18 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'count',
   },
+  'conv.quiet_after_message_s': {
+    title: 'Ждать после сообщения клиента, сек',
+    hint: 'Сара отвечает, когда клиент молчит столько. Своё сообщение клиента ты видишь сразу, ждёт только черновик.',
+    edit: 'free',
+    kind: 'count',
+  },
+  'conv.quiet_after_typing_s': {
+    title: 'Ждать после «печатает», сек',
+    hint: 'Пока клиент печатает, Сара не отвечает.',
+    edit: 'free',
+    kind: 'count',
+  },
   'conv.night': {
     title: 'Ночь для клиентов',
     hint: 'По Москве: ночью клиентам уходят только срочные ответы.',
@@ -114,6 +127,38 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'count',
   },
+  'calls.offer': {
+    title: 'Предлагает созвон после отклика',
+    hint: 'Последнее сообщение серии: созвониться на полчаса, три времени на выбор.',
+    edit: 'free',
+    kind: 'flag',
+  },
+  'series.telegram': {
+    title: 'Telegram в конце серии',
+    hint: 'Последнее сообщение после отклика: «Если удобнее, пишите в тг @ник)». Пусто: не отправлять.',
+    edit: 'free',
+    kind: 'text',
+  },
+  'calls.work_hours': {
+    title: 'Рабочие часы для созвонов',
+    hint: 'По Москве. Выходные и время ближе двух часов не предлагаются.',
+    edit: 'locked',
+    kind: 'hours',
+  },
+  'calls.preferred': {
+    title: 'Любимое время для созвонов',
+    hint: 'По Москве, предлагается первым, если подходит.',
+    edit: 'locked',
+    kind: 'other',
+  },
+  'links.blocked': {
+    title: 'Ссылки, которые клиентам не даём',
+    hint: 'Сайты, которые не работают или не для показа. Сара их не покажет нигде. Добавляет разработчик по твоему слову.',
+    edit: 'locked',
+    kind: 'other',
+  },
+  'calls.slot_min': { title: 'Длина созвона, мин', edit: 'free', kind: 'count' },
+  'calls.min_ahead_min': { title: 'Созвон не раньше чем через, мин', edit: 'free', kind: 'count' },
 }
 
 const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
@@ -151,9 +196,24 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'reminder.decision_after_min',
       'cards.quiet_hours',
       'notify.push',
+      'conv.quiet_after_message_s',
+      'conv.quiet_after_typing_s',
       'conv.night',
       'conv.reminder_quiet',
       'secretary.turns_per_day',
+    ],
+  },
+  {
+    id: 'calls',
+    title: 'Созвоны и ссылки',
+    keys: [
+      'calls.offer',
+      'series.telegram',
+      'calls.work_hours',
+      'calls.preferred',
+      'calls.slot_min',
+      'calls.min_ahead_min',
+      'links.blocked',
     ],
   },
 ]
@@ -211,6 +271,7 @@ export async function settingsView(db: DbOrTx): Promise<SettingsView> {
     const r = v?.rules as
       | {
           threshold: number
+          kind_thresholds?: Partial<Thresholds>
           stop_factors: { text: string }[]
           axes: { title: string; weight: number }[]
         }
@@ -221,6 +282,7 @@ export async function settingsView(db: DbOrTx): Promise<SettingsView> {
       title: a.title,
       version: v.version,
       threshold: r.threshold,
+      thresholds: thresholdsOf(r),
       stops: r.stop_factors.map((s) => s.text),
       axes: r.axes.map((x) => ({ title: x.title, weight: x.weight })),
     })

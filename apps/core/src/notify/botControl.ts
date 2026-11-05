@@ -21,9 +21,13 @@ export function createBotControl(d: {
   apiRoot?: string
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   onMessage?(m: BorisMessage): Promise<BorisReply | null>
+  /** Boris's /test with the words after it (test orders, docs/ops/test-leads.md). */
+  onTest?(args: string): Promise<string>
   voiceDir?: string
   /** A new notice of the bell: the phone and the computer ring (Web Push). */
   onNotice?: (kind: NoticeKind) => void
+  /** The pult's address, for /pult. */
+  publicUrl?: string
 }): BotControl {
   let runtime: TelegramRuntime | null = null
   const current = (): TelegramRuntime => {
@@ -39,7 +43,9 @@ export function createBotControl(d: {
         db: d.db,
         onPress: d.onPress,
         onMessage: d.onMessage,
+        onTest: d.onTest,
         voiceDir: d.voiceDir,
+        publicUrl: d.publicUrl,
       })
       await runtime.start()
     },
@@ -55,12 +61,22 @@ export function createBotControl(d: {
       {
         sendLeadCard: (c, o) => current().notifier.sendLeadCard(c, o),
         closeLeadCard: (id, c) => current().notifier.closeLeadCard(id, c),
+        restoreLeadCard: async (id, c) => {
+          const restore = current().notifier.restoreLeadCard
+          if (!restore) throw new Error('no restore')
+          await restore.call(current().notifier, id, c)
+        },
         sendText: (t, o) => current().notifier.sendText(t, o),
         sendButtons: (t, rows, o) => current().notifier.sendButtons(t, rows, o),
-        editText: async (id, t, rows) => current().notifier.editText?.(id, t, rows),
+        editText: async (id, t, rows, o) => current().notifier.editText?.(id, t, rows, o),
         typing: async () => current().notifier.typing?.(),
         markDone: async (id, note) => current().notifier.markDone?.(id, note),
         closeTopic: async (place, outcome) => current().notifier.closeTopic?.(place, outcome),
+        topicLink: async (place) => (await current().notifier.topicLink?.(place)) ?? null,
+        setTopicStage: async (place, dot) => current().notifier.setTopicStage?.(place, dot),
+        topicPosts: async (place) => (await current().notifier.topicPosts?.(place)) ?? [],
+        pinPost: async (ref) => current().notifier.pinPost?.(ref),
+        forumOn: async () => (await current().notifier.forumOn?.()) ?? false,
       },
       d.db,
       d.onNotice,

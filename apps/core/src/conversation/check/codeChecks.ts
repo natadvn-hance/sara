@@ -1,5 +1,6 @@
+import { neuroSpeech, neuroSpeechReason } from '../../text/neuroSpeech'
 import type { CheckInput, CheckIssue } from '../types'
-import { caseIssues, maskCaseName } from './caseChecks'
+import { caseIssues, maskCaseName, voiceIssues } from './caseChecks'
 import {
   AI_NAME,
   AI_SELF_PATTERNS,
@@ -11,7 +12,7 @@ import {
   ROBOTIC_PHRASES,
 } from './phrases'
 
-const MAX_LENGTH = 600
+const MAX_LENGTH = 1200
 /** A client turn longer than this may not be answered with more than LENGTH_TIMES its length. */
 const SHORT_TURN = 40
 const LENGTH_TIMES = 4
@@ -359,6 +360,12 @@ function promiseIssues(text: string): CheckIssue[] {
 export const numberKeys = (s: string): Set<string> =>
   new Set(numbersIn(cutOut(s, true).rest).map((n) => n.key))
 
+/** «не X, а Y» and its kin (Boris, 01.11.2026): a rewrite is asked for; if it stays, Boris reads the draft with this reason. */
+function neuroIssues(text: string): CheckIssue[] {
+  const hit = neuroSpeech(text)
+  return hit ? [{ id: 'style.neuro', detail: neuroSpeechReason(hit) }] : []
+}
+
 /** The code checks of a reply (FR-CONV-4, M4 design 5.6): every problem found, each with a reason Boris can read. */
 export function checkReplyText(i: CheckInput): CheckIssue[] {
   const text = i.text?.trim() ?? ''
@@ -372,5 +379,7 @@ export function checkReplyText(i: CheckInput): CheckIssue[] {
     ...roboticIssues(i, text),
     ...promiseIssues(text),
     ...caseIssues(i, text, numberKeys),
+    ...voiceIssues(text),
+    ...neuroIssues(text),
   ]
 }

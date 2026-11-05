@@ -30,6 +30,18 @@ const quote = (s: string, max = 400) => {
 /** Words from outside (a client's, Boris's, the page's) may hold a long dash; Boris reads a short hyphen (NFR-UX-1). */
 const hyphenated = (s: string) => s.replace(/[\u2014\u2013]/g, '-')
 
+/** The text as Telegram HTML: <, > and & become entities. */
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/** The first sentence of a reason, for the one line Boris reads, and what is left of it for the fold. */
+const firstSentence = (r: string): [string, string] => {
+  const t = r.trim()
+  const m = /^(.+?[.!?])(\s+|$)/su.exec(t)
+  const first = (m?.[1] ?? t).replace(/[.\s]+$/, '')
+  const cut = first.length > 140 ? `${first.slice(0, 139)}…` : first
+  return [cut, m ? t.slice(m[0].length).trim() : '']
+}
+
 export type CardView = {
   name: string | null
   orderTitle: string | null
@@ -80,40 +92,82 @@ const REMINDER_STEP_RU = {
 } as const
 
 export const CONV_TEXTS = {
+  /** A client waits for Boris's answer (Boris, 31.10): in his topic, with the draft's buttons when there is a draft. */
+  owedReminder: (v: {
+    name: string | null
+    waited: string
+    words: string
+    draft: string | null
+    canAnswer: boolean
+  }) => {
+    const e = (x: string) => esc(hyphenated(x))
+    const words = v.words.trim()
+    return [
+      `⏰ <b>${e(v.name ?? 'Клиент')}</b> ждёт ответа ${v.waited}`,
+      words
+        ? `<blockquote>${e(words.length > 300 ? `${words.slice(0, 299)}…` : words)}</blockquote>`
+        : null,
+      v.draft
+        ? `<b>✍️ Ответ Сары:</b>\n<blockquote>${e(v.draft.trim())}</blockquote>`
+        : e(
+            v.canAnswer
+              ? 'Ответ ждёт твоего «Отправить».'
+              : 'Ответа Сары нет: напиши клиенту сам или нажми «Беру сам».',
+          ),
+    ]
+      .filter(Boolean)
+      .join('\n')
+  },
+
+  /** One list of the clients who wait, to the general topic (daily, and after a deploy). */
+  owedSummary: (
+    list: { name: string | null; order: string | null; waited: string; link: string | null }[],
+  ) => {
+    const e = (x: string) => esc(hyphenated(x))
+    const rows = list.map((c) => {
+      const who = e(c.name ?? 'Клиент')
+      const head = c.link ? `<a href="${c.link}">${who}</a>` : who
+      return `• ${head}${c.order ? `, заказ «${e(c.order)}»` : ''}: ждёт ${c.waited}`
+    })
+    return [`⏰ <b>Ждут твоего ответа: ${list.length}</b>`, ...rows].join('\n')
+  },
+
   authorUnclear: (chatId: string) =>
     `⚠️ В чате заказа ${chatId} не понимаю, кто написал последние сообщения: клиент или наша сторона. Пока ничего не отвечаю, посмотри сам.`,
 
-  /** The card of a turn (M4 design 5.12). */
-  card(v: CardView): string {
-    const head = v.decision === 'call_boris' ? `🔔 ${who(v)}: ${wouldRu(v)}` : `💬 ${who(v)}`
-    const lines = [head, `Клиент: ${quote(v.clientWords)}`, '']
+  /**
+   * The card of a turn (M4 design 5.12) in Telegram HTML: a short head, the draft as a quote under «Ответ Сары», one
+   * human line of why, and the rest (tone, case, what the checks found) in a quote that folds. The client's words are
+   * not repeated: they came a moment before as their own message (Boris, 31.10). In the client's topic the order is
+   * in the topic's name, so the head is only the name.
+   */
+  card(v: CardView, o: { inTopic?: boolean } = {}): string {
+    const call = v.decision === 'call_boris'
+    const e = (x: string) => esc(hyphenated(x))
+    const head = o.inTopic ? e(v.name ?? 'Клиент') : e(who(v))
+    const lines = [call ? `🔔 <b>${head}</b>: ${e(wouldRu(v))}` : `💬 <b>${head}</b>`]
     if (v.text) {
-      lines.push(
-        v.callsBoris ? 'Черновик для тебя:' : v.shadow ? 'Ответила бы так:' : 'Черновик ответа:',
-        v.text.trim(),
-        '',
-      )
-      if (v.callsBoris && v.issues.length)
-        lines.push(`В черновике не так: ${v.issues.join('; ')}.`, '')
-    } else
-      lines.push(
-        v.decision === 'call_boris' ? 'Сама не отвечаю, это к тебе.' : 'Ответа не написала.',
-        '',
-      )
-    const meta = [
-      v.decision === 'call_boris'
-        ? null
-        : `${v.shadow ? 'Сама бы' : 'Почему черновик'}: ${wouldRu(v)}.`,
-      v.tone ? `Тон: ${TONE_RU[v.tone]}.` : null,
-    ].filter(Boolean)
-    if (meta.length) lines.push(meta.join(' '))
-    if (v.caseUsed) lines.push(caseLine(v.caseUsed))
-    lines.push(
-      `Опора: ${v.factIds.length ? v.factIds.join(', ') : 'нет записей разума'}. Образцов: ${v.examples}.`,
-    )
+      const label = v.callsBoris
+        ? 'Черновик для тебя:'
+        : v.shadow
+          ? 'Ответила бы так:'
+          : '✍️ Ответ Сары:'
+      lines.push('', `<b>${label}</b>`, `<blockquote>${e(v.text.trim())}</blockquote>`)
+    } else lines.push('', e(call ? 'Сама не отвечаю, это к тебе.' : 'Ответа не написала.'))
+    const more: string[] = []
+    if (!call) {
+      const [short, rest] = firstSentence(wouldRu(v))
+      lines.push(`${v.shadow ? 'Сама бы' : 'Почему черновик'}: ${e(short)}.`)
+      if (rest) more.push(rest)
+    }
+    if (v.callsBoris && v.text && v.issues.length)
+      more.push(`В черновике не так: ${v.issues.join('; ')}.`)
+    if (v.tone && v.tone !== 'neutral') more.push(`Тон: ${TONE_RU[v.tone]}.`)
+    if (v.caseUsed) more.push(caseLine(v.caseUsed))
+    if (more.length) lines.push(`<blockquote expandable>${e(more.join('\n'))}</blockquote>`)
     if (v.shadow) lines.push('Режим тени: клиенту ничего не ушло.')
     // A draft that failed the dash check is still shown to Boris, with a hyphen (NFR-UX-1).
-    return hyphenated(lines.join('\n'))
+    return lines.join('\n').replace(/(?<!\.)\.\.(?!\.)/g, '.')
   },
 
   /** What really went to the client, added to the shadow card. */

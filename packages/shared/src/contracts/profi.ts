@@ -39,6 +39,8 @@ export const SubmitBidInput = z.object({
   text: z.string().min(1),
   /** The «Стоимость услуги» field; null or absent leaves it empty (M2 design 4). */
   price_rub: z.number().int().positive().nullable().optional(),
+  /** The «До» of the range; left out, the node puts half again over «от». */
+  price_to_rub: z.number().int().positive().nullable().optional(),
   /** The most the bid may cost: the fee on the card Boris pressed. The node presses nothing when the site asks more. */
   max_fee_rub: z.number().int().nonnegative(),
   /** The node never presses after this moment: the core has stopped waiting for the answer by then. */
@@ -98,8 +100,21 @@ export const GetOrderInput = z.object({
   order_id: z.string().min(1),
 })
 /**
+ * What the site itself says of the client for Profi Pro (Boris, 01.11.2026: «Это очень важный показатель»), in the
+ * site's words, as «Договаривается меньше, чем в 20% заказов».
+ */
+export const ClientSummary = z.object({
+  description: z.string(),
+  /** The site's colour of it: RED, GREEN... */
+  color_theme: z.string().nullable(),
+  /** The percent in its words, when they have one. */
+  percent: z.number().int().min(0).max(100).nullable(),
+})
+export type ClientSummary = z.infer<typeof ClientSummary>
+
+/**
  * What the order page says about the client (the backoffice answer getKlientInfo): shown on the card and read by
- * the Scorer for the client's quality. Every part may be missing on a page that does not show it.
+ * the Analyst for the client's quality. Every part may be missing on a page that does not show it.
  */
 export const ClientInfo = z.object({
   name: z.string().nullable(),
@@ -112,6 +127,8 @@ export const ClientInfo = z.object({
     .nullable(),
   /** Short tags of those reviews, newest first («Перестала отвечать»). */
   review_tags: z.array(z.string()).max(10),
+  /** The site's own lines about the client; absent on an order read before them or without Profi Pro. */
+  summaries: z.array(ClientSummary).max(10).optional(),
 })
 export type ClientInfo = z.infer<typeof ClientInfo>
 
@@ -174,6 +191,13 @@ export const SendMessageInput = z.object({
   chat_id: z.string().min(1),
   text: z.string().min(1).max(4000),
   expect_last_message_id: z.string().min(1).nullable(),
+  /**
+   * Messages of our own side may stand after the one the core saw (the series after a bid: the site's line about the
+   * bid comes after the stored chat was read, 01.11.2026): only a word of the client or of an unknown side is a change.
+   */
+  after_own: z.boolean().optional(),
+  /** Type at once, not at a person's pace: the series follows a bid in seconds (Boris, 31.10.2026). */
+  quick: z.boolean().optional(),
   idempotency_key: z.string().min(1),
   permit: z.string().min(1),
 })
@@ -232,6 +256,9 @@ export const PROFI_EVENT_PAYLOADS = {
   'profi.client_read': z
     .object({
       chat_id: z.string().min(1),
+      /** The order of the chat: without it the core would make a chat it does not know an old one, with no order. */
+      order_id: z.string().min(1).nullable().optional(),
+      /** Null: the site says only that the client saw the bid, not up to which message. */
       platform_message_id: z.string().min(1).nullable(),
       at: z.iso.datetime(),
     })

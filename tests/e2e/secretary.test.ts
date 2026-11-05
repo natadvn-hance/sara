@@ -2,11 +2,12 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
+import { isTestOrder } from '@sara/shared'
 import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { event, modelCall, outbox, question, task } from '../../apps/core/src/db/schema'
+import { event, lead, modelCall, outbox, question, task } from '../../apps/core/src/db/schema'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { askWhy } from '../../apps/core/src/learning/questions'
 import { PULT_TEXTS } from '../../apps/core/src/pult/routes'
@@ -229,6 +230,51 @@ describe('the Secretary in the bot', () => {
     expect((await turns())[0]?.tools[0]?.text).toContain('Деньги уйдут только по его нажатию')
     tg.pushPress(111, `t:${taskId}:bid`)
     await until(() => fake.bids.length === 1)
+  })
+
+  it('FR-LEAD-9: «подкинь тестовую заявку» starts test orders through the bot’s own function, «сотри тестовые» erases only them', async () => {
+    const live = orderId()
+    await fake.emitOrder({ order_id: live })
+    await until(async () => (await db.select().from(lead)).length === 1)
+    byRole.secretary = {
+      calls: [
+        { name: 'start_test_leads', arguments: { scenario: 'price', count: 2, invented: true } },
+      ],
+      answer: 'Подкинула две тестовые заявки.',
+    }
+    await boris('подкинь две тестовые заявки, клиент просит цену')
+    const ids = async () => (await db.select({ id: lead.id }).from(lead)).map((r) => r.id)
+    await until(async () => (await ids()).filter(isTestOrder).length === 2, 20000)
+    const started = (await turns())[0]?.tools[0]
+    expect(started?.isError).toBe(false)
+    expect(started?.text.match(/Подкинула тестовую заявку/g)).toHaveLength(2)
+    expect(started?.text).toContain('клиент: просит цену')
+    expect(started?.text).toContain('выдуманная')
+    byRole.secretary = {
+      calls: [{ name: 'clear_test_leads' }],
+      answer: 'Стёрла тестовые.',
+    }
+    await boris('сотри тестовые')
+    const cleared = (await turns())[1]?.tools[0]
+    expect(cleared?.text).toContain('Стёрла тестовых заявок: 2')
+    expect(await ids()).toEqual([live])
+    // None of it reached the node or the money: nothing was bid and nothing sent to a client.
+    expect(fake.bids).toHaveLength(0)
+    expect(await db.select().from(outbox)).toHaveLength(0)
+  }, 60000)
+
+  it('FR-LEAD-9: the tools refuse a scenario that does not exist and more than five orders', async () => {
+    byRole.secretary = {
+      calls: [
+        { name: 'start_test_leads', arguments: { scenario: 'мошенник' } },
+        { name: 'start_test_leads', arguments: { count: 6 } },
+      ],
+      answer: 'Не вышло.',
+    }
+    await boris('подкинь тестовые')
+    const [a, b] = (await turns())[0]?.tools ?? []
+    expect([a?.isError, b?.isError]).toEqual([true, true])
+    expect((await db.select().from(lead)).filter((r) => isTestOrder(r.id))).toEqual([])
   })
 
   it('FR-NOTIF-4: «поставь на паузу» stops the bids at once; turning them on again is refused', async () => {

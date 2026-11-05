@@ -75,6 +75,31 @@ describe('scorer', () => {
     expect(decide(RULES_V1, scorerAnswer(56)).decision).toBe('show')
   })
 
+  it('FR-LEAD-3: each kind of order has its own threshold: 52 shows marketing at 40 and drops a site at 55', () => {
+    const rules = {
+      ...RULES_V1,
+      threshold: 50,
+      kind_thresholds: { marketing: 40, sites: 55, other: 50 },
+    }
+    expect(decide(rules, scorerAnswer(52), 'Маркетолог').decision).toBe('show')
+    expect(decide(rules, scorerAnswer(52), 'Создание сайтов').decision).toBe('drop')
+    expect(decide(rules, scorerAnswer(52), 'Авитолог').decision).toBe('show')
+    expect(decide(rules, scorerAnswer(49), 'Авитолог').decision).toBe('drop')
+    // Without kinds in the rules the plain threshold is everyone's, as before.
+    expect(decide(RULES_V1, scorerAnswer(55), 'Маркетолог').decision).toBe('drop')
+  })
+
+  it('FR-LEAD-3: the Scorer sees the threshold of the order’s own kind', async () => {
+    const rules = {
+      ...RULES_V1,
+      threshold: 50,
+      kind_thresholds: { marketing: 40, sites: 55, other: 50 },
+    }
+    const o = { ...(await order()), category: 'Создание сайтов' }
+    expect(scorerInput(o, rules)).toContain('Порог: 55')
+    expect(scorerInput({ ...o, category: 'Маркетолог' }, rules)).toContain('Порог: 40')
+  })
+
   it('FR-LEAD-3: a borderline haiku score is redone on sonnet and sonnet decides', async () => {
     const gw = await gateway({
       'scorer@haiku': scorerAnswer(60),

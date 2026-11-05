@@ -93,6 +93,7 @@ describe('M4 contracts', () => {
       'urgent',
       'why',
       'case',
+      'sites',
       'text',
       'fact_ids',
       'example_ids',
@@ -278,6 +279,15 @@ describe('M4 contracts', () => {
         text: 'x',
       }).success,
     ).toBe(false)
+    // With the order of the chat, and without it as the fake site sends it.
+    expect(
+      PROFI_EVENT_PAYLOADS['profi.client_read'].safeParse({
+        chat_id: 'c',
+        order_id: 'c',
+        platform_message_id: null,
+        at: ref.sent_at,
+      }).success,
+    ).toBe(true)
   })
 
   it('FR-CONV-6: sending names the last message the core saw and the node can refuse a changed chat', () => {
@@ -299,8 +309,8 @@ describe('M4 contracts', () => {
     expect(SETTINGS['pipeline.conversations'].default).toBe(false)
     expect(SETTINGS['conv.v1_writes'].default).toBe(true)
     expect(SETTINGS['conv.autopilot'].default).toBe(false)
-    expect(SETTINGS['conv.quiet_after_message_s'].default).toBe(45)
-    expect(SETTINGS['conv.quiet_after_typing_s'].default).toBe(20)
+    expect(SETTINGS['conv.quiet_after_message_s'].default).toBe(15)
+    expect(SETTINGS['conv.quiet_after_typing_s'].default).toBe(10)
     expect(SETTINGS['conv.max_wait_s'].default).toBe(600)
     expect(SETTINGS['conv.night'].default).toEqual({ from: 23, to: 8 })
     expect(SETTINGS['conv.reminder_quiet'].default).toEqual({ from: 23, to: 9 })
@@ -352,6 +362,9 @@ describe('M4 contracts', () => {
       'conv.boris_wrote',
       'conv.compared',
       'conv.day_summary',
+      'conv.owed_reminded',
+      'conv.topic_restored',
+      'meeting.read',
       'mind.indexed',
       'mind.proposed',
       'history.exported',

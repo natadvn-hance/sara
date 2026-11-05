@@ -1,10 +1,46 @@
+import { formalName } from './russianNames'
+
 /** What Profi.ru shows instead of a name while it hides one. */
 const PLACEHOLDER = /^(клиент|заказчик|пользовател|имя|аноним|скры)/iu
 
-/** The leading letters of the name («Анна(Юля)» gives «Анна»), so only letters and hyphens ever reach a pattern. */
+/**
+ * The name Sara calls a client by, from what his profile says (Boris, 01.11.2026): the first word of it as a formal
+ * Russian first name, «alexander» as «Александр», «Таня» as «Татьяна». A profession («Психотерапевт»), a company
+ * («ООО Ромашка»), a nick, a stand-in of the site or a name Sara does not know gives null: the greeting then goes
+ * without a name, «Добрый день!». Only letters and hyphens ever reach a pattern.
+ */
 export function firstName(clientName: string): string | null {
   const word = /^\p{L}[\p{L}-]*/u.exec(clientName.trim())?.[0] ?? ''
-  return word && !PLACEHOLDER.test(word) ? word : null
+  if (!word || PLACEHOLDER.test(word)) return null
+  const parts = word.split('-').filter(Boolean)
+  const formal = parts.map(formalName)
+  return formal.length > 0 && formal.every((p): p is string => p !== null) ? formal.join('-') : null
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * The name in a reply as Sara calls it (Boris, 01.11.2026): the model writes the label and the gateway puts back the
+ * name the site gave, «alexander» or «Психотерапевт». Each such name becomes its formal first name ahead of the text
+ * («Александр»); a name that is none (a profession, a nick) is dropped from the greeting, «Психотерапевт, добрый
+ * день!» becoming «Добрый день!». A name that already reads right stays.
+ */
+export function addressName(text: string, names: string[]): string {
+  let out = text
+  for (const raw of names) {
+    const word = /^\p{L}[\p{L}-]*/u.exec(raw.trim())?.[0]
+    if (!word) continue
+    const formal = firstName(raw)
+    if (formal === word) continue
+    const re = new RegExp(`(?<![\\p{L}-])${escapeRe(word)}(?![\\p{L}-])`, 'giu')
+    if (formal) out = out.replace(re, formal)
+    else
+      out = out.replace(
+        new RegExp(`(^|\\n)(\\s*)${escapeRe(word)}\\s*,\\s*(\\p{L})`, 'giu'),
+        (_m, nl: string, sp: string, c: string) => `${nl}${sp}${c.toUpperCase()}`,
+      )
+  }
+  return out
 }
 
 /** «ИП», «ООО»: a company form in capitals is no part of a person's name, and hiding it would mangle the text. */

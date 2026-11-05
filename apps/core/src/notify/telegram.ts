@@ -9,6 +9,7 @@ import { appendEvent } from '../journal/journal'
 import { quietNow } from '../leads/cardFlow'
 import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { bindChat, boundChat, boundUser } from './binding'
+import { COMMANDS, type CommandReply } from './botCommands'
 import { closedLeadCardText, leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
 import {
   bindForum,
@@ -22,12 +23,15 @@ import {
   markTopic,
   postOf,
   postRef,
+  renameTopic,
   saveTopic,
   topicByKey,
   topicByThread,
   topicIntro,
   topicKey,
+  topicPostRefs,
   unbindForum,
+  withoutDot,
 } from './forum'
 import type { Notifier, Place } from './notifier'
 
@@ -91,8 +95,12 @@ export function createTelegramRuntime(d: {
   onPress(p: { taskId: string; action: TaskAction }): Promise<string>
   /** Boris's text or voice (saved to a file first); the answer goes back to him (null: it comes on its own later). */
   onMessage?(m: BorisMessage): Promise<BorisReply | null>
+  /** /test with the words after it: test orders into the live Sara (docs/ops/test-leads.md). */
+  onTest?(args: string): Promise<string>
   /** Where voice messages are saved while they are recognized (default: the system temp folder). */
   voiceDir?: string
+  /** The pult's address, for /pult and the commands that point at it. */
+  publicUrl?: string
 }): TelegramRuntime {
   const bot = new Bot(d.token, d.apiRoot ? { client: { apiRoot: d.apiRoot } } : undefined)
   // Every text leaves through here (messages, replies, button answers), so a dash in it becomes a short hyphen once.
@@ -225,6 +233,62 @@ export function createTelegramRuntime(d: {
     await ctx.reply(TEXTS.forumOff)
     if (ctx.chat.type !== 'private') await toOwnChat(TEXTS.forumOff)
   })
+
+  /**
+   * A command's answer. A page opens as the Mini App in Boris's chat (Telegram takes only https there) and as a link in
+   * a group; should Telegram refuse the button, the address goes as text.
+   */
+  async function answerCommand(ctx: Context, r: CommandReply): Promise<void> {
+    if (typeof r === 'string') return void (await ctx.reply(r))
+    const { text, url } = r.open
+    const app = ctx.chat?.type === 'private' && url.startsWith('https://')
+    await ctx
+      .reply(r.text, {
+        reply_markup: { inline_keyboard: [[app ? { text, web_app: { url } } : { text, url }]] },
+      })
+      .catch(async (e: unknown) => {
+        console.error('command button refused', short(e))
+        await ctx.reply(`${r.text}\n${url}`, { link_preview_options: { is_disabled: true } })
+      })
+  }
+
+  // The menu's commands (Boris, 30.10.2026); the forum's two above need Telegram itself.
+  for (const c of COMMANDS) {
+    const run = c.run
+    if (!run) continue
+    bot.command(c.name, async (ctx) => {
+      let r: CommandReply
+      try {
+        r = await run({
+          db: d.db,
+          publicUrl: d.publicUrl ?? null,
+          args: ctx.match ?? '',
+          test: d.onTest,
+        })
+      } catch (e) {
+        console.error(`/${c.name} failed`, short(e))
+        r = TEXTS.commandFailed
+      }
+      await answerCommand(ctx, r)
+    })
+  }
+
+  /** The list of commands under the menu button, in Boris's chat and in his forum; a refusal is only logged. */
+  async function publishMenu(): Promise<void> {
+    const log = (what: string) => (e: unknown) => console.error(what, short(e))
+    await bot.api
+      .setMyCommands(COMMANDS.map((c) => ({ command: c.name, description: c.description })))
+      .catch(log('commands not set'))
+    await bot.api
+      .setChatMenuButton({ menu_button: { type: 'commands' } })
+      .catch(log('menu button not set'))
+    // A button set for his chat alone (the Mini App once) would hide the list: his chat gets the list too.
+    const own = await boundChat(d.db)
+    if (own !== null)
+      await bot.api
+        .setChatMenuButton({ chat_id: own, menu_button: { type: 'commands' } })
+        .catch(log('menu button of the chat not set'))
+  }
 
   bot.on('my_chat_member', async (ctx) => {
     const f = await forumOf(d.db)
@@ -413,9 +477,8 @@ export function createTelegramRuntime(d: {
         conversationId: k.conversationId,
         name,
       })
-      const m = await bot.api.sendMessage(chatId, intro, {
+      const m = await sendHtml(chatId, intro, {
         message_thread_id: thread,
-        link_preview_options: { is_disabled: true },
         disable_notification: true,
       })
       await postRef(d.db, chatId, m.message_id, thread)
@@ -476,9 +539,21 @@ export function createTelegramRuntime(d: {
    */
   async function post(
     place: Place | undefined,
-    send: (to: number, where: { message_thread_id?: number }) => Promise<Message>,
+    send0: (to: number, where: { message_thread_id?: number }) => Promise<Message>,
   ): Promise<number> {
     const where = (s: Spot) => (s.thread === undefined ? {} : { message_thread_id: s.thread })
+    // A flood limit is waited out (Telegram says for how long), a few times; any other refusal goes on as it did.
+    const send: typeof send0 = async (to, w) => {
+      for (let tries = 0; ; tries++) {
+        try {
+          return await send0(to, w)
+        } catch (err) {
+          const wait = err instanceof GrammyError ? err.parameters?.retry_after : undefined
+          if (!wait || tries >= 3) throw err
+          await new Promise((r) => setTimeout(r, (wait + 1) * 1000))
+        }
+      }
+    }
     try {
       let s = await spot(place)
       if (!s.forum) return (await send(s.to, {})).message_id
@@ -551,6 +626,7 @@ export function createTelegramRuntime(d: {
     async start() {
       await bot.init()
       lastError = null
+      await publishMenu()
       await new Promise<void>((ready, fail) => {
         // Polling errors must never become an unhandled rejection: that would stop the whole core.
         running = bot.start({ onStart: () => ready() }).catch(async (err) => {
@@ -589,11 +665,24 @@ export function createTelegramRuntime(d: {
         )
         return { messageId }
       },
+      async restoreLeadCard(messageId, c) {
+        const at = await locate(messageId)
+        if (!at) throw new Error('card unknown')
+        await bot.api
+          .editMessageText(at.to, at.id, leadCardText(c), {
+            parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
+            reply_markup: leadCardKeyboard(c),
+          })
+          .catch((e: unknown) => {
+            if (!String((e as Error).message).includes('message is not modified')) throw e
+          })
+      },
       async closeLeadCard(messageId, c) {
         await closeHtml(messageId, closedLeadCardText(c))
       },
       async sendText(text, o) {
-        const silent = await silentNow(o?.loud)
+        const silent = o?.quiet || (await silentNow(o?.loud))
         const extra: Omit<SendOptions, 'parse_mode'> = silent ? { disable_notification: true } : {}
         const messageId = await post(o?.place, (to, where) =>
           o?.html
@@ -604,12 +693,14 @@ export function createTelegramRuntime(d: {
       },
       async sendButtons(text, rows, o) {
         const silent = await silentNow(o?.loud)
+        const extra: Omit<SendOptions, 'parse_mode'> = {
+          ...(silent && { disable_notification: true }),
+          reply_markup: { inline_keyboard: keyboard(rows) },
+        }
         const messageId = await post(o?.place, (to, where) =>
-          bot.api.sendMessage(to, text, {
-            ...where,
-            ...(silent && { disable_notification: true }),
-            reply_markup: { inline_keyboard: keyboard(rows) },
-          }),
+          o?.html
+            ? sendHtml(to, text, { ...where, ...extra })
+            : bot.api.sendMessage(to, text, { ...where, ...extra }),
         )
         return { messageId }
       },
@@ -626,17 +717,73 @@ export function createTelegramRuntime(d: {
           })
           .catch((e: unknown) => console.error('card not marked', short(e)))
       },
-      async editText(ref, text, rows) {
+      async editText(ref, text, rows, o) {
         const at = await locate(ref)
         if (!at) return void console.error('message not edited: unknown', ref)
         await bot.api
           .editMessageText(at.to, at.id, text, {
+            ...(o?.html && { parse_mode: 'HTML', link_preview_options: { is_disabled: true } }),
             ...(rows && { reply_markup: { inline_keyboard: keyboard(rows) } }),
           })
           .catch((e: unknown) => {
             // The same text again is not an error worth a retry.
             if (!String((e as Error).message).includes('message is not modified')) throw e
           })
+      },
+      async setTopicStage(place, dot) {
+        try {
+          const f = await forumOf(d.db)
+          const k = f ? await topicKey(d.db, place) : null
+          const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+          if (!f || !t) return
+          const name = `${dot} ${withoutDot(t.name)}`.slice(0, 128 - CLOSED_MARK.length)
+          if (name === t.name) return
+          try {
+            await bot.api.editForumTopic(f.chatId, t.threadId, {
+              name: t.closedAt ? `${name}${CLOSED_MARK}` : name,
+            })
+          } catch (e) {
+            // Deleted by hand: the topic is forgotten, so the next message makes a new one (and its history is shown again).
+            if (TOPIC_GONE.test(short(e))) return void (await dropTopic(d.db, f.chatId, t.key))
+            // Telegram refused: the name we keep stays the one Telegram has. The same name already is no refusal.
+            if (!/TOPIC_NOT_MODIFIED|not modified/i.test(short(e)))
+              return logTopic('topic not renamed')(e)
+          }
+          await renameTopic(d.db, f.chatId, t.key, name)
+        } catch (e) {
+          console.error('topic stage', short(e))
+        }
+      },
+      async topicPosts(place) {
+        const f = await forumOf(d.db).catch(() => null)
+        const k = f ? await topicKey(d.db, place) : null
+        const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+        if (!f || !t) return []
+        return topicPostRefs(d.db, f.chatId, t.threadId)
+      },
+      async pinPost(ref) {
+        try {
+          const at = await locate(ref)
+          if (at) await bot.api.pinChatMessage(at.to, at.id, { disable_notification: true })
+        } catch {
+          // No right to pin (or the post is gone): the card is there all the same, nothing to say about it.
+        }
+      },
+      async forumOn() {
+        return (await forumOf(d.db).catch(() => null)) !== null
+      },
+      async topicLink(place) {
+        try {
+          const f = await forumOf(d.db)
+          const k = f ? await topicKey(d.db, place) : null
+          const t = f && k ? await topicByKey(d.db, f.chatId, k.key) : null
+          return f && t
+            ? `https://t.me/c/${String(f.chatId).replace(/^-100/, '')}/${t.threadId}`
+            : null
+        } catch (e) {
+          console.error('topic link', short(e))
+          return null
+        }
       },
       async closeTopic(place, outcome) {
         try {

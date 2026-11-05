@@ -89,3 +89,49 @@ export async function transition(
     })
   })
 }
+
+/** The shortest chain of allowed steps from one stage to another (the stages it passes included), or null. */
+export function pathBetween(from: DealStage, to: DealStage): DealStage[] | null {
+  if (from === to) return []
+  const prev = new Map<DealStage, DealStage>()
+  const queue: DealStage[] = [from]
+  while (queue.length > 0) {
+    const at = queue.shift() as DealStage
+    for (const next of ALLOWED_TRANSITIONS[at]) {
+      if (next === from || prev.has(next)) continue
+      prev.set(next, at)
+      if (next === to) {
+        const path: DealStage[] = [to]
+        for (let k = at; k !== from; k = prev.get(k) as DealStage) path.unshift(k)
+        return path
+      }
+      queue.push(next)
+    }
+  }
+  return null
+}
+
+/**
+ * Moves a deal to a stage along the allowed steps, each one journaled (Boris, 01.11: the stage moves by itself, on
+ * the events, and every reader of it, the topic, the sheet, the pult and the analytics, sees the same one). A deal
+ * already there, or further on than any way back to it, stays; returns whether it moved.
+ */
+export async function advanceTo(
+  db: Db,
+  i: { dealId: string; to: DealStage; actor: Actor; reason: string | null; correlationId: string },
+): Promise<boolean> {
+  const [row] = await db.select({ stage: deal.stage }).from(deal).where(eq(deal.id, i.dealId))
+  if (!row) return false
+  const path = pathBetween(row.stage as DealStage, i.to)
+  if (!path || path.length === 0) return false
+  for (const to of path) {
+    try {
+      await transition(db, { ...i, to })
+    } catch (e) {
+      // Moved by someone else meanwhile: what is there is right.
+      if (e instanceof TransitionError) return false
+      throw e
+    }
+  }
+  return true
+}

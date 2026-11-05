@@ -63,7 +63,7 @@ describe('removeEmoji (FR-LEAD-6, rule 8)', () => {
   })
 
   it('FR-LEAD-6: an emoji between two letters or digits leaves one space, not a glued word', () => {
-    expect(removeEmoji('Ждём🤝вас')).toBe('Ждём вас')
+    expect(removeEmoji('Ждем🤝вас')).toBe('Ждем вас')
     expect(removeEmoji('Сайт👍быстро, 5🙏6 штук')).toBe('Сайт быстро, 5 6 штук')
     expect(removeEmoji('Спасибо 🤝🙏 вам')).toBe('Спасибо  вам')
   })
@@ -84,9 +84,9 @@ describe('removeEmoji (FR-LEAD-6, rule 8)', () => {
   })
 
   it('FR-LEAD-6: in a bid none of that shows: no «..», no «()», no glued words', () => {
-    const text = 'Ирина, добрый день!\n\nСпасибо (🤝). Ждём🤝вас. 🙏.\n\nКогда запуск?'
+    const text = 'Ирина, добрый день!\n\nСпасибо (🤝). Ждем🤝вас. 🙏.\n\nКогда запуск?'
     expect(bidTextAt(text, 'Ирина', M_1200)).toBe(
-      'Ирина, добрый день!\n\nСпасибо. Ждём вас\n\nКогда запуск?',
+      'Ирина, добрый день!\n\nСпасибо. Ждем вас\n\nКогда запуск?',
     )
   })
 
@@ -219,8 +219,8 @@ describe('bidTextAt: the text of a bid at the moment it is sent (FR-LEAD-6, rule
   })
 
   it('FR-LEAD-6: a word that only begins like a greeting is not one', () => {
-    expect(bidTextAt('Приветливый персонал решает всё.\n\nКогда запуск?', 'Ирина', M_1800)).toBe(
-      'Ирина, добрый вечер!\n\nПриветливый персонал решает всё\n\nКогда запуск?',
+    expect(bidTextAt('Приветливый персонал решает все.\n\nКогда запуск?', 'Ирина', M_1800)).toBe(
+      'Ирина, добрый вечер!\n\nПриветливый персонал решает все\n\nКогда запуск?',
     )
   })
 
@@ -248,8 +248,8 @@ describe('bidTextAt: the text of a bid at the moment it is sent (FR-LEAD-6, rule
   })
 
   it('FR-LEAD-6: the paragraphs are separated by one empty line', () => {
-    expect(bidTextAt('Ирина, добрый день!\nТекст\n\n\n\nЕщё', 'Ирина', M_1200)).toBe(
-      'Ирина, добрый день!\n\nТекст\n\nЕщё',
+    expect(bidTextAt('Ирина, добрый день!\nТекст\n\n\n\nЕще', 'Ирина', M_1200)).toBe(
+      'Ирина, добрый день!\n\nТекст\n\nЕще',
     )
   })
 

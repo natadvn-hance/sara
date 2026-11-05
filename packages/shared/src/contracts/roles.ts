@@ -78,6 +78,8 @@ export const AnalystOutput = z.object({
   condition: z.string().max(300),
   text: z.string().min(1).max(2000),
   price_rub: z.number().int().nonnegative().nullable(),
+  /** The top of the range, «до»; absent or not above «от»: the program puts half again over «от». */
+  price_to_rub: z.number().int().nonnegative().nullable().optional(),
   /**
    * The ids of the direction's cases that fit this order (FR-LEAD-6); the program puts in the links and checks the
    * ids against the library. Last in the schema and not required: a direction without cases never sees the field.
@@ -93,6 +95,11 @@ export const AnalystOutput = z.object({
     .array(z.object({ text: z.string().min(1).max(300), case_id: z.string().nullable() }))
     .max(2)
     .optional(),
+  /**
+   * For an order of a site (Boris, 30.10.2026): the ids of 3-4 sites of Hance from the input that fit the task, which
+   * the series shows by their links. Not required: no other order sees the sites.
+   */
+  site_ids: z.array(z.string()).max(4).optional(),
 })
 export type AnalystOutput = z.infer<typeof AnalystOutput>
 

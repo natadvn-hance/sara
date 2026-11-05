@@ -1,10 +1,11 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { type CaseChoice, newEventId, type Topic } from '@sara/shared'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { type CaseChoice, isTestOrder, newEventId, type Topic } from '@sara/shared'
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { account, chatMessage, convTurn, mindGap } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
+import { workHoursSource } from '../leads/callSlots'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { buildDossier, clientNames, turnMessageIds, untilOurs } from './dossier'
@@ -29,6 +30,10 @@ export type TurnDeps = {
   mind: MindSearch
   /** The card of a decided turn to Boris: the shadow draft, a draft, a call (part C4). */
   card(turnId: string): Promise<void>
+  /** What is new in the chat the turn reads, told to Boris at once (the client's words, shown by whoever reads first). */
+  show?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
+  /** The same news for the reader of a call booked in the chat. */
+  news?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
   /** The client's words to Boris: a client he took, a closed conversation. */
   forward(turnId: string): Promise<void>
   /**
@@ -92,6 +97,14 @@ const UNREADABLE_TRIES = 30
 const DB_STEP = { retriesAllowed: true, maxAttempts: 5, intervalSeconds: 2 }
 /** The steps that talk to Telegram or the service: the same retries, and a failure that ends the turn as failed. */
 const notifyStep = () => ({ ...DB_STEP, ...d().stepRetry })
+
+/**
+ * The reasons of a draft with no text that come from the plumbing, not from a decision: the chat could not be read (the
+ * node is down or restarting). Such a turn did not answer the client; the words stay open and a later attempt may take
+ * them (Boris, 01.11: a node that restarts under a turn must not cost the client his draft). A planning that threw is
+ * not among them: it covers what it saw, as it always did, so the conversation moves on.
+ */
+export const INFRA_REASONS = ['не могу прочитать чат'] as const
 
 type Gate = 'go' | 'closed' | 'take' | 'answered' | 'unclear' | 'unreadable'
 type Heard = { gate: Gate; quietLeftS: number }
@@ -219,15 +232,19 @@ const sinceAnchor = (messages: StoredMessage[], anchor: string) => {
   return at >= 0 ? messages.slice(at) : []
 }
 
-async function policySettings(db: Db, accountId: string): Promise<PolicySettings> {
+/** A test chat (docs/ops/test-leads.md) is held by neither the pause for real clients nor the live account's state. */
+async function policySettings(db: Db, accountId: string, chatId: string): Promise<PolicySettings> {
   const [a] = await db.select().from(account).where(eq(account.id, accountId))
+  const test = isTestOrder(chatId)
   return {
     v1Writes: await getSetting(db, 'conv.v1_writes'),
     autopilot: await getSetting(db, 'conv.autopilot'),
-    outboundMessages: await getSetting(db, 'outbound.messages'),
-    accountPaused: a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false,
+    outboundMessages: test || (await getSetting(db, 'outbound.messages')),
+    accountPaused:
+      !test && (a ? a.paused || a.loginState === 'dead' || a.loginState === 'banned' : false),
     night: await getSetting(db, 'conv.night'),
     autonomy: (await getSetting(db, 'conv.autonomy')) as Record<Topic, 'self' | 'draft' | 'call'>,
+    blockedLinks: await getSetting(db, 'links.blocked'),
   }
 }
 
@@ -259,7 +276,7 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
         .filter((m) => m.side === 'client' && seen.includes(m.platformMessageId))
         .map((m) => m.text),
     )
-    const settings = await policySettings(db, conv.accountId)
+    const settings = await policySettings(db, conv.accountId, conv.chatId)
     const dossier = await buildDossier(db, conversationId, now, {
       night: settings.night,
       profi,
@@ -268,8 +285,14 @@ async function planStep(turnId: string, conversationId: string, anchor: string):
     })
     await stamp(turnId, 'recalled', { messageIds: dossier.turnMessageIds })
     const plan = await planTurn(
-      { gateway, mind },
-      { dossier, names: await clientNames(db, conv, dossier), settings, now },
+      { gateway, mind, slots: workHoursSource(db) },
+      {
+        dossier,
+        names: await clientNames(db, conv, dossier),
+        settings,
+        now,
+        leadId: conv.orderId,
+      },
     )
     const out = plan.output
     await stamp(turnId, 'planned', {
@@ -434,7 +457,7 @@ async function reread(
   if (!v1Writes && after.some((m) => m.side === 'specialist')) return stop('answered')
   const known = new Set(covered)
   if (after.some((m) => m.side === 'client' && !known.has(m.platformMessageId))) return stop('more')
-  const settings = await policySettings(db, conv.accountId)
+  const settings = await policySettings(db, conv.accountId, conv.chatId)
   const why = settings.v1Writes
     ? 'режим тени'
     : settings.accountPaused
@@ -479,9 +502,15 @@ async function handoff(
   const messages = await storedMessages(db, conversationId)
   // A turn that covered nothing (Boris's client, an unclear author, a failure) still covers what it saw; only a
   // turn that our side's message cancelled does not, that message already ends the client turn.
+  const [row] = await db
+    .select({ reason: convTurn.decisionReason, text: convTurn.text })
+    .from(convTurn)
+    .where(eq(convTurn.id, turnId))
+  const plumbing = !row?.text && (INFRA_REASONS as readonly string[]).includes(row?.reason ?? '')
   const through =
-    // After the switch the card is the client's only way to an answer: when it did not reach Boris the words stay open.
-    outcome === 'card_lost'
+    // After the switch the card is the client's only way to an answer: when it did not reach Boris the words stay open;
+    // so they do when the turn only met a chat it could not read or a planning that threw.
+    outcome === 'card_lost' || plumbing
       ? undefined
       : (covered.at(-1) ??
         (outcome !== 'answered'
@@ -723,7 +752,8 @@ async function pendingAnchor(conv: ConversationRow): Promise<string | null> {
 
 /**
  * Which attempt of the client turn at `anchor` is the current one: every earlier turn of it whose card never reached
- * Boris (`card_lost`) leaves it unanswered, and the client's next message starts the next attempt.
+ * Boris (`card_lost`), or that met only a chat it could not read, leaves it unanswered; the client's next message or a
+ * later catch-up starts the next attempt.
  */
 async function attemptOf(conversationId: string, anchor: string): Promise<number> {
   const rows = await d()
@@ -734,7 +764,14 @@ async function attemptOf(conversationId: string, anchor: string): Promise<number
         eq(convTurn.conversationId, conversationId),
         eq(convTurn.kind, 'reply'),
         eq(convTurn.anchorMessageId, anchor),
-        eq(convTurn.outcome, 'card_lost'),
+        or(
+          eq(convTurn.outcome, 'card_lost'),
+          and(
+            isNull(convTurn.text),
+            isNotNull(convTurn.finishedAt),
+            inArray(convTurn.decisionReason, [...INFRA_REASONS]),
+          ),
+        ),
       ),
     )
   return rows.length

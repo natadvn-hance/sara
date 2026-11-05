@@ -18,6 +18,7 @@ import { attachRecorder } from './eyes/recorder'
 import { startWatchedMaps } from './eyes/watchedMaps'
 import { serveMcp } from './mcp/http'
 import { createProfiMcpServer } from './mcp/server'
+import { refuseTestOrders } from './mcp/testOrders'
 import { registerScreenRoute } from './screen/screenRoute'
 import { createShipper } from './ship/shipper'
 import { purgeOld } from './store/purge'
@@ -33,10 +34,19 @@ export type ServiceTimings = {
   egressEveryMs: number
 }
 
+/**
+ * Boris, 31.10.2026: «Давай чаще просматривать страницы». The feed every 30 s (was 60): new orders are read twice as
+ * soon, about 120 page loads an hour. The chat check every 2 minutes (was 10): it reads the unread marks and last times
+ * from the list's own answer and opens only the chats with news, so it costs the list page, 30 loads an hour, where the
+ * 10-minute check read the 8 newest chats blind (10 loads, 60 an hour). A chat the event stream names is read at once
+ * (its page and the way back to the feed, 2 loads a message). Together about 150 an hour and 2 a client message, well
+ * under the ~270 at which Profi.ru shut old Sara out for 48 minutes on 08.10.2026 (nine escalations every 3 minutes).
+ * Reading the whole board (src/eyes/insurance.ts) adds no page load, only the board's own answers while it scrolls.
+ */
 const DEFAULT_TIMINGS: ServiceTimings = {
   tickMs: 30000,
-  feedEveryMs: 60000,
-  chatsEveryMs: 600000,
+  feedEveryMs: 30000,
+  chatsEveryMs: 120000,
   shipPollMs: 500,
   egressEveryMs: 600000,
 }
@@ -207,7 +217,8 @@ export async function startProfiService(
         onNavigate: (ok) => guard.report(ok),
         afterOrderPage: (id, may) => calibration.afterOrderPage(id, may),
       })
-      await a.insurance.feedOnce()
+      // The first look reads the whole board: whatever came while the node was away.
+      await a.insurance.feedOnce({ deep: true })
       await a.watch.tick()
     }
     await start()
@@ -268,7 +279,12 @@ export async function startProfiService(
     }),
   }
   const host = c.production ? '0.0.0.0' : '127.0.0.1'
-  const svc = await serveMcp(() => createProfiMcpServer(tools), c.port, undefined, host)
+  const svc = await serveMcp(
+    () => createProfiMcpServer(refuseTestOrders(tools)),
+    c.port,
+    undefined,
+    host,
+  )
   registerScreenRoute(svc.http, {
     nodeToken: c.nodeToken,
     browsers,

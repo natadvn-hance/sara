@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
-import type { DirectionRules } from '@sara/shared'
+import { type DirectionRules, type KindThresholds, leadKind, thresholdFor } from '@sara/shared'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { calibrationItem, directionRun, lead, trialScore as trialTable } from '../db/schema'
+import { NOT_TEST } from '../testLeads/sql'
 import { rulesHash } from './hash'
 import { createRun, getRun, type RunRow } from './runStore'
 import { type TrialDeps, trialScore } from './trial'
@@ -23,17 +24,17 @@ const HINT_GAIN = 0.1
 
 export type Mark = 'yes' | 'no' | 'unsure'
 
-type Candidate = { id: string; score: number | null }
+type Candidate = { id: string; score: number | null; category: string }
 
 /** Leads of the account Boris can still be asked about, with their live score when they have one. */
 async function candidates(db: DbOrTx, accountId: string): Promise<Candidate[]> {
   const r = await db.execute<Candidate>(sql`
-    select l.id, (
+    select l.id, l.category, (
       select s.score from core.lead_score s
       where s.lead_id = l.id and not s.backtest order by s.created_at desc limit 1
     ) as score
     from core.lead l
-    where l.account_id = ${accountId}
+    where l.account_id = ${accountId} and ${NOT_TEST('l.id')}
       and l.status not in ('sorted_out', 'stale')
       and l.seen_at > now() - make_interval(days => ${WINDOW_DAYS})
       and not exists (
@@ -50,16 +51,18 @@ const order = (seed: number) => (id: string) =>
  */
 export function pickSample(
   pool: Candidate[],
-  threshold: number,
+  threshold: number | ((c: Candidate) => number),
   seed: number,
   size = CALIBRATION_SIZE,
 ): string[] {
   const key = order(seed)
   const sorted = [...pool].sort((a, b) => (key(a.id) < key(b.id) ? -1 : 1))
+  // Near is near the threshold of the lead's own kind.
+  const at = (c: Candidate) => (typeof threshold === 'number' ? threshold : threshold(c))
   const groups = {
-    near: sorted.filter((c) => c.score !== null && Math.abs(c.score - threshold) <= NEAR),
-    above: sorted.filter((c) => c.score !== null && c.score - threshold > NEAR),
-    below: sorted.filter((c) => c.score !== null && threshold - c.score > NEAR),
+    near: sorted.filter((c) => c.score !== null && Math.abs(c.score - at(c)) <= NEAR),
+    above: sorted.filter((c) => c.score !== null && c.score - at(c) > NEAR),
+    below: sorted.filter((c) => c.score !== null && at(c) - c.score > NEAR),
     unknown: sorted.filter((c) => c.score === null),
   }
   const take: Candidate[] = []
@@ -87,7 +90,12 @@ export async function calibrationSample(
   seed: number,
   size = CALIBRATION_SIZE,
 ): Promise<string[]> {
-  return pickSample(await candidates(db, accountId), rules.threshold, seed, size)
+  return pickSample(
+    await candidates(db, accountId),
+    (c) => thresholdFor(rules, c.category),
+    seed,
+    size,
+  )
 }
 
 export type StartResult =
@@ -103,7 +111,7 @@ export async function startCalibration(
   if (pool.length === 0) return { ok: false, error: 'no_leads', have: 0 }
   if (pool.length < MIN_LEADS) return { ok: false, error: 'too_few', have: pool.length }
   const seed = a.seed ?? Math.floor(Math.random() * 2 ** 31)
-  const leadIds = pickSample(pool, a.rules.threshold, seed)
+  const leadIds = pickSample(pool, (c) => thresholdFor(a.rules, c.category), seed)
   const made = await createRun(db, {
     accountId: a.accountId,
     kind: 'calibration',
@@ -261,22 +269,31 @@ export type CalibrationResult = {
   thresholdHint: ThresholdHint | null
 }
 
-type Scored = { mark: 'yes' | 'no'; score: number; stopFactor: string | null }
+type Scored = {
+  mark: 'yes' | 'no'
+  score: number
+  stopFactor: string | null
+  category: string
+}
 
-const agreementAt = (items: Scored[], threshold: number): number =>
-  items.filter((i) => (!i.stopFactor && i.score >= threshold ? 'yes' : 'no') === i.mark).length /
-  items.length
+/** The kinds with a threshold of their own keep it; the one tried replaces the plain threshold only. */
+const agreementAt = (items: Scored[], threshold: number, kinds?: KindThresholds): number =>
+  items.filter(
+    (i) =>
+      (!i.stopFactor && i.score >= (kinds?.[leadKind(i.category)] ?? threshold) ? 'yes' : 'no') ===
+      i.mark,
+  ).length / items.length
 
 /**
  * The threshold that would agree with Boris the most, nearest to the current one (of two equally near, the lower);
  * null without a clear gain.
  */
-function hintOf(items: Scored[], current: number): ThresholdHint | null {
+function hintOf(items: Scored[], current: number, kinds?: KindThresholds): ThresholdHint | null {
   if (items.length === 0) return null
-  const before = agreementAt(items, current)
+  const before = agreementAt(items, current, kinds)
   let best = { t: current, a: before }
   for (let t = 0; t <= 100; t++) {
-    const a = agreementAt(items, t)
+    const a = agreementAt(items, t, kinds)
     const closer = Math.abs(t - current) < Math.abs(best.t - current)
     if (a > best.a || (a === best.a && closer && t !== current)) best = { t, a }
   }
@@ -317,7 +334,12 @@ export async function calibrationResult(db: DbOrTx, runId: string): Promise<Cali
   for (const i of items) {
     const t = scores.find((s) => s.leadId === i.leadId)
     if ((i.mark !== 'yes' && i.mark !== 'no') || !t) continue
-    decided.push({ mark: i.mark, score: t.score, stopFactor: t.stopFactor })
+    decided.push({
+      mark: i.mark,
+      score: t.score,
+      stopFactor: t.stopFactor,
+      category: leads.find((x) => x.id === i.leadId)?.category ?? '',
+    })
     const sara = t.decision === 'show' ? 'yes' : 'no'
     if (sara === i.mark) continue
     const l = leads.find((x) => x.id === i.leadId)
@@ -349,7 +371,7 @@ export async function calibrationResult(db: DbOrTx, runId: string): Promise<Cali
     passed: reliable && agreement !== null && agreement >= CALIBRATION_TARGET,
     threshold: rules.threshold,
     misses,
-    thresholdHint: hintOf(decided, rules.threshold),
+    thresholdHint: hintOf(decided, rules.threshold, rules.kind_thresholds),
   }
 }
 

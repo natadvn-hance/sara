@@ -167,6 +167,8 @@ export const LeadView = z.object({
         since: z.string().nullable(),
         phone: z.boolean().nullable(),
         reviews: z.string().nullable(),
+        /** The site's own lines about the client, with the mark of their colour. */
+        summaries: z.array(z.object({ mark: z.string(), text: z.string() })).optional(),
       })
       .nullable(),
     /**
@@ -394,7 +396,7 @@ export const SettingRow = z.object({
   value: z.unknown(),
   isDefault: z.boolean(),
   edit: SettingEdit,
-  kind: z.enum(['flag', 'count', 'rub', 'hours', 'other']),
+  kind: z.enum(['flag', 'count', 'rub', 'hours', 'text', 'other']),
   changedAt: at.nullable(),
   changedBy: z.string().nullable(),
 })
@@ -408,6 +410,12 @@ export const SettingsView = z.object({
       title: z.string(),
       version: z.number().int(),
       threshold: z.number().int(),
+      /** The thresholds in force by the kind of the order (marketing, sites, the rest). */
+      thresholds: z.object({
+        marketing: z.number().int(),
+        sites: z.number().int(),
+        other: z.number().int(),
+      }),
       stops: z.array(z.string()),
       axes: z.array(z.object({ title: z.string(), weight: z.number().int() })),
     }),

@@ -86,7 +86,7 @@ export const TASK_KINDS: Record<string, { title: string; actions: TaskActionSpec
     title: 'Заявка ждёт решения',
     actions: [
       a('bid', 'Откликнуться', 'primary', 'fee'),
-      a('skip', 'Пропустить', 'ghost', 'reason'),
+      a('skip', 'Закрыть заявку', 'ghost', 'reason'),
     ],
   },
   lead_review: {

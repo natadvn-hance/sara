@@ -1,6 +1,6 @@
-import { and, desc, eq, gte, max } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, max, sql } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
-import { rawMessage, rawOrder } from '../db/schema'
+import { bidAttempt, clientSawBid, rawMessage, rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
 import { saveRaw, upsertMessage, upsertOrder } from '../store/raw'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
@@ -20,6 +20,11 @@ export type Eyes = {
   /** Chats with news seen in the last 3 days, newest first, 3 at most: what the 10-minute check rereads. */
   knownChats(now?: number): Promise<string[]>
   /**
+   * The time (ms) of the newest message the node holds of each of these chats. It is never before the message's real
+   * time: a message read from the page takes the moment it was seen, one the stream named that moment.
+   */
+  lastStored(chatIds: string[]): Promise<Map<string, number>>
+  /**
    * A chat page was read. On the first reading of a chat only the client's messages after our last one are news;
    * what came before is history from before Sara watched, kept without events.
    */
@@ -27,10 +32,11 @@ export type Eyes = {
   /** The site's board answer was read in the last 10 minutes. */
   boardWorks(now?: number): boolean
   /**
-   * The board answers read so far: how many (a counter, to tell a new one from the last) and whether the last one
-   * said the board has more pages. Null before the first. The minute check scrolls the board by it.
+   * The board answers read so far: how many (a counter, to tell a new one from the last), whether the last one said the
+   * board has more pages, and how many orders it said the whole board holds (null: it did not say). Null before the
+   * first. The minute check scrolls the board by it.
    */
-  board(): { seq: number; more: boolean } | null
+  board(): { seq: number; more: boolean; total: number | null } | null
   /**
    * A pass over the board begins (the minute check opens the feed) and ends (its scroll is done). An order the last
    * pass saw is gone from the feed when this pass does not show it although it loaded the page the order was on, and
@@ -67,7 +73,7 @@ export function createEyes(o: {
   // The fee from the order page's own answer: truer than the page text, which misses a discount.
   const fees = new Map<string, { rub: number; baseRub: number | null; hasBid: boolean | null }>()
   let boardAt = 0
-  let board: { seq: number; more: boolean } | null = null
+  let board: { seq: number; more: boolean; total: number | null } | null = null
   // chat → when the stream named it and which message, for the time the message really came.
   const touched = new Map<string, { at: string; messageId: string | null }>()
   // order → the first board page (from 0) it was on, in the pass going on and in the last one; when it was told gone.
@@ -99,6 +105,48 @@ export function createEyes(o: {
       order: { ...s.order, bid_price_rub: fee.rub },
       answer: { baseRub: fee.baseRub, hasBid: fee.hasBid },
     }
+  }
+
+  // Chats already noted this run: the list says it again on every read, every 2 minutes.
+  const sawNoted = new Set<string>()
+
+  /**
+   * The client of this chat has seen our bid, by the chats list: one profi.client_read a chat. Only for a bid Sara made
+   * (a press in node.bid_attempt): the list also names dozens of older chats, for which the core would make an empty
+   * conversation and which have no topic to mark. Those are written down without an event.
+   */
+  async function noteClientSaw(chatId: string) {
+    if (sawNoted.has(chatId)) return
+    const at = new Date().toISOString()
+    await o.db
+      .transaction(async (tx) => {
+        const fresh = await tx
+          .insert(clientSawBid)
+          .values({ accountId: o.accountId, chatId, seenAt: at })
+          .onConflictDoNothing()
+          .returning({ chatId: clientSawBid.chatId })
+        if (fresh.length === 0) return
+        const ours = await tx
+          .select({ key: bidAttempt.idempotencyKey })
+          .from(bidAttempt)
+          .where(and(eq(bidAttempt.accountId, o.accountId), eq(bidAttempt.orderId, chatId)))
+          .limit(1)
+        if (ours.length === 0) return
+        await queueEvent(tx, {
+          type: 'profi.client_read',
+          accountId: o.accountId,
+          entity: { kind: 'chat', id: chatId },
+          // The order chat lives under the order's number.
+          payload: { chat_id: chatId, order_id: chatId, platform_message_id: null, at },
+        })
+      })
+      .then(() => sawNoted.add(chatId))
+      .catch((err) =>
+        console.error(
+          'client saw bid not noted',
+          err instanceof Error ? err.message.slice(0, 120) : err,
+        ),
+      )
   }
 
   async function onSignals(
@@ -139,6 +187,10 @@ export function createEyes(o: {
       }
       if (s.t === 'presence') {
         presence = s.on
+        continue
+      }
+      if (s.t === 'client_saw_bid') {
+        await noteClientSaw(s.chatId)
         continue
       }
       // One broken signal (an odd date, a missing field) must not stop the rest of the batch; its raw record stays.
@@ -201,7 +253,7 @@ export function createEyes(o: {
   }
 
   async function onParsed(p: ParseResult, source: 'rtp' | 'response' | 'dom', body?: unknown) {
-    // The feed is read every minute, so its silence is the sign of a changed site (ADR-002).
+    // The feed is read twice a minute, so its silence is the sign of a changed site (ADR-002).
     if (p.recognized && p.what === 'feed') {
       lastRecognized = Date.now()
       layoutReported = false
@@ -210,7 +262,7 @@ export function createEyes(o: {
     await onSignals(p.signals, body)
     // Counted when its orders are stored and on their way, so a pass that saw the answer arrive leaves nothing behind.
     if (p.recognized && p.what === 'feed' && source === 'response') {
-      board = { seq: (board?.seq ?? 0) + 1, more: p.more === true }
+      board = { seq: (board?.seq ?? 0) + 1, more: p.more === true, total: p.total ?? null }
       if (pass) {
         for (const s of p.signals)
           if (s.t === 'order' && !pass.orders.has(s.order.order_id))
@@ -230,6 +282,9 @@ export function createEyes(o: {
     if (!before) return
     // Its last page may lose an order to the next page; the board read to its end loses none.
     const covered = board?.more === false ? Number.POSITIVE_INFINITY : seen.pages - 1
+    // What this pass did not reach waits for the next one that does: most passes read only the first pages.
+    for (const [orderId, page] of before)
+      if (page >= covered && !lastPass.has(orderId)) lastPass.set(orderId, page)
     for (const [orderId, page] of before) {
       if (seen.orders.has(orderId) || page >= covered) continue
       const told = goneAt.get(orderId)
@@ -301,6 +356,18 @@ export function createEyes(o: {
         .orderBy(desc(last))
         .limit(3)
       return rows.map((r) => r.chatId)
+    },
+    async lastStored(chatIds) {
+      if (chatIds.length === 0) return new Map()
+      const rows = await o.db
+        .select({
+          chatId: rawMessage.chatId,
+          ms: sql<string>`extract(epoch from max(${rawMessage.sentAt})) * 1000`,
+        })
+        .from(rawMessage)
+        .where(and(eq(rawMessage.accountId, o.accountId), inArray(rawMessage.chatId, chatIds)))
+        .groupBy(rawMessage.chatId)
+      return new Map(rows.map((r) => [r.chatId, Number(r.ms)]))
     },
     async onChatRead(chatId, p) {
       const touch = touched.get(chatId)

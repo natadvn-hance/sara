@@ -11,6 +11,7 @@ import {
   lead,
   leadLabel,
   leadScore,
+  question,
   ruleProposal,
   task,
 } from '../../apps/core/src/db/schema'
@@ -107,6 +108,7 @@ beforeEach(async () => {
   await resetDb(db)
   await seedDirection(db, 'hance-marketing')
   tg.sent.length = 0
+  tg.edited.length = 0
   tg.pushStart(111)
   await until(() => tg.sent.length === 1)
   await setSetting(db, 'pipeline.leads', true, 'boris')
@@ -178,16 +180,36 @@ describe('scoring in the lead pipeline', () => {
     expect(l).toMatchObject({ label: 'no', source: 'card', score: 70, surprise: false })
   })
 
-  it('FR-LEAD-7: skipping a card scored far above the threshold brings «почему?»', async () => {
+  it('FR-LEAD-7: closing a card scored far above the threshold edits that card, asks no «почему?» and keeps the features', async () => {
     byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(80) }
     const id = orderId()
     await fake.emitOrder({ order_id: id })
     await until(() => cards().length === 1)
-    const skip = cards()[0]
+    const close = cards()[0]
       ?.reply_markup?.inline_keyboard.flat()
       .find((b) => b.callback_data.endsWith(':skip'))
-    tg.pushPress(111, skip?.callback_data ?? '')
-    await until(() => tg.sent.some((m) => m.text.startsWith('Почему пропустил «')))
+    expect(close?.text).toBe('Закрыть заявку')
+    tg.pushPress(111, close?.callback_data ?? '')
+    await until(() => tg.edited.length === 1)
+    expect(tg.edited[0]).toMatchObject({
+      message_id: cards()[0]?.message_id,
+      reply_markup: { inline_keyboard: [] },
+    })
+    expect(tg.edited[0]?.text.startsWith('<b>📁 Заявка закрыта</b> · ')).toBe(true)
+    expect(tg.edited[0]?.text).toContain('Открыть на Профи.ру')
+    await new Promise((r) => setTimeout(r, 800))
+    expect(tg.sent.some((m) => m.text.startsWith('Почему пропустил'))).toBe(false)
+    expect(await db.select().from(question)).toHaveLength(0)
+    const [e] = await db
+      .select({ payload: event.payload })
+      .from(event)
+      .where(and(eq(event.type, 'lead.labeled'), eq(event.entityId, id)))
+    expect(e?.payload).toMatchObject({
+      label: 'no',
+      source: 'card',
+      surprise: true,
+      features: { score: 80, score_version: 1, category: expect.any(String), has_draft: true },
+    })
   })
 
   it('FR-LEAD-7: «Взял бы» is a yes, asks why and brings a normal card; pressing again does nothing', async () => {
@@ -198,9 +220,8 @@ describe('scoring in the lead pipeline', () => {
     expect(await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())).toBe(
       'sent',
     )
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла 1 заявку. На грани:')))
-    const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
-      ?.inline_keyboard[0]?.[0]
+    await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+    const want = tg.sent.find((m) => m.text.startsWith('📊'))?.reply_markup?.inline_keyboard[0]?.[0]
     expect(want?.text).toBe('Взял бы №1')
     tg.pushPress(111, want?.callback_data ?? '')
     await until(() =>
@@ -228,9 +249,8 @@ describe('scoring in the lead pipeline', () => {
     await fake.emitOrder({ order_id: id })
     await until(async () => (await statusOf(id)) === 'scored_out')
     await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())
-    await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
-    const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
-      ?.inline_keyboard[0]?.[0]
+    await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+    const want = tg.sent.find((m) => m.text.startsWith('📊'))?.reply_markup?.inline_keyboard[0]?.[0]
     tg.pushPress(111, want?.callback_data ?? '')
     await until(() =>
       cards().some((m) =>
@@ -241,7 +261,7 @@ describe('scoring in the lead pipeline', () => {
       .flatMap((m) => m.reply_markup?.inline_keyboard.flat() ?? [])
       .find((b) => b.callback_data.endsWith(':bid'))
     tg.pushPress(111, bid?.callback_data ?? '')
-    await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+    await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids.some((b) => b.idempotency_key === `bid:${id}`)).toBe(true)
   }, 30000)
 
@@ -287,7 +307,7 @@ describe('scoring in the lead pipeline', () => {
         ?.reply_markup?.inline_keyboard.flat()
         .find((b) => b.callback_data.endsWith(':bid'))
       tg.pushPress(111, bid?.callback_data ?? '')
-      await until(() => tg.sent.some((m) => m.text.startsWith('✅ Отклик отправлен')))
+      await until(() => tg.shown('✅ Отклик отправлен'))
       expect(fake.bids.some((b) => b.idempotency_key === `bid:${id}`)).toBe(true)
 
       byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(50) }
@@ -295,8 +315,8 @@ describe('scoring in the lead pipeline', () => {
       await fake.emitOrder({ order_id: dropped })
       await until(async () => (await statusOf(dropped)) === 'scored_out')
       await dailySummary({ db: app.db, notifier: app.bot.notifier }, nextSummary())
-      await until(() => tg.sent.some((m) => m.text.startsWith('Сегодня отсеяла')))
-      const want = tg.sent.find((m) => m.text.startsWith('Сегодня отсеяла'))?.reply_markup
+      await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
+      const want = tg.sent.find((m) => m.text.startsWith('📊'))?.reply_markup
         ?.inline_keyboard[0]?.[0]
       tg.pushPress(111, want?.callback_data ?? '')
       await until(() => cards().length === 3)

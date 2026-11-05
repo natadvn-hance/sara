@@ -1,8 +1,10 @@
-import { formatCallback, newEventId, type TaskAction, type Tone } from '@sara/shared'
+import { formatCallback, newEventId, shownTitle, type TaskAction, type Tone } from '@sara/shared'
 import { and, desc, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, convTurn, lead, task } from '../db/schema'
 import { appendEvent } from '../journal/journal'
+import { firstName } from '../leads/clientName'
+import { forumOf } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
 import { getConversation } from './store'
@@ -18,6 +20,8 @@ export function moscowDayStart(now: Date): string {
     Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - 3 * 3600_000,
   ).toISOString()
 }
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 type Row = typeof convTurn.$inferSelect
 
@@ -46,8 +50,8 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
     } | null) ?? null
   const told = understanding?.case
   return {
-    name: l?.clientName || null,
-    orderTitle: l?.title ?? null,
+    name: l?.clientName ? firstName(l.clientName) : null,
+    orderTitle: l ? shownTitle(l.id, l.title) : null,
     clientWords: ids
       .map((id) => byId.get(id) ?? '')
       .filter(Boolean)
@@ -67,7 +71,7 @@ export async function cardView(db: Db, t: Row): Promise<CardView> {
   }
 }
 
-function rowsFor(
+export function rowsFor(
   taskId: string,
   t: Row,
   shadow: boolean,
@@ -123,9 +127,11 @@ export async function sendTurnCard(
   const view = await cardView(d.db, t)
   const taskId = newEventId()
   // At quiet hours the Telegram layer sends it without sound (FR-NOTIF-2, cards.quiet_hours).
-  const m = await d.notifier.sendButtons(CONV_TEXTS.card(view), rowsFor(taskId, t, view.shadow), {
-    place: { conversation: t.conversationId },
-  })
+  const m = await d.notifier.sendButtons(
+    CONV_TEXTS.card(view, { inTopic: (await forumOf(d.db)) !== null }),
+    rowsFor(taskId, t, view.shadow),
+    { html: true, place: { conversation: t.conversationId } },
+  )
   await d.db.transaction(async (tx) => {
     await tx.insert(task).values({
       id: taskId,
@@ -166,8 +172,9 @@ export async function redrawCard(
   const view = await cardView(d.db, t)
   await d.notifier.editText?.(
     t.cardMessageId,
-    `${CONV_TEXTS.card(view)}\n\n${tail}`,
+    `${CONV_TEXTS.card(view, { inTopic: (await forumOf(d.db)) !== null })}\n\n${esc(tail)}`,
     o.buttons === false ? [] : rowsFor(t.taskId, t, view.shadow),
+    { html: true },
   )
 }
 

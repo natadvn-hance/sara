@@ -1,4 +1,4 @@
-import { DirectionRules, type DirectionState } from '@sara/shared'
+import { DirectionRules, type DirectionState, thresholdFor } from '@sara/shared'
 import { and, eq, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
 import { directionVersion, lead, leadCandidate, leadRoute } from '../db/schema'
@@ -136,12 +136,17 @@ export async function decideRoute(
 }
 
 /** The threshold of the rules the order was scored under (the version, not whatever is active now). */
-async function thresholdOf(db: DbOrTx, accountId: string, version: number): Promise<number | null> {
+async function thresholdOf(
+  db: DbOrTx,
+  accountId: string,
+  version: number,
+  category: string,
+): Promise<number | null> {
   const [v] = await db
     .select({ rules: directionVersion.rules })
     .from(directionVersion)
     .where(and(eq(directionVersion.accountId, accountId), eq(directionVersion.version, version)))
-  return v ? DirectionRules.parse(v.rules).threshold : null
+  return v ? thresholdFor(DirectionRules.parse(v.rules), category) : null
 }
 
 export type Scoring = {
@@ -161,7 +166,11 @@ export async function routeOrder(
   p: { orderId: string; accountId: string; correlationId: string; scored: Scoring | null },
 ): Promise<RouteResult & { mine: boolean }> {
   const { scored } = p
-  const threshold = scored ? await thresholdOf(db, p.accountId, scored.version) : null
+  const [row] = scored
+    ? await db.select({ category: lead.category }).from(lead).where(eq(lead.id, p.orderId))
+    : []
+  const threshold =
+    scored && row ? await thresholdOf(db, p.accountId, scored.version, row.category) : null
   await recordCandidate(db, p.orderId, {
     accountId: p.accountId,
     score: scored?.score ?? null,

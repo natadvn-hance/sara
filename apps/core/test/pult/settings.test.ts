@@ -3,7 +3,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { account, directionVersion, lead, leadLabel, leadScore, setting } from '../../src/db/schema'
 import { activeRules, seedDirection } from '../../src/direction/store'
-import { THRESHOLD_TEXTS } from '../../src/pult/threshold'
+import { THRESHOLD_TEXTS, type ThresholdHint, thresholdsOf } from '../../src/pult/threshold'
 import { getSetting } from '../../src/settings/store'
 import { buildTestApp, type TestApp } from '../helpers/app'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -142,12 +142,17 @@ describe('the pult\u2019s own choices in the settings (Boris\u2019s open questio
 })
 
 describe('«Минимальный балл»: a hint from the stored scores, then a new version of the rules', () => {
-  async function scored(id: string, score: number, label: 'yes' | 'no' | null) {
+  async function scored(
+    id: string,
+    score: number,
+    label: 'yes' | 'no' | null,
+    category = 'Маркетинг',
+  ) {
     await db.insert(lead).values({
       id,
       accountId: ACC,
       title: `Заявка ${id}`,
-      category: 'Маркетинг',
+      category,
       city: 'Краснодар',
       text: 'Нужна помощь.',
       clientName: 'Ирина',
@@ -172,56 +177,63 @@ describe('«Минимальный балл»: a hint from the stored scores, th
     if (label) await db.insert(leadLabel).values({ leadId: id, label, source: 'card' })
   }
 
-  it('FR-OPS-1, ST-M7-07: the hint counts the last week: cards then and now, «да» lost and «нет» gained', async () => {
+  it('FR-OPS-1, ST-M7-07: the hint counts the last week by kind: cards then and now, «да» lost and «нет» gained', async () => {
     const { rules, version } = await activeRules(db, ACC)
     const cur = rules.threshold
     await scored('97000001', cur + 10, 'yes')
     await scored('97000002', cur + 1, 'yes')
     await scored('97000003', cur - 1, 'no')
     await scored('97000004', cur - 10, null)
-    const up = (await get(`/api/settings/threshold/${ACC}?value=${cur + 2}`)).body
-    expect(up).toEqual({
+    // A site order at the same scores is counted against the sites' own threshold, not the marketing one.
+    await scored('97000005', cur + 1, 'no', 'Создание сайтов')
+    const q = (m: number, si: number, o: number) =>
+      `/api/settings/threshold/${ACC}?marketing=${m}&sites=${si}&other=${o}`
+    const up = (await get(q(cur + 2, cur + 2, cur))).body as ThresholdHint
+    expect(up.version).toBe(version)
+    expect(up.kinds.marketing).toEqual({
       value: cur + 2,
       current: cur,
-      version,
       cardsNow: 2,
       cardsWould: 1,
       lostYes: 1,
       gainedNo: 0,
     })
-    const down = (await get(`/api/settings/threshold/${ACC}?value=${cur - 2}`)).body
-    expect(down).toMatchObject({ cardsNow: 2, cardsWould: 3, lostYes: 0, gainedNo: 1 })
-    expect((await get(`/api/settings/threshold/${ACC}?value=101`)).status).toBe(400)
+    expect(up.kinds.sites).toMatchObject({ cardsNow: 1, cardsWould: 0 })
+    expect(up.kinds.other).toMatchObject({ cardsNow: 0, cardsWould: 0 })
+    const down = (await get(q(cur - 2, cur, cur))).body as ThresholdHint
+    expect(down.kinds.marketing).toMatchObject({
+      cardsNow: 2,
+      cardsWould: 3,
+      lostYes: 0,
+      gainedNo: 1,
+    })
+    expect((await get(q(101, cur, cur))).status).toBe(400)
   })
 
-  it('FR-ACC-2, ST-M7-07: «Сохранить» makes a new active version from the one Boris saw, the old one stays', async () => {
+  it('FR-ACC-2, ST-M7-07: «Сохранить» makes a new active version with the thresholds by kind, the old one stays', async () => {
     const { rules, version } = await activeRules(db, ACC)
-    const to = rules.threshold + 3
+    const from = thresholdsOf(rules)
+    const to = { marketing: 40, sites: 55, other: 50 }
     expect(
-      (await post(`/api/settings/threshold/${ACC}`, { value: to, expectedVersion: version + 5 }))
-        .body,
-    ).toEqual({
-      error: THRESHOLD_TEXTS.stale,
-    })
-    const ok = await post(`/api/settings/threshold/${ACC}`, { value: to, expectedVersion: version })
-    expect(ok.body.message).toBe(THRESHOLD_TEXTS.saved(rules.threshold, to, version + 1))
+      (await post(`/api/settings/threshold/${ACC}`, { ...to, expectedVersion: version + 5 })).body,
+    ).toEqual({ error: THRESHOLD_TEXTS.stale })
+    const ok = await post(`/api/settings/threshold/${ACC}`, { ...to, expectedVersion: version })
+    expect(ok.body.message).toBe(THRESHOLD_TEXTS.saved(from, to, version + 1))
     const now = await activeRules(db, ACC)
     expect(now.version).toBe(version + 1)
-    expect(now.rules).toEqual({ ...rules, threshold: to })
+    // The plain threshold follows «Остальное»: what reads only it sees the rest's bar.
+    expect(now.rules).toEqual({ ...rules, threshold: 50, kind_thresholds: to })
     const [row] = await db
       .select()
       .from(directionVersion)
       .where(and(eq(directionVersion.accountId, ACC), eq(directionVersion.active, true)))
       .orderBy(desc(directionVersion.version))
-    expect(row).toMatchObject({
-      createdBy: 'boris',
-      reason: `Порог ${rules.threshold} → ${to} из настроек`,
-    })
+    expect(row).toMatchObject({ createdBy: 'boris' })
+    expect(row?.reason).toContain('Маркетинг')
     expect(
-      (await post(`/api/settings/threshold/${ACC}`, { value: to, expectedVersion: version + 1 }))
-        .body,
-    ).toEqual({
-      error: THRESHOLD_TEXTS.same,
-    })
+      (await post(`/api/settings/threshold/${ACC}`, { ...to, expectedVersion: version + 1 })).body,
+    ).toEqual({ error: THRESHOLD_TEXTS.same })
+    const v = SettingsView.parse((await get('/api/settings')).body)
+    expect(v.directions.find((x) => x.accountId === ACC)?.thresholds).toEqual(to)
   })
 })

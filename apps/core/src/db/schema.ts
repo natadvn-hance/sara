@@ -65,6 +65,8 @@ export const lead = core.table('lead', {
   draftText: text('draft_text'),
   /** The «Стоимость услуги» for the bid form; null leaves the field empty. */
   draftPriceRub: integer('draft_price_rub'),
+  /** The top of the price range of the draft, «до»; null: half again over «от» (31.10.2026). */
+  draftPriceToRub: integer('draft_price_to_rub'),
   /** The Analyst's reading of the order and its short разбор (hidden need, risk, condition); null: none. */
   draftAnalysis: jsonb('draft_analysis'),
   /** What the order page says about the client (contract ClientInfo), read when the order page is opened. */
@@ -428,6 +430,42 @@ export const conversation = core.table(
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
   (t) => [uniqueIndex('conversation_account_chat').on(t.accountId, t.chatId)],
+)
+
+/**
+ * Where the reminders «клиент ждёт ответа» of a conversation stand (Boris, 31.10: a client must never be left without
+ * an answer): the last client message they are about, how many steps of the ladder went, when, and the message of the
+ * last one in Telegram, which the next one replaces. The row goes when the client is answered, taken or closed.
+ */
+export const convOwed = core.table('conv_owed', {
+  conversationId: uuid('conversation_id')
+    .primaryKey()
+    .references(() => conversation.id),
+  anchorMessageId: text('anchor_message_id').notNull(),
+  steps: integer('steps').notNull().default(0),
+  lastAt: ts('last_at'),
+  messageId: bigint('message_id', { mode: 'number' }),
+})
+
+/**
+ * The once-only micro-steps shown in a client's topic («Клиент прочитал отклик», «Созвон назначен», «Заказ закрыт на
+ * сайте»), by the topic's key and the step: a row is the step shown.
+ */
+export const topicStep = core.table(
+  'topic_step',
+  { key: text('key').notNull(), step: text('step').notNull() },
+  (t) => [primaryKey({ columns: [t.key, t.step] })],
+)
+
+/**
+ * What a client's topic already shows (Boris, 01.11: the topic is the chat with the client, every message once): the
+ * intro, the bid, the messages after it and the chat messages, by the topic's key and a reference (`bid`, `series:2`,
+ * `msg:<platform id>`, `restored`). The restore of old history reads it so that nothing is shown twice.
+ */
+export const topicShown = core.table(
+  'topic_shown',
+  { key: text('key').notNull(), ref: text('ref').notNull() },
+  (t) => [primaryKey({ columns: [t.key, t.ref] })],
 )
 
 /** Every chat message Sara knows, live or exported from history, with whose voice it is (FR-CONV-2, FR-TRAIN-1). */
@@ -935,14 +973,67 @@ export const meeting = core.table(
     startsAt: ts('starts_at'),
     channel: text('channel'),
     note: text('note'),
-    /** `held`, `missed`, `moved`; null before. */
+    /** `held`, `missed`, `moved`, `cancelled`; null before. */
     outcome: text('outcome'),
+    /**
+     * `booked` (a call on the calendar), `maybe` (the chat says they agreed but no firm time: no slot is taken, the stage
+     * does not move) or `cancelled`. Meetings Boris wrote down himself are `booked`.
+     */
+    status: text('status').notNull().default('booked'),
+    /** Where the meeting came from: `boris` (written in the pult), `chat` (read from the correspondence), later `call`. */
+    source: text('source').notNull().default('boris'),
+    /** How the call goes and who calls, as the chat says (`phone`, `telegram`, `video`; `we`, `client`). */
+    how: text('how'),
+    caller: text('caller'),
+    /** The words of the chat the meeting stands on. */
+    quote: text('quote'),
+    /** The card of the meeting in the client's topic (a post reference), edited in place. */
+    cardRef: bigint('card_ref', { mode: 'number' }),
     amountRub: integer('amount_rub'),
     createdBy: text('created_by').notNull().default('boris'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
   (t) => [index('meeting_starts').on(t.startsAt)],
+)
+
+/**
+ * Boris's Google Sheet (FR-ANL-7, docs/ops/google-sheet.md): one row per bid Sara keeps in his «Лог клиентов». The
+ * sheet itself finds the row by its order (developer metadata), so a row Boris moves stays the same row.
+ */
+export const sheetRow = core.table('sheet_row', {
+  orderId: text('order_id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  /** `new`: not in the sheet yet; `active`: Sara keeps it; `gone`: Boris deleted the row, Sara leaves it be. */
+  state: text('state').notNull().default('new'),
+  /** What Sara last wrote, column by column: a cell that holds something else is Boris's. */
+  written: jsonb('written').$type<Record<string, string | number>>().notNull().default({}),
+  /** Columns Boris changed by hand in this row: Sara never writes them again. */
+  boris: jsonb('boris').$type<string[]>().notNull().default([]),
+  /** Since when the sheet lags behind what Sara knows of this bid; null: it has it all. */
+  pendingSince: ts('pending_since'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+
+/** The link to Boris's sheet: since when bids go there, the last answer, the last failure and the next try. */
+export const sheetSync = core.table(
+  'sheet_sync',
+  {
+    id: integer('id').primaryKey().default(1),
+    /** Bids from this moment on go to the sheet; the earlier ones wait for Boris's «Внести» (`backfill`). */
+    since: ts('since').notNull(),
+    /** The past bids: `none` (not offered yet), `asked` (the preview waits for Boris), `running`, `done`, `declined`. */
+    backfill: text('backfill').notNull().default('none'),
+    backfillMessageId: bigint('backfill_message_id', { mode: 'number' }),
+    lastOkAt: ts('last_ok_at'),
+    lastWriteAt: ts('last_write_at'),
+    lastError: text('last_error'),
+    lastErrorAt: ts('last_error_at'),
+    failures: integer('failures').notNull().default(0),
+    nextTryAt: ts('next_try_at'),
+  },
+  (t) => [check('sheet_sync_single_row', sql`${t.id} = 1`)],
 )
 
 /** A browser that asked to ring (pult v2 design 6): one row per Web Push endpoint. */
