@@ -18,6 +18,8 @@ import { type SendOptions, STALE_DRAFT } from './sendTexts'
 import { getConversation, updateConversation } from './store'
 import { CONV_TEXTS, REMIND_TEXTS } from './texts'
 
+import type { ConversationRow } from './types'
+
 export type CommandDeps = {
   db: Db
   notifier: Pick<Notifier, 'sendText' | 'closeTopic'>
@@ -28,6 +30,11 @@ export type CommandDeps = {
     author: 'sara' | 'boris',
     o?: SendOptions,
   ): Promise<string>
+  /**
+   * Boris's plain words in a client's topic, read as the story of a call (the outcome and the next step go on the meeting
+   * card); a line for him when they were, null when they are for the client or about something else.
+   */
+  meetingResult?(conv: ConversationRow, text: string, at: Date): Promise<string | null>
 }
 
 export const COMMAND_TEXTS = {
@@ -826,6 +833,11 @@ export async function onClientText(
     }
     case 'say':
       if (c.text === null) return COMMAND_TEXTS.askText
+  }
+  // The story of a call («созвонились, договорились, что пришлю КП до пятницы») is not a text for the client.
+  if (!c && d.meetingResult) {
+    const told = await d.meetingResult(conv, m.text, m.at)
+    if (told) return told
   }
   const words = c?.cmd === 'say' && c.text ? c.text : m.text
   if (!live || !d.sendText) return say(d, conv.id, words, telegramKey(m.messageId))
