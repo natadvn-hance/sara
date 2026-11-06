@@ -145,7 +145,12 @@ export async function clientView(db: Db, id: string): Promise<ClientView | null>
   const meetings = await db
     .select()
     .from(meeting)
-    .where(eq(meeting.conversationId, id))
+    .where(
+      and(
+        eq(meeting.conversationId, id),
+        sql`${meeting.status} not in ('maybe', 'cancelled', 'duplicate')`,
+      ),
+    )
     .orderBy(asc(meeting.startsAt))
   return {
     id,
@@ -269,6 +274,7 @@ export async function meetingList(db: DbOrTx): Promise<MeetingList> {
   const own = await db
     .select()
     .from(meeting)
+    .where(sql`${meeting.status} not in ('maybe', 'cancelled', 'duplicate')`)
     .orderBy(asc(meeting.startsAt), desc(meeting.createdAt))
   const proposed = await db
     .select({ c: conversation, stage: deal.stage })

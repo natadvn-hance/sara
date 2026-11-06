@@ -5,6 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { onClientText } from '../../src/conversation/commands'
 import { registerLoraRoute } from '../../src/conversation/loraRoute'
 import {
+  dedupeMeetings,
   looksLikeReport,
   meetingsTick,
   readBorisResult,
@@ -15,6 +16,7 @@ import { syncChat } from '../../src/conversation/sync'
 import { deal, lead, meeting } from '../../src/db/schema'
 import { createDeal } from '../../src/domain/deal'
 import { meetingCard } from '../../src/notify/meetingCard'
+import { meetingList } from '../../src/pult/clients'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -202,6 +204,123 @@ describe('the outcome of a call', () => {
     await meetingsTick(deps(), new Date('2026-11-06T08:00:00.000Z'))
     expect(sent).toHaveLength(1)
     expect(sent[0]?.html).toBe('⏰ <b>Сегодня шаг по клиенту:</b> Прислать КП')
+  })
+})
+
+describe('a call written down twice (06.11)', () => {
+  const byHand = async (over: Partial<typeof meeting.$inferInsert> = {}) => {
+    const c = await conv()
+    const id = newEventId()
+    await db.insert(meeting).values({
+      id,
+      conversationId: c.id,
+      title: 'Созвон',
+      startsAt: '2026-11-03T10:00:00.000Z',
+      status: 'booked',
+      source: 'boris',
+      outcome: 'held',
+      createdBy: 'boris',
+      createdAt: '2026-11-03T14:00:00.000Z',
+      ...over,
+    })
+    return id
+  }
+
+  it('FR-CONV-12: Lora’s outcome finds the meeting Boris entered by hand and adds to it, no second row', async () => {
+    const id = await byHand()
+    await recordMeetingResult(
+      deps(),
+      await conv(),
+      {
+        held: true,
+        at: '2026-11-03T10:30:00.000Z',
+        result: 'Обсудили сайт',
+        nextStep: 'Прислать КП',
+        nextStepOn: '2026-11-07',
+        source: 'lora',
+      },
+      NOW,
+    )
+    const rows = await db.select().from(meeting)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      id,
+      outcome: 'held',
+      source: 'boris',
+      result: 'Обсудили сайт',
+      resultSource: 'lora',
+    })
+    expect(sent).toHaveLength(1)
+  })
+
+  it('FR-CONV-12: a call of another day, or a word that adds nothing, does not blank what stands', async () => {
+    const id = await byHand({ result: 'Старый итог', nextStep: 'Старый шаг' })
+    await recordMeetingResult(
+      deps(),
+      await conv(),
+      {
+        held: true,
+        at: '2026-11-03T10:00:00.000Z',
+        result: null,
+        nextStep: null,
+        nextStepOn: null,
+        source: 'boris',
+      },
+      NOW,
+    )
+    expect((await db.select().from(meeting))[0]).toMatchObject({
+      id,
+      result: 'Старый итог',
+      nextStep: 'Старый шаг',
+    })
+    // Four days later is another call.
+    await recordMeetingResult(
+      deps(),
+      await conv(),
+      {
+        held: true,
+        at: '2026-11-07T10:00:00.000Z',
+        result: 'Второй',
+        nextStep: null,
+        nextStepOn: null,
+        source: 'lora',
+      },
+      NOW,
+    )
+    expect(await db.select().from(meeting)).toHaveLength(2)
+  })
+
+  it('FR-CONV-12: the pass makes one meeting of the pair, keeps the outcome and the card, marks the extra, once', async () => {
+    const mine = await byHand()
+    const extra = await byHand({
+      id: newEventId(),
+      startsAt: '2026-11-03T12:00:00.000Z',
+      source: 'lora',
+      createdBy: 'lora',
+      createdAt: '2026-11-05T09:00:00.000Z',
+      result: 'Обсудили сайт',
+      nextStep: 'Прислать КП',
+      nextStepOn: '2026-11-07',
+      resultSource: 'lora',
+      cardRef: -777,
+    } as never)
+    expect(await dedupeMeetings(db)).toBe(1)
+    const rows = await db.select().from(meeting)
+    const kept = rows.find((r) => r.id === mine)
+    const marked = rows.find((r) => r.id !== mine)
+    expect(kept).toMatchObject({
+      status: 'booked',
+      result: 'Обсудили сайт',
+      nextStep: 'Прислать КП',
+      cardRef: -777,
+    })
+    expect(marked).toMatchObject({ id: expect.any(String), status: 'duplicate' })
+    expect(marked?.id).not.toBe(mine)
+    expect(extra).toBeDefined()
+    // The lists leave the marked one out; nothing is deleted; a second pass does nothing.
+    expect((await meetingList(db)).rows.filter((r) => r.source === 'manual').length).toBe(1)
+    expect(await db.select().from(meeting)).toHaveLength(2)
+    expect(await dedupeMeetings(db)).toBe(0)
   })
 })
 

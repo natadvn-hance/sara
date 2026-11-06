@@ -21,6 +21,7 @@ import {
 } from './conversation/events'
 import { registerLoraRoute } from './conversation/loraRoute'
 import {
+  dedupeMeetings,
   hasBookedMeeting,
   readBorisResult,
   readMeeting,
@@ -523,6 +524,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
   // Once each: deals whose client already answered move on to talking, and the false «закрыт на сайте» marks go.
+  // Once: a call written down twice is one meeting, the extra row marked, not deleted.
+  void dedupeMeetings(db).catch((e) =>
+    console.error('meeting duplicates pass failed', e instanceof Error ? e.message : e),
+  )
   void backfillTalking(db).catch((e) =>
     console.error('deal stages pass failed', e instanceof Error ? e.message : e),
   )
