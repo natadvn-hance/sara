@@ -294,7 +294,7 @@ describe('the input for Lora', () => {
   const post = (f: Awaited<ReturnType<typeof app>>, body: unknown, token = 'lora-secret') =>
     f.inject({
       method: 'POST',
-      url: '/internal/lora/meeting-result',
+      url: '/api/lora/meeting-result',
       headers: { 'x-sara-lora-token': token },
       payload: body as object,
     })
@@ -330,7 +330,7 @@ describe('the input for Lora', () => {
     const off = Fastify()
     registerLoraRoute(off, { db, token: undefined, record: async () => {} })
     expect(
-      (await off.inject({ method: 'POST', url: '/internal/lora/meeting-result', payload: {} }))
+      (await off.inject({ method: 'POST', url: '/api/lora/meeting-result', payload: {} }))
         .statusCode,
     ).toBe(503)
   })
