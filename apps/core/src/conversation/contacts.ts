@@ -6,7 +6,7 @@ import { formalName } from '../leads/russianNames'
 /**
  * The people and the ways to reach them, taken out of a chat by code (Boris, 03.11: «в карточке писались их контакты и
  * имена, и контакты в тг»): the real names of the people he talks to (the order may be for Anna and the talk with
- * Екатерина Геннадьевна), their phones, Telegram and mail. Regular expressions only, no model: the card and the first
+ * Марина Сергеевна), their phones, Telegram and mail. Regular expressions only, no model: the card and the first
  * post of the topic show it, and it is never kept anywhere or written to the journal or to a prompt (ADR-016).
  */
 
@@ -31,7 +31,7 @@ const CUE =
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 const lc = (s: string) => s.toLowerCase().replace(/ё/g, 'е')
 
-/** A name in any case as the nominative of a known first name: «Екатерине» is «Екатерина»; null if it is none. */
+/** A name in any case as the nominative of a known first name: «Марине» is «Марина»; null if it is none. */
 export function firstNameIn(word: string): string | null {
   const w = lc(word)
   const ends: [string, string][] = [
@@ -61,7 +61,7 @@ export function firstNameIn(word: string): string | null {
   return null
 }
 
-/** «Геннадьевне» is «Геннадьевна», «Петровичу» is «Петрович». */
+/** «Сергеевне» is «Сергеевна», «Петровичу» is «Петрович». */
 const patronymic = (w: string): string =>
   w
     .replace(/(евн|овн|ичн|ьичн)(?:а|ы|е|у|ой)$/u, '$1а')
@@ -123,7 +123,7 @@ export function contactsFromChat(texts: string[], skip: string[] = []): Contacts
 export const noContacts = (c: Contacts) =>
   c.names.length + c.phones.length + c.telegrams.length + c.emails.length === 0
 
-/** One line for a card or a post: «Екатерина Геннадьевна · +7 900 123-45-67 · @name». */
+/** One line for a card or a post: «Марина Сергеевна · +7 900 123-45-67 · @name». */
 export function contactsLine(c: Contacts): string | null {
   const parts = [...c.names, ...c.phones, ...c.telegrams, ...c.emails]
   return parts.length ? parts.join(' · ') : null

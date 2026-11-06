@@ -63,7 +63,7 @@ beforeEach(async () => {
     accountId: ACC,
     title: 'Маркетинг',
     category: 'Маркетинг',
-    city: 'Екатеринбург',
+    city: 'Маринбург',
     text: 'Нужен маркетолог',
     clientName: 'Татьяна',
     bidPriceRub: 100,

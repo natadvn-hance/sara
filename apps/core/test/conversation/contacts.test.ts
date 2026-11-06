@@ -4,15 +4,15 @@ import { contactsFromChat, contactsLine, firstNameIn } from '../../src/conversat
 describe('contacts out of a chat (by code)', () => {
   it('FR-CONV-13: the person and the number of the real scene: a name in a case, a phone with 8', () => {
     const c = contactsFromChat([
-      'могу попросить вас набрать Екатерине Геннадьевне завтра по номеру 8900 123-45-67 в 15:30?',
+      'могу попросить вас набрать Марине Сергеевне завтра по номеру 8900 123-45-67 в 15:30?',
     ])
-    expect(c.names).toEqual(['Екатерина Геннадьевна'])
+    expect(c.names).toEqual(['Марина Сергеевна'])
     expect(c.phones).toEqual(['+7 900 123-45-67'])
   })
 
   it('FR-CONV-13: a first name alone after «набрать» is found and put in the nominative', () => {
-    expect(contactsFromChat(['наберите Екатерине в пятницу']).names).toEqual(['Екатерина'])
-    expect(firstNameIn('Екатерине')).toBe('Екатерина')
+    expect(contactsFromChat(['наберите Марине в пятницу']).names).toEqual(['Марина'])
+    expect(firstNameIn('Марине')).toBe('Марина')
   })
 
   it('FR-CONV-13: our own number and Telegram are never shown as the client’s', () => {

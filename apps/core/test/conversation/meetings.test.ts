@@ -96,7 +96,7 @@ describe('the cheap gate', () => {
   it('FR-CONV-12: words of a call with a time or a number pass; talk of other things does not', () => {
     expect(
       looksLikeMeeting([
-        'могу попросить вас набрать Екатерине завтра по номеру 8900 123-45-67 в 15:30?',
+        'могу попросить вас набрать Марине завтра по номеру 8900 123-45-67 в 15:30?',
       ]),
     ).toBe(true)
     expect(looksLikeMeeting(['давайте созвонимся в четверг'])).toBe(true)
@@ -136,7 +136,7 @@ describe('a call booked in the chat', () => {
       ['specialist', 'Добрый день! Готов обсудить задачу.', 600],
       [
         'client',
-        'Могу попросить вас набрать Екатерине завтра по номеру 8900 123-45-67 в 15:30? Она может с 15:00 до 16:00',
+        'Могу попросить вас набрать Марине завтра по номеру 8900 123-45-67 в 15:30? Она может с 15:00 до 16:00',
         30,
       ],
       ['specialist', 'Договорились, завтра наберу', 10],
@@ -382,7 +382,7 @@ describe('no waiting and no reminders while a call stands', () => {
 describe('contacts on the topic', () => {
   it('FR-CONV-13: a phone in the talk redraws the first post once, and not again for the same set', async () => {
     const { conv } = await chat([
-      ['client', 'Наберите Екатерине Геннадьевне по номеру 8900 123-45-67', 5],
+      ['client', 'Наберите Марине Сергеевне по номеру 8900 123-45-67', 5],
     ])
     const posted: string[] = []
     const n = {
@@ -395,7 +395,7 @@ describe('contacts on the topic', () => {
     await refreshContacts({ ...deps, notifier: n } as never, conv)
     expect(posted.length).toBe(1)
     expect(posted[0]).toContain('+7 900 123-45-67')
-    expect(posted[0]).toContain('Екатерина Геннадьевна')
+    expect(posted[0]).toContain('Марина Сергеевна')
     await refreshContacts({ ...deps, notifier: n } as never, conv)
     expect(posted.length).toBe(1)
   })
