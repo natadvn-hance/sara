@@ -292,7 +292,7 @@ describe('the screen on: a criterion that fired stops the order', () => {
     expect(await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())).toBe(
       'sent',
     )
-    expect(tg.sent.map((m) => m.text).join('\n')).toContain('Отсеяно 1: Короткий текст 1')
+    expect(tg.sent.map((m) => m.text).join('\n')).toContain('Отсеяно сразу: короткий текст 1')
   })
 })
 
@@ -308,7 +308,7 @@ describe('the shadow (the default): the screen only marks', () => {
     tg.sent.length = 0
     await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
     expect(tg.sent.map((m) => m.text).join('\n')).toContain(
-      'Отсеяла бы 1 (отсев пока только отмечает): Короткий текст 1',
+      'Отсев отметил ещё 1 и пропустил дальше: короткий текст 1',
     )
   })
 })
