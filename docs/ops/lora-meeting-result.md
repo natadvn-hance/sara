@@ -7,7 +7,7 @@
 ## Куда
 
 ```
-POST <адрес ядра Сары>/internal/lora/meeting-result
+POST https://sara.hance.pro/api/lora/meeting-result
 x-sara-lora-token: <токен Лоры>
 content-type: application/json
 ```

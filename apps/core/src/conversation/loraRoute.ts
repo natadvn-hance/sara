@@ -53,6 +53,12 @@ async function conversationOf(db: Db, b: LoraResult): Promise<ConversationRow | 
   return row ? rowOf(row) : null
 }
 
+/**
+ * Lora works on Boris's Mac, outside the server: her input sits under /api, which the proxy passes on, while
+ * /internal stays closed to the outside (T4). Her own token guards it.
+ */
+export const LORA_PATH = '/api/lora/meeting-result'
+
 export const topicKeyOf = (c: ConversationRow) => c.orderId ?? `conv:${c.id}`
 
 export function registerLoraRoute(
@@ -63,7 +69,7 @@ export function registerLoraRoute(
     record(conv: ConversationRow, r: LoraResult): Promise<void>
   },
 ): void {
-  app.post('/internal/lora/meeting-result', async (req, reply) => {
+  app.post(LORA_PATH, async (req, reply) => {
     if (!d.token) return reply.code(503).send({ error: 'the input is off' })
     const given = req.headers['x-sara-lora-token']
     if (typeof given !== 'string' || !same(given, d.token))
