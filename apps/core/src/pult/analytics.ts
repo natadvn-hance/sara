@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { NOT_TEST } from '../testLeads/sql'
 import { stageOf } from './clients'
+import { meetingStats } from './meetingStats'
 
 /**
  * Boris's three tables (docs/product/analytics-metrics.md) from what Sara knows today: bids and spends from the
@@ -256,6 +257,7 @@ export async function analyticsView(db: DbOrTx, year: number): Promise<Analytics
     })),
     funnel,
     months,
+    meetings: await meetingStats(db, year),
     notes: [
       ...(unpriced
         ? [

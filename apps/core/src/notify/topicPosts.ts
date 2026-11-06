@@ -109,6 +109,8 @@ export function introPost(o: {
   budget: string | null
   seenAt: string | null
   text: string | null
+  /** The people and their ways to reach them as the chat says, one line. */
+  contacts?: string | null
 }): string {
   const head = `📌 <b>${hyphen(o.title ?? (o.orderId ? `Заказ №${o.orderId}` : 'Клиент без заказа'))}</b>`
   const who = [o.clientName, o.city, o.budget ? `бюджет ${o.budget}` : null]
@@ -125,6 +127,7 @@ export function introPost(o: {
   const lines = [
     head,
     who || null,
+    o.contacts ? `<b>Контакты:</b> ${hyphen(o.contacts)}` : null,
     o.seenAt ? `Заявка от ${stamp(o.seenAt)}` : null,
     request ? `\n${hyphen(request.length > 300 ? `${request.slice(0, 299)}…` : request)}` : null,
     facts.length

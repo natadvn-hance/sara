@@ -8,6 +8,7 @@ import {
   type MeetingRead,
   parseMoscow,
   readMeeting,
+  refreshContacts,
 } from '../../src/conversation/meetings'
 import { waitingClients } from '../../src/conversation/owed'
 import { ensureConversation } from '../../src/conversation/store'
@@ -375,5 +376,27 @@ describe('no waiting and no reminders while a call stands', () => {
       'по телефону · звоним мы',
       '<blockquote>Договорились, завтра &lt;наберу&gt;</blockquote>',
     ])
+  })
+})
+
+describe('contacts on the topic', () => {
+  it('FR-CONV-13: a phone in the talk redraws the first post once, and not again for the same set', async () => {
+    const { conv } = await chat([
+      ['client', 'Наберите Екатерине Геннадьевне по номеру 8900 123-45-67', 5],
+    ])
+    const posted: string[] = []
+    const n = {
+      ...notifier,
+      topicPosts: async () => [-77],
+      editText: async (ref: number, html: string) => {
+        posted.push(`${ref}:${html}`)
+      },
+    }
+    await refreshContacts({ ...deps, notifier: n } as never, conv)
+    expect(posted.length).toBe(1)
+    expect(posted[0]).toContain('+7 900 123-45-67')
+    expect(posted[0]).toContain('Екатерина Геннадьевна')
+    await refreshContacts({ ...deps, notifier: n } as never, conv)
+    expect(posted.length).toBe(1)
   })
 })

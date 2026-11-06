@@ -2,14 +2,16 @@ import { newEventId } from '@sara/shared'
 import { and, asc, desc, eq, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../db/client'
-import { chatMessage, jobRun, meeting } from '../db/schema'
+import { chatMessage, jobRun, lead, meeting } from '../db/schema'
 import { advanceTo } from '../domain/deal'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
-import { markShown } from '../notify/forum'
+import { firstName } from '../leads/clientName'
+import { markShown, topicIntro } from '../notify/forum'
 import { type MeetingCardView, meetingCard } from '../notify/meetingCard'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
+import { contactsLine, contactsOf } from './contacts'
 import { clientNames } from './dossier'
 import { dealOf } from './stage'
 import { getConversation as getConversationRow } from './store'
@@ -89,7 +91,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 export type MeetingDeps = {
   db: Db
   gateway: Pick<Gateway, 'call'>
-  notifier: Pick<Notifier, 'sendText' | 'editText' | 'pinPost' | 'forumOn'>
+  notifier: Pick<Notifier, 'sendText' | 'editText' | 'pinPost' | 'forumOn' | 'topicPosts'>
   now?: () => Date
 }
 
@@ -372,7 +374,10 @@ async function card(
   pin: boolean,
 ): Promise<void> {
   if (!(await d.notifier.forumOn?.())) return
-  const html = meetingCard(v, now)
+  const html = meetingCard(
+    { ...v, contacts: v.contacts ?? (await contactsLineOf(d.db, conv)) },
+    now,
+  )
   const [row] = await d.db.select({ ref: meeting.cardRef }).from(meeting).where(eq(meeting.id, id))
   if (row?.ref != null) {
     try {
@@ -773,4 +778,99 @@ export async function dedupeMeetings(db: Db): Promise<number> {
     }
   }
   return marked
+}
+
+/** The contacts line of a conversation, without the name the order already carries. */
+async function contactsLineOf(db: Db, conv: ConversationRow): Promise<string | null> {
+  const [l] = conv.orderId
+    ? await db.select({ name: lead.clientName }).from(lead).where(eq(lead.id, conv.orderId))
+    : []
+  const own = l?.name ? firstName(l.name) : null
+  return contactsLine(await contactsOf(db, { conversationId: conv.id }, own ? [own] : []))
+}
+
+const hash = (s: string) => {
+  let h = 5381
+  for (const ch of s) h = ((h << 5) + h + ch.charCodeAt(0)) | 0
+  return (h >>> 0).toString(36)
+}
+
+/** The card of a meeting drawn again from its row (the contacts changed). */
+async function redraw(
+  d: MeetingDeps,
+  conv: ConversationRow,
+  m: typeof meeting.$inferSelect,
+  now: Date,
+) {
+  const status: MeetingCardView['status'] =
+    m.outcome === 'held'
+      ? 'held'
+      : m.outcome === 'missed'
+        ? 'missed'
+        : m.expiredAt
+          ? 'expired'
+          : m.status === 'maybe'
+            ? 'maybe'
+            : 'booked'
+  await card(
+    d,
+    conv,
+    m.id,
+    {
+      status,
+      at: m.startsAt ? new Date(m.startsAt).toISOString() : null,
+      how: m.how,
+      caller: m.caller,
+      quote: m.quote,
+      result: m.result,
+      nextStep: m.nextStep,
+      nextStepOn: m.nextStepOn,
+    },
+    now,
+    false,
+  )
+}
+
+/**
+ * New contacts in the talk (a name, a phone, a Telegram, a mail): the first post of the topic and the card of the
+ * meeting are drawn again with them, once for each set. Never throws.
+ */
+export async function refreshContacts(d: MeetingDeps, conv: ConversationRow): Promise<void> {
+  try {
+    if (conv.closedAt || !(await d.notifier.forumOn?.())) return
+    const line = await contactsLineOf(d.db, conv)
+    if (!line) return
+    const key = conv.orderId ?? `conv:${conv.id}`
+    if (!(await markShown(d.db, key, `contacts:${hash(line)}`))) return
+    const place = { conversation: conv.id }
+    const first = (await d.notifier.topicPosts?.(place))?.[0]
+    if (first !== undefined && d.notifier.editText)
+      await d.notifier
+        .editText(first, (await topicIntro(d.db, key)).intro, undefined, { html: true })
+        .catch(() => {})
+    const now = d.now?.() ?? new Date()
+    const rows = await d.db
+      .select()
+      .from(meeting)
+      .where(
+        and(
+          eq(meeting.conversationId, conv.id),
+          sql`${meeting.status} not in ('cancelled', 'duplicate')`,
+          sql`${meeting.cardRef} is not null`,
+        ),
+      )
+    for (const m of rows) await redraw(d, conv, m, now).catch(() => {})
+  } catch (e) {
+    console.error('contacts not refreshed', e instanceof Error ? e.message.slice(0, 200) : e)
+  }
+}
+
+/** The news of a chat for the meeting side: the contacts first, then the call booked in it. */
+export async function meetingNews(
+  d: MeetingDeps,
+  conv: ConversationRow,
+  added: StoredMessage[],
+): Promise<void> {
+  await refreshContacts(d, conv)
+  await readMeeting(d, conv, added)
 }

@@ -23,8 +23,8 @@ import { registerLoraRoute } from './conversation/loraRoute'
 import {
   dedupeMeetings,
   hasBookedMeeting,
+  meetingNews,
   readBorisResult,
-  readMeeting,
   recordMeetingResult,
   startMeetingTick,
 } from './conversation/meetings'
@@ -337,7 +337,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
     show: (conv, added) => showClientWords({ db, notifier: bot.notifier }, conv, added),
-    news: (conv, added) => readMeeting(meetingDeps, conv, added),
+    news: (conv, added) => meetingNews(meetingDeps, conv, added),
   })
   // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
   // A booked call stops the reminders to the client (Boris, 03.11: she kept reminding after they had agreed).
@@ -359,7 +359,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     onSpecialist: (c, added) => compareTurn(cardDeps, c.id, added),
     // The reminders follow the chat as read: our message last starts one, a client's message cancels it.
     onChatState: (c, messages) => syncReminders(c, messages),
-    onNews: (c, added) => readMeeting(meetingDeps, c, added),
+    onNews: (c, added) => meetingNews(meetingDeps, c, added),
   }
   const conversationEvents = createConversationEvents(conversationDeps)
   const accountEvents = createProfiEventDispatcher({
