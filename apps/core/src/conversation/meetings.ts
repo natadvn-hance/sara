@@ -2,7 +2,7 @@ import { newEventId } from '@sara/shared'
 import { and, asc, desc, eq, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../db/client'
-import { chatMessage, meeting } from '../db/schema'
+import { chatMessage, jobRun, meeting } from '../db/schema'
 import { advanceTo } from '../domain/deal'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
@@ -426,6 +426,33 @@ async function openMeeting(db: Db, conversationId: string) {
   return m ?? null
 }
 
+/** Meetings of one call closer than this are one meeting, whoever wrote them down. */
+const SAME_CALL_MS = 24 * 3600_000
+
+/**
+ * The meeting an outcome belongs to (Boris, 06.11: the outcome of Lora found no meeting Boris had entered by hand and made
+ * a second one): of the conversation's meetings, any source and any outcome, the one nearest in time to the call, within
+ * a day; failing that, the latest with no outcome yet.
+ */
+export async function standingMeeting(db: Db, conversationId: string, around: Date) {
+  const all = await db
+    .select()
+    .from(meeting)
+    .where(
+      and(
+        eq(meeting.conversationId, conversationId),
+        sql`${meeting.status} not in ('cancelled', 'duplicate')`,
+      ),
+    )
+    .orderBy(desc(meeting.createdAt))
+  const near = all
+    .filter((m) => m.startsAt)
+    .map((m) => ({ m, d: Math.abs(new Date(m.startsAt ?? 0).getTime() - around.getTime()) }))
+    .filter((x) => x.d <= SAME_CALL_MS)
+    .sort((a, b) => a.d - b.d)[0]
+  return near?.m ?? all.find((m) => m.outcome === null) ?? null
+}
+
 /**
  * Writes down the outcome of a call (Boris, 03.11: «после проведения встречи хочу, чтобы внутри чата с клиентом была
  * информация о том что встреча была проведена и следующие шаги»): the meeting gets its result and next step, a held
@@ -439,16 +466,17 @@ export async function recordMeetingResult(
   now: Date,
 ): Promise<string> {
   const at = r.at ? new Date(r.at) : null
-  const known = await openMeeting(d.db, conv.id)
+  const known = await standingMeeting(d.db, conv.id, at && !Number.isNaN(at.getTime()) ? at : now)
   const id = known?.id ?? newEventId()
   const outcome = r.held ? 'held' : 'missed'
   const startsAt = known?.startsAt ?? (at && !Number.isNaN(at.getTime()) ? at.toISOString() : null)
   const fields = {
     outcome,
     status: 'booked',
-    result: r.result,
-    nextStep: r.nextStep,
-    nextStepOn: r.nextStepOn,
+    // What an earlier word of the call said stays when this one adds to it.
+    result: r.result ?? known?.result ?? null,
+    nextStep: r.nextStep ?? known?.nextStep ?? null,
+    nextStepOn: r.nextStepOn ?? known?.nextStepOn ?? null,
     resultSource: r.source,
     resultAt: now.toISOString(),
     startsAt,
@@ -498,9 +526,9 @@ export async function recordMeetingResult(
       how: known?.how ?? null,
       caller: known?.caller ?? null,
       quote: null,
-      result: r.result,
-      nextStep: r.nextStep,
-      nextStepOn: r.nextStepOn,
+      result: r.result ?? known?.result ?? null,
+      nextStep: r.nextStep ?? known?.nextStep ?? null,
+      nextStepOn: r.nextStepOn ?? known?.nextStepOn ?? null,
     },
     now,
     false,
@@ -673,4 +701,76 @@ export function startMeetingTick(d: MeetingDeps, tickMs = 60_000): { stop(): voi
       })
   }, tickMs)
   return { stop: () => clearInterval(timer) }
+}
+
+/**
+ * Once: a call written down twice (Boris's by hand, then Lora's outcome as a second row) is one meeting. Of the meetings of
+ * a conversation whose times are within a day, the oldest stays and takes the outcome, the card and the next step of the
+ * others; the others are marked `duplicate` (not deleted), and the readers of meetings leave them out. A mark in job_run
+ * keeps it from repeating. Returns how many rows were marked.
+ */
+export async function dedupeMeetings(db: Db): Promise<number> {
+  const taken = await db
+    .insert(jobRun)
+    .values({ name: 'meetings_dedup', day: '2000-01-01' })
+    .onConflictDoNothing()
+    .returning({ day: jobRun.day })
+  if (taken.length === 0) return 0
+  const rows = await db
+    .select()
+    .from(meeting)
+    .where(
+      and(
+        sql`${meeting.conversationId} is not null`,
+        sql`${meeting.startsAt} is not null`,
+        sql`${meeting.status} not in ('cancelled', 'duplicate', 'maybe')`,
+      ),
+    )
+    .orderBy(asc(meeting.conversationId), asc(meeting.createdAt))
+  let marked = 0
+  const byConv = new Map<string, typeof rows>()
+  for (const r of rows)
+    byConv.set(r.conversationId as string, [...(byConv.get(r.conversationId as string) ?? []), r])
+  for (const list of byConv.values()) {
+    const kept: (typeof rows)[number][] = []
+    for (const m of list) {
+      const t = new Date(m.startsAt ?? 0).getTime()
+      const keeper = kept.find(
+        (k) => Math.abs(new Date(k.startsAt ?? 0).getTime() - t) <= SAME_CALL_MS,
+      )
+      if (!keeper) {
+        kept.push(m)
+        continue
+      }
+      await db
+        .update(meeting)
+        .set({
+          outcome: keeper.outcome ?? m.outcome,
+          result: keeper.result ?? m.result,
+          nextStep: keeper.nextStep ?? m.nextStep,
+          nextStepOn: keeper.nextStepOn ?? m.nextStepOn,
+          resultSource: keeper.resultSource ?? m.resultSource,
+          resultAt: keeper.resultAt ?? m.resultAt,
+          cardRef: keeper.cardRef ?? m.cardRef,
+          nextRemindedAt: keeper.nextRemindedAt ?? m.nextRemindedAt,
+          amountRub: keeper.amountRub ?? m.amountRub,
+          note: keeper.note ?? m.note,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(meeting.id, keeper.id))
+      await db
+        .update(meeting)
+        .set({ status: 'duplicate', updatedAt: new Date().toISOString() })
+        .where(eq(meeting.id, m.id))
+      Object.assign(keeper, {
+        outcome: keeper.outcome ?? m.outcome,
+        result: keeper.result ?? m.result,
+        nextStep: keeper.nextStep ?? m.nextStep,
+        nextStepOn: keeper.nextStepOn ?? m.nextStepOn,
+        cardRef: keeper.cardRef ?? m.cardRef,
+      })
+      marked++
+    }
+  }
+  return marked
 }
