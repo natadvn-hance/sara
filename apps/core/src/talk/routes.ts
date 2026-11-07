@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { newEventId } from '@sara/shared'
@@ -7,22 +8,38 @@ import { requireSession } from '../auth/session'
 import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { TEXTS } from '../notify/cards'
 import type { ChatLine } from '../secretary/store'
+import { AGENT_IDS, AGENTS, type Agent, switchTo } from './agents'
 import type { TalkAnswers } from './answers'
+import type { LoraLink } from './lora'
 import type { Voice } from './voice'
 
 export const TALK_TEXTS = {
   gone: 'Ответ потерялся: Сара перезапускалась. Скажи ещё раз.',
   noVoice: 'Голос сейчас недоступен, ответ только текстом.',
   empty: 'Не услышала слов. Скажи ещё раз.',
+  loraOff: 'Лора ещё не подключена к приложению. Позови Сару или напиши Лоре в Telegram.',
+  loraAway: 'Лора сейчас не на связи в приложении. Напиши ей в Telegram или позови Сару.',
 } as const
+
+/** Where Lora's channel takes Boris's words and gives her answers (ADR-028); her own key guards it. */
+export const LORA_APP_PATH = '/api/lora/app'
 
 /** A recording of up to a few minutes; anything bigger is not a question to Sara. */
 const AUDIO_LIMIT = 15 * 1024 * 1024
 /** How long one ask for the answer waits: shorter than the proxies' and the phone's patience. */
 const WAIT_MS = 25_000
 
+const AgentId = z.enum(AGENT_IDS)
 const TypedWords = z.object({ text: z.string().trim().min(1).max(4000) })
-const SpeakBody = z.object({ text: z.string().trim().min(1).max(4000) })
+const SpeakBody = z.object({ text: z.string().trim().min(1).max(4000), agent: AgentId.optional() })
+const AgentQuery = z.object({ agent: AgentId.optional() })
+const LoraReply = z.object({ talk: z.uuid(), text: z.string().trim().min(1).max(4000) })
+
+const same = (a: string, b: string) => {
+  const x = Buffer.from(a)
+  const y = Buffer.from(b)
+  return x.length === y.length && timingSafeEqual(x, y)
+}
 
 const EXT: Record<string, string> = {
   'audio/mp4': 'm4a',
@@ -51,10 +68,36 @@ export function registerTalkRoutes(
     answers: TalkAnswers
     voice: Voice
     history(): Promise<ChatLine[]>
+    /** Lora's side of the app: her channel takes the words from here. */
+    lora: LoraLink
+    /** Lora's own key (SARA_LORA_TOKEN); unset, Lora is not in the app. */
+    loraToken: string | undefined
     workDir: string
     waitMs?: number
   },
 ): void {
+  /** Lora's channel, from her session on the server: by her key only, never by the pult's sign-in. */
+  app.register(async (lora) => {
+    lora.addHook('onRequest', async (req, reply) => {
+      if (!d.loraToken) return reply.code(503).send({ error: 'the app channel is off' })
+      const given = req.headers['x-sara-lora-token']
+      if (typeof given !== 'string' || !same(given, d.loraToken))
+        return reply.code(401).send({ error: 'unauthorized' })
+    })
+    lora.get(`${LORA_APP_PATH}/next`, async (_req, reply) => {
+      const w = await d.lora.next(d.waitMs ?? WAIT_MS)
+      return w ?? reply.code(204).send()
+    })
+    lora.post(`${LORA_APP_PATH}/reply`, async (req, reply) => {
+      const body = LoraReply.safeParse(req.body ?? {})
+      if (!body.success) return reply.code(400).send({ error: 'talk and text are needed' })
+      d.lora.reply(body.data.talk, body.data.text)
+      const waiting = d.answers.pending(body.data.talk)
+      d.answers.give([body.data.talk], { text: body.data.text, cards: 0 })
+      return { ok: true, waiting }
+    })
+  })
+
   app.register(async (scoped) => {
     scoped.addHook('onRequest', requireSession)
     scoped.addContentTypeParser(
@@ -65,6 +108,9 @@ export function registerTalkRoutes(
 
     scoped.post('/api/talk', async (req, reply) => {
       d.voice.warm()
+      const asked = AgentQuery.safeParse(req.query ?? {})
+      if (!asked.success) return reply.code(400).send({ error: TALK_TEXTS.empty })
+      let agent: Agent = asked.data.agent ?? 'sara'
       let text: string
       const spoken = Buffer.isBuffer(req.body)
       if (Buffer.isBuffer(req.body)) {
@@ -88,6 +134,40 @@ export function registerTalkRoutes(
         if (!typed.success) return reply.code(400).send({ error: TALK_TEXTS.empty })
         text = typed.data.text
       }
+      const heard = text
+      // «Позови Сару»: the other one comes and greets; a question after her name goes to her at once.
+      const call = switchTo(text, agent)
+      if (call) {
+        agent = call.agent
+        if (!call.rest)
+          return {
+            heard,
+            talk: null,
+            switch: agent,
+            reply: { text: AGENTS[agent].greeting, buttons: false },
+          }
+        text = call.rest
+      }
+      const switched = call ? { switch: agent } : {}
+      if (agent === 'lora') {
+        if (!d.loraToken)
+          return {
+            heard,
+            talk: null,
+            ...switched,
+            reply: { text: TALK_TEXTS.loraOff, buttons: false },
+          }
+        if (!d.lora.connected())
+          return {
+            heard,
+            talk: null,
+            ...switched,
+            reply: { text: TALK_TEXTS.loraAway, buttons: false },
+          }
+        const talk = d.answers.open()
+        d.lora.push({ talk, text, voice: spoken, at: new Date().toISOString() })
+        return { heard, talk, ...switched, reply: null }
+      }
       const talk = d.answers.open()
       const r = await d.handle({
         text,
@@ -98,11 +178,16 @@ export function registerTalkRoutes(
         at: new Date(),
       })
       return r === null
-        ? { heard: text, talk, reply: null }
-        : { heard: text, talk: null, reply: shown(r) }
+        ? { heard, talk, ...switched, reply: null }
+        : { heard, talk: null, ...switched, reply: shown(r) }
     })
 
-    scoped.get('/api/talk/history', async () => ({ lines: await d.history() }))
+    scoped.get('/api/talk/history', async (req, reply) => {
+      const asked = AgentQuery.safeParse(req.query ?? {})
+      if (!asked.success) return reply.code(400).send({ error: TALK_TEXTS.empty })
+      if (asked.data.agent === 'lora') return { lines: d.lora.history() }
+      return { lines: await d.history() }
+    })
 
     scoped.get('/api/talk/:id', async (req, reply) => {
       const { id } = req.params as { id: string }
@@ -116,7 +201,7 @@ export function registerTalkRoutes(
     scoped.post('/api/talk/speak', async (req, reply) => {
       const body = SpeakBody.safeParse(req.body ?? {})
       if (!body.success) return reply.code(400).send({ error: TALK_TEXTS.empty })
-      const audio = await d.voice.speak(body.data.text)
+      const audio = await d.voice.speak(body.data.text, AGENTS[body.data.agent ?? 'sara'].speaker)
       if (!audio) return reply.code(503).send({ error: TALK_TEXTS.noVoice })
       return reply.type('audio/mpeg').header('cache-control', 'no-store').send(audio)
     })

@@ -41,6 +41,11 @@ export function createTalkAnswers(o: { now?: () => number; keepMs?: number } = {
         for (const w of t.wake.splice(0)) w()
       }
     },
+    /** Whether the app still waits for this talk's answer. */
+    pending: (id: string): boolean => {
+      const t = talks.get(id)
+      return t !== undefined && t.answer === null
+    },
     /** The answer if it is there, or after up to `ms` of waiting for it. */
     async wait(id: string, ms: number): Promise<TalkWait> {
       const t = talks.get(id)

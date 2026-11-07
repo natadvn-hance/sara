@@ -1,11 +1,13 @@
-import { type Sent, SignedOut, talkApi } from './client'
+import { type Agent, type Sent, SignedOut, talkApi } from './client'
 import { createSilence, waitForAnswer } from './logic'
 import { createPlayer, keepAwake, type Mic, openMic, type Played, speakLocally } from './media'
 
 export type Phase = 'loading' | 'login' | 'idle' | 'listening' | 'sending' | 'thinking' | 'speaking'
 export type Item = {
   id: string
-  who: 'boris' | 'sara' | 'note'
+  /** Whose talk it belongs to: each one has her own feed. */
+  agent: Agent
+  who: 'boris' | 'agent' | 'note'
   text: string
   at: number
   cards?: number
@@ -13,6 +15,8 @@ export type Item = {
   replay?: boolean
 }
 export type TalkView = {
+  /** Who answers now: Lora by default. */
+  agent: Agent
   phase: Phase
   items: Item[]
   /** The microphone's loudness while listening, 0..1. */
@@ -23,12 +27,32 @@ export type TalkView = {
   since: number
 }
 
+export const AGENT_UI: Record<
+  Agent,
+  { name: string; acc: string; dat: string; role: string; greeting: string }
+> = {
+  lora: {
+    name: 'Лора',
+    acc: 'Лору',
+    dat: 'Лоре',
+    role: 'Личный ассистент',
+    greeting: 'Борь, я на связи.',
+  },
+  sara: {
+    name: 'Сара',
+    acc: 'Сару',
+    dat: 'Саре',
+    role: 'Продажи и заявки',
+    greeting: 'Да-да, Борь, я тут.',
+  },
+}
+
 export const TALK_NOTES = {
   notHeard: 'Не разобрала',
   noMic: 'Нет доступа к микрофону. Разреши его для этого сайта в настройках Safari и нажми кнопку.',
-  late: 'Сара не ответила за шесть минут. Спроси ещё раз.',
-  gone: 'Ответ потерялся: Сара перезапускалась. Скажи ещё раз.',
-  failed: 'Нет связи с Сарой. Проверь интернет и попробуй ещё раз.',
+  late: 'Ответа нет шесть минут. Спроси ещё раз.',
+  gone: 'Ответ потерялся: сервер перезапускался. Скажи ещё раз.',
+  failed: 'Нет связи. Проверь интернет и попробуй ещё раз.',
 } as const
 
 const uid = () => Math.random().toString(36).slice(2)
@@ -43,15 +67,26 @@ function audioSession(type: 'auto' | 'playback'): void {
  * The talk itself, apart from the screen (ADR-028): listen, send, wait for Sara, play her voice, listen again for a
  * follow-up. The screen gets every change through `render`.
  */
-export function createTalkEngine(render: (v: TalkView) => void) {
-  let view: TalkView = { phase: 'loading', items: [], level: 0, tapToStop: false, since: 0 }
+export function createTalkEngine(
+  render: (v: TalkView) => void,
+  /** The colour change, done inside the screen's own transition when the browser has one; resolves once it is shown. */
+  transition: (change: () => void) => Promise<void> = async (change) => change(),
+) {
+  let view: TalkView = {
+    agent: 'lora',
+    phase: 'loading',
+    items: [],
+    level: 0,
+    tapToStop: false,
+    since: 0,
+  }
   const set = (p: Partial<TalkView>) => {
     view = { ...view, ...p }
     render(view)
   }
-  const add = (i: Omit<Item, 'id' | 'at'>): string => {
+  const add = (i: Omit<Item, 'id' | 'at' | 'agent'> & { agent?: Agent }): string => {
     const id = uid()
-    set({ items: [...view.items, { id, at: Date.now(), ...i }] })
+    set({ items: [...view.items, { id, at: Date.now(), agent: view.agent, ...i }] })
     return id
   }
   const patch = (id: string, p: Partial<Item>) =>
@@ -106,12 +141,14 @@ export function createTalkEngine(render: (v: TalkView) => void) {
    * Sara's voice. After a touch the mic is closed first: iOS then plays through the loudspeaker, not the earpiece. With
    * no touch at all (the side button) the mic stays open, since only a page that is capturing may play without one.
    */
-  async function say(id: string, text: string, followUp: boolean): Promise<void> {
+  /** `followUp`: listen after, a few seconds for a follow-up; `'first'`: the first question after a greeting. */
+  async function say(id: string, text: string, followUp: boolean | 'first'): Promise<void> {
     const mine = turn
+    const agent = view.agent
     set({ phase: 'speaking' })
     let played: Played
     try {
-      const audio = await talkApi.speak(text)
+      const audio = await talkApi.speak(text, agent)
       if (mine !== turn) return
       if (touched) {
         stopLoop()
@@ -125,15 +162,24 @@ export function createTalkEngine(render: (v: TalkView) => void) {
     }
     if (mine !== turn) return
     if (played === 'blocked') patch(id, { replay: true })
-    if (played === 'played' && followUp) return listen(true)
+    if (played === 'played' && followUp) return listen(followUp === true)
     idle()
   }
 
   /** After a spoken question Sara listens a few seconds for a follow-up; after a typed one she does not. */
+  /** The other one comes: the colour changes; what she says next is hers, in her feed and her voice. */
+  async function become(agent: Agent): Promise<void> {
+    if (agent === view.agent) return
+    await transition(() => set({ agent }))
+    // Whatever the browser did with the transition, she is the one from now on.
+    if (view.agent !== agent) set({ agent })
+  }
+
   async function answered(sent: Sent, mine: string, spoken: boolean): Promise<void> {
     patch(mine, { text: sent.heard ?? TALK_NOTES.notHeard, pending: false })
+    if (sent.switch) await become(sent.switch)
     if (sent.reply) {
-      const id = add({ who: 'sara', text: sent.reply.text, cards: sent.reply.buttons ? 1 : 0 })
+      const id = add({ who: 'agent', text: sent.reply.text, cards: sent.reply.buttons ? 1 : 0 })
       return say(id, sent.reply.text, spoken && sent.heard !== null)
     }
     if (!sent.talk) return idle()
@@ -142,7 +188,7 @@ export function createTalkEngine(render: (v: TalkView) => void) {
       retry: (e) => !(e instanceof SignedOut),
     })
     if (r.state === 'done') {
-      const id = add({ who: 'sara', text: r.text, cards: r.cards })
+      const id = add({ who: 'agent', text: r.text, cards: r.cards })
       return say(id, r.text, spoken)
     }
     add({ who: 'note', text: r.state === 'late' ? TALK_NOTES.late : TALK_NOTES.gone })
@@ -169,7 +215,8 @@ export function createTalkEngine(render: (v: TalkView) => void) {
     const audio = await rec.stop()
     if (audio.size < 1500) return idle()
     const mine = add({ who: 'boris', text: '…', pending: true })
-    await send(mine, true, () => talkApi.sendVoice(audio))
+    const agent = view.agent
+    await send(mine, true, () => talkApi.sendVoice(audio, agent))
   }
 
   async function listen(followUp = false): Promise<void> {
@@ -216,20 +263,43 @@ export function createTalkEngine(render: (v: TalkView) => void) {
     }, 100)
   }
 
+  /** The chat with one of them so far, as the core keeps it. */
+  async function historyOf(agent: Agent): Promise<Item[]> {
+    const lines = await talkApi.history(agent)
+    return lines.map((l) => ({
+      id: uid(),
+      agent,
+      who: l.author === 'boris' ? 'boris' : 'agent',
+      text: l.text,
+      at: Date.parse(l.at),
+    }))
+  }
+
+  /** She greets: her line in the feed and in her voice; with the side button the mic is opened first. */
+  async function greet(followUp: boolean): Promise<void> {
+    const text = AGENT_UI[view.agent].greeting
+    const id = add({ who: 'agent', text })
+    if (!touched)
+      try {
+        mic ??= await openMic()
+      } catch {}
+    await say(id, text, followUp ? 'first' : false)
+  }
+
   let loaded = false
   /** Once per page (React runs effects twice in development); again only after a login. */
   async function load(again = false): Promise<void> {
     if (loaded && !again) return
     loaded = true
     try {
-      const lines = await talkApi.history()
-      set({
-        phase: 'idle',
-        items: lines.map((l) => ({ id: uid(), who: l.author, text: l.text, at: Date.parse(l.at) })),
-      })
-      if (new URLSearchParams(window.location.search).get('go') === '1') {
+      const params = new URLSearchParams(window.location.search)
+      const asked = params.get('agent')
+      if (asked === 'sara' || asked === 'lora') set({ agent: asked })
+      const [lora, sara] = await Promise.all([historyOf('lora'), historyOf('sara')])
+      set({ phase: 'idle', items: [...lora, ...sara].sort((a, b) => a.at - b.at) })
+      if (params.get('go') === '1') {
         window.history.replaceState(null, '', window.location.pathname)
-        await listen()
+        await greet(true)
       }
     } catch (e) {
       if (signedOut(e)) return
@@ -255,8 +325,18 @@ export function createTalkEngine(render: (v: TalkView) => void) {
       if (!text.trim() || view.phase !== 'idle') return
       player.unlock()
       const t = text.trim()
+      const agent = view.agent
       const mine = add({ who: 'boris', text: t })
-      await send(mine, false, async () => ({ ...(await talkApi.sendText(t)), heard: t }))
+      await send(mine, false, async () => ({ ...(await talkApi.sendText(t, agent)), heard: t }))
+    },
+    /** A tap on her picture: the other one comes and greets. */
+    async call(agent: Agent): Promise<void> {
+      if (agent === view.agent || (view.phase !== 'idle' && view.phase !== 'speaking')) return
+      turn++
+      player.stop()
+      window.speechSynthesis?.cancel()
+      await become(agent)
+      await greet(false)
     },
     async replay(i: Item): Promise<void> {
       if (view.phase !== 'idle') return

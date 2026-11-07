@@ -7,12 +7,15 @@ import { speakableText } from './speech'
 export type Voice = {
   /** Loads the model ahead while Boris speaks and Sara thinks; never throws. */
   warm(): void
-  /** Sara's answer in her voice as MP3, or null: no voice service, nothing to say, or it failed. */
-  speak(text: string): Promise<Buffer | null>
+  /** The answer in this voice as MP3 (Sara's xenia by default), or null: no voice service, nothing to say, a failure. */
+  speak(text: string, speaker?: string): Promise<Buffer | null>
 }
 
-/** Boris chose xenia as Sara's voice (ADR-028). */
+/** Boris chose xenia as Sara's voice (ADR-028); Lora speaks with baya. */
 const SPEAKER = 'xenia'
+/** Short lines said again and again (the greetings) are kept, so a greeting needs no model at all. */
+const KEEP_CHARS = 60
+const KEEP_LINES = 20
 
 function run(bin: string, args: string[], timeoutMs: number): Promise<boolean> {
   return new Promise((done) => {
@@ -40,6 +43,7 @@ export function createVoice(c: {
   timeoutMs?: number
 }): Voice {
   const timeoutMs = c.timeoutMs ?? 90_000
+  const kept = new Map<string, Buffer>()
   return {
     warm() {
       if (!c.url) return
@@ -47,9 +51,12 @@ export function createVoice(c: {
         () => {},
       )
     },
-    async speak(text) {
+    async speak(text, speaker = SPEAKER) {
       const said = speakableText(text)
       if (!c.url || !/[А-Яа-яЁё]/.test(said)) return null
+      const key = `${speaker}:${said}`
+      const known = kept.get(key)
+      if (known) return known
       const id = newEventId()
       const wav = join(c.workDir, `${id}.wav`)
       const mp3 = join(c.workDir, `${id}.mp3`)
@@ -57,7 +64,7 @@ export function createVoice(c: {
         const res = await fetch(`${c.url}/speak`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: said, speaker: SPEAKER }),
+          body: JSON.stringify({ text: said, speaker }),
           signal: AbortSignal.timeout(timeoutMs),
         })
         if (!res.ok) return null
@@ -81,7 +88,10 @@ export function createVoice(c: {
           ],
           timeoutMs,
         )
-        return ok ? await readFile(mp3) : null
+        if (!ok) return null
+        const audio = await readFile(mp3)
+        if (said.length <= KEEP_CHARS && kept.size < KEEP_LINES) kept.set(key, audio)
+        return audio
       } catch (e) {
         console.error('voice failed', e instanceof Error ? e.message : e)
         return null

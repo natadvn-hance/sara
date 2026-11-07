@@ -76,4 +76,18 @@ describe('the voice app: Sara speaks with her own voice', () => {
     voice.warm()
     await expect.poll(() => v.asked.map((a) => a.path)).toEqual(['/warm'])
   })
+
+  it('FR-NOTIF-5: Lora speaks with baya, and a greeting said again needs no model', async () => {
+    const v = await fakeVoice()
+    const voice = createVoice({
+      url: v.url,
+      ffmpegBin: FFMPEG,
+      workDir: await mkdtemp(join(tmpdir(), 's-')),
+    })
+    expect((await voice.speak('Борь, я на связи.', 'baya'))?.toString()).toBe('RIFF fake wav')
+    expect((await voice.speak('Борь, я на связи.', 'baya'))?.toString()).toBe('RIFF fake wav')
+    expect(v.asked).toEqual([
+      { path: '/speak', body: { text: 'Борь, я на связи.', speaker: 'baya' } },
+    ])
+  })
 })

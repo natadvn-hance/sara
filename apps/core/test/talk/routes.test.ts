@@ -8,8 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { startSession } from '../../src/auth/session'
 import type { BorisMessage, BorisReply } from '../../src/learning/inbox'
 import { TEXTS } from '../../src/notify/cards'
+import { AGENTS } from '../../src/talk/agents'
 import { createTalkAnswers, type TalkAnswers } from '../../src/talk/answers'
-import { registerTalkRoutes, TALK_TEXTS } from '../../src/talk/routes'
+import { createLoraLink, type LoraLink } from '../../src/talk/lora'
+import { LORA_APP_PATH, registerTalkRoutes, TALK_TEXTS } from '../../src/talk/routes'
 
 let app: FastifyInstance
 let answers: TalkAnswers
@@ -19,9 +21,11 @@ let heard: string | null
 let replyOf: (m: BorisMessage) => BorisReply | null
 let work: string
 let session: string
+let lora: LoraLink
 
 beforeEach(async () => {
   answers = createTalkAnswers()
+  lora = createLoraLink()
   handled = []
   heardFiles = []
   heard = 'что в очереди'
@@ -45,9 +49,12 @@ beforeEach(async () => {
     answers,
     voice: {
       warm: () => {},
-      speak: async (text) => (text.includes('нечего') ? null : Buffer.from(`mp3:${text}`)),
+      speak: async (text, speaker) =>
+        text.includes('нечего') ? null : Buffer.from(`mp3:${speaker ?? 'xenia'}:${text}`),
     },
     history: async () => [{ author: 'sara', text: 'Привет', at: '2026-11-07T10:00:00.000Z' }],
+    lora,
+    loraToken: 'lora-key',
     workDir: work,
     waitMs: 50,
   })
@@ -167,7 +174,7 @@ describe('the voice app: Boris speaks, Sara answers', () => {
     })
     expect(r.statusCode).toBe(200)
     expect(r.headers['content-type']).toBe('audio/mpeg')
-    expect(r.body).toBe('mp3:Две заявки')
+    expect(r.body).toBe('mp3:xenia:Две заявки')
     const none = await app.inject({
       method: 'POST',
       url: '/api/talk/speak',
@@ -179,5 +186,95 @@ describe('the voice app: Boris speaks, Sara answers', () => {
     expect(h.json()).toEqual({
       lines: [{ author: 'sara', text: 'Привет', at: '2026-11-07T10:00:00.000Z' }],
     })
+  })
+})
+
+describe('the voice app: Lora by default, Sara on call', () => {
+  const lora_ = (
+    path: string,
+    o: { method?: 'GET' | 'POST'; key?: string; payload?: object } = {},
+  ) =>
+    app.inject({
+      method: o.method ?? 'GET',
+      url: `${LORA_APP_PATH}${path}`,
+      headers: o.key === undefined ? {} : { 'x-sara-lora-token': o.key },
+      ...(o.payload && { payload: o.payload }),
+    })
+  const say = (text: string, agent: 'lora' | 'sara') =>
+    app.inject({
+      method: 'POST',
+      url: `/api/talk?agent=${agent}`,
+      headers: { cookie: session },
+      payload: { text },
+    })
+
+  it("FR-NOTIF-5: Lora's channel gets in by her key only, never by the pult's sign-in", async () => {
+    expect((await lora_('/next')).statusCode).toBe(401)
+    expect((await lora_('/next', { key: 'wrong' })).statusCode).toBe(401)
+    const withCookie = await app.inject({
+      url: `${LORA_APP_PATH}/next`,
+      headers: { cookie: session },
+    })
+    expect(withCookie.statusCode).toBe(401)
+    expect((await lora_('/next', { key: 'lora-key' })).statusCode).toBe(204)
+  })
+
+  it('FR-NOTIF-5: words to Lora reach her channel, and her reply reaches the app in her voice', async () => {
+    await lora_('/next', { key: 'lora-key' })
+    const sent = await say('что у меня завтра', 'lora')
+    const body = sent.json()
+    expect(body).toMatchObject({ heard: 'что у меня завтра', reply: null })
+    const taken = await lora_('/next', { key: 'lora-key' })
+    expect(taken.json()).toMatchObject({ talk: body.talk, text: 'что у меня завтра', voice: false })
+    // Words to Lora never take Sara's way.
+    expect(handled).toEqual([])
+    const r = await lora_('/reply', {
+      method: 'POST',
+      key: 'lora-key',
+      payload: { talk: body.talk, text: 'Завтра в десять созвон' },
+    })
+    expect(r.json()).toEqual({ ok: true, waiting: true })
+    const done = await app.inject({ url: `/api/talk/${body.talk}`, headers: { cookie: session } })
+    expect(done.json()).toEqual({ state: 'done', text: 'Завтра в десять созвон', cards: 0 })
+    const h = await app.inject({
+      url: '/api/talk/history?agent=lora',
+      headers: { cookie: session },
+    })
+    expect(h.json().lines.map((l: { author: string }) => l.author)).toEqual(['boris', 'lora'])
+    const voice = await app.inject({
+      method: 'POST',
+      url: '/api/talk/speak',
+      headers: { cookie: session },
+      payload: { text: 'Завтра в десять', agent: 'lora' },
+    })
+    expect(voice.body).toBe('mp3:baya:Завтра в десять')
+  })
+
+  it('FR-NOTIF-5: Lora not on the line is said so at once', async () => {
+    const r = await say('что у меня завтра', 'lora')
+    expect(r.json()).toEqual({
+      heard: 'что у меня завтра',
+      talk: null,
+      reply: { text: TALK_TEXTS.loraAway, buttons: false },
+    })
+  })
+
+  it('FR-NOTIF-5: «позови Сару» brings Sara with her greeting, and a question after her name goes to her', async () => {
+    const r = await say('Позови Сару', 'lora')
+    expect(r.json()).toEqual({
+      heard: 'Позови Сару',
+      talk: null,
+      switch: 'sara',
+      reply: { text: AGENTS.sara.greeting, buttons: false },
+    })
+    expect(handled).toEqual([])
+    const asked = await say('Позови Сару, что по лидам сегодня?', 'lora')
+    expect(asked.json()).toMatchObject({
+      heard: 'Позови Сару, что по лидам сегодня?',
+      switch: 'sara',
+    })
+    expect(handled).toEqual([expect.objectContaining({ text: 'что по лидам сегодня?' })])
+    const back = await say('верни Лору', 'sara')
+    expect(back.json()).toMatchObject({ switch: 'lora', reply: { text: AGENTS.lora.greeting } })
   })
 })

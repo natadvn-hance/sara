@@ -93,6 +93,7 @@ import { getSetting } from './settings/store'
 import { startSheetSync } from './sheet/sync'
 import type { Fetched } from './site/fetch'
 import { createTalkAnswers } from './talk/answers'
+import { createLoraLink } from './talk/lora'
 import { registerTalkRoutes } from './talk/routes'
 import { createVoice } from './talk/voice'
 import { createResolver, type Press } from './tasks/resolve'
@@ -503,6 +504,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       workDir: join(config.dataDir, 'voice'),
     }),
     history: () => memory(db, new Date(), []),
+    // Lora in the app (ADR-028): her session's own channel takes the words by her key.
+    lora: createLoraLink(),
+    loraToken: config.loraToken,
     workDir: join(config.dataDir, 'voice'),
   })
   // The made-up Profi.ru of test orders: if it cannot start, the live Sara works on without test orders.
