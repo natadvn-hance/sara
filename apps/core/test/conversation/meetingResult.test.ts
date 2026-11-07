@@ -350,7 +350,7 @@ describe('Boris tells how the call went', () => {
   it('FR-CONV-12: words for the client, other words, and a text that is no story are left to the usual flow', async () => {
     reads.push({ kind: 'for_client' })
     expect(
-      await readBorisResult(deps(), await conv(), 'Екатерина, созвонимся завтра, высылаю договор'),
+      await readBorisResult(deps(), await conv(), 'Марина, созвонимся завтра, высылаю договор'),
     ).toBeNull()
     expect(looksLikeReport('Клиент интересный, из Краснодара')).toBe(false)
     expect(

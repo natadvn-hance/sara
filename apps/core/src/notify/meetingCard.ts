@@ -30,6 +30,8 @@ export type MeetingCardView = {
   result?: string | null
   nextStep?: string | null
   nextStepOn?: string | null
+  /** The people and their ways to reach them, as the chat says (names, phones, Telegram, mail), one line. */
+  contacts?: string | null
 }
 
 /** «Среда, 5 ноября, 15:30»: the day of the week and the date in Moscow. */
@@ -65,6 +67,7 @@ export function meetingCard(v: MeetingCardView, now: Date = new Date()): string 
       ? `<b>${hyphen(dayAndTime(v.at, now))}</b> · по Москве`
       : '<i>Твёрдого времени в переписке нет</i>',
     how ? hyphen(how) : null,
+    v.contacts ? `<b>Контакты:</b> ${hyphen(v.contacts)}` : null,
     v.quote?.trim() ? `<blockquote>${hyphen(v.quote.trim())}</blockquote>` : null,
     v.movedFrom ? `<i>Перенесено, было ${hyphen(lower(dayAndTime(v.movedFrom, now)))}</i>` : null,
     v.result?.trim() ? `<b>Итог:</b> ${hyphen(v.result.trim())}` : null,
