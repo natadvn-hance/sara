@@ -1,4 +1,5 @@
 import { firstName } from '../leads/clientName'
+import type { PingScenario } from './pingScenario'
 import { moscowHoursEnd } from './time'
 
 /**
@@ -51,6 +52,8 @@ export function nextReminder(i: {
   quiet?: { from: number; to: number }
   /** The first reminder's wait: a day, but two for a client who went to think it over. */
   firstAfterMs?: number
+  /** The first reminder never comes before this: the morning after a day the client named (spec 2026-11-07). */
+  firstNotBefore?: Date | null
   /** The waits after the first step (2, 3 and 3 days); tests shorten them. */
   waitsMs?: Waits
 }): NextReminder | null {
@@ -76,7 +79,8 @@ export function nextReminder(i: {
   for (let k = 0; k < i.sent; k++) before += waits[k] ?? 0
   const prev = i.prevAt ? new Date(i.prevAt).getTime() : Number.NaN
   const base = i.sent === 0 ? from : Number.isNaN(prev) ? before : prev
-  let at = new Date(Math.max(base + wait, i.now.getTime()))
+  const floor = i.sent === 0 && i.firstNotBefore ? i.firstNotBefore.getTime() : 0
+  let at = new Date(Math.max(base + wait, floor, i.now.getTime()))
   // The dormant day is a task for Boris, whose notices have their own quiet; only a message to the client waits.
   if (p.step !== 'dormant') at = moscowHoursEnd(at, i.quiet ?? DEFAULT_QUIET) ?? at
   return { at, step: p.step, tone: p.tone, read: i.read }
@@ -101,4 +105,57 @@ export function reminderFallback(
   return variant === 0
     ? `${greeting} Если задача ещё актуальна, давайте обсудим детали: подскажу, с чего начать. Удобно созвониться на 15 минут?`
     : `${greeting} Пишу ещё раз про ваш заказ. Если он в силе, давайте обсудим, с чего начать: удобно здесь, в переписке, или лучше созвониться?`
+}
+
+type Pair = readonly [string, string]
+
+/** The two wordings of a ready ping for the scenarios that have their own (spec 2026-11-07-organic-pings). */
+function scenarioTexts(hello: string, sc: PingScenario): Pair | null {
+  if (sc.kind === 'awaiting' && sc.item === 'tz')
+    return [
+      `${hello} Как у вас с ТЗ? Можно в любом виде, хоть парой строк, дальше разберемся вместе`,
+      `${hello} Если с ТЗ пока не складывается, можно обсудить задачу на коротком созвоне и собрать его по итогам`,
+    ]
+  if (sc.kind === 'awaiting' && sc.item === 'materials')
+    return [
+      `${hello} Получится прислать материалы? Можно частями, начну с того, что уже есть`,
+      `${hello} Пишу про материалы: пришлите то, что под рукой, остальное доберем по ходу`,
+    ]
+  if (sc.kind === 'awaiting' && sc.item === 'budget')
+    return [
+      `${hello} Получилось прикинуть бюджет? Даже примерная вилка поможет понять, с чего лучше начать`,
+      `${hello} Если цифру пока назвать сложно, расскажите, какой результат нужен, от него и оттолкнемся`,
+    ]
+  if (sc.kind === 'awaiting' && sc.item === 'call_time')
+    return [
+      `${hello} Когда вам удобно созвониться? Подстроюсь под ваше время`,
+      `${hello} Подскажите день и время, когда вам удобно, и созвонимся`,
+    ]
+  if (sc.kind === 'after_meeting')
+    return [
+      `${hello} Спасибо еще раз за разговор. Как вам то, что обсудили?`,
+      `${hello} Пишу по итогам нашего созвона: остались вопросы или переходим к следующему шагу?`,
+    ]
+  if (sc.kind === 'named_date')
+    return [
+      `${hello} Вы хотели вернуться к заказу примерно в эти дни. Как у вас, получилось посмотреть?`,
+      `${hello} Пишу, как договаривались: удалось посмотреть? Если нужно еще время, просто скажите`,
+    ]
+  return null
+}
+
+/**
+ * The ready text of a ping when the Pinger gave none that passed the checks: about what we wait for, the call that
+ * was held or the day the client named; for the rest old Sara's texts (`reminderFallback`). It holds no news and no
+ * fact, so nothing in it needs a source.
+ */
+export function pingFallback(
+  clientName: string | null,
+  sc: PingScenario | null,
+  tone: ReminderTone,
+  variant: 0 | 1 = 0,
+): string {
+  const first = clientName ? firstName(clientName) : null
+  const own = sc ? scenarioTexts(first ? `${first}, добрый день!` : 'Добрый день!', sc) : null
+  return own ? own[variant] : reminderFallback(clientName, tone, variant)
 }

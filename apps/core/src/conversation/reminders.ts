@@ -4,8 +4,10 @@ import { convTurn, deal, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { getSetting } from '../settings/store'
 import { clientTurnBefore, isRefusal } from './clientCues'
+import type { PingChoice } from './pingDecide'
 import {
   checkGround,
+  decideStep,
   dormantStep,
   fallbackStep,
   type Ground,
@@ -14,13 +16,15 @@ import {
   groundStep,
   isLadderMessage,
   ladderTexts,
+  MESSENGER,
   type Planned,
   planNext,
   quietUntil,
   REFUSED,
   type RemindDeps,
   sendStep,
-  writeStep,
+  tellBorisStep,
+  wentToMessenger,
 } from './reminderSteps'
 import { getConversation } from './store'
 import type { ConversationRow, StoredMessage } from './types'
@@ -28,6 +32,7 @@ import type { ConversationRow, StoredMessage } from './types'
 export {
   type NextReminder,
   nextReminder,
+  pingFallback,
   type ReminderStep,
   type ReminderTone,
   reminderFallback,
@@ -70,25 +75,36 @@ const CARD_TRIES = 6
 const CARD_RETRY_MS = 10 * 60_000
 
 /**
- * The text of a reminder: the model's; when the model itself gave nothing (a limit, a failure) it is asked again every
- * so often until the reminder is 3 hours late; when its text failed the checks twice, or the time is up, the ready
- * text of old Sara goes.
+ * What the Pinger chose for a step (spec 2026-11-07-organic-pings): its ping, «later» (only while `mayLater`) or Boris.
+ * A model that gave nothing (a limit, a failure) is asked again every so often until the step is 3 hours late; when
+ * its text failed the checks twice, or the time is up, the ready text of the scenario goes. The day's calls spent: the
+ * ask waits for the morning. `r` is the round of the step: the second comes after a «later».
  */
-async function obtainText(
+async function obtainChoice(
   k: number,
+  r: number,
   conversationId: string,
   rowId: string,
   p: Planned,
   read: boolean,
-): Promise<string> {
-  const deadline = (await DBOS.now()) + (d().fallbackAfterMs ?? FALLBACK_AFTER_MS)
+  mayLater: boolean,
+): Promise<PingChoice> {
+  let deadline = (await DBOS.now()) + (d().fallbackAfterMs ?? FALLBACK_AFTER_MS)
   for (let a = 0; ; a++) {
     const left = deadline - (await DBOS.now())
     if (left <= 0) break
-    const w = await DBOS.runStep(() => writeStep(d(), rowId, conversationId, p, read, left), {
-      name: `write-${k}-${a}`,
-    })
-    if (w.text) return w.text
+    const w = await DBOS.runStep(
+      () => decideStep(d(), rowId, conversationId, p, read, mayLater ? p.latest : null, left),
+      { name: `write-${k}-${r}-${a}` },
+    )
+    if (w.capped) {
+      const until = Date.parse(w.capped)
+      const rest = until - (await DBOS.now())
+      if (rest > 0) await DBOS.sleep(rest)
+      deadline = Math.max(until, await DBOS.now()) + (d().fallbackAfterMs ?? FALLBACK_AFTER_MS)
+      continue
+    }
+    if (w.choice) return w.choice
     // The checks failed twice: the model is not asked again, the ready text goes.
     if (!w.modelFailed) break
     const wait = Math.min(d().retryEveryMs ?? RETRY_EVERY_MS, deadline - (await DBOS.now()))
@@ -98,7 +114,7 @@ async function obtainText(
     name: `fallback-${k}`,
     ...DB_STEP,
   })
-  return f.text
+  return { kind: 'ping', text: f.text, why: f.why, source: null }
 }
 
 /**
@@ -147,7 +163,8 @@ async function askBoris(
 async function runRemind(conversationId: string, anchor: string): Promise<void> {
   const wf = remindWorkflowId(conversationId, anchor)
   // How many steps are done, and when the one before went (or was due, if it was only skipped): the next wait
-  // counts from there (rule 11: 1 day, then 2 days after the first, 3 days after the second, 3 days after the third).
+  // counts from there, by the scenario of the silence (pingScenario.ts: a day or two, then 2-3, then 3-4 days), and
+  // three days after the third comes the task for Boris.
   let sent = 0
   let prevAt: string | null = null
   for (let k = 0; k < MAX_PLANS; k++) {
@@ -156,28 +173,53 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
       ...DB_STEP,
     })
     if (!next) return
-    const wait = Date.parse(next.at) - (await DBOS.now())
-    if (wait > 0) await DBOS.sleep(wait)
     const rowId = `${wf}:${next.step}`
     if (next.step === 'dormant') {
+      const wait = Date.parse(next.at) - (await DBOS.now())
+      if (wait > 0) await DBOS.sleep(wait)
       // The third reminder is the last: three silent days later Boris gets one task (in shadow only the trace) and the
       // ladder is over. Nothing waits for his answer, «Закрыть» works on the task whenever he presses it.
       await askBoris(k, conversationId, anchor, rowId, next)
       return
     }
-    const g = await DBOS.runStep(() => groundStep(d(), rowId, conversationId, anchor, next), {
-      name: `ground-${k}`,
-      ...DB_STEP,
-    })
-    if (!g.go) {
+    // The Pinger may say «later» once a step (spec 2026-11-07-organic-pings): the step wakes again at that time, the
+    // chat is looked at again, and the second ask must decide.
+    let at = next.at
+    let g: Ground | null = null
+    let choice: PingChoice | null = null
+    for (let r = 0; r < 2; r++) {
+      const wait = Date.parse(at) - (await DBOS.now())
+      if (wait > 0) await DBOS.sleep(wait)
+      g = await DBOS.runStep(() => groundStep(d(), rowId, conversationId, anchor, next), {
+        name: r === 0 ? `ground-${k}` : `ground-${k}-later`,
+        ...DB_STEP,
+      })
+      if (!g.go) break
+      choice = await obtainChoice(k, r, conversationId, rowId, next, g.read, r === 0)
+      if (choice.kind !== 'later') break
+      at = choice.at
+    }
+    if (!g?.go) {
       // The client wrote, our side wrote, a pause: the ladder ends. A step only skipped (a running turn, an
       // unreadable chat, a pause of sending) is not repeated later, the next step comes at its own time.
-      if (g.end) return
+      if (g?.end) return
       sent++
       prevAt = next.at
       continue
     }
-    const text = await obtainText(k, conversationId, rowId, next, g.read)
+    if (!choice || choice.kind === 'later') return
+    if (choice.kind === 'boris') {
+      // To Boris, not the client: one message in the topic, and this silence gets no more pings.
+      const c = choice
+      const shadow = g.shadow
+      await DBOS.runStep(() => tellBorisStep(d(), rowId, conversationId, next, c, shadow), {
+        name: `boris-${k}`,
+        ...DB_STEP,
+      })
+      return
+    }
+    const text = choice.text
+    const card = { why: choice.why, source: choice.source }
     // The text may have taken hours: a reminder never goes in the quiet hours, it waits for the morning.
     const hold = await DBOS.runStep(async () => quietUntil(d(), new Date(), conversationId), {
       name: `quiet-${k}`,
@@ -186,7 +228,7 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
     const rest = hold.until ? Date.parse(hold.until) - (await DBOS.now()) : 0
     if (rest > 0) await DBOS.sleep(rest)
     let result = await DBOS.runStep(
-      () => sendStep(d(), rowId, conversationId, anchor, next, text),
+      () => sendStep(d(), rowId, conversationId, anchor, next, text, card),
       { name: `send-${k}`, ...DB_STEP },
     )
     // Drafts mode: Telegram not taking the card is a passing trouble, the step is tried again for an hour.
@@ -200,10 +242,10 @@ async function runRemind(conversationId: string, anchor: string): Promise<void> 
         break
       }
       await DBOS.sleep(d().cardRetryEveryMs ?? CARD_RETRY_MS)
-      result = await DBOS.runStep(() => sendStep(d(), rowId, conversationId, anchor, next, text), {
-        name: `send-${k}-r${a}`,
-        ...DB_STEP,
-      })
+      result = await DBOS.runStep(
+        () => sendStep(d(), rowId, conversationId, anchor, next, text, card),
+        { name: `send-${k}-r${a}`, ...DB_STEP },
+      )
     }
     if (result.end) return
     prevAt =
@@ -367,25 +409,43 @@ export async function syncReminders(
     await traceRefusal(conv.id, anchor.platformMessageId, wf)
     return
   }
+  // The client went over to Telegram or WhatsApp (spec 2026-11-07-organic-pings): nothing more on Profi.ru.
+  const lines = messages.map((m) => ({
+    id: m.platformMessageId,
+    side: m.side,
+    text: m.text,
+    at: m.sentAt,
+  }))
+  if (await wentToMessenger(db, lines)) {
+    await cancelReminders(conv.id)
+    await resolveDormantTasks(conv.id)
+    await traceRefusal(conv.id, anchor.platformMessageId, wf, MESSENGER)
+    return
+  }
   if ((await cancelReminders(conv.id, { keep: wf })) > 0) await resolveDormantTasks(conv.id, wf)
   await startReminder(conv.id, anchor.platformMessageId)
 }
 
 /** The only trace of a ladder that was not run: one row, whatever the shadow or the switch (a repeat adds none). */
-async function traceRefusal(conversationId: string, anchor: string, wf: string): Promise<void> {
+async function traceRefusal(
+  conversationId: string,
+  anchor: string,
+  wf: string,
+  why = REFUSED,
+): Promise<void> {
   const now = new Date().toISOString()
   await d()
     .db.insert(convTurn)
     .values({
-      id: `${wf}:refused`,
+      id: `${wf}:${why === REFUSED ? 'refused' : 'messenger'}`,
       conversationId,
       kind: 'reminder',
       anchorMessageId: anchor,
       state: 'finished',
       outcome: 'stopped',
       decision: 'nothing',
-      decisionReason: REFUSED,
-      understanding: { step: 'refused' },
+      decisionReason: why,
+      understanding: { step: why === REFUSED ? 'refused' : 'messenger' },
       timings: { finished: now },
       finishedAt: now,
     })

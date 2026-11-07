@@ -35,7 +35,13 @@ afterAll(close)
 const CHAT = '95147898'
 const TEXT = 'Анна, здравствуйте! Как у вас дела с сайтом для клиники?'
 const HOUR = 3600_000
-const PLAN: Planned = { at: new Date().toISOString(), step: 1, tone: 'check_in' }
+const PLAN: Planned = {
+  at: new Date().toISOString(),
+  step: 1,
+  tone: 'check_in',
+  scenario: { kind: 'since_bid', quote: null, item: null, day: null, nextStep: null },
+  latest: new Date().toISOString(),
+}
 
 type Card = { text: string; rows: { text: string; callbackData: string }[][] }
 const profi = stubProfi([])
@@ -572,20 +578,20 @@ describe('the time of a reminder that goes by a press', () => {
     await setSetting(db, 'conv.reminder_quiet', { from: (h + 6) % 24, to: (h + 7) % 24 }, 'system')
   }
 
-  it('FR-CONV-12: a reminder keeps a day from the one that really went out, a late press cannot squeeze two together', async () => {
+  it('FR-CONV-12: a reminder keeps two days from the one that really went out, a late press cannot squeeze two together', async () => {
     const { conv } = await scene()
     await awayFromNow()
     await wentAgo(conv.id, 2 * HOUR)
     const r = await quietUntil(deps, new Date(), conv.id)
     const at = Date.parse(r.until ?? '')
-    expect(Math.abs(at - (Date.now() - 2 * HOUR + 24 * HOUR))).toBeLessThan(5000)
+    expect(Math.abs(at - (Date.now() - 2 * HOUR + 48 * HOUR))).toBeLessThan(5000)
   })
 
-  it('FR-CONV-12: a day passed since the last reminder, or none went: no extra wait', async () => {
+  it('FR-CONV-12: two days passed since the last reminder, or none went: no extra wait', async () => {
     const { conv } = await scene()
     await awayFromNow()
     expect((await quietUntil(deps, new Date(), conv.id)).until).toBeNull()
-    await wentAgo(conv.id, 30 * HOUR)
+    await wentAgo(conv.id, 50 * HOUR)
     expect((await quietUntil(deps, new Date(), conv.id)).until).toBeNull()
   })
 
@@ -595,22 +601,22 @@ describe('the time of a reminder that goes by a press', () => {
     // The card is there, nothing went: no wait.
     await sendStep(deps, rowId, conv.id, 'm-1', PLAN, TEXT)
     expect((await quietUntil(deps, new Date(), conv.id)).until).toBeNull()
-    // Boris pressed «Отправить» an hour ago: the next reminder is a day after it.
+    // Boris pressed «Отправить» an hour ago: the next reminder is two days after it.
     const t = await taskOf(rowId)
     await wentAgo(conv.id, HOUR, `msg:send:${t?.id}`)
     const r = await quietUntil(deps, new Date(), conv.id)
-    expect(Math.abs(Date.parse(r.until ?? '') - (Date.now() - HOUR + 24 * HOUR))).toBeLessThan(5000)
+    expect(Math.abs(Date.parse(r.until ?? '') - (Date.now() - HOUR + 48 * HOUR))).toBeLessThan(5000)
   })
 
   it('FR-CONV-12: when the day is over inside the quiet hours the reminder waits for the morning', async () => {
     const { conv } = await scene()
-    // The day since the last reminder (which went 2 hours ago) ends 22 hours from now: inside the quiet hours.
+    // The two days since the last reminder (which went 2 hours ago) end 46 hours from now: inside the quiet hours.
     const h = moscowHour(new Date())
     const quiet = { from: (h + 20) % 24, to: (h + 23) % 24 }
     await setSetting(db, 'conv.reminder_quiet', quiet, 'system')
     await wentAgo(conv.id, 2 * HOUR)
     const r = await quietUntil(deps, new Date(), conv.id)
-    const dayLater = new Date(Date.now() - 2 * HOUR + 24 * HOUR)
+    const dayLater = new Date(Date.now() - 2 * HOUR + 48 * HOUR)
     expect(r.until).toBe(moscowHoursEnd(dayLater, quiet)?.toISOString())
   })
 

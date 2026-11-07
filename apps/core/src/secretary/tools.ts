@@ -233,7 +233,7 @@ export const SECRETARY_TOOLS = {
 
   set_setting: tool({
     description:
-      'Поменять настройку, как в пульте. Лимиты (money.*, cards.*, conv.cards_per_day, secretary.turns_per_day) свободно. outbound.bids, outbound.messages, conv.autopilot, conv.reminders только выключить (false). Остальное нельзя.',
+      'Поменять настройку, как в пульте. Лимиты (money.*, cards.*, conv.cards_per_day, conv.pings_per_day, secretary.turns_per_day) свободно. outbound.bids, outbound.messages, conv.autopilot, conv.reminders, conv.pings_auto только выключить (false). Остальное нельзя.',
     input: z.object({ key: z.string(), value: z.unknown() }),
     run: async (d, _t, i) => {
       if (!(i.key in SETTINGS) || !pultMay(i.key, i.value)) return done(false, PULT_TEXTS.locked)

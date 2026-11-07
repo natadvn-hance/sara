@@ -11,8 +11,14 @@ export function roleJsonSchema(schema: ZodType): object {
   return rest
 }
 
-/** The CLI contract for a role call (spec 7.4). `--max-turns` is not used: CLI 2.1.308 no longer lists it. */
+/**
+ * The CLI contract for a role call (spec 7.4). `--max-turns` is not used: CLI 2.1.308 no longer lists it. A role
+ * without tools gets none (`--tools ""`). A role that names built-in tools (ADR-027, amendment of 07.11.2026: only
+ * WebSearch and WebFetch) gets exactly those, allowed by name, and answers as a stream of events, so the gateway can
+ * see which pages the run really got.
+ */
 export function buildClaudeArgs(meta: RoleMeta, promptPath: string, jsonSchema: object): string[] {
+  const tools = meta.tools ?? []
   return [
     '-p',
     '--model',
@@ -22,11 +28,12 @@ export function buildClaudeArgs(meta: RoleMeta, promptPath: string, jsonSchema: 
     '--system-prompt-file',
     promptPath,
     '--output-format',
-    'json',
+    ...(tools.length > 0 ? ['stream-json', '--verbose'] : ['json']),
     '--json-schema',
     JSON.stringify(jsonSchema),
     '--tools',
-    '',
+    tools.join(','),
+    ...(tools.length > 0 ? ['--allowedTools', ...tools] : []),
     '--strict-mcp-config',
     '--setting-sources',
     'project',
@@ -35,7 +42,55 @@ export function buildClaudeArgs(meta: RoleMeta, promptPath: string, jsonSchema: 
     '--permission-prompts',
     'none',
     '--no-session-persistence',
+    ...(meta.maxBudgetUsd ? ['--max-budget-usd', String(meta.maxBudgetUsd)] : []),
   ]
+}
+
+const URL_IN_TEXT = /https?:\/\/[^\s"'<>\\)\]}]+/g
+
+/**
+ * The answer of a run with `--output-format stream-json`: the last result event, as `--output-format json` prints it,
+ * and every link the tools gave the run back (search results, fetched pages). Links the model only wrote itself are
+ * not in it: a page is «seen» when a tool's result holds it. Null when no result event is there.
+ */
+export function readStream(stdout: string): { result: string; seen: string[] } | null {
+  let result: string | null = null
+  const seen = new Set<string>()
+  for (const line of stdout.split('\n')) {
+    const t = line.trim()
+    if (!t.startsWith('{')) continue
+    let o: { type?: string; message?: { content?: unknown }; tool_use_result?: unknown }
+    try {
+      o = JSON.parse(t)
+    } catch {
+      continue
+    }
+    if (o.type === 'result') result = t
+    if (o.type !== 'user') continue
+    const text = `${JSON.stringify(o.message?.content ?? '')}\n${JSON.stringify(o.tool_use_result ?? '')}`
+    for (const m of text.match(URL_IN_TEXT) ?? []) seen.add(m.replace(/[.,;:!?]+$/, ''))
+  }
+  return result === null ? null : { result, seen: [...seen] }
+}
+
+/**
+ * A link as one page: no fragment, no utm marks, no «www.», no trailing slash, the scheme and the host in lower case.
+ * Two links to the same page compare equal.
+ */
+export function samePage(url: string): string | null {
+  let u: URL
+  try {
+    u = new URL(url.trim())
+  } catch {
+    return null
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+  u.hash = ''
+  for (const k of [...u.searchParams.keys()]) if (k.startsWith('utm_')) u.searchParams.delete(k)
+  const host = u.hostname.toLowerCase().replace(/^www\./, '')
+  const path = u.pathname.replace(/\/+$/, '')
+  const query = u.searchParams.toString()
+  return `${host}${path}${query ? `?${query}` : ''}`
 }
 
 /**

@@ -8,25 +8,33 @@ import {
 } from '@sara/shared'
 import { and, asc, desc, eq, gte, isNotNull, like, ne, sql } from 'drizzle-orm'
 import type { Db, DbOrTx } from '../db/client'
-import { account, chatMessage, convTurn, lead, outbox, task } from '../db/schema'
+import { account, chatMessage, convTurn, lead, meeting, outbox, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
-import { clientTurnBefore, isRefusal, isThinking } from './clientCues'
+import { clientTurnBefore, isRefusal } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
+import { decidePing, type PingChoice } from './pingDecide'
+import {
+  type ChatLine,
+  movedToMessenger,
+  type PingScenario,
+  pingScenario,
+  pingWaits,
+  scenarioWhy,
+} from './pingScenario'
 import { expireOldCards, sendReminderCard } from './reminderCard'
 import {
   nextReminder,
+  pingFallback,
   type ReminderStep,
   type ReminderTone,
-  reminderFallback,
   type Waits,
 } from './reminderLadder'
-import { type TextStep, writeReminder } from './reminderText'
 import { getConversation } from './store'
 import { CONV_TEXTS } from './texts'
 import { moscowHoursEnd } from './time'
@@ -38,7 +46,8 @@ export type RemindDeps = {
   profi: ProfiClient
   gateway: Gateway
   mind: MindSearch
-  notifier: Pick<Notifier, 'sendButtons'>
+  /** `sendText` tells Boris when the Pinger chose him, not the client; without it the message goes with no button. */
+  notifier: Pick<Notifier, 'sendButtons'> & Partial<Pick<Notifier, 'sendText'>>
   /** M6: a conversation with a booked meeting gets no reminder. Not given: nothing is booked. */
   isBooked?(conversationId: string): Promise<boolean>
   /** How long after its time a reminder waits for the model before the ready text goes (default 3 hours). */
@@ -47,8 +56,12 @@ export type RemindDeps = {
   retryEveryMs?: number
   /** The waits after the first reminder (2, 3 and 3 days, each from the step before); tests shorten them. */
   waitsMs?: Waits
-  /** The least time between two reminders that really went out (default a day); tests shorten it. */
+  /** The least time between two reminders that really went out (default two days); tests shorten it. */
   minGapMs?: number
+  /** How long after its time a ping may still wait for the Pinger's «later» (default two days); tests shorten it. */
+  laterWindowMs?: number
+  /** One day of the Pinger's «later» (tests shorten it). */
+  dayMs?: number
   /** How often the silence task is tried again while something stands in its way (default an hour). */
   dormantRetryEveryMs?: number
   /** How often it is tried again after a failure, a Telegram outage say (default 10 minutes). */
@@ -60,8 +73,17 @@ export type RemindDeps = {
   cardTries?: number
 }
 
-/** The step the ladder is at: when it is due, which reminder and in what tone. */
-export type Planned = { at: string; step: ReminderStep; tone: ReminderTone }
+/**
+ * The step the ladder is at: when it is due, which reminder and in what tone; the scenario of the silence as the code
+ * read it, and until when the Pinger may still say «later» (spec 2026-11-07-organic-pings).
+ */
+export type Planned = {
+  at: string
+  step: ReminderStep
+  tone: ReminderTone
+  scenario: PingScenario
+  latest: string
+}
 
 export type Ground =
   | { go: true; read: boolean; lastId: string | null; shadow: boolean }
@@ -80,11 +102,13 @@ export type Sent = {
 /** A turn that has not finished for longer than this is not running, it is stuck. */
 const TURN_ALIVE_MS = 24 * 3600_000
 
-/** The first reminder of a client who went to think it over waits this long after our message. */
-const THINKING_FIRST_MS = 48 * 3600_000
+/** How long after its time a ping may wait for the Pinger's «later». */
+const LATER_WINDOW_MS = 2 * 24 * 3600_000
 
 /** Why the ladder of a client who said no is not run (the trace says it). */
 export const REFUSED = 'клиент отказался'
+/** Why nothing more is written on Profi.ru to a client who went over to a messenger. */
+export const MESSENGER = 'клиент ушел в мессенджер'
 
 const STOP = (why: string): Ground => ({ go: false, end: true, why })
 const SKIP = (why: string): Ground => ({ go: false, end: false, why })
@@ -152,7 +176,7 @@ async function ensureRow(
       kind: 'reminder',
       anchorMessageId: anchor,
       state: 'waiting',
-      understanding: { step: p.step, tone: p.tone },
+      understanding: { step: p.step, tone: p.tone, scenario: p.scenario.kind },
       timings: { started: now },
     })
     .onConflictDoNothing()
@@ -179,13 +203,10 @@ export async function planNext(
       and(eq(chatMessage.accountId, conv.accountId), eq(chatMessage.platformMessageId, anchor)),
     )
   if (!m) return null
-  // «Я подумаю»: a client who went to think it over gets two days before the first reminder, not one.
-  const stored = await d.db
-    .select({ id: chatMessage.platformMessageId, side: chatMessage.side, text: chatMessage.text })
-    .from(chatMessage)
-    .where(eq(chatMessage.conversationId, conversationId))
-    .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
-  const thinking = isThinking(clientTurnBefore(stored, anchor))
+  // The scenario of the silence (spec 2026-11-07-organic-pings): it sets the waits and what the ping is about.
+  const sc = await scenarioOf(d.db, conversationId, anchor)
+  if (sc.kind === 'messenger') return null
+  const w = pingWaits(sc)
   const r = nextReminder({
     lastOursAt: m.sentAt,
     sent: st.sent,
@@ -193,10 +214,65 @@ export async function planNext(
     now: new Date(),
     prevAt: st.prevAt,
     quiet: await getSetting(d.db, 'conv.reminder_quiet'),
-    waitsMs: d.waitsMs,
-    ...(thinking && { firstAfterMs: THINKING_FIRST_MS }),
+    waitsMs: {
+      second: d.waitsMs?.second ?? w.second,
+      third: d.waitsMs?.third ?? w.third,
+      silent: d.waitsMs?.silent,
+    },
+    firstAfterMs: w.first,
+    firstNotBefore: w.notBefore,
   })
-  return r ? { at: r.at.toISOString(), step: r.step, tone: r.tone } : null
+  if (!r) return null
+  const latest = new Date(r.at.getTime() + (d.laterWindowMs ?? LATER_WINDOW_MS))
+  return {
+    at: r.at.toISOString(),
+    step: r.step,
+    tone: r.tone,
+    scenario: sc,
+    latest: latest.toISOString(),
+  }
+}
+
+/** The chat as the scenario reads it: the stored messages of the conversation in order. */
+async function storedLines(db: Db, conversationId: string): Promise<ChatLine[]> {
+  return db
+    .select({
+      id: chatMessage.platformMessageId,
+      side: chatMessage.side,
+      text: chatMessage.text,
+      at: chatMessage.sentAt,
+    })
+    .from(chatMessage)
+    .where(eq(chatMessage.conversationId, conversationId))
+    .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+}
+
+/** Boris's Telegram as the bids give it: our offer to talk there is read by it. */
+const telegramHandle = async (db: Db) => (await getSetting(db, 'series.telegram')) || null
+
+/** The scenario of the silence after our message `anchor`: the stored chat, the last held call, Boris's Telegram. */
+export async function scenarioOf(
+  db: Db,
+  conversationId: string,
+  anchor: string,
+): Promise<PingScenario> {
+  const [held] = await db
+    .select({ nextStep: meeting.nextStep, nextStepOn: meeting.nextStepOn })
+    .from(meeting)
+    .where(and(eq(meeting.conversationId, conversationId), eq(meeting.outcome, 'held')))
+    .orderBy(desc(meeting.startsAt))
+    .limit(1)
+  return pingScenario({
+    lines: await storedLines(db, conversationId),
+    anchorId: anchor,
+    meeting: held ?? null,
+    handle: await telegramHandle(db),
+  })
+}
+
+/** The client went over to a messenger, by the words of the chat (our offer and his yes, or his own ask). */
+export async function wentToMessenger(db: Db, lines: ChatLine[]): Promise<boolean> {
+  return movedToMessenger(lines, await telegramHandle(db)) !== null
 }
 
 /**
@@ -319,6 +395,14 @@ async function readGround(
     anchor,
   )
   if (isRefusal(turn)) return STOP(REFUSED)
+  // The client went over to Telegram or WhatsApp: nothing more on Profi.ru.
+  const lines = chat.map((m) => ({
+    id: m.platform_message_id,
+    side: m.author,
+    text: m.text,
+    at: m.sent_at,
+  }))
+  if (await wentToMessenger(d.db, lines)) return STOP(MESSENGER)
   // «Прочитал» is the stored mark of our last message, which only the client's read event sets (design 5.11).
   const lastOurs = chat.findLast((m) => m.author === 'specialist')
   const [stored] = lastOurs
@@ -404,7 +488,9 @@ export async function groundStep(
   if (g.go) {
     await d.db
       .update(convTurn)
-      .set({ understanding: { step: p.step, tone: p.tone, read: g.read } })
+      .set({
+        understanding: sql`coalesce(${convTurn.understanding}, '{}'::jsonb) || ${JSON.stringify({ step: p.step, tone: p.tone, scenario: p.scenario.kind, read: g.read })}::jsonb`,
+      })
       .where(eq(convTurn.id, rowId))
     return g
   }
@@ -426,13 +512,16 @@ export async function giveUpDormant(d: RemindDeps, rowId: string, why: string): 
   })
 }
 
-/** The least time between two reminders that really went out: a late press never puts two close together. */
-const MIN_GAP_MS = 24 * 3600_000
+/**
+ * The least time between two pings that really went out (Boris, 06.11.2026: at least two days): a late press never
+ * puts two close together.
+ */
+const MIN_GAP_MS = 2 * 24 * 3600_000
 
 /**
  * How long a reminder still waits right before it goes, or null if it may go now. The planned time was outside the
  * quiet hours (`conv.reminder_quiet`), but getting the text can take hours (a limit wait, a rewrite, the ready text),
- * so a reminder due at 22:30 could be sent at 01:30: the time is looked at again here. And a day must have passed
+ * so a reminder due at 22:30 could be sent at 01:30: the time is looked at again here. And two days must have passed
  * since the last reminder that really went out (Boris may have pressed a card late, after the wait of the next step
  * was already running), so two reminders never reach a client 2 hours apart.
  */
@@ -449,49 +538,74 @@ export async function quietUntil(
   return { until: until ? until.toISOString() : null }
 }
 
-/** The model's try at the text, in one step so a replay does not ask it again. Never throws: no text is the answer. */
-export async function writeStep(
+/** What one ask of the Pinger came to: its choice, or that the day's calls are spent, or that the model failed. */
+export type Decision = { choice: PingChoice | null; capped: string | null; modelFailed: boolean }
+
+/**
+ * One ask of the Pinger (spec 2026-11-07-organic-pings), in one step so a replay does not ask it again: ping now, wait
+ * once more (only while `laterUntil` allows), or tell Boris; the trace row keeps what it said and why. Never throws:
+ * no choice is the answer.
+ */
+export async function decideStep(
   d: RemindDeps,
   rowId: string,
   conversationId: string,
   p: Planned,
   read: boolean,
+  laterUntil: string | null,
   limitMs: number,
-): Promise<{ text: string | null; modelFailed: boolean }> {
+): Promise<Decision> {
   try {
-    const w = await writeReminder(
+    const now = new Date()
+    const until = laterUntil && Date.parse(laterUntil) > now.getTime() ? new Date(laterUntil) : null
+    const w = await decidePing(
       { db: d.db, gateway: d.gateway, mind: d.mind, profi: d.profi },
       {
         conversationId,
-        step: p.step as TextStep,
-        tone: p.tone,
+        scenario: p.scenario,
+        step: typeof p.step === 'number' ? p.step : 3,
         read,
-        now: new Date(),
+        now,
+        laterUntil: until,
+        ...(d.dayMs !== undefined && { dayMs: d.dayMs }),
         limitWaitMs: Math.max(0, limitMs),
       },
     )
+    if (w.capped) return { choice: null, capped: w.capped, modelFailed: false }
     const [prev] = await d.db
       .select({ ids: convTurn.modelCallIds })
       .from(convTurn)
       .where(eq(convTurn.id, rowId))
+    const c = w.choice
+    const said = c
+      ? {
+          decision: c.kind,
+          why: c.why,
+          ...(c.kind === 'ping' && c.source && { source: c.source }),
+          ...(c.kind === 'later' && { later: c.at }),
+        }
+      : {}
     await d.db
       .update(convTurn)
       .set({
         move: 'reply',
         mindVersion: w.mindVersion,
         recalled: { ids: w.recalled },
-        text: w.text,
+        text: c?.kind === 'ping' ? c.text : w.text,
         factIds: w.factIds,
         modelCallIds: [...((prev?.ids as string[] | undefined) ?? []), ...w.modelCallIds],
         checks: { issues: w.issues, attempts: w.attempts, failure: w.failure, fallback: false },
+        understanding: sql`coalesce(${convTurn.understanding}, '{}'::jsonb) || ${JSON.stringify(said)}::jsonb`,
       })
       .where(eq(convTurn.id, rowId))
     // A model that gave no answer is asked again later; one whose text failed the checks twice is not, the ready
-    // text goes at once (the same model, asked again and again, would only spend the subscription).
-    return { text: w.text, modelFailed: w.text === null && w.failure !== null }
+    // text goes at once (the same model, asked again and again, would only spend the subscription). The Pinger
+    // switched off (0 calls a day) is no failure either: the ready text goes.
+    const modelFailed = c === null && w.failure !== null && w.failure !== 'off'
+    return { choice: c, capped: null, modelFailed }
   } catch (e) {
-    console.error('reminder: the text was not written', e instanceof Error ? e.message : e)
-    return { text: null, modelFailed: true }
+    console.error('ping: the Pinger was not asked', e instanceof Error ? e.message : e)
+    return { choice: null, capped: null, modelFailed: true }
   }
 }
 
@@ -505,10 +619,12 @@ export async function fallbackStep(
   rowId: string,
   conversationId: string,
   p: Planned,
-): Promise<{ text: string }> {
+): Promise<{ text: string; why: string }> {
   const conv = await getConversation(d.db, conversationId)
   const names = conv ? await clientNames(d.db, conv) : []
-  const variants = ([0, 1] as const).map((v) => reminderFallback(names[0] ?? null, p.tone, v))
+  const variants = ([0, 1] as const).map((v) =>
+    pingFallback(names[0] ?? null, p.scenario, p.tone, v),
+  )
   const used = conv ? await ladderTexts(d.db, conv.id) : new Set<string>()
   if (conv) {
     const ours = await d.db
@@ -542,7 +658,12 @@ export async function fallbackStep(
       checks: sql`coalesce(${convTurn.checks}, '{}'::jsonb) || ${JSON.stringify({ fallback: true })}::jsonb`,
     })
     .where(eq(convTurn.id, rowId))
-  return { text }
+  const [row] = await d.db
+    .select({ understanding: convTurn.understanding })
+    .from(convTurn)
+    .where(eq(convTurn.id, rowId))
+  const read = (row?.understanding as { read?: boolean } | null)?.read ?? false
+  return { text, why: scenarioWhy(p.scenario, read) }
 }
 
 /** The outbox row of a reminder is delivered, and the trace says how it went. */
@@ -632,6 +753,8 @@ export async function sendStep(
   anchor: string,
   p: Planned,
   text: string,
+  /** What the card says besides the text: why now, and the page of the fact (spec 2026-11-07-organic-pings). */
+  card: { why?: string | null; source?: string | null } = {},
 ): Promise<Sent> {
   const conv = await getConversation(d.db, conversationId)
   if (!conv) return { outcome: 'stopped', end: true }
@@ -692,10 +815,13 @@ export async function sendStep(
       })
     return { outcome: 'drafted', end: false }
   }
-  // Drafts mode (FR-CONV-5): Sara sends nothing by herself, Boris gets the card and his press sends the text.
-  if (!(await getSetting(d.db, 'conv.autopilot'))) {
+  // Drafts mode (FR-CONV-5): Sara sends nothing by herself, Boris gets the card and his press sends the text. Pings
+  // alone may go by themselves when Boris switched `conv.pings_auto` on (default off).
+  const auto =
+    (await getSetting(d.db, 'conv.autopilot')) || (await getSetting(d.db, 'conv.pings_auto'))
+  if (!auto) {
     try {
-      await sendReminderCard(d, rowId, conv, p.step as 1 | 2 | 3, text)
+      await sendReminderCard(d, rowId, conv, p.step as 1 | 2 | 3, text, card)
     } catch (e) {
       console.error('reminder: the card did not go', e instanceof Error ? e.message : e)
       return { outcome: 'failed', end: false, retry: true }
@@ -722,6 +848,40 @@ export async function sendStep(
     return { outcome: 'skipped', end: false }
   }
   return deliver(d, rowId, conv, id, p)
+}
+
+/**
+ * The Pinger chose Boris, not the client, or we promised the client something (spec 2026-11-07-organic-pings): one
+ * message in the client's topic, no buttons, and the silence gets no more pings. In shadow only the trace says so.
+ * The reminder cards that still wait are closed: nothing of this ladder goes to the client any more.
+ */
+export async function tellBorisStep(
+  d: RemindDeps,
+  rowId: string,
+  conversationId: string,
+  p: Planned,
+  c: { note: string; why: string },
+  shadow: boolean,
+): Promise<void> {
+  const conv = await getConversation(d.db, conversationId)
+  if (!conv || (await endedWith(d, rowId, 'to_boris'))) return
+  if (!shadow) {
+    const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
+    const who = { name: l?.clientName || null, orderTitle: l ? shownTitle(l.id, l.title) : null }
+    const text =
+      p.scenario.kind === 'our_promise' && p.scenario.quote
+        ? CONV_TEXTS.ourPromise({ ...who, quote: p.scenario.quote })
+        : CONV_TEXTS.pingToBoris({ ...who, note: c.note, why: c.why })
+    const place = { place: { conversation: conv.id } }
+    if (d.notifier.sendText) await d.notifier.sendText(text, place)
+    else await d.notifier.sendButtons(text, [], place)
+    await expireOldCards(d.db, conv.id, rowId, 'клиента я передала тебе')
+  }
+  await finishRow(d.db, rowId, {
+    outcome: 'to_boris',
+    decision: shadow ? 'trace' : 'tell',
+    decisionReason: c.note.slice(0, 300),
+  })
 }
 
 /** The deal of a client silent after the reminders becomes dormant; a stage that cannot (a booked meeting) stays. */
