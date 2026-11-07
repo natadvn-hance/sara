@@ -3,6 +3,7 @@ import type { ChatMessage } from '@sara/shared'
 import { asc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onConvPress } from '../../src/conversation/commands'
+import { morningAfter, moscowDay } from '../../src/conversation/pingScenario'
 import { checkGround } from '../../src/conversation/reminderSteps'
 import {
   openReminders,
@@ -15,7 +16,7 @@ import {
   syncReminders,
 } from '../../src/conversation/reminders'
 import { sendTextNow } from '../../src/conversation/sendJob'
-import { syncChat } from '../../src/conversation/sync'
+import { storedOf, syncChat } from '../../src/conversation/sync'
 import { moscowHour, moscowHoursEnd } from '../../src/conversation/time'
 import {
   account,
@@ -75,6 +76,8 @@ let onRead: (n: number) => void
 let sendFails: ProfiError | null
 let fake: FakeGateway
 let buttons: { text: string; rows: { text: string; callbackData: string }[][] }[]
+/** Plain messages to Boris (the Pinger chose him, not the client), with the topic each went to. */
+let texts: { text: string; place: unknown }[]
 let booked: boolean
 /** How many of the next messages to Boris fail (Telegram is down), and the deal's stage at each try. */
 let notifyFails: number
@@ -89,6 +92,10 @@ const notifier = {
     if (notifyFails-- > 0) throw new Error('telegram is down')
     buttons.push({ text, rows })
     return { messageId: 500 + buttons.length }
+  },
+  sendText: async (text: string, o?: { place?: unknown }) => {
+    texts.push({ text, place: o?.place })
+    return { messageId: 900 + texts.length }
   },
 }
 
@@ -199,6 +206,7 @@ beforeEach(async () => {
   onRead = () => {}
   sendFails = null
   buttons = []
+  texts = []
   booked = false
   notifyFails = 0
   dealStages = []
@@ -233,7 +241,7 @@ beforeEach(async () => {
     fallbackAfterMs: 1500,
     retryEveryMs: 300,
   }
-  await useGateway({ reminder: SEQUENCE })
+  await useGateway({ pinger: SEQUENCE })
   setRemindDeps(deps)
   await baseSettings()
 })
@@ -267,8 +275,8 @@ describe('a reminder in shadow', () => {
     await startReminder(other.id, 'm-1')
     await until(done(1))
     const [read, unread] = (await fake.calls()).map((c) => c.stdin)
-    expect(read).toContain('Клиент прочитал наше сообщение: да')
-    expect(unread).toContain('Клиент прочитал наше сообщение: неизвестно')
+    expect(read).toContain('Клиент прочитал наше последнее сообщение: да')
+    expect(unread).toContain('Клиент прочитал наше последнее сообщение: нет или неизвестно')
   })
 
   it('FR-CONV-12: in shadow the silence after three reminders is only in the trace, with no task for Boris', async () => {
@@ -380,18 +388,17 @@ describe('a reminder after the switch', () => {
     expect(tasks[0]?.state).toBe('open')
     expect((await db.select().from(deal))[0]?.stage).toBe('dormant')
     expect(await countEvents(db, 'conv.dormant')).toBe(1)
-    // The third is friendly, the first two check in; nothing is written to the client after it.
+    // The third is the last and soft, the first two are not; nothing is written to the client after it.
     const inputs = (await fake.calls()).map((c) => c.stdin)
-    expect(inputs[2]).toContain('По счёту: 3 из 3')
-    expect(inputs[2]).toContain('Тон: дружеский')
-    expect(inputs[1]).toContain('Тон: обычный')
+    expect(inputs[2]).toContain('Пинг по счету: 3 из 3, последний')
+    expect(inputs[1]).toContain('Пинг по счету: 2 из 3\n')
     // The ladder is over with the task: nothing waits for Boris, and a fourth reminder never comes.
     await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
     expect(sends).toHaveLength(3)
     expect((await rows()).map((r) => r.id.split(':').at(-1))).not.toContain('4')
   })
 
-  it('FR-CONV-12: the waits are two days after the first reminder went and three after the second, not from our message', async () => {
+  it('FR-CONV-12: a client silent since the bid: the second ping three days after the first went, not from our message', async () => {
     await live()
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
@@ -402,11 +409,12 @@ describe('a reminder after the switch', () => {
     await until(async () => (await planOf('plan-1')) !== undefined)
     const wentAt = Date.parse(String((await rows())[0]?.finishedAt))
     const at = Date.parse(String(((await planOf('plan-1'))?.output as { at?: string })?.at))
-    // Two days after the first went (the quiet hours of the test are away from that time).
-    expect(Math.abs(at - (wentAt + 2 * DAY))).toBeLessThan(10_000)
+    // Three days after the first went for a stranger since the bid (spec 2026-11-07-organic-pings; the quiet hours of
+    // the test are away from that time).
+    expect(Math.abs(at - (wentAt + 3 * DAY))).toBeLessThan(10_000)
   })
 
-  it('FR-CONV-12: the second reminder keeps a day from the first that went, even when its own wait is over', async () => {
+  it('FR-CONV-12: the second reminder keeps two days from the first that went, even when its own wait is over', async () => {
     await live()
     deps.waitsMs = { second: 0 }
     const conv = await scene(quiet(25 * HOUR))
@@ -419,8 +427,8 @@ describe('a reminder after the switch', () => {
     const wentAt = Date.parse(String((await rows())[0]?.finishedAt))
     const held = ((await quietStep())?.output ?? {}) as { until?: string }
     const until1 = Date.parse(String(held.until))
-    // A day after the first went, not a moment after: nothing else goes meanwhile.
-    expect(Math.abs(until1 - (wentAt + DAY))).toBeLessThan(10_000)
+    // Two days after the first went (Boris, 06.11.2026), not a moment after: nothing else goes meanwhile.
+    expect(Math.abs(until1 - (wentAt + 2 * DAY))).toBeLessThan(10_000)
     await sleep(500)
     expect(sends).toHaveLength(1)
     expect(await statusOf(wf)).toBe('PENDING')
@@ -450,7 +458,7 @@ describe('a reminder after the switch', () => {
 
   it('FR-CONV-12: no model text for 3 hours past the time means the ready text of old Sara', async () => {
     await live()
-    await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_MODE: 'exit1' })
+    await useGateway({ pinger: GOOD }, { FAKE_CLAUDE_MODE: 'exit1' })
     const conv = await scene(quiet(25 * HOUR))
     const startedAt = Date.now()
     await startReminder(conv.id, 'm-1')
@@ -466,7 +474,7 @@ describe('a reminder after the switch', () => {
 
   it('FR-CONV-12: a text that fails the checks twice goes straight to the ready text, the model is not asked again and again', async () => {
     await live()
-    await useGateway({ reminder: { ...GOOD, text: '[имя 1], здравствуйте \u2014 как дела?' } })
+    await useGateway({ pinger: { ...GOOD, text: '[имя 1], здравствуйте \u2014 как дела?' } })
     // The time for the model is long here: the ready text must not wait for it to pass.
     deps.fallbackAfterMs = 8000
     const startedAt = Date.now()
@@ -482,7 +490,7 @@ describe('a reminder after the switch', () => {
 
   it('FR-CONV-12: steps 1 and 2 never send the same ready text word for word', async () => {
     await live()
-    await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_MODE: 'exit1' })
+    await useGateway({ pinger: GOOD }, { FAKE_CLAUDE_MODE: 'exit1' })
     deps.fallbackAfterMs = 600
     // The second may follow the first at once; the third keeps its three days.
     deps.waitsMs = { second: 0 }
@@ -899,7 +907,7 @@ describe('when a reminder must not go', () => {
 
   it('FR-CONV-12: a reminder whose switch went off while its text was written is skipped, and the process lives on', async () => {
     await live()
-    await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_DELAY_MS: '2500' })
+    await useGateway({ pinger: GOOD }, { FAKE_CLAUDE_DELAY_MS: '2500' })
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
     await until(async () => (await rows()).length === 1)
@@ -982,7 +990,7 @@ describe('the time of a reminder', () => {
   it('FR-CONV-12: a text that took hours to get does not go at night, it waits for 9:00 Moscow', async () => {
     await live()
     // The model is slow: while it works the evening turns into the quiet hours.
-    await useGateway({ reminder: GOOD }, { FAKE_CLAUDE_DELAY_MS: '2500' })
+    await useGateway({ pinger: GOOD }, { FAKE_CLAUDE_DELAY_MS: '2500' })
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
     await until(async () => (await rows()).length === 1)
@@ -1034,5 +1042,166 @@ describe('the time of a reminder', () => {
     expect(await statusOf(wf)).toBe('PENDING')
     expect(await rows()).toHaveLength(0)
     expect(sends).toHaveLength(0)
+  })
+})
+
+describe('organic pings (spec 2026-11-07-organic-pings)', () => {
+  const draftsMode = async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await setSetting(db, 'outbound.messages', true, 'system')
+  }
+  /** The client wrote once, our answer `ours` 25 hours ago is the anchor. */
+  const talk = (client: string, ours: string): SeedMessage[] => [
+    ...quiet(30 * HOUR),
+    { id: 'm-2', side: 'client', text: client, at: ago(28 * HOUR) },
+    { id: 'm-3', side: 'specialist', text: ours, at: ago(25 * HOUR) },
+  ]
+  const planOf = async (wf: string, name = 'plan-0') => {
+    await until(async () => ((await DBOS.listWorkflowSteps(wf)) ?? []).some((s) => s.name === name))
+    const step = ((await DBOS.listWorkflowSteps(wf)) ?? []).find((s) => s.name === name)
+    return step?.output as { at: string; scenario: { kind: string; day: string | null } }
+  }
+
+  it('FR-CONV-12: the card says why now and gives the page of its fact; nothing goes to the client', async () => {
+    await draftsMode()
+    const page = 'https://example.ru/clinics/online-2026'
+    await useGateway({
+      pinger: {
+        ...GOOD,
+        why_now: 'Сообщение не прочитано, есть свежий повод про онлайн запись',
+        text: '[имя 1], добрый день! Онлайн записей в клиниках стало на 12% больше. Как у вас с сайтом?',
+        hook: { fact: 'Онлайн записей в частные клиники стало на 12% больше', source_url: page },
+        $web: [page],
+      },
+    })
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=carded'])
+    expect(buttons[0]?.text).toContain(
+      'Почему сейчас: Сообщение не прочитано, есть свежий повод про онлайн запись',
+    )
+    expect(buttons[0]?.text).toContain(`Источник факта: ${page}`)
+    expect(buttons[0]?.text).toContain(
+      'Анна, добрый день! Онлайн записей в клиниках стало на 12% больше',
+    )
+    expect(sends).toHaveLength(0)
+    const [row] = await rows()
+    expect(row?.understanding).toMatchObject({
+      scenario: 'since_bid',
+      decision: 'ping',
+      source: page,
+    })
+  })
+
+  it('FR-CONV-12: with «conv.pings_auto» on a ping goes without a card; off (the default) it is a card', async () => {
+    await draftsMode()
+    await setSetting(db, 'conv.pings_auto', true, 'system')
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=sent'])
+    expect(sends.map((x) => x.text)).toEqual([GOOD_TEXT])
+    expect(buttons).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: «later» once: the step wakes again inside the window, and the second ask must decide', async () => {
+    await live()
+    deps.dayMs = 1500
+    deps.laterWindowMs = 60_000
+    await useGateway({
+      pinger: {
+        $sequence: [
+          { ...GOOD, decision: 'later', later_days: 1, text: '', why_now: 'выходные' },
+          GOOD,
+        ],
+      },
+    })
+    const conv = await scene(quiet(25 * HOUR))
+    const started = Date.now()
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1500)
+    expect(await outcomes()).toEqual(['1=sent'])
+    const inputs = (await fake.calls()).map((c) => c.stdin)
+    expect(inputs).toHaveLength(2)
+    expect(inputs[0]).toContain('- later: подождать еще 1-3 дня')
+    expect(inputs[1]).toContain('- later: нельзя')
+    expect((await rows())[0]?.understanding).toMatchObject({ decision: 'ping' })
+  })
+
+  it('FR-CONV-12: the Pinger chose Boris: one message in the topic, nothing to the client, no more pings', async () => {
+    await live()
+    instant()
+    await useGateway({
+      pinger: {
+        ...GOOD,
+        decision: 'boris',
+        text: '',
+        why_now: 'Клиент спросил про договор',
+        boris_note: 'Ответь ему про договор сам, пинговать не буду',
+      },
+    })
+    const conv = await scene(quiet(25 * HOUR))
+    await startReminder(conv.id, 'm-1')
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-1'))) === 'SUCCESS')
+    expect(await outcomes()).toEqual(['1=to_boris'])
+    expect(sends).toHaveLength(0)
+    expect(texts).toHaveLength(1)
+    expect(texts[0]?.text).toContain('Клиенту не пишу, это тебе')
+    expect(texts[0]?.text).toContain('Ответь ему про договор сам, пинговать не буду')
+    expect(texts[0]?.place).toEqual({ conversation: conv.id })
+    expect(texts[0]?.text).not.toMatch(/[\u2013\u2014]/)
+  })
+
+  it('FR-CONV-12: we promised the client something: Boris hears it, no model call, no ping', async () => {
+    await live()
+    const conv = await scene(
+      talk('Хотим понять, с чего начать', 'Понял. Изучу ваш сайт и вернусь с идеями.'),
+    )
+    await startReminder(conv.id, 'm-3')
+    await until(async () => (await statusOf(remindWorkflowId(conv.id, 'm-3'))) === 'SUCCESS')
+    expect(await outcomes()).toEqual(['1=to_boris'])
+    expect(texts[0]?.text).toContain('Клиент ждет нас')
+    expect(texts[0]?.text).toContain('«Изучу ваш сайт и вернусь с идеями.»')
+    expect(await fake.calls()).toEqual([])
+    expect(sends).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: the client named a day: the first ping waits for the morning after it', async () => {
+    await live()
+    const conv = await scene(talk('Посмотрю с командой и через неделю напишу', 'Хорошо, жду.'))
+    await startReminder(conv.id, 'm-3')
+    const plan = await planOf(remindWorkflowId(conv.id, 'm-3'))
+    expect(plan.scenario.kind).toBe('named_date')
+    const said = moscowDay(new Date(Date.now() - 28 * HOUR))
+    const day = new Date(Date.parse(`${said}T00:00:00Z`) + 7 * DAY).toISOString().slice(0, 10)
+    expect(plan.scenario.day).toBe(day)
+    expect(plan.at).toBe(morningAfter(day).toISOString())
+    await sleep(300)
+    expect(await rows()).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: the client went over to Telegram: no process, one trace row, nothing more on Profi.ru', async () => {
+    await live()
+    const messages: SeedMessage[] = [
+      ...quiet(30 * HOUR),
+      { id: 'm-2', side: 'specialist', text: 'Можем продолжить в тг @bmnoian', at: ago(29 * HOUR) },
+      { id: 'm-3', side: 'client', text: 'Да, написал вам', at: ago(28 * HOUR) },
+      { id: 'm-4', side: 'specialist', text: 'Отлично, вижу', at: ago(25 * HOUR) },
+    ]
+    const conv = await scene(messages)
+    const stored = await db
+      .select()
+      .from(chatMessage)
+      .where(eq(chatMessage.conversationId, conv.id))
+      .orderBy(asc(chatMessage.sentAt))
+    await syncReminders(conv, stored.map(storedOf))
+    expect(await openReminders(conv.id)).toEqual([])
+    const trace = (await db.select().from(convTurn)).map((r) => [
+      r.id.split(':').at(-1),
+      r.decisionReason,
+    ])
+    expect(trace).toEqual([['messenger', 'клиент ушел в мессенджер']])
   })
 })

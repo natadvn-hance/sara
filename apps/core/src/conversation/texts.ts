@@ -227,6 +227,10 @@ export const CONV_TEXTS = {
     orderTitle: string | null
     step: 1 | 2 | 3
     text: string
+    /** Why the ping comes now (spec 2026-11-07-organic-pings): the Pinger's words, or the scenario's. */
+    why?: string | null
+    /** The page the fact of the ping came from: Boris sees it before he sends. */
+    source?: string | null
   }) =>
     hyphenated(
       [
@@ -235,11 +239,43 @@ export const CONV_TEXTS = {
           .filter(Boolean)
           .join(', '),
         `${REMINDER_STEP_RU[v.step]}: клиент не ответил на наше последнее сообщение.`,
+        ...(v.why?.trim() ? [`Почему сейчас: ${v.why.trim()}`] : []),
         '',
         'Текст напоминания:',
         v.text.trim(),
         '',
+        ...(v.source ? [`Источник факта: ${v.source}`, ''] : []),
         'Без твоего нажатия клиенту ничего не уйдёт.',
+      ].join('\n'),
+    ),
+
+  /**
+   * The Pinger chose Boris, not the client (spec 2026-11-07-organic-pings): one message in the client's topic, no
+   * buttons, and no more pings for this silence.
+   */
+  pingToBoris: (v: { name: string | null; orderTitle: string | null; note: string; why: string }) =>
+    hyphenated(
+      [
+        '🙋 Клиенту не пишу, это тебе',
+        [v.name ?? 'Клиент', v.orderTitle ? `заказ «${v.orderTitle}»` : null]
+          .filter(Boolean)
+          .join(', '),
+        ...(v.why.trim() && v.why.trim() !== v.note.trim() ? [v.why.trim()] : []),
+        v.note.trim(),
+        'Больше напоминаний этому клиенту не будет, пока кто то из вас не напишет.',
+      ].join('\n'),
+    ),
+
+  /** Our side promised the client something and he waits for us: Boris hears it, the client gets no ping. */
+  ourPromise: (v: { name: string | null; orderTitle: string | null; quote: string }) =>
+    hyphenated(
+      [
+        '🤝 Клиент ждет нас',
+        [v.name ?? 'Клиент', v.orderTitle ? `заказ «${v.orderTitle}»` : null]
+          .filter(Boolean)
+          .join(', '),
+        `Мы обещали: ${quote(v.quote, 200)}`,
+        'Клиенту не напоминаю: следующий шаг наш.',
       ].join('\n'),
     ),
 

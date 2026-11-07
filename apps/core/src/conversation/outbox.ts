@@ -134,6 +134,14 @@ async function seriesApproved(
 }
 
 /**
+ * A ping to a quiet client goes by itself only when Boris switched `conv.pings_auto` on (spec
+ * 2026-11-07-organic-pings, default off): its key is the step of a reminder process, nothing else passes by it.
+ */
+async function pingAllowed(tx: DbOrTx, key: string): Promise<boolean> {
+  return key.startsWith('conv-remind:') && (await getSetting(tx, 'conv.pings_auto'))
+}
+
+/**
  * A message to a client enters the outbox once per key (FR-CONV-9). Nothing is queued in shadow, not even Boris's
  * own text (ADR-024); Sara's own text also waits out the «Пишет клиентам» pause, Boris's text passes it (as v1).
  * In drafts mode (`conv.autopilot` off) the one line nothing crosses: a message of author sara goes only with Boris's
@@ -155,7 +163,8 @@ export async function queueMessage(
     i.author === 'sara' &&
     !(await getSetting(tx, 'conv.autopilot')) &&
     !(await borisPressed(tx, i.key, i)) &&
-    !(await seriesApproved(tx, i.key, i))
+    !(await seriesApproved(tx, i.key, i)) &&
+    !(await pingAllowed(tx, i.key))
   )
     return null
   const { key, ...p } = i

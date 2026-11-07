@@ -182,6 +182,13 @@ export const SETTINGS = {
    */
   'conv.reminders': { schema: z.boolean(), default: true },
   /**
+   * Pings to quiet clients go without Boris's press (spec 2026-11-07-organic-pings). Off: each ping is a card in the
+   * client's topic and goes only on «Отправить». The pauses and the shadow hold a ping either way.
+   */
+  'conv.pings_auto': { schema: z.boolean(), default: false },
+  /** Calls of the Pinger a Moscow day (it may search the web); past them a ping waits for the morning. */
+  'conv.pings_per_day': { schema: z.number().int().nonnegative(), default: 20 },
+  /**
    * FR-NOTIF-4: turns of the Secretary (Opus) a Moscow day; past them Sara says so and keeps quiet till morning. 0
    * turns the chat off.
    */

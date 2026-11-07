@@ -1,11 +1,11 @@
 import { cp, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { ProbeOutput, ScorerOutput, SorterOutput } from '@sara/shared'
+import { PingerOutput, ProbeOutput, type RoleMeta, ScorerOutput, SorterOutput } from '@sara/shared'
 import { sql } from 'drizzle-orm'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { modelCall } from '../src/db/schema'
-import { buildClaudeArgs, roleJsonSchema } from '../src/gateway/claudeCli'
+import { buildClaudeArgs, readStream, roleJsonSchema, samePage } from '../src/gateway/claudeCli'
 import { createGateway, withoutLimitWait } from '../src/gateway/gateway'
 import { LIMIT_TEXTS } from '../src/gateway/limit'
 import { createSecretStore } from '../src/secrets/store'
@@ -120,6 +120,115 @@ describe('model gateway', () => {
       '--permission-prompts',
       'none',
       '--no-session-persistence',
+    ])
+  })
+
+  it('ADR-027 (07.11.2026): a role with web tools gets exactly them, allowed by name, as a stream, with a budget', () => {
+    const meta = {
+      name: 'pinger',
+      version: 1,
+      model: 'sonnet',
+      priority: 'P2',
+      timeoutMs: 240000,
+      tools: ['WebSearch', 'WebFetch'] as RoleMeta['tools'],
+      maxBudgetUsd: 1,
+    } satisfies RoleMeta
+    expect(buildClaudeArgs(meta, '/r/pinger/role.md', { type: 'object' })).toEqual([
+      '-p',
+      '--model',
+      'sonnet',
+      '--system-prompt-file',
+      '/r/pinger/role.md',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--json-schema',
+      '{"type":"object"}',
+      '--tools',
+      'WebSearch,WebFetch',
+      '--allowedTools',
+      'WebSearch',
+      'WebFetch',
+      '--strict-mcp-config',
+      '--setting-sources',
+      'project',
+      '--permission-mode',
+      'dontAsk',
+      '--permission-prompts',
+      'none',
+      '--no-session-persistence',
+      '--max-budget-usd',
+      '1',
+    ])
+  })
+
+  it('ADR-027 (07.11.2026): only the pinger names built-in tools; every other role runs with none', async () => {
+    const { readdir } = await import('node:fs/promises')
+    const withTools: string[] = []
+    for (const name of await readdir(join(ROOT, 'roles'))) {
+      const meta = JSON.parse(
+        await readFile(join(ROOT, 'roles', name, 'meta.json'), 'utf8').catch(() => '{}'),
+      ) as { tools?: string[] }
+      if (meta.tools) withTools.push(`${name}: ${meta.tools.join(',')}`)
+    }
+    expect(withTools).toEqual(['pinger: WebSearch,WebFetch'])
+  })
+
+  it('ADR-027 (07.11.2026): a stream gives its last result and the pages the tools returned, not what the model wrote', () => {
+    const lines = [
+      { type: 'system', subtype: 'init' },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'see https://made-up.ru/x' }] },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              content:
+                'Links: [{"title":"a","url":"https://news.ru/a?b=1"},{"url":"https://b.ru/c"}].',
+            },
+          ],
+        },
+        tool_use_result: { url: 'https://fetched.ru/page', code: 200 },
+      },
+      { type: 'result', subtype: 'success', structured_output: { ok: true } },
+    ]
+    const r = readStream(lines.map((l) => JSON.stringify(l)).join('\n'))
+    expect(JSON.parse(r?.result ?? '{}')).toMatchObject({ structured_output: { ok: true } })
+    expect(r?.seen.sort()).toEqual([
+      'https://b.ru/c',
+      'https://fetched.ru/page',
+      'https://news.ru/a?b=1',
+    ])
+    expect(readStream('not a stream')).toBeNull()
+    expect(samePage('https://www.News.ru/a/?utm_source=x#top')).toBe('news.ru/a')
+    expect(samePage('ftp://news.ru/a')).toBeNull()
+  })
+
+  it('ADR-027 (07.11.2026): a call of a role with tools returns its answer and the pages it saw', async () => {
+    const answer = {
+      decision: 'ping',
+      text: 'Добрый день!',
+      fact_ids: ['s-portrait'],
+      $web: ['https://news.ru/a'],
+    }
+    const gw = await gateway({
+      FAKE_CLAUDE_MODE: 'ok',
+      FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({ pinger: answer }),
+    })
+    const r = await gw.call('pinger', 'проверка', PingerOutput)
+    expect(r).toMatchObject({
+      ok: true,
+      output: { text: 'Добрый день!' },
+      sources: ['https://news.ru/a'],
+    })
+    const [c] = await calls()
+    expect(c?.args.slice(c.args.indexOf('--tools'), c.args.indexOf('--tools') + 2)).toEqual([
+      '--tools',
+      'WebSearch,WebFetch',
     ])
   })
 
