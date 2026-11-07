@@ -19,7 +19,15 @@ import {
   createConversationEvents,
   showClientWords,
 } from './conversation/events'
-import { hasBookedMeeting, readMeeting } from './conversation/meetings'
+import { registerLoraRoute } from './conversation/loraRoute'
+import {
+  dedupeMeetings,
+  hasBookedMeeting,
+  meetingNews,
+  readBorisResult,
+  recordMeetingResult,
+  startMeetingTick,
+} from './conversation/meetings'
 import { sendTurnReply } from './conversation/outbox'
 import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
@@ -171,6 +179,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       const job = await prepareJob({ db }, c, text, author, o)
       return job ? startSendJob(job) : SEND_TEXTS.failed
     },
+    // Boris's story of a call in a client's topic goes onto the meeting card, not to the client.
+    meetingResult: (c, text, at) => readBorisResult(meetingDeps, c, text, at),
   })
   // A press on a conversation card goes to the conversation, every other press to the lead pipeline; the resolver
   // around it marks the Telegram card when the press came from the pult (pult v2 design 3).
@@ -327,7 +337,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     send: (id, round, seenLast) => sendTurnReply({ db, profi }, id, round, seenLast),
     compare: (id) => compareAfterTurn(cardDeps, id),
     show: (conv, added) => showClientWords({ db, notifier: bot.notifier }, conv, added),
-    news: (conv, added) => readMeeting(meetingDeps, conv, added),
+    news: (conv, added) => meetingNews(meetingDeps, conv, added),
   })
   // Reminders to clients who went quiet (FR-CONV-12): a durable process per message of ours nobody answered.
   // A booked call stops the reminders to the client (Boris, 03.11: she kept reminding after they had agreed).
@@ -349,7 +359,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     onSpecialist: (c, added) => compareTurn(cardDeps, c.id, added),
     // The reminders follow the chat as read: our message last starts one, a client's message cancels it.
     onChatState: (c, messages) => syncReminders(c, messages),
-    onNews: (c, added) => readMeeting(meetingDeps, c, added),
+    onNews: (c, added) => meetingNews(meetingDeps, c, added),
   }
   const conversationEvents = createConversationEvents(conversationDeps)
   const accountEvents = createProfiEventDispatcher({
@@ -403,6 +413,26 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   // The recheck starts below, once the core listens: an order gone from the feed before that waits for its tick.
   let kickRecheck = () => {}
+  // Lora tells how a call went (own token; without SARA_LORA_TOKEN the input is off).
+  registerLoraRoute(app, {
+    db,
+    token: config.loraToken,
+    record: async (conv, r) => {
+      await recordMeetingResult(
+        meetingDeps,
+        conv,
+        {
+          held: r.held ?? true,
+          at: r.at ?? null,
+          result: r.result,
+          nextStep: r.next_step?.trim() || null,
+          nextStepOn: r.next_step_on ?? null,
+          source: 'lora',
+        },
+        new Date(),
+      )
+    },
+  })
   registerProfiEventsRoute(app, {
     db,
     nodeToken: config.nodeToken,
@@ -494,6 +524,10 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
   // Once each: deals whose client already answered move on to talking, and the false «закрыт на сайте» marks go.
+  // Once: a call written down twice is one meeting, the extra row marked, not deleted.
+  void dedupeMeetings(db).catch((e) =>
+    console.error('meeting duplicates pass failed', e instanceof Error ? e.message : e),
+  )
   void backfillTalking(db).catch((e) =>
     console.error('deal stages pass failed', e instanceof Error ? e.message : e),
   )
@@ -505,6 +539,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     o.learningTickMs,
   )
   // The topics as the chat with the client: old ones laid out anew and given their history, bids without one get it.
+  // The meetings whose time passed with no word, and the day of a next step.
+  const meetingTick = startMeetingTick(meetingDeps, o.learningTickMs)
   const topicRestore = startTopicRestore({ db, notifier: bot.notifier }, o.learningTickMs)
   // The conversations whose last client word got no real turn (a site line once hid it, a node restart cut the turn)
   // get theirs, once the node answers and then every ten minutes.
@@ -570,6 +606,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       conversationSummary.stop()
       owed.stop()
       topicRestore.stop()
+      meetingTick.stop()
       catchUp.stop()
       gateway.stop()
       await bot.stop()

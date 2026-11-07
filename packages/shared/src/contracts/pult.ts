@@ -332,6 +332,18 @@ export const AnalyticsView = z.object({
       cacRub: rub.nullable(),
     }),
   ),
+  /** Calls by month: booked, held, missed, without a word (one function for the pult, the sheet and the summary). */
+  meetings: z
+    .array(
+      z.object({
+        month: z.string(),
+        booked: z.number().int(),
+        held: z.number().int(),
+        missed: z.number().int(),
+        noWord: z.number().int(),
+      }),
+    )
+    .default([]),
   /** What the tables do not know yet, said plainly. */
   notes: z.array(z.string()),
 })
