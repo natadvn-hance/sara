@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { firstAgent } from '../src/talk/engine'
 import { createSilence, recordingType, waitForAnswer } from '../src/talk/logic'
 
 describe('the voice app: when Boris stops speaking', () => {
@@ -94,5 +95,14 @@ describe('the voice app: the recording and the answer', () => {
         { retry: (e) => !(e instanceof Out), pause: async () => {} },
       ),
     ).rejects.toBeInstanceOf(Out)
+  })
+})
+
+describe('the voice app: who answers first', () => {
+  it('FR-NOTIF-5: Lora by default, Sara when the address asks for her', () => {
+    expect(firstAgent('')).toBe('lora')
+    expect(firstAgent('?go=1')).toBe('lora')
+    expect(firstAgent('?agent=sara&go=1')).toBe('sara')
+    expect(firstAgent('?agent=nobody')).toBe('lora')
   })
 })

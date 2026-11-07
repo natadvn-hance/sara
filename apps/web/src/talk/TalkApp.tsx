@@ -1,7 +1,7 @@
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { Agent } from './client'
-import { AGENT_UI, createTalkEngine, type Phase, type TalkView } from './engine'
+import { AGENT_UI, createTalkEngine, firstAgent, type Phase, type TalkView } from './engine'
 import './talk.css'
 
 export const TALK_UI = {
@@ -145,14 +145,14 @@ function revealFrom(el: Element | null): (change: () => void) => Promise<void> {
  * voice and colour. `?go=1` (the side button's command) greets and starts listening at once when iOS allows it.
  */
 export function TalkApp() {
-  const [view, setView] = useState<TalkView>({
-    agent: 'lora',
+  const [view, setView] = useState<TalkView>(() => ({
+    agent: firstAgent(window.location.search),
     phase: 'loading',
     items: [],
     level: 0,
     tapToStop: false,
     since: 0,
-  })
+  }))
   const origin = useRef<Element | null>(null)
   const [engine] = useState(() =>
     createTalkEngine(setView, (change) => revealFrom(origin.current)(change)),

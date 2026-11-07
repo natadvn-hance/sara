@@ -57,6 +57,11 @@ export const TALK_NOTES = {
 
 const uid = () => Math.random().toString(36).slice(2)
 
+/** Who answers first: `?agent=sara` in the address, Lora otherwise. */
+export function firstAgent(search: string): Agent {
+  return new URLSearchParams(search).get('agent') === 'sara' ? 'sara' : 'lora'
+}
+
 /** iOS 16.4+ lets a page say what its sound is for; elsewhere nothing happens. */
 function audioSession(type: 'auto' | 'playback'): void {
   const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession
@@ -73,7 +78,7 @@ export function createTalkEngine(
   transition: (change: () => void) => Promise<void> = async (change) => change(),
 ) {
   let view: TalkView = {
-    agent: 'lora',
+    agent: firstAgent(window.location.search),
     phase: 'loading',
     items: [],
     level: 0,
@@ -293,8 +298,6 @@ export function createTalkEngine(
     loaded = true
     try {
       const params = new URLSearchParams(window.location.search)
-      const asked = params.get('agent')
-      if (asked === 'sara' || asked === 'lora') set({ agent: asked })
       const [lora, sara] = await Promise.all([historyOf('lora'), historyOf('sara')])
       set({ phase: 'idle', items: [...lora, ...sara].sort((a, b) => a.at - b.at) })
       if (params.get('go') === '1') {
