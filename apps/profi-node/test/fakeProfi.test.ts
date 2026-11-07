@@ -33,6 +33,9 @@ beforeEach(async () => {
     nodeToken: 'node-tok',
     permitSecret: SECRET,
   })
+  // These tests count the chat's own messages; the site's line after the first client word (01.11.2026, c9ee91b7)
+  // is what the core's tests read from the fake, and stays on there.
+  fake.setSystemLineAfterFirstClient(null)
 })
 afterEach(async () => {
   await fake.close()
