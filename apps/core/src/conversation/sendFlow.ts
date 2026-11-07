@@ -17,7 +17,11 @@ import { CONV_TEXTS } from './texts'
  * delivery asks the service with the same key, which never sends twice. The result reaches Boris as a new message.
  */
 
-export type SendFlowDeps = SendDeps & { notifier: Pick<Notifier, 'sendText'> }
+export type SendFlowDeps = SendDeps & {
+  notifier: Pick<Notifier, 'sendText'>
+  /** The text reached the client: the discussion of it leaves the topic (the topic chat spec, section 5). */
+  onSent?(conversationId: string): Promise<unknown>
+}
 
 let deps: SendFlowDeps | null = null
 
@@ -75,6 +79,11 @@ async function runSend(job: SendJob): Promise<void> {
     // The text has gone or been refused all the same: a message to Boris that Telegram would not take is not a failure.
     console.error('send: Boris was not told', e instanceof Error ? e.message : e)
   }
+  // Not a step: the clearing is done once whoever runs it (the topic showing our message does it too).
+  if (outcome.kind === 'answer' && outcome.answer === SEND_TEXTS.sent)
+    await d()
+      .onSent?.(job.conversationId)
+      .catch(() => {})
 }
 
 const sendWorkflow = DBOS.registerWorkflow(runSend, { name: 'convSend' })

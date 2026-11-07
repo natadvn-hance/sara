@@ -72,7 +72,7 @@ import { createMindWriter } from './mind/writer'
 import { type BotControl, createBotControl } from './notify/botControl'
 import { TEXTS } from './notify/cards'
 import { pushNotice } from './notify/push'
-import { createTranscriber } from './notify/transcribe'
+import { createSocketTranscriber, createTranscriber } from './notify/transcribe'
 import { createProfiClient } from './profi/client'
 import { registerProfiEventsRoute } from './profi/eventsRoute'
 import { systemView } from './pult/system'
@@ -80,7 +80,12 @@ import { startSchoolJobs } from './school/jobs'
 import { registerSchoolRoutes } from './school/routes'
 import type { SchoolDeps } from './school/types'
 import { registerScreenProxy } from './screen/screenProxy'
-import { createTurnKeys, registerSecretaryMcp, SECRETARY_MCP_PATH } from './secretary/mcp'
+import {
+  createTurnKeys,
+  registerSecretaryMcp,
+  registerToolMcp,
+  SECRETARY_MCP_PATH,
+} from './secretary/mcp'
 import { createSecretary, type Secretary } from './secretary/secretary'
 import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
@@ -92,6 +97,9 @@ import { testCommand } from './testLeads/command'
 import { routeTestOrders } from './testLeads/router'
 import { registerTestRoutes } from './testLeads/routes'
 import { startTestLeads, type TestLeads } from './testLeads/testLeads'
+import { createTopicChat, TOPIC_MCP_PATH, type TopicChat } from './topicChat/chat'
+import { clearDiscussion } from './topicChat/discussion'
+import { runTopicTool, TOPIC_TOOLS, type TopicTurn } from './topicChat/tools'
 import { launchDbos, shutdownDbos } from './workflows/dbos'
 import { setReminderHandler } from './workflows/decisionWait'
 
@@ -172,6 +180,9 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   let secretary: Secretary | null = null
   let secretaryTools: SecretaryDeps | null = null
   const turnKeys = createTurnKeys()
+  // The chat in a client's topic (docs/superpowers/specs/2026-11-07-topic-chat-design.md), made once the core listens.
+  let topicChat: TopicChat | null = null
+  const topicKeys = createTurnKeys<TopicTurn>()
   const commandDeps = (): Parameters<typeof onConvPress>[0] => ({
     db,
     notifier: bot.notifier,
@@ -182,6 +193,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     },
     // Boris's story of a call in a client's topic goes onto the meeting card, not to the client.
     meetingResult: (c, text, at) => readBorisResult(meetingDeps, c, text, at),
+    ...(topicChat && { topicChat }),
   })
   // A press on a conversation card goes to the conversation, every other press to the lead pipeline; the resolver
   // around it marks the Telegram card when the press came from the pult (pult v2 design 3).
@@ -217,12 +229,14 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     const ok = await db.transaction((tx) => markAnswered(tx, q, a))
     return ok ? TEXTS.noted(text, await titleOf(db, q)) : TEXTS.notAnAnswer
   }
-  const transcriber = createTranscriber({
-    ffmpegBin: config.ffmpegBin,
-    whisperBin: config.whisperBin,
-    modelPath: config.whisperModel,
-    workDir: join(config.dataDir, 'voice'),
-  })
+  const transcriber = config.voiceSocket
+    ? createSocketTranscriber({ socketPath: config.voiceSocket, dropDir: config.voiceDropDir })
+    : createTranscriber({
+        ffmpegBin: config.ffmpegBin,
+        whisperBin: config.whisperBin,
+        modelPath: config.whisperModel,
+        workDir: join(config.dataDir, 'voice'),
+      })
   const bot = createBotControl({
     db,
     apiRoot: config.telegramApiRoot,
@@ -355,7 +369,13 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     notifier: bot.notifier,
     isBooked: (conversationId) => hasBookedMeeting(db, conversationId),
   })
-  setSendDeps({ db, profi, notifier: bot.notifier, ground: reminderGround })
+  setSendDeps({
+    db,
+    profi,
+    notifier: bot.notifier,
+    ground: reminderGround,
+    onSent: (c) => clearDiscussion({ db, notifier: bot.notifier }, c),
+  })
   const conversationDeps: ConversationEventDeps = {
     db,
     profi,
@@ -366,6 +386,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     // The reminders follow the chat as read: our message last starts one, a client's message cancels it.
     onChatState: (c, messages) => syncReminders(c, messages),
     onNews: (c, added) => meetingNews(meetingDeps, c, added),
+    onOurs: (c) => clearDiscussion({ db, notifier: bot.notifier }, c.id),
   }
   const conversationEvents = createConversationEvents(conversationDeps)
   const accountEvents = createProfiEventDispatcher({
@@ -481,6 +502,24 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   registerSchoolRoutes(app, school)
   registerConversationRoutes(app, commandDeps())
   registerSecretaryMcp(app, { keys: turnKeys, deps: () => secretaryTools })
+  registerToolMcp(app, TOPIC_MCP_PATH, {
+    keys: topicKeys,
+    tools: () => {
+      const chat = topicChat
+      if (!chat) return null
+      const deps = { db, mind, propose: chat.propose }
+      return {
+        name: 'sara-topic-chat',
+        list: () =>
+          Object.entries(TOPIC_TOOLS).map(([name, def]) => ({
+            name,
+            description: def.description,
+            input: def.input,
+          })),
+        run: (t, name, args) => runTopicTool(deps, t, name, args),
+      }
+    },
+  })
   // The made-up Profi.ru of test orders: if it cannot start, the live Sara works on without test orders.
   testLeads = await startTestLeads({
     db,
@@ -509,6 +548,17 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     dataDir: config.dataDir,
     publicUrl: config.publicUrl,
     titleOf: (q) => titleOf(db, q),
+  })
+  topicChat = createTopicChat({
+    db,
+    converse: gateway.converse,
+    notifier: bot.notifier,
+    commands: commandDeps,
+    mind,
+    keys: topicKeys,
+    mcpUrl: () => `http://127.0.0.1:${port}${TOPIC_MCP_PATH}`,
+    dataDir: config.dataDir,
+    publicUrl: config.publicUrl,
   })
 
   const token = await secrets.get('telegram_bot_token')

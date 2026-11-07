@@ -29,6 +29,8 @@ export type ConversationEventDeps = {
   onChatState?(conv: ConversationRow, messages: StoredMessage[]): Promise<void>
   /** What is new in a chat, for the reader of a call booked in it (the meeting card). */
   onNews?(conv: ConversationRow, added: StoredMessage[]): Promise<void>
+  /** Our sent message is shown in the topic: the discussion of it leaves (the topic chat spec, section 5). */
+  onOurs?(conv: ConversationRow): Promise<unknown>
 }
 
 /** After three unclear authors in a row Boris hears of it once (FR-CONV-2). */
@@ -71,7 +73,11 @@ async function noteUnclear(d: ConversationEventDeps, conv: ConversationRow, id: 
  * never stops the turn.
  */
 export async function showClientWords(
-  d: { db: Db; notifier: Pick<Notifier, 'sendText'> },
+  d: {
+    db: Db
+    notifier: Pick<Notifier, 'sendText'>
+    onOurs?(conv: ConversationRow): Promise<unknown>
+  },
   conv: ConversationRow,
   added: StoredMessage[],
 ) {
@@ -111,6 +117,7 @@ export async function showClientWords(
           ...(m.side === 'client' ? {} : { quiet: true }),
         },
       )
+      if (m.side !== 'client') await d.onOurs?.(conv).catch(() => {})
     } catch (e) {
       await unmarkShown(d.db, key, `msg:${m.platformMessageId}`).catch(() => {})
       console.error('chat message not shown', e instanceof Error ? e.message : e)

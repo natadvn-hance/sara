@@ -1,0 +1,12 @@
+{
+  "name": "topic-chat",
+  "version": 1,
+  "model": "opus",
+  "effort": "medium",
+  "priority": "P0",
+  "timeoutMs": 240000,
+  "tools": [
+    "WebSearch",
+    "WebFetch"
+  ]
+}

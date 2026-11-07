@@ -1,12 +1,14 @@
 import { cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { moscowHour } from '../../apps/core/src/conversation/time'
-import { conversation, convTurn } from '../../apps/core/src/db/schema'
+import { conversation, convTurn, event } from '../../apps/core/src/db/schema'
 import { forumOf } from '../../apps/core/src/notify/forum'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { interlocutorAnswer } from '../../apps/core/test/helpers/conversation'
@@ -22,10 +24,16 @@ const FORUM = -1009876543210
 const { db, close } = openTestDb()
 
 let tg: FakeTelegram
+let closeStt: () => void = () => {}
 let fake: FakeProfi
 let app: RunningApp
 let n = 0
 const chatId = () => `${Date.now()}${n++}`
+/** What each role answers; the topic chat's answer is a script of tool calls and words (tests/fakes/fake-claude.mjs). */
+let byRole: Record<string, unknown> = {}
+/** Lora's speech service as the core sees it: a unix socket answering one JSON line. */
+let heard = 'предложи созвон в четверг'
+let voiceDir = ''
 
 async function until(cond: () => boolean | Promise<boolean>, ms = 15000) {
   const end = Date.now() + ms
@@ -70,6 +78,16 @@ beforeAll(async () => {
     permitSecret: 'permit',
   })
   const dir = await mkdtemp(join(tmpdir(), 'e2e-forum-'))
+  voiceDir = await mkdtemp(join(tmpdir(), 'e2e-voice-'))
+  const stt = createServer((c) => {
+    let buf = ''
+    c.on('data', (b) => {
+      buf += b.toString()
+      if (buf.includes('\n')) c.end(`${JSON.stringify({ ok: true, text: heard })}\n`)
+    })
+  })
+  await new Promise<void>((ok) => stt.listen(join(voiceDir, 'stt.sock'), ok))
+  closeStt = () => stt.close()
   await cp(join(ROOT, 'roles'), join(dir, 'roles'), { recursive: true })
   for (const [name, model] of [
     ['interlocutor', 'sonnet'],
@@ -95,11 +113,13 @@ beforeAll(async () => {
       permitSecret: 'permit',
       claudeBin: join(ROOT, 'tests/fakes/fake-claude.mjs'),
       telegramApiRoot: tg.apiRoot,
+      voiceSocket: join(voiceDir, 'stt.sock'),
+      voiceDropDir: join(voiceDir, 'in'),
     },
     {
       claudeEnv: () => ({
         FAKE_CLAUDE_MODE: 'ok',
-        FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({ interlocutor: interlocutorAnswer() }),
+        FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
       }),
       learningTickMs: 3_600_000,
       remindAfterMs: async () => 3_600_000,
@@ -112,6 +132,7 @@ beforeAll(async () => {
 }, 60000)
 
 afterAll(async () => {
+  closeStt()
   await app.close()
   await fake.close()
   await tg.close()
@@ -119,6 +140,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
+  byRole = { interlocutor: interlocutorAnswer() }
   await resetDb(db)
   tg.sent.length = 0
   tg.topics.length = 0
@@ -172,7 +194,7 @@ describe('a client in his own topic of the forum', () => {
     await until(() => finished(1))
     const thread = clientTopic()?.message_thread_id
     const words = 'Анна, давайте завтра в 11 созвонимся, наберу сам.'
-    tg.pushGroupText({ chatId: FORUM, fromId: BORIS, text: words, thread })
+    tg.pushGroupText({ chatId: FORUM, fromId: BORIS, text: `напиши: ${words}`, thread })
     await until(() => inForum().some((m) => m.text === `Отправлю клиенту так: «${words}»`))
     const confirm = inForum().find((m) => m.text === `Отправлю клиенту так: «${words}»`)
     expect(confirm?.message_thread_id).toBe(thread)
@@ -209,6 +231,66 @@ describe('a client in his own topic of the forum', () => {
     })
     await until(() => topic?.closed === false, 30000)
     expect(topic?.name).not.toMatch(/закрыт/)
+    expect(fake.messages).toHaveLength(0)
+  }, 60000)
+
+  it('ST-M7-16: words in the topic go to Sara, her version comes with «Отправить», and after the send the discussion leaves the topic', async () => {
+    const chat = await oldChat()
+    await fake.addChatMessage({ chatId: chat, author: 'client', text: 'Сколько стоит сайт?' })
+    await until(() => cards().length === 1)
+    await until(() => finished(1))
+    const thread = clientTopic()?.message_thread_id
+    const version = 'Добрый день! Давайте обсудим объем на созвоне в четверг.'
+    byRole['topic-chat'] = {
+      calls: [{ name: 'propose', arguments: { text: version } }],
+      answer: 'Готово',
+    }
+    tg.pushGroupText({
+      chatId: FORUM,
+      fromId: BORIS,
+      text: 'без цены, позови на созвон в четверг',
+      thread,
+    })
+    const card = `Отправлю клиенту так: «${version}»`
+    await until(() => inForum().some((m) => m.text === card))
+    const confirm = inForum().find((m) => m.text === card)
+    expect(confirm?.message_thread_id).toBe(thread)
+    await settle()
+    expect(fake.messages).toHaveLength(0)
+    // «Готово» after a version is not posted: the card says it.
+    expect(inForum().some((m) => m.text === 'Готово')).toBe(false)
+    const send =
+      confirm?.reply_markup?.inline_keyboard.flat().find((b) => b.callback_data.endsWith(':send'))
+        ?.callback_data ?? ''
+    tg.pushGroupPress(FORUM, BORIS, send, thread)
+    await until(() => fake.messages.length === 1)
+    expect(fake.messages[0]?.text).toBe(version)
+    // Once the topic shows the sent message, his words and the version card are deleted; the client's post stays.
+    await until(() => tg.deleted.length === 2, 30000)
+    expect(tg.deleted.map((d) => d.message_id)).toContain(confirm?.message_id)
+    const clientPost = inForum().find((m) => m.text.includes('Сколько стоит сайт?'))
+    expect(tg.deleted.map((d) => d.message_id)).not.toContain(clientPost?.message_id)
+    const [cleared] = await db
+      .select()
+      .from(event)
+      .where(eq(event.type, 'topic.discussion_cleared'))
+    expect(cleared).toBeDefined()
+  }, 60000)
+
+  it('ST-M7-16: a voice in the topic is heard by the speech service, its transcript comes folded, and Sara answers there', async () => {
+    const chat = await oldChat()
+    await fake.addChatMessage({ chatId: chat, author: 'client', text: 'Когда сможете начать?' })
+    await until(() => cards().length === 1)
+    await until(() => finished(1))
+    const thread = clientTopic()?.message_thread_id
+    heard = 'спроси, удобен ли ей четверг'
+    byRole['topic-chat'] = { calls: [], answer: 'Какой четверг предложить, этот или следующий?' }
+    tg.pushGroupVoice({ chatId: FORUM, fromId: BORIS, thread })
+    await until(() => inForum().some((m) => m.text.startsWith('Какой четверг')))
+    const transcript = inForum().find((m) => m.text.includes('спроси, удобен ли ей четверг'))
+    expect(transcript?.message_thread_id).toBe(thread)
+    expect(transcript?.parse_mode).toBe('HTML')
+    expect(transcript?.text).toContain('<blockquote expandable>')
     expect(fake.messages).toHaveLength(0)
   }, 60000)
 })

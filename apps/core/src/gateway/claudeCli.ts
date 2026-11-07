@@ -103,6 +103,8 @@ export function buildConverseArgs(
   mcp: { configPath: string; server: string; tools: string[] },
   maxBudgetUsd?: number,
 ): string[] {
+  // Built-in tools only for a role that names them in its meta (the topic chat: ADR-027 point 7); none by default.
+  const builtinTools: string[] = meta.tools ?? []
   return [
     '-p',
     '--model',
@@ -113,11 +115,12 @@ export function buildConverseArgs(
     '--output-format',
     'json',
     '--tools',
-    '',
+    builtinTools.join(','),
     '--mcp-config',
     mcp.configPath,
     '--strict-mcp-config',
     '--allowedTools',
+    ...builtinTools,
     ...mcp.tools.map((t) => `mcp__${mcp.server}__${t}`),
     '--setting-sources',
     'project',

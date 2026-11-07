@@ -35,6 +35,19 @@ export type CommandDeps = {
    * card); a line for him when they were, null when they are for the client or about something else.
    */
   meetingResult?(conv: ConversationRow, text: string, at: Date): Promise<string | null>
+  /**
+   * The chat in a client's topic (docs/superpowers/specs/2026-11-07-topic-chat-design.md): his plain words there go to
+   * Sara, who rewrites the draft by them; her answer comes on its own. Without it, his words are his text for the client.
+   */
+  topicChat?: {
+    take(w: {
+      conversationId: string
+      text: string
+      voice: boolean
+      messageRef?: number
+      at: Date
+    }): Promise<void>
+  }
 }
 
 export const COMMAND_TEXTS = {
@@ -70,6 +83,9 @@ export const COMMAND_TEXTS = {
   nothingToSend:
     'Здесь нечего отправлять: нет открытого черновика. Напиши текст, и я предложу его отправить.',
   askFree: 'Пришли сюда новый вариант, и я покажу его перед отправкой.',
+  /** «Изменить» under a version of the topic chat: his next words are a correction, not the text itself. */
+  chatEdit:
+    'Напиши здесь, что поправить, текстом или голосом. Можно прислать и свой вариант целиком.',
   topicClosed:
     '📁 Разговор закрыт: не пишу и не напоминаю. Клиент напишет, и тема откроется снова.',
 }
@@ -491,7 +507,7 @@ export async function proposeSay(
   d: CommandDeps,
   parent: typeof convTurn.$inferSelect,
   text: string,
-  o: { via: 'say' | 'edit'; voice?: boolean; messageId?: number },
+  o: { via: 'say' | 'edit'; voice?: boolean; messageId?: number; chat?: boolean },
 ): Promise<BorisReply> {
   const [card] = parent.taskId
     ? await d.db.select().from(task).where(eq(task.id, parent.taskId))
@@ -514,7 +530,13 @@ export async function proposeSay(
         state: 'decided',
         text,
         decision: 'say',
-        understanding: { parent: parent.id, via: o.via, voice: o.voice ?? false, key: sayKey(o) },
+        understanding: {
+          parent: parent.id,
+          via: o.via,
+          voice: o.voice ?? false,
+          key: sayKey(o),
+          ...(o.chat && { chat: true }),
+        },
         taskId,
       })
       .onConflictDoNothing()
@@ -552,6 +574,10 @@ async function onSayPress(d: CommandDeps, st: CardTask, action: TaskAction): Pro
     parent?: string
     via?: 'say' | 'edit'
     key?: string | null
+  }
+  if (action === 'edit' && (meta as { chat?: boolean }).chat) {
+    if (!(await closeCard(d.db, st.id, 'edit'))) return COMMAND_TEXTS.done
+    return COMMAND_TEXTS.chatEdit
   }
   if (say?.text && (meta as { free?: boolean }).free) return onFreeSayPress(d, st, say, action)
   const [parent] = meta.parent
@@ -764,7 +790,7 @@ async function openEditOf(db: Db, conversationId: string) {
 }
 
 /** The latest open card of a conversation (a draft, a reminder, a client of Boris's), with its turn. */
-async function openCardOf(db: Db, conversationId: string) {
+export async function openCardOf(db: Db, conversationId: string) {
   const [row] = await db
     .select({ card: task, turn: convTurn })
     .from(task)
@@ -789,7 +815,7 @@ async function openCardOf(db: Db, conversationId: string) {
 export async function onClientText(
   d: CommandDeps,
   m: { conversationId: string | null; text: string; voice: boolean; messageId?: number; at: Date },
-): Promise<BorisReply> {
+): Promise<BorisReply | null> {
   const conv = m.conversationId ? await getConversation(d.db, m.conversationId) : null
   if (!conv) return COMMAND_TEXTS.noChatYet
   const c = parseCardReply(m.text)
@@ -832,12 +858,31 @@ export async function onClientText(
       }
     }
     case 'say':
-      if (c.text === null) return COMMAND_TEXTS.askText
+      // A bare «ответь ей» asks Sara to write the answer: the chat in the topic does, when it is on.
+      if (c.text === null && !(live && d.sendText && d.topicChat && !conv.closedAt))
+        return COMMAND_TEXTS.askText
   }
   // The story of a call («созвонились, договорились, что пришлю КП до пятницы») is not a text for the client.
   if (!c && d.meetingResult) {
     const told = await d.meetingResult(conv, m.text, m.at)
     if (told) return told
+  }
+  // Plain words go to the chat in the topic: Sara rewrites the draft by them («напиши: …» stays his exact text).
+  if (
+    (!c || (c.cmd === 'say' && c.text === null)) &&
+    live &&
+    d.sendText &&
+    d.topicChat &&
+    !conv.closedAt
+  ) {
+    await d.topicChat.take({
+      conversationId: conv.id,
+      text: m.text,
+      voice: m.voice,
+      ...(m.messageId !== undefined && { messageRef: m.messageId }),
+      at: m.at,
+    })
+    return null
   }
   const words = c?.cmd === 'say' && c.text ? c.text : m.text
   if (!live || !d.sendText) return say(d, conv.id, words, telegramKey(m.messageId))
@@ -851,11 +896,11 @@ export async function onClientText(
  * back with «Отправить» and «Изменить». The press sends them against the chat as it was when he wrote, so a client
  * who wrote meanwhile is never answered over (CHAT_CHANGED).
  */
-async function proposeFreeSay(
+export async function proposeFreeSay(
   d: CommandDeps,
   conversationId: string,
   text: string,
-  o: { voice?: boolean; messageId?: number },
+  o: { voice?: boolean; messageId?: number; chat?: boolean },
 ): Promise<BorisReply> {
   const rowId =
     o.messageId !== undefined
@@ -874,7 +919,13 @@ async function proposeFreeSay(
         state: 'decided',
         text,
         decision: 'say',
-        understanding: { free: true, voice: o.voice ?? false, key: sayKey(o), expectLast },
+        understanding: {
+          free: true,
+          voice: o.voice ?? false,
+          key: sayKey(o),
+          expectLast,
+          ...(o.chat && { chat: true }),
+        },
         taskId,
       })
       .onConflictDoNothing()
