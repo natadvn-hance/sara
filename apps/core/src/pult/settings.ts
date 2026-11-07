@@ -2,6 +2,7 @@ import { SETTINGS, type SettingKey, type SettingRow, type SettingsView } from '@
 import { desc, eq } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import { account, directionVersion, setting, settingHistory } from '../db/schema'
+import { getSetting } from '../settings/store'
 import { type Thresholds, thresholdsOf } from './threshold'
 
 /**
@@ -72,6 +73,18 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     hint: 'По Москве: карточки и push приходят без звука, срочное звонит всегда.',
     edit: 'free',
     kind: 'hours',
+  },
+  'pult.tabs': {
+    title: 'Вкладки внизу',
+    hint: 'Четыре раздела внизу телефона и Mini App, остальное в «Ещё».',
+    edit: 'free',
+    kind: 'other',
+  },
+  'pult.switch_on': {
+    title: 'Включать паузы и отправку из пульта',
+    hint: 'Вторым нажатием. Выключено: из пульта их можно только выключить.',
+    edit: 'confirm',
+    kind: 'flag',
   },
   'notify.push': {
     title: 'Push на телефон и компьютер',
@@ -149,6 +162,7 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
 }
 
 const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
+  { id: 'pult', title: 'Пульт', keys: ['pult.tabs', 'pult.switch_on'] },
   {
     id: 'work',
     title: 'Работа',
@@ -218,8 +232,12 @@ export function pultMay(key: string, value: unknown, confirm = false): key is Se
 
 const titleOf = (key: string) => SETTING_META[key as SettingKey]?.title ?? key
 
+/** The keys that turn on with a second press only while «Включать паузы и отправку из пульта» is on. */
+export const SWITCH_ON_KEYS: SettingKey[] = ['outbound.bids', 'outbound.messages', 'conv.reminders']
+
 export async function settingsView(db: DbOrTx): Promise<SettingsView> {
   const stored = new Map((await db.select().from(setting)).map((s) => [s.key, s]))
+  const switchOn = await getSetting(db, 'pult.switch_on')
   const groups = GROUPS.map((g) => ({
     id: g.id,
     title: g.title,
@@ -233,7 +251,8 @@ export async function settingsView(db: DbOrTx): Promise<SettingsView> {
         hint: m.hint ?? null,
         value: parsed?.success ? parsed.data : SETTINGS[key].default,
         isDefault: !s,
-        edit: m.edit,
+        // With the choice off these only turn off from the pult, and the screen shows it so.
+        edit: !switchOn && SWITCH_ON_KEYS.includes(key) ? 'stop_only' : m.edit,
         kind: m.kind,
         changedAt: s?.changedAt ?? null,
         changedBy: s?.changedBy ?? null,
