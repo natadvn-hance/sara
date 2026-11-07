@@ -570,6 +570,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     notifier: bot.notifier,
     close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
+    feeFound: (taskId, rub) => lp.feeFound(taskId, rub),
     tickMs: o.recheckTickMs,
     now: o.now,
   })
