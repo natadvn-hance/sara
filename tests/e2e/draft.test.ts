@@ -511,9 +511,12 @@ describe('the pult', { timeout: 30000 }, () => {
       .from(task)
       .where(and(eq(task.entityId, id), eq(task.kind, 'lead_decision')))
     expect((await post(cookie, `/api/tasks/${t?.id}/skip`, {})).status).toBe(200)
-    // A closed lead card is edited into «📁 Заявка закрыта», without a button.
+    // A closed lead card is edited into «📁 Заявка закрыта», without an order button; only the reasons of the
+    // close stand under it (07.11.2026).
     await until(() => tg.edited.some((e) => e.text.includes('📁 Заявка закрыта')))
-    expect(tg.edited.at(-1)).toMatchObject({ reply_markup: { inline_keyboard: [] } })
+    const left = tg.edited.at(-1)?.reply_markup?.inline_keyboard.flat() ?? []
+    expect(left.length).toBeGreaterThan(0)
+    for (const b of left) expect(b.callback_data).toMatch(/^t:[^:]+:why[a-z]+$/)
   })
 })
 
