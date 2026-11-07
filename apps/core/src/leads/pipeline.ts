@@ -130,6 +130,11 @@ export type LeadPipeline = {
   /** The full card of a task back in its own message; false when that cannot be done (send it again then). */
   restoreCard(taskId: string, messageId: number): Promise<boolean>
   /**
+   * A later look at the order page found the bid's fee that the first one missed (the tariff renders late): the lead
+   * gets it, and a card still waiting is drawn again with it. A known fee is never overwritten here.
+   */
+  feeFound(taskId: string, rub: number): Promise<boolean>
+  /**
    * The order of this card closed on Profi.ru. `recheck`: the waiting task is ended as skipped (closed) and every
    * message of its card is edited (the closed line, no buttons); a task Boris decided meanwhile is left alone.
    * `press`: Boris's bid ended ORDER_CLOSED; his task stays as he decided it, only the card is closed.
@@ -1834,6 +1839,24 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         )
         return false
       }
+    },
+
+    async feeFound(taskId, rub) {
+      if (!Number.isInteger(rub) || rub <= 0) return false
+      const found = await leadOfTask(taskId)
+      if (!found) return false
+      const set = await d()
+        .db.update(lead)
+        .set({ bidPriceRub: rub })
+        .where(and(eq(lead.id, found.lead.id), eq(lead.bidPriceRub, 0)))
+        .returning({ id: lead.id })
+      if (set.length === 0) return false
+      const [t] = await d()
+        .db.select({ state: task.state, messageId: task.telegramMessageId })
+        .from(task)
+        .where(eq(task.id, taskId))
+      if (t?.state === 'open' && t.messageId != null) await this.restoreCard(taskId, t.messageId)
+      return true
     },
 
     async closeOnSite(taskId, via) {

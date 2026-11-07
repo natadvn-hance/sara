@@ -28,6 +28,8 @@ export type Config = {
   /** Lora's speech service through the shared folder (the topic chat spec, section 4); unset, whisper.cpp above. */
   voiceSocket: string | null
   voiceDropDir: string
+  /** Sara's voice for the voice app: the `voice` service (Silero, ADR-028); unset, the app answers in text only. */
+  voiceUrl: string | null
   /** The host's backup log (infra/backup), mounted read only for the pult's health screen; unset: not seen. */
   backupLog: string | undefined
   /**
@@ -78,6 +80,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ffmpegBin: env.SARA_FFMPEG_BIN ?? 'ffmpeg',
     voiceSocket: env.SARA_VOICE_SOCKET || null,
     voiceDropDir: env.SARA_VOICE_DROP_DIR ?? '/srv/voice-share/in',
+    voiceUrl: env.SARA_VOICE_URL || null,
     backupLog: env.SARA_BACKUP_LOG || undefined,
     sheet: { url: env.SARA_SHEET_URL || undefined, secret: env.SARA_SHEET_SECRET || undefined },
     production,

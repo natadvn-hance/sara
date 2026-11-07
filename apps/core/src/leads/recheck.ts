@@ -69,6 +69,8 @@ export function startCardRecheck(d: {
   notifier: Pick<Notifier, 'sendText'>
   /** Closes the card of this task (its order is closed on Profi.ru). */
   close(taskId: string): Promise<void>
+  /** The page showed the bid's fee: the card that did not know it learns it (07.11.2026). */
+  feeFound?(taskId: string, rub: number): Promise<unknown>
   now?: () => Date
   tickMs?: number
   /** How many pages one pass reads at most (default 3). */
@@ -224,6 +226,10 @@ export function startCardRecheck(d: {
         break
       }
       await journalRead(c, at, page)
+      if (page.bid_price_rub > 0 && d.feeFound)
+        await d
+          .feeFound(c.task_id, page.bid_price_rub)
+          .catch((err) => console.error('fee not kept', c.order_id, errText(err)))
       // A bid of ours keeps an order from being «closed»: such an order may show no form either.
       looks.push({ taskId: c.task_id, shut: page.open === false && page.has_bid !== true })
     }

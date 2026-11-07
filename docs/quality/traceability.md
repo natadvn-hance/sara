@@ -57,6 +57,7 @@
 | FR-CONV-10 | M4 | FR-UI-6 | M7 |
 | FR-CONV-11 | M4 | FR-ANL-1 | M6 |
 | FR-CONV-12 | M4 | FR-ANL-2 | M2 траты, M6 |
+| FR-NOTIF-5 | M7 | | |
 | FR-SPEECH-1 | M4 | FR-ANL-3 | M2 |
 | FR-SPEECH-2 | M4 | FR-ANL-4 | M5 |
 | FR-SPEECH-3 | M4 | FR-OPS-1 | M2 |

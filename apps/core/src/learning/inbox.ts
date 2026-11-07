@@ -18,6 +18,8 @@ export type BorisMessage = {
   text: string | null
   /** A voice message saved on disk, recognized here. */
   voicePath: string | null
+  /** The words were spoken and already recognized (the voice app, ADR-028). */
+  spoken?: boolean
   replyToMessageId: number | null
   /** The message's number in Telegram: a repeat of the same update is the same message. */
   messageId?: number
@@ -25,6 +27,8 @@ export type BorisMessage = {
   replyToText?: string | null
   /** Written in a client's topic of the forum: the words are about this client (docs/product/telegram-forum.md). */
   client?: { conversationId: string | null; orderId: string | null }
+  /** Said in the voice app (ADR-028): the answer goes back to the app under this talk, not to Telegram. */
+  talk?: string
   at: Date
 }
 
@@ -37,6 +41,8 @@ export type SecretaryWords = {
   at: Date
   /** Sara's open questions this message came after without a reply: it may answer one, or ask for something else. */
   questions: QuestionRow[]
+  /** Said in the voice app: the turn's answer goes to the app under this talk (ADR-028). */
+  talk?: string
 }
 
 /** The answer to an open question, given the words that answer it. */
@@ -121,7 +127,12 @@ export async function handleBorisMessage(
     text = heard
   }
   if (!text) return TEXTS.notAnAnswer
-  const a = { text, voice: m.voicePath !== null, messageId: m.messageId, at: m.at }
+  const a = {
+    text,
+    voice: m.voicePath !== null || m.spoken === true,
+    messageId: m.messageId,
+    at: m.at,
+  }
   const command = await d.onCardReply?.({
     replyToMessageId: m.replyToMessageId,
     text,
@@ -141,7 +152,7 @@ export async function handleBorisMessage(
   }
   const q = await openQuestion(d.db, { replyToMessageId: m.replyToMessageId, at: m.at })
   if (d.onSecretary) {
-    const words = { ...a, replyToText: m.replyToText ?? null }
+    const words = { ...a, replyToText: m.replyToText ?? null, ...(m.talk && { talk: m.talk }) }
     if (!q) return d.onSecretary({ ...words, questions: [] })
     const questions = 'ambiguous' in q ? q.ambiguous : [q]
     const bidText = questions.some((x) => (DRAFT_KINDS as string[]).includes(x.kind))
