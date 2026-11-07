@@ -8,6 +8,7 @@ import { appendEvent } from '../journal/journal'
 import type { SecretaryWords } from '../learning/inbox'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
+import type { TalkAnswer } from '../talk/answers'
 import { SECRETARY_MCP_SERVER, type TurnKeys } from './mcp'
 import { addLine, type ChatLine, clientNamesToHide, memory, turnsToday } from './store'
 import { SECRETARY_TOOLS, type TurnContext } from './tools'
@@ -136,15 +137,25 @@ export function createSecretary(d: {
   publicUrl: string
   /** Question titles for the input (the lead a «почему?» is about). */
   titleOf(q: SecretaryWords['questions'][number]): Promise<string | null>
+  /** The answer of a turn with words from the voice app, for the talks it waits under (ADR-028). */
+  answered?(talks: string[], answer: TalkAnswer): void
   now?: () => Date
 }): Secretary {
   const now = d.now ?? (() => new Date())
   const waiting: Waiting[] = []
   let running: Promise<void> | null = null
 
-  async function say(text: string, saved: boolean): Promise<void> {
-    for (const part of answerParts(text)) await d.notifier.sendText(part)
+  /**
+   * The answer goes where the words came from: Telegram when any of them came from it, the voice app for the words
+   * said there (ADR-028). The chat keeps it either way, so the talk goes on in the other place.
+   */
+  async function say(said: Waiting[], text: string, saved: boolean, cards = 0): Promise<void> {
+    // The app first: a Telegram that fails must not leave the app waiting.
+    const talks = said.flatMap((w) => (w.talk ? [w.talk] : []))
+    if (talks.length > 0) d.answered?.(talks, { text: answerParts(text).join('\n'), cards })
     if (saved) await addLine(d.db, { author: 'sara', text, at: now() })
+    if (said.some((w) => !w.talk))
+      for (const part of answerParts(text)) await d.notifier.sendText(part)
   }
 
   async function journal(id: string, used: string[], r: ConverseResult | 'cap'): Promise<void> {
@@ -169,7 +180,7 @@ export function createSecretary(d: {
     const id = newEventId()
     const cap = await getSetting(d.db, 'secretary.turns_per_day')
     if ((await turnsToday(d.db, now())) >= cap) {
-      await say(SECRETARY_TEXTS.cap(cap), false)
+      await say(said, SECRETARY_TEXTS.cap(cap), false)
       return journal(id, [], 'cap')
     }
     const titles = new Map<string, string | null>()
@@ -194,8 +205,11 @@ export function createSecretary(d: {
     const key = d.keys.open(t)
     const dir = join(d.dataDir, 'secretary')
     const configPath = join(dir, `mcp-${id}.json`)
-    const typing = setInterval(() => void d.notifier.typing?.().catch(() => {}), TYPING_EVERY_MS)
-    void d.notifier.typing?.().catch(() => {})
+    // «печатает…» only in Telegram: the voice app shows its own «думает».
+    const inTelegram = said.some((w) => !w.talk)
+    const type = () => (inTelegram ? void d.notifier.typing?.().catch(() => {}) : undefined)
+    const typing = setInterval(type, TYPING_EVERY_MS)
+    type()
     let r: ConverseResult
     try {
       await mkdir(dir, { recursive: true })
@@ -229,12 +243,19 @@ export function createSecretary(d: {
       d.keys.close(key)
       await rm(configPath, { force: true })
     }
-    if (r.ok) await say(r.text, true)
+    const cards = t.cards ?? 0
+    if (r.ok) await say(said, r.text, true, cards)
     else if (r.errorClass === 'limit_reached')
-      await say(SECRETARY_TEXTS.limit(r.resetAt ? clock(r.resetAt) : null, d.publicUrl), false)
-    else if (r.errorClass === 'timeout') await say(SECRETARY_TEXTS.timeout, false)
-    else if (r.errorClass === 'not_connected') await say(SECRETARY_TEXTS.notConnected, false)
-    else await say(SECRETARY_TEXTS.failed, false)
+      await say(
+        said,
+        SECRETARY_TEXTS.limit(r.resetAt ? clock(r.resetAt) : null, d.publicUrl),
+        false,
+        cards,
+      )
+    else if (r.errorClass === 'timeout') await say(said, SECRETARY_TEXTS.timeout, false, cards)
+    else if (r.errorClass === 'not_connected')
+      await say(said, SECRETARY_TEXTS.notConnected, false, cards)
+    else await say(said, SECRETARY_TEXTS.failed, false, cards)
     await journal(id, t.used, r)
   }
 
@@ -245,7 +266,7 @@ export function createSecretary(d: {
         await turn(said)
       } catch (e) {
         console.error('secretary turn failed', e instanceof Error ? e.message : e)
-        await d.notifier.sendText(SECRETARY_TEXTS.failed).catch(() => {})
+        await say(said, SECRETARY_TEXTS.failed, false).catch(() => {})
       }
     }
     running = null

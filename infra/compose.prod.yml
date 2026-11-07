@@ -29,6 +29,8 @@ services:
       SARA_NODE_TOKEN: ${SARA_NODE_TOKEN}
       SARA_PERMIT_SECRET: ${SARA_PERMIT_SECRET}
       SARA_ACCOUNTS: ${SARA_ACCOUNTS}
+      # Sara's voice in the voice app (ADR-028).
+      SARA_VOICE_URL: http://voice:7080
       # Boris's Google Sheet (docs/ops/google-sheet.md): unset in /opt/sara/.env, nothing goes to the sheet.
       SARA_SHEET_URL: ${SARA_SHEET_URL:-}
       SARA_SHEET_SECRET: ${SARA_SHEET_SECRET:-}
@@ -62,6 +64,19 @@ services:
     # internal has no way out; the tab goes out through the account's SOCKS, and anything else from
     # profi-node leaves through egress-ip1 too, so from the account's IP either way.
     networks: [internal, egress-ip1]
+
+  # Sara's voice for the voice app (ADR-028): Silero on the CPU, only on the internal network, the model in memory
+  # only while Boris talks. Its limits keep the server for the others: out of memory, only the voice falls.
+  voice:
+    build: { context: .., dockerfile: infra/docker/voice.Dockerfile }
+    restart: unless-stopped
+    init: true
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2
+    # Short of memory on the server, the kernel takes the voice first, never Sara, the database or Lora.
+    oom_score_adj: 1000
+    networks: [internal]
 
   # SOCKS on a network whose outgoing traffic leaves from the account's own IPv4 (FR-ACC-1).
   socks-ip1:

@@ -1,0 +1,69 @@
+import { authHeaders } from '../api'
+import type { TalkState } from './logic'
+
+/** The core's answers to the voice app (apps/core/src/talk/routes.ts). */
+export type SaidReply = { text: string; buttons: boolean }
+export type Sent = { heard: string | null; talk: string | null; reply: SaidReply | null }
+export type Line = { author: 'boris' | 'sara'; text: string; at: string }
+
+export class SignedOut extends Error {}
+
+async function call(path: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) },
+    credentials: 'same-origin',
+    cache: 'no-store',
+  })
+  if (res.status === 401) throw new SignedOut()
+  return res
+}
+
+const json = async <T>(res: Response): Promise<T> => {
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string }
+  if (!res.ok && res.status !== 404) throw new Error(data.error ?? 'Нет связи с Сарой.')
+  return data
+}
+
+export const talkApi = {
+  history: async () => (await json<{ lines: Line[] }>(await call('/api/talk/history'))).lines,
+  login: async (password: string) => {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password }),
+      credentials: 'same-origin',
+    })
+    if (!res.ok)
+      throw new Error(
+        ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Не вышло войти.',
+      )
+  },
+  sendVoice: async (audio: Blob) =>
+    json<Sent>(
+      await call('/api/talk', {
+        method: 'POST',
+        headers: { 'content-type': audio.type || 'audio/mp4' },
+        body: audio,
+      }),
+    ),
+  sendText: async (text: string) =>
+    json<Sent>(
+      await call('/api/talk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }),
+      }),
+    ),
+  answer: async (talk: string) => json<TalkState>(await call(`/api/talk/${talk}`)),
+  /** Sara's voice for these words, or null: then the phone's own voice says them. */
+  speak: async (text: string): Promise<Blob | null> => {
+    const res = await call('/api/talk/speak', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    return res.ok ? res.blob() : null
+  },
+  warm: () => void call('/api/talk/warm', { method: 'POST' }).catch(() => {}),
+}

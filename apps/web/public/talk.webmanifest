@@ -1,0 +1,20 @@
+{
+  "name": "Сара · голос",
+  "short_name": "Сара",
+  "id": "/talk",
+  "start_url": "/talk",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F3F2EF",
+  "theme_color": "#F3F2EF",
+  "lang": "ru",
+  "icons": [
+    { "src": "/talk-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    {
+      "src": "/talk-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

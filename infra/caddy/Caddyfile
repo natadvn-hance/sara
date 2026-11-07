@@ -13,6 +13,14 @@
 		encode zstd gzip
 		reverse_proxy core:3300
 	}
+	# The voice app (ADR-028): its own page, with its own manifest for the Home Screen.
+	handle /talk {
+		encode zstd gzip
+		root * /srv
+		header Content-Security-Policy "frame-ancestors 'self'"
+		rewrite * /talk.html
+		file_server
+	}
 	handle {
 		encode zstd gzip
 		root * /srv
