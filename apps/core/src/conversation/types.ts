@@ -105,14 +105,15 @@ export type MindSearch = {
   version(): Promise<string>
   search(q: {
     text: string
-    scope: string
+    scope: string | readonly string[]
     types: MindType[]
     limit: number
     field?: 'body' | 'example_client'
   }): Promise<MindHit[]>
   byIds(ids: string[]): Promise<MindHit[]>
-  byStage(stage: ConvStage, scope: string): Promise<MindHit | null>
-  bannedPhrases(): Promise<string[]>
+  byStage(stage: ConvStage, scope: string | readonly string[]): Promise<MindHit | null>
+  /** The portrait's «Никогда не говорит»; a portrait of the trial scope only with `trial` (the new voice on). */
+  bannedPhrases(o?: { trial?: boolean }): Promise<string[]>
   /** Cases of Hance that fit the text, never the ones in `exclude` (already told in the chat). */
   cases?(q: { text: string; scope: string; limit: number; exclude?: string[] }): Promise<CaseHit[]>
 }
@@ -130,6 +131,8 @@ export type Dossier = {
   accountId: string
   /** The direction's mind scope (the account id). */
   scope: string
+  /** Boris's new voice for this conversation (conv.voice, test orders first): the mind's trial records too. */
+  voice?: boolean
   order: {
     title: string
     category: string

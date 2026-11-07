@@ -13,6 +13,7 @@ import { morningAfter, moscowDay, type PingScenario, scenarioWhy } from './pingS
 import { formatPingInput } from './prompt'
 import { getConversation } from './store'
 import type { CheckIssue, MindHit, MindSearch } from './types'
+import { scopesOf, VOICE_ALWAYS, withoutTrial } from './voice'
 
 /**
  * The Pinger decides about a client who went quiet (FR-CONV-12, spec 2026-11-07-organic-pings): write to him now,
@@ -129,16 +130,18 @@ export async function decidePing(
   try {
     const found = await Promise.all([
       d.mind.version(),
-      d.mind.byIds(PING_RECORDS),
+      d.mind
+        .byIds(dossier.voice ? [...PING_RECORDS, ...VOICE_ALWAYS] : PING_RECORDS)
+        .then((hits) => withoutTrial(hits, dossier.voice)),
       d.mind.search({
         text: [dossier.order?.title, dossier.order?.text, lastOurs?.text]
           .filter(Boolean)
           .join('\n'),
-        scope: dossier.scope,
+        scope: scopesOf(dossier.scope, dossier.voice),
         types: ['knowledge'],
         limit: KNOWLEDGE_LIMIT,
       }),
-      d.mind.bannedPhrases(),
+      d.mind.bannedPhrases({ trial: dossier.voice }),
     ])
     out.mindVersion = found[0]
     knowledge = found[2]

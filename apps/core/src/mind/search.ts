@@ -1,11 +1,12 @@
 import type { ConvStage, MindType, Tone, Topic } from '@sara/shared'
-import { and, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, ne, or, sql } from 'drizzle-orm'
 import type { MindHit, MindSearch } from '../conversation/types'
 import type { Db } from '../db/client'
 import { mindIndex } from '../db/schema'
 import { CASE_LEXEME, toCaseHit } from './cases'
 import { lastIndexedVersion } from './indexer'
 import { markdownSections } from './loader'
+import { TRIAL_SCOPE } from './trial'
 
 /** A long order text gives at most this many words to the query, the last ones. */
 const MAX_WORDS = 32
@@ -57,7 +58,7 @@ function queryWords(text: string): string[] {
 
 type RankedQuery = {
   words: string[]
-  scope: string
+  scope: string | readonly string[]
   types: MindType[]
   field?: 'body' | 'example_client'
   limit: number
@@ -107,7 +108,10 @@ async function ranked(db: Db, q: RankedQuery): Promise<MindHit[]> {
       ${mindIndex.exampleClient} as "exampleClient", ${mindIndex.exampleBoris} as "exampleBoris",
       ts_rank_cd(${vector}, q.query) as rank
     from ${source}
-    where (${mindIndex.scope} = 'shared' or ${mindIndex.scope} = ${q.scope})
+    where (${mindIndex.scope} = 'shared' or ${mindIndex.scope} in (${sql.join(
+      scopeList(q.scope).map((s) => sql`${s}`),
+      sql`, `,
+    )}))
       and ${types}
       and ${cases}
       and ${exclude}
@@ -117,6 +121,9 @@ async function ranked(db: Db, q: RankedQuery): Promise<MindHit[]> {
   return rows.rows.map((r) => toHit(r, Number(r.rank)))
 }
 
+const scopeList = (scope: string | readonly string[]): string[] =>
+  typeof scope === 'string' ? [scope] : [...scope]
+
 const unquote = (s: string) => s.replace(/^[«"“](.*)[»"”]$/, '$1').trim()
 
 /**
@@ -124,7 +131,8 @@ const unquote = (s: string) => s.replace(/^[«"“](.*)[»"”]$/, '$1').trim()
  * `plainto_tsquery`, joined by OR, ranked by `ts_rank_cd`. A direction sees the shared records and its own.
  */
 export function createMindSearch(db: Db): MindSearch {
-  const inScope = (scope: string) => or(eq(mindIndex.scope, 'shared'), eq(mindIndex.scope, scope))
+  const inScope = (scope: string | readonly string[]) =>
+    or(eq(mindIndex.scope, 'shared'), inArray(mindIndex.scope, scopeList(scope)))
   return {
     async version() {
       const [r] = await db.select({ v: mindIndex.mindVersion }).from(mindIndex).limit(1)
@@ -185,11 +193,16 @@ export function createMindSearch(db: Db): MindSearch {
       return r ? toHit(r, 0) : null
     },
 
-    async bannedPhrases() {
+    async bannedPhrases(o) {
       const [r] = await db
         .select({ body: mindIndex.body })
         .from(mindIndex)
-        .where(eq(mindIndex.recordId, 's-portrait'))
+        .where(
+          and(
+            eq(mindIndex.recordId, 's-portrait'),
+            o?.trial ? sql`true` : ne(mindIndex.scope, TRIAL_SCOPE),
+          ),
+        )
       const section = r ? markdownSections(r.body)['Никогда не говорит'] : undefined
       return (section ?? '')
         .split('\n')

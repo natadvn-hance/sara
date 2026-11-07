@@ -20,6 +20,7 @@ import type {
   TurnInput,
   TurnPlan,
 } from './types'
+import { scopesOf, VOICE_ALWAYS, withoutTrial } from './voice'
 
 /** Records on every turn: who Sara is, the greeting, Boris's topics, Hance's values, the speech portrait. */
 export const ALWAYS = ['j-constitution', 'j-greeting', 'j-autonomy', 'j-hance-values', 's-portrait']
@@ -108,19 +109,22 @@ async function casesFor(mind: MindSearch, d: Dossier, said: string): Promise<Cas
 /** Step 2: the mind a turn needs, by what the client wrote (M4 design 5.3). */
 export async function recall(mind: MindSearch, d: Dossier): Promise<Recall> {
   const said = clientTurn(d)
+  const scopes = scopesOf(d.scope, d.voice)
   const text = [said, d.order?.title ?? ''].join('\n')
   const [mindVersion, understanding, knowledge, procedure, always, cases] = await Promise.all([
     mind.version(),
-    mind.search({ text: said, scope: d.scope, types: ['understanding'], limit: 6 }),
-    mind.search({ text, scope: d.scope, types: ['knowledge'], limit: 8 }),
-    mind.byStage(d.stage, d.scope),
-    mind.byIds(ALWAYS),
+    mind.search({ text: said, scope: scopes, types: ['understanding'], limit: 6 }),
+    mind.search({ text, scope: scopes, types: ['knowledge'], limit: 8 }),
+    mind.byStage(d.stage, scopes),
+    mind
+      .byIds(d.voice ? [...ALWAYS, ...VOICE_ALWAYS] : ALWAYS)
+      .then((hits) => withoutTrial(hits, d.voice)),
     casesFor(mind, d, said),
   ])
   let examples = (
     await mind.search({
       text: said,
-      scope: d.scope,
+      scope: scopes,
       types: ['example'],
       limit: 5,
       field: 'example_client',
@@ -129,7 +133,7 @@ export async function recall(mind: MindSearch, d: Dossier): Promise<Recall> {
   if (examples.length < 3 && understanding[0]) {
     const more = await mind.search({
       text: understanding[0].title,
-      scope: d.scope,
+      scope: scopes,
       types: ['example'],
       limit: 5,
       field: 'example_client',
@@ -191,7 +195,7 @@ export async function planTurn(deps: EngineDeps, input: TurnInput): Promise<Turn
   const callRequest =
     detectCallRequest(said) !== null ||
     agreesToCallProposal(said, before?.side === 'specialist' ? before.text : null)
-  const banned = await deps.mind.bannedPhrases()
+  const banned = await deps.mind.bannedPhrases({ trial: d.voice })
   const told = d.toldCases ?? []
   const knowledgeTexts = Object.fromEntries(r.knowledge.map((k) => [k.id, k.body]))
   const ourPrevious = d.messages.filter((m) => m.side === 'specialist').map((m) => m.text)
