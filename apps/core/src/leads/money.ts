@@ -1,6 +1,7 @@
 import { formatRub, plural } from '@sara/shared'
-import { sql } from 'drizzle-orm'
+import { desc, eq, sql } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
+import { account, event } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
 import { NOT_TEST } from '../testLeads/sql'
@@ -103,4 +104,29 @@ export async function refuseSpend(
   const bids = day.sent + day.pending
   if (bids >= cap) return MONEY_TEXTS.overCap(bids, cap)
   return null
+}
+
+/**
+ * The wallet as the core last heard it, without asking the node: the newer of the account row and the last balance
+ * the node reported. «Сегодня» of the pult and the bot's status both say this one.
+ */
+export async function walletNow(
+  db: DbOrTx,
+): Promise<{ balanceRub: number | null; at: string | null }> {
+  const [acc] = await db.select().from(account).orderBy(account.id).limit(1)
+  const [ev] = await db
+    .select({
+      at: event.occurredAt,
+      rub: sql<number | null>`(${event.payload}->>'balance_rub')::int`,
+    })
+    .from(event)
+    .where(eq(event.type, 'profi.balance_changed'))
+    .orderBy(desc(event.occurredAt))
+    .limit(1)
+  const fromAcc = acc?.balanceRub !== null && acc?.balanceRub !== undefined
+  if (ev?.rub !== null && ev?.rub !== undefined && (!fromAcc || (acc?.balanceAt ?? '') < ev.at))
+    return { balanceRub: ev.rub, at: ev.at }
+  return fromAcc
+    ? { balanceRub: acc?.balanceRub ?? null, at: acc?.balanceAt ?? null }
+    : { balanceRub: null, at: null }
 }

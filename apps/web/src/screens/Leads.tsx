@@ -20,6 +20,7 @@ const DECIDED: Record<LeadQueue['decided'][number]['decision'], string> = {
   bid: 'отклик',
   skip: 'закрыта',
   closed: 'закрылась',
+  stale: 'устарела',
   other: 'решена',
 }
 
