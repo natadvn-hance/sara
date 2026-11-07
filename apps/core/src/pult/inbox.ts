@@ -19,6 +19,7 @@ import {
   ruleProposal,
   task,
 } from '../db/schema'
+import { LEAD_TASK_KINDS, waitEnd } from '../leads/waiting'
 import { clientNames } from './feed'
 
 /**
@@ -61,17 +62,23 @@ type TaskRow = typeof task.$inferSelect
 type TurnRow = typeof convTurn.$inferSelect
 
 export async function inboxView(db: DbOrTx, now = new Date()): Promise<InboxView> {
-  const tasks = await db
+  const all = await db
     .select()
     .from(task)
     .where(eq(task.state, 'open'))
     .orderBy(asc(task.createdAt))
-  const leadIds = tasks.filter((t) => t.entityKind === 'lead').map((t) => t.entityId)
+  const leadIds = all.filter((t) => t.entityKind === 'lead').map((t) => t.entityId)
   const leads = new Map(
     (leadIds.length ? await db.select().from(lead).where(inArray(lead.id, leadIds)) : []).map(
       (l) => [l.id, l],
     ),
   )
+  // A lead's task is here only while the bot would still offer it (leads/waiting.ts): the sweep closes the rest.
+  const tasks = all.filter((t) => {
+    if (!(LEAD_TASK_KINDS as readonly string[]).includes(t.kind)) return true
+    const l = leads.get(t.entityId)
+    return l !== undefined && waitEnd(t, l, now) === null
+  })
   const turnIds = tasks.filter((t) => t.entityKind === 'conv_turn').map((t) => t.entityId)
   const turns = new Map(
     (turnIds.length
