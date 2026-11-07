@@ -1,0 +1,8 @@
+{
+  "name": "analytics-insights",
+  "version": 1,
+  "model": "opus",
+  "fallbackModel": "sonnet",
+  "priority": "P2",
+  "timeoutMs": 120000
+}

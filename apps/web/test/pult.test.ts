@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ago, count, pct, toCsv, waited, waitTone } from '../src/app/format'
 import { idOf, queryOf, sectionOf } from '../src/app/router'
+import { navOf } from '../src/app/Shell'
 
 const NOW = Date.parse('2026-10-28T12:00:00Z')
 const before = (min: number) => new Date(NOW - min * 60_000).toISOString()
@@ -59,5 +60,17 @@ describe('the paths of the pult', () => {
     expect(idOf('/clients/c%201', 'clients')).toBe('c 1')
     expect(queryOf('/search?q=%D0%B0%D0%BD%D0%BD%D0%B0')).toBe('анна')
     expect(queryOf('/search')).toBe('')
+  })
+})
+
+describe('the tabs Boris chose', () => {
+  it('FR-UI-4: four tabs from the setting, the rest in «Ещё»; an unknown section is left out', () => {
+    const d = navOf(undefined)
+    expect(d.work.map((i) => i.id)).toEqual(['inbox', 'leads', 'clients', 'today'])
+    expect(d.more.map((i) => i.id)).toContain('meetings')
+    const n = navOf(['inbox', 'meetings', 'leads', 'nonsense'])
+    expect(n.work.map((i) => i.title)).toEqual(['Входящие', 'Встречи', 'Заявки'])
+    expect(n.more.some((i) => i.id === 'meetings')).toBe(false)
+    expect(n.more.some((i) => i.id === 'clients')).toBe(true)
   })
 })

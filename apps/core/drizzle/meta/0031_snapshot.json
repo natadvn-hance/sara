@@ -1,5 +1,5 @@
 {
-  "id": "378b09ec-c965-493b-bdf9-da5e8b534c6c",
+  "id": "5a87fab0-77ac-42de-9c7a-9839f5a82403",
   "prevId": "603f5c20-0068-4173-a078-d24f90a8b200",
   "version": "7",
   "dialect": "postgresql",
@@ -71,68 +71,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "core.analytics_hypothesis": {
-      "name": "analytics_hypothesis",
-      "schema": "core",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "level": {
-          "name": "level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "facts": {
-          "name": "facts",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -2737,6 +2675,48 @@
           "primaryKey": false,
           "notNull": false
         },
+        "result": {
+          "name": "result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_step": {
+          "name": "next_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_step_on": {
+          "name": "next_step_on",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_source": {
+          "name": "result_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_at": {
+          "name": "result_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expired_at": {
+          "name": "expired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_reminded_at": {
+          "name": "next_reminded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "amount_rub": {
           "name": "amount_rub",
           "type": "integer",
@@ -4337,12 +4317,6 @@
         },
         "leads_thread_id": {
           "name": "leads_thread_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "analytics_thread_id": {
-          "name": "analytics_thread_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false

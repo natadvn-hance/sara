@@ -218,7 +218,12 @@ export function createTelegramRuntime(d: {
         : (await ctx.api.createForumTopic(c.id, TEXTS.leadsTopic).catch(() => null))
             ?.message_thread_id
     if (leads === undefined) return void (await ctx.reply(TEXTS.forumNoRights))
-    await bindForum(d.db, { chatId: c.id, title: c.title, leadsThreadId: leads })
+    await bindForum(d.db, {
+      chatId: c.id,
+      title: c.title,
+      leadsThreadId: leads,
+      analyticsThreadId: same?.chatId === c.id ? (same.analyticsThreadId ?? null) : null,
+    })
     await journal('telegram.forum_bound', c.id, null)
     await ctx.reply(TEXTS.forumBound)
     await toOwnChat(TEXTS.forumMoved(c.title))
@@ -494,6 +499,10 @@ export function createTelegramRuntime(d: {
     if (!f) return { to: await chat(), forum: false }
     if (place === 'leads')
       return { to: f.chatId, thread: f.leadsThreadId ?? undefined, forum: true }
+    if (place === 'analytics') {
+      const thread = f.analyticsThreadId ?? (await analyticsAgain(f, true))
+      return { to: f.chatId, ...(thread !== undefined && { thread }), forum: true }
+    }
     const k = isClientPlace(place) ? await topicKey(d.db, place) : null
     if (!k) return { to: f.chatId, forum: true }
     try {
@@ -519,6 +528,23 @@ export function createTelegramRuntime(d: {
     }
     const made = await bot.api.createForumTopic(f.chatId, TEXTS.leadsTopic).catch(() => null)
     await bindForum(d.db, { ...f, leadsThreadId: made?.message_thread_id ?? null })
+    return made?.message_thread_id
+  }
+
+  /**
+   * «📊 Аналитика» made, reopened or made again (Boris, 01.11.2026): the topic is Sara's own, so a missing or closed one
+   * is no trouble for the cards; when none can be made the hypothesis goes to the General topic.
+   */
+  async function analyticsAgain(f: Forum, gone: boolean): Promise<number | undefined> {
+    if (!gone && f.analyticsThreadId) {
+      const opened = await bot.api.reopenForumTopic(f.chatId, f.analyticsThreadId).then(
+        () => true,
+        (e: unknown) => /TOPIC_NOT_MODIFIED/i.test(short(e)),
+      )
+      if (opened) return f.analyticsThreadId
+    }
+    const made = await bot.api.createForumTopic(f.chatId, TEXTS.analyticsTopic).catch(() => null)
+    await bindForum(d.db, { ...f, analyticsThreadId: made?.message_thread_id ?? null })
     return made?.message_thread_id
   }
 
@@ -569,7 +595,9 @@ export function createTelegramRuntime(d: {
           if (gone) await dropTopic(d.db, f.chatId, s.key)
           else await markTopic(d.db, f.chatId, s.key, new Date().toISOString())
           s = await spot(place)
-        } else s = { to: f.chatId, thread: await leadsAgain(f, gone), forum: true }
+        } else if (place === 'analytics')
+          s = { to: f.chatId, thread: await analyticsAgain(f, gone), forum: true }
+        else s = { to: f.chatId, thread: await leadsAgain(f, gone), forum: true }
         m = await send(s.to, where(s))
       }
       return await postRef(d.db, s.to, m.message_id, s.thread ?? null)
@@ -692,7 +720,7 @@ export function createTelegramRuntime(d: {
         return { messageId }
       },
       async sendButtons(text, rows, o) {
-        const silent = o?.quiet || (await silentNow(o?.loud))
+        const silent = o?.quiet === true || (await silentNow(o?.loud))
         const extra: Omit<SendOptions, 'parse_mode'> = {
           ...(silent && { disable_notification: true }),
           reply_markup: { inline_keyboard: keyboard(rows) },

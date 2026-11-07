@@ -1,5 +1,6 @@
 import type { FunnelStage } from '@sara/shared'
 import { and, asc, eq } from 'drizzle-orm'
+import { contactsLine, contactsOf } from '../conversation/contacts'
 import type { DbOrTx } from '../db/client'
 import {
   conversation,
@@ -14,11 +15,23 @@ import type { Place } from './notifier'
 import { introPost } from './topicPosts'
 
 /** Boris's forum (docs/product/telegram-forum.md), null while he has none: then everything goes to his chat. */
-export type Forum = { chatId: number; title: string | null; leadsThreadId: number | null }
+export type Forum = {
+  chatId: number
+  title: string | null
+  leadsThreadId: number | null
+  analyticsThreadId?: number | null
+}
 
 export async function forumOf(db: DbOrTx): Promise<Forum | null> {
   const [f] = await db.select().from(telegramForum).where(eq(telegramForum.id, 1))
-  return f ? { chatId: f.chatId, title: f.title, leadsThreadId: f.leadsThreadId } : null
+  return f
+    ? {
+        chatId: f.chatId,
+        title: f.title,
+        leadsThreadId: f.leadsThreadId,
+        analyticsThreadId: f.analyticsThreadId,
+      }
+    : null
 }
 
 export async function bindForum(db: DbOrTx, f: Forum): Promise<void> {
@@ -188,6 +201,13 @@ export async function topicIntro(
     budget: l?.budgetText ?? null,
     seenAt: l?.seenAt ?? null,
     text: l?.text ?? null,
+    contacts: contactsLine(
+      await contactsOf(
+        db,
+        { orderId, conversationId: orderId ? null : key.slice(5) },
+        l?.clientName ? [firstName(l.clientName) ?? ''] : [],
+      ),
+    ),
   })
   return { name, intro }
 }

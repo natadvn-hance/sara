@@ -6,7 +6,13 @@ import type { NoticeHint } from './center'
  * (by the conversation, or by the order before a conversation exists), the topic of new orders, or the general one
  * (left out). Without a forum every place is his one chat.
  */
-export type Place = { conversation: string } | { order: string } | 'leads' | 'general'
+export type Place =
+  | { conversation: string }
+  | { order: string }
+  | 'leads'
+  | 'general'
+  /** The topic «📊 Аналитика»: hypotheses of Sara. */
+  | 'analytics'
 
 /**
  * Every message goes without sound at the quiet hours (FR-NOTIF-2); `loud` is for an urgent one, which keeps its
@@ -34,7 +40,14 @@ export type Notifier = {
   sendButtons(
     text: string,
     rows: { text: string; callbackData: string }[][],
-    o?: { html?: boolean; loud?: boolean; quiet?: boolean; place?: Place; notice?: NoticeHint },
+    o?: {
+      html?: boolean
+      loud?: boolean
+      /** Without a sound at any hour (a hypothesis of the analytics topic, the daily post of his replies). */
+      quiet?: boolean
+      place?: Place
+      notice?: NoticeHint
+    },
   ): Promise<{ messageId: number }>
   /** «печатает…» in the chat for a few seconds: Sara is busy with Boris's words (ADR-027). */
   typing?(): Promise<void>

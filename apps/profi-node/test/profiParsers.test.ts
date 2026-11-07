@@ -77,6 +77,20 @@ describe('Profi.ru page readers', () => {
     })
   })
 
+  it('ST-M1-06: a bid price of a thousand and more is read with its digit groups', () => {
+    const cases: [string, number][] = [
+      ['Отклик • 1 234 ₽', 1234],
+      ['Отклик • 1\u00a0234\u00a0₽', 1234],
+      ['Отклик • 1\u202f234 ₽', 1234],
+      ['Отклик • 12 500₽', 12500],
+    ]
+    for (const [fee, rub] of cases)
+      expect(
+        orderFromPageText(ORDER_TEXT.replace('Отклик • 210 ₽', fee), '95100001')?.bid_price_rub,
+        fee,
+      ).toBe(rub)
+  })
+
   it('ST-M1-06: a page without the order sections (closed or gone) gives no order', () => {
     expect(orderFromPageText('Заказы\nПоддержка\nЗаказ скрыт', '1')).toBeNull()
   })

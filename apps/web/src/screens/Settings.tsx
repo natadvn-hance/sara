@@ -12,7 +12,7 @@ import { api } from '../api'
 import { usePress, useScreen } from '../app/data'
 import { ago, rub } from '../app/format'
 import { focusOf, idOf, usePath } from '../app/router'
-import { MORE } from '../app/Shell'
+import { SECTIONS, useNav } from '../app/Shell'
 import { CalibrationPage } from '../pages/Calibration'
 import { DirectionPage } from '../pages/Direction'
 import { OnboardingPage } from '../pages/Onboarding'
@@ -384,6 +384,56 @@ function Push({ r }: { r: SettingRow }) {
   )
 }
 
+/** «Вкладки внизу»: four places, each a section; a section stands in one place only. */
+function Tabs({ r }: { r: SettingRow }) {
+  const { press, busy } = usePress()
+  const now = (r.value as string[] | null) ?? ['inbox', 'leads', 'clients', 'today']
+  const [draft, setDraft] = useState<string[]>(now)
+  const changed = draft.join() !== now.join()
+  const ok = new Set(draft).size === draft.length
+  const choices = SECTIONS.filter((s) => s.id !== 'accounts')
+  return (
+    <div className="set-row" id={r.key}>
+      <div className="set-text">
+        <span>{r.title}</span>
+        <span className="muted small">{r.hint}</span>
+        <span className="actions" style={{ marginTop: 6 }}>
+          {draft.map((id, k) => (
+            <select
+              // biome-ignore lint/suspicious/noArrayIndexKey: the place itself is the identity
+              key={k}
+              className="field"
+              aria-label={`Вкладка ${k + 1}`}
+              value={id}
+              onChange={(e) => setDraft(draft.map((x, j) => (j === k ? e.target.value : x)))}
+              style={{ flex: '1 1 120px' }}
+            >
+              {choices.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                </option>
+              ))}
+            </select>
+          ))}
+        </span>
+        {!ok ? (
+          <span className="small tone-warn">Раздел не может стоять на двух местах.</span>
+        ) : null}
+      </div>
+      {changed ? (
+        <Btn
+          size="sm"
+          look="primary"
+          disabled={!ok || busy !== null}
+          onClick={() => press(r.key, `/api/settings/${r.key}`, { value: draft })}
+        >
+          Сохранить
+        </Btn>
+      ) : null}
+    </div>
+  )
+}
+
 /** This device: ask the browser to ring, and tell the core where (Web Push, pult v2 design 6). */
 function PushSubscribe() {
   const [state, setState] = useState<'idle' | 'busy' | 'on' | 'no'>('idle')
@@ -436,6 +486,7 @@ const GROUP_ICON: Record<string, string> = {
 }
 
 function Body({ v }: { v: SettingsView }) {
+  const { more } = useNav()
   // A link such as /settings?focus=thresholds (the bot's /settings) opens the screen on that block.
   const focus = focusOf(usePath())
   useEffect(() => {
@@ -448,7 +499,13 @@ function Body({ v }: { v: SettingsView }) {
           <Card key={g.id} title={g.title} icon={GROUP_ICON[g.id] ?? 'settings'} i={i + 1}>
             <div>
               {g.rows.map((r) =>
-                r.key === 'notify.push' ? <Push key={r.key} r={r} /> : <Row key={r.key} r={r} />,
+                r.key === 'notify.push' ? (
+                  <Push key={r.key} r={r} />
+                ) : r.key === 'pult.tabs' ? (
+                  <Tabs key={JSON.stringify(r.value)} r={r} />
+                ) : (
+                  <Row key={r.key} r={r} />
+                ),
               )}
             </div>
           </Card>
@@ -501,16 +558,18 @@ function Body({ v }: { v: SettingsView }) {
         ))}
         <Card title="Разделы" icon="more" className="only-narrow">
           <div className="list">
-            {MORE.filter((m) => m.id !== 'settings').map((m) => (
-              <A key={m.id} to={m.to} className="row">
-                <span className="row-main">
-                  <span className="row-title">{m.title}</span>
-                </span>
-                <span className="row-end">
-                  <Icon name="right" />
-                </span>
-              </A>
-            ))}
+            {more
+              .filter((m) => m.id !== 'settings')
+              .map((m) => (
+                <A key={m.id} to={m.to} className="row">
+                  <span className="row-main">
+                    <span className="row-title">{m.title}</span>
+                  </span>
+                  <span className="row-end">
+                    <Icon name="right" />
+                  </span>
+                </A>
+              ))}
           </div>
         </Card>
       </div>

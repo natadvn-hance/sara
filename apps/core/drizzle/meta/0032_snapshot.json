@@ -1,6 +1,6 @@
 {
-  "id": "783840db-9bca-4b76-b4cc-ffc463adb03e",
-  "prevId": "378b09ec-c965-493b-bdf9-da5e8b534c6c",
+  "id": "ec0e7c21-318f-458e-b998-da1d4a49a4c2",
+  "prevId": "5a87fab0-77ac-42de-9c7a-9839f5a82403",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2737,6 +2737,48 @@
           "primaryKey": false,
           "notNull": false
         },
+        "result": {
+          "name": "result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_step": {
+          "name": "next_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_step_on": {
+          "name": "next_step_on",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_source": {
+          "name": "result_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_at": {
+          "name": "result_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expired_at": {
+          "name": "expired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_reminded_at": {
+          "name": "next_reminded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "amount_rub": {
           "name": "amount_rub",
           "type": "integer",
@@ -3737,156 +3779,6 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "core.reply_pick": {
-      "name": "reply_pick",
-      "schema": "core",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "turn_id": {
-          "name": "turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "first_message_id": {
-          "name": "first_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "replied_at": {
-          "name": "replied_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "similarity": {
-          "name": "similarity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_text": {
-          "name": "client_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "draft_text": {
-          "name": "draft_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reply_text": {
-          "name": "reply_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "promises": {
-          "name": "promises",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "post_message_id": {
-          "name": "post_message_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decision": {
-          "name": "decision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "reply_pick_reply": {
-          "name": "reply_pick_reply",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "first_message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "reply_pick_conversation_id_conversation_id_fk": {
-          "name": "reply_pick_conversation_id_conversation_id_fk",
-          "tableFrom": "reply_pick",
-          "tableTo": "conversation",
-          "schemaTo": "core",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "reply_pick_turn_id_unique": {
-          "name": "reply_pick_turn_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "turn_id"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

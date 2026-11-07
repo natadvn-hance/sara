@@ -13,13 +13,12 @@ import { navigate, sectionOf, usePath } from './router'
 
 export type Item = { id: string; to: string; title: string; icon: string }
 
-export const WORK: Item[] = [
+/** Every section of the pult, in the menu's order (pult v2 design 2). */
+export const SECTIONS: Item[] = [
   { id: 'inbox', to: '/inbox', title: 'Входящие', icon: 'inbox' },
   { id: 'leads', to: '/leads', title: 'Заявки', icon: 'leads' },
   { id: 'clients', to: '/clients', title: 'Клиенты', icon: 'users' },
   { id: 'today', to: '/today', title: 'Сегодня', icon: 'today' },
-]
-export const MORE: Item[] = [
   { id: 'meetings', to: '/meetings', title: 'Встречи', icon: 'calendar' },
   { id: 'mind', to: '/mind', title: 'Разум', icon: 'mind' },
   { id: 'settings', to: '/settings', title: 'Настройки', icon: 'settings' },
@@ -27,13 +26,26 @@ export const MORE: Item[] = [
   { id: 'journal', to: '/journal', title: 'Журнал', icon: 'list' },
   { id: 'accounts', to: '/accounts', title: 'Аккаунты', icon: 'user' },
   { id: 'notices', to: '/notices', title: 'Уведомления', icon: 'bell' },
-]
-/** Every section, for the search: a section opens from the search too (FR-UI-1). */
-export const SECTIONS: Item[] = [
-  ...WORK,
-  ...MORE,
   { id: 'analytics', to: '/analytics', title: 'Итоги', icon: 'chart' },
 ]
+
+/** The tabs before the setting is read, and when it cannot be. */
+export const DEFAULT_TABS = ['inbox', 'leads', 'clients', 'today']
+
+/**
+ * The four tabs Boris chose («Вкладки внизу» in the settings) and the rest for «Ещё»; the menu of a computer shows
+ * the same split as «Работа» and «Сара».
+ */
+export function navOf(tabs: readonly string[] | undefined): { work: Item[]; more: Item[] } {
+  const ids = (tabs ?? DEFAULT_TABS).filter((id) => SECTIONS.some((s) => s.id === id))
+  const work = ids.map((id) => SECTIONS.find((s) => s.id === id) as Item)
+  return { work, more: SECTIONS.filter((s) => !ids.includes(s.id)) }
+}
+
+/** The split as the core says now. */
+export function useNav() {
+  return navOf(useScreen<{ tabs: string[] }>('/api/prefs', 60_000).data?.tabs)
+}
 
 type Theme = 'system' | 'dark' | 'light'
 const THEME_KEY = 'sara.theme'
@@ -161,7 +173,8 @@ export function Shell({ children }: { children: ReactNode }) {
     clients: inbox?.counts.drafts,
     notices: notices?.unseen,
   }
-  const isMore = section === 'more' || MORE.some((s) => s.id === section) || section === 'analytics'
+  const { work: WORK, more: MORE } = useNav()
+  const isMore = section === 'more' || MORE.some((s) => s.id === section)
   return (
     <div className="shell">
       <aside className="side" aria-label="Разделы">
@@ -249,6 +262,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
 /** «Ещё» on a phone: Sara's own sections and the theme. */
 export function MoreScreen() {
+  const { more: MORE } = useNav()
   const notices = useScreen<NoticeList>('/api/notices?state=new').data
   return (
     <div className="page">
@@ -259,22 +273,20 @@ export function MoreScreen() {
       </header>
       <section className="card reveal" aria-label="Разделы">
         <div className="list">
-          {[...MORE, { id: 'analytics', to: '/analytics', title: 'Итоги', icon: 'chart' }].map(
-            (i) => (
-              <A key={i.id} to={i.to} className="row">
-                <span className="score">
-                  <Icon name={i.icon} />
-                </span>
-                <span className="row-main">
-                  <span className="row-title">{i.title}</span>
-                </span>
-                <span className="row-end">
-                  {i.id === 'notices' ? <Badge n={notices?.unseen} /> : null}
-                  <Icon name="right" />
-                </span>
-              </A>
-            ),
-          )}
+          {MORE.map((i) => (
+            <A key={i.id} to={i.to} className="row">
+              <span className="score">
+                <Icon name={i.icon} />
+              </span>
+              <span className="row-main">
+                <span className="row-title">{i.title}</span>
+              </span>
+              <span className="row-end">
+                {i.id === 'notices' ? <Badge n={notices?.unseen} /> : null}
+                <Icon name="right" />
+              </span>
+            </A>
+          ))}
         </div>
         <ThemeSwitch />
       </section>

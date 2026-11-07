@@ -30,7 +30,12 @@ beforeEach(async () => {
 
 describe('learning tick', () => {
   it('FR-LEAD-7: the tick runs the weak noes, the daily summary and the rule proposals', () => {
-    expect(LEARNING_STEPS.map((s) => s.name)).toEqual(['ignored', 'summary', 'proposals'])
+    expect(LEARNING_STEPS.map((s) => s.name)).toEqual([
+      'ignored',
+      'summary',
+      'insights',
+      'proposals',
+    ])
   })
 
   it('FR-LEAD-7: a tick at 19:30 Moscow time sends the day summary', async () => {

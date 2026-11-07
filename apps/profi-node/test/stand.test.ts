@@ -122,8 +122,17 @@ async function message(chatId: string, text: string, expect: string | null) {
   await c.close()
 }
 
+// The people's messages: the site's own line after the first client word (01.11.2026, c9ee91b7) is left out.
 const chat = (id: string) =>
-  stand.fake.snapshot().chats.find((c) => c.chatId === id)?.messages ?? []
+  (stand.fake.snapshot().chats.find((c) => c.chatId === id)?.messages ?? []).filter(
+    (m) => m.author !== 'system',
+  )
+// The id our next message is sent against: the chat's very last message, the site's line included.
+const lastId = (id: string) =>
+  stand.fake
+    .snapshot()
+    .chats.find((c) => c.chatId === id)
+    ?.messages.at(-1)?.platform_message_id ?? null
 const types = (id: string) =>
   events.filter((e) => e.entity.id === id && e.type !== 'profi.order_seen').map((e) => e.type)
 
@@ -179,7 +188,7 @@ describe('the test stand', () => {
     expect(types(id)).toEqual(
       expect.arrayContaining(['profi.client_read', 'profi.client_typing', 'profi.client_message']),
     )
-    await message(id, 'От 40 до 60 тысяч.', chat(id).at(-1)?.platform_message_id ?? null)
+    await message(id, 'От 40 до 60 тысяч.', lastId(id))
     await until(() => stand.state.plans[id]?.ended === true)
     expect(chat(id).at(-1)?.text).toBe('А сроки?')
     expect(stand.state.plans[id]).toMatchObject({ replies: 2, ended: true })
@@ -198,7 +207,7 @@ describe('the test stand', () => {
     })
     expect(page.structuredContent).toMatchObject({ open: false, has_bid: true })
     await c.close()
-    await message(id, 'Жаль, удачи!', chat(id).at(-1)?.platform_message_id ?? null)
+    await message(id, 'Жаль, удачи!', lastId(id))
     await new Promise((r) => setTimeout(r, 200))
     expect(chat(id).filter((m) => m.author === 'client')).toHaveLength(1)
   })
@@ -230,7 +239,7 @@ describe('the test stand', () => {
     })
     expect(turns[0]?.behaviour).toContain('цену')
     answers.push({ text: 'Дорого, мы выбрали другого', ends: 'left', mood: 'irritation' })
-    await message(id, 'От 80 тысяч.', chat(id).at(-1)?.platform_message_id ?? null)
+    await message(id, 'От 80 тысяч.', lastId(id))
     await until(() => stand.state.plans[id]?.ended === true)
     // The day's ceiling of two calls is spent: the next client waits for Boris.
     const other = await stand.addOrder({ from: 'sample', behaviour: 'answers' })
@@ -271,7 +280,8 @@ describe('the test stand', () => {
       (o) => o.id === id,
     )
     expect(shown).toMatchObject({ open: false })
-    expect(shown?.messages).toHaveLength(2)
+    // The bid, the client's word and the site's line after it, as Profi.ru shows them.
+    expect(shown?.messages).toHaveLength(3)
     expect((await api('chats/1/client', { text: 'Ау' })).status).toBe(400)
     expect((await stand.api('GET', '', '')).html).toContain('Тестовые заявки')
   })
