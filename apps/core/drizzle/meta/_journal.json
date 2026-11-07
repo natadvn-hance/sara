@@ -225,6 +225,13 @@
       "when": 1793812489648,
       "tag": "0031_meeting_result",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793875702398,
+      "tag": "0032_analytics_insights",
+      "breakpoints": true
     }
   ]
 }

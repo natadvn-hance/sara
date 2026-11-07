@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
 import { createProfiEventDispatcher, routeProfiEvent } from './accounts/profiEvents'
+import { onHypothesisPress } from './analytics/insights/job'
 import { speedReport } from './analytics/speed'
 import type { AppDeps } from './api/deps'
 import { buildServer } from './api/server'
@@ -187,6 +188,11 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const press = async (p: Press) => {
     const [t] = await db.select({ kind: task.kind }).from(task).where(eq(task.id, p.taskId))
     if (t?.kind.startsWith('conv_')) return onConvPress(commandDeps(), p)
+    if (t?.kind === 'analytics_hypothesis')
+      return onHypothesisPress(
+        { db, markDone: async (id, note) => void (await bot.notifier.markDone?.(id, note)) },
+        p,
+      )
     return pipeline ? pipeline.onPress(p) : 'Сара ещё запускается'
   }
   const onPress = createResolver({

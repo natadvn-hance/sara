@@ -26,6 +26,7 @@ export type RoleName =
   | 'secretary'
   | 'site-reader'
   | 'links-digest'
+  | 'analytics-insights'
   | 'meeting'
   | 'meeting-result'
 
