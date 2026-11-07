@@ -56,7 +56,9 @@ export function orderFromPageText(
       break
     }
   }
-  const fee = /Отклик\s*•\s*(\d+)\s*₽/.exec(text)
+  // «Отклик • 1 234 ₽»: from a thousand up Profi.ru groups the digits with a space (plain, no-break or thin), so
+  // the digits are taken with their spaces and joined (07.11.2026: every bid of 1000 ₽ and more read as unknown).
+  const fee = /Отклик\s*•\s*(\d[\d \u00a0\u202f\u2009]*)₽/.exec(text)
   return {
     order_id: orderId,
     title,
@@ -65,7 +67,7 @@ export function orderFromPageText(
     text: body,
     client_name: client,
     budget_text: budget,
-    bid_price_rub: fee ? Number(fee[1]) : 0,
+    bid_price_rub: fee ? Number((fee[1] ?? '').replace(/\D/g, '')) : 0,
     seen_at: new Date().toISOString(),
     published_at: null,
   }
