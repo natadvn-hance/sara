@@ -270,11 +270,12 @@ describe('a client in his own topic of the forum', () => {
     expect(tg.deleted.map((d) => d.message_id)).toContain(confirm?.message_id)
     const clientPost = inForum().find((m) => m.text.includes('Сколько стоит сайт?'))
     expect(tg.deleted.map((d) => d.message_id)).not.toContain(clientPost?.message_id)
-    const [cleared] = await db
-      .select()
-      .from(event)
-      .where(eq(event.type, 'topic.discussion_cleared'))
-    expect(cleared).toBeDefined()
+    // The journal line is written once every post is dealt with.
+    await until(
+      async () =>
+        (await db.select().from(event).where(eq(event.type, 'topic.discussion_cleared'))).length ===
+        1,
+    )
   }, 60000)
 
   it('ST-M7-16: a voice in the topic is heard by the speech service, its transcript comes folded, and Sara answers there', async () => {
