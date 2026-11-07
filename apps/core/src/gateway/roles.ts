@@ -10,7 +10,7 @@ export type RoleName =
   | 'analyst'
   | 'interlocutor'
   | 'checker'
-  | 'reminder'
+  | 'pinger'
   | 'examiner'
   | 'onboarding-about'
   | 'onboarding-stops'

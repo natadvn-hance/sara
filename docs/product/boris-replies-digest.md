@@ -4,7 +4,7 @@
 |---|---|
 | Версия | 1.0, 02.11.2026 |
 | Откуда | Борис, 01-02.11.2026, разбор заказа 95622361: спас разговор, написав сам «как человек», и спросил, что делать с такими данными |
-| История | ST-M7-18 в `docs/product/backlog.md`, требование FR-SPEECH-5 |
+| История | ST-M7-19 в `docs/product/backlog.md`, требование FR-SPEECH-5 |
 | Код | `apps/core/src/conversation/replyDigest.ts`, роль `roles/reply-cleaner`, таблица `core.reply_pick` |
 
 ## 1. Зачем

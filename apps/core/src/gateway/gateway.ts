@@ -12,6 +12,7 @@ import {
   buildClaudeArgs,
   buildConverseArgs,
   type CliRun,
+  readStream,
   roleJsonSchema,
   runClaude,
 } from './claudeCli'
@@ -28,7 +29,14 @@ export type GatewayErrorClass =
   | 'limit_reached'
 
 export type RoleCallResult<T> =
-  | { ok: true; output: T; durationMs: number; modelCallId: string }
+  | {
+      ok: true
+      output: T
+      durationMs: number
+      modelCallId: string
+      /** A role with web tools: every link its tools gave the run (search results, fetched pages). */
+      sources?: string[]
+    }
   | {
       ok: false
       errorClass: GatewayErrorClass
@@ -103,7 +111,7 @@ const LIMIT_HISTORY = 500
 type Model = RoleMeta['model']
 
 type Outcome =
-  | { ok: true; output: unknown }
+  | { ok: true; output: unknown; sources?: string[] }
   | { ok: false; errorClass: GatewayErrorClass; message: string; resetAt?: string }
 
 /** The subscription limit only: "Context limit reached" and the like are other failures. */
@@ -115,12 +123,18 @@ function classify<T>(
   run: CliRun,
   schema: ZodType<T>,
   tags: Map<string, string>,
-): { ok: true; output: T } | { ok: false; errorClass: GatewayErrorClass; message: string } {
+  stream = false,
+):
+  | { ok: true; output: T; sources?: string[] }
+  | { ok: false; errorClass: GatewayErrorClass; message: string } {
   const failed = failureOf(run)
   if (failed) return { ok: false, ...failed }
+  // A role with tools answers as a stream of events: its last result event is the answer.
+  const read = stream ? readStream(run.stdout) : null
+  if (stream && !read) return { ok: false, errorClass: 'bad_output', message: 'no result event' }
   let parsed: { structured_output?: unknown }
   try {
-    parsed = JSON.parse(run.stdout)
+    parsed = JSON.parse(read ? read.result : run.stdout)
   } catch {
     return { ok: false, errorClass: 'bad_output', message: 'CLI output is not JSON' }
   }
@@ -131,7 +145,7 @@ function classify<T>(
   const checked = schema.safeParse(restore(parsed.structured_output, tags))
   if (!checked.success)
     return { ok: false, errorClass: 'bad_output', message: checked.error.message.slice(0, 300) }
-  return { ok: true, output: checked.data }
+  return { ok: true, output: checked.data, ...(read && { sources: read.seen }) }
 }
 
 /** The failure of a run by its exit, the same for both kinds of call. */
@@ -291,7 +305,7 @@ export function createGateway(d: {
         timeoutMs: meta.timeoutMs,
         extraEnv: typeof d.extraEnv === 'function' ? d.extraEnv() : d.extraEnv,
       })
-      const result = classify(run, schema, hidden.tags)
+      const result = classify(run, schema, hidden.tags, (meta.tools?.length ?? 0) > 0)
       if (!result.ok && result.errorClass === 'limit_reached') {
         const resetAt = parseResetAt(`${run.stdout}\n${run.stderr}`, new Date())
         guard.hit(resetAt, ranAt)
@@ -351,11 +365,20 @@ export function createGateway(d: {
         ...(result.ok ? {} : { errorClass: result.errorClass }),
         ...(!result.ok && result.resetAt ? { resetAt: result.resetAt } : {}),
         ...(waitedMs > 0 ? { waitedMs } : {}),
+        // Numbers only: how many pages the tools gave a role with web search.
+        ...(result.ok && result.sources ? { sources: result.sources.length } : {}),
         ...redacted,
         ...extra,
       },
     })
-    if (result.ok) return { ok: true, output: result.output, durationMs, modelCallId: id }
+    if (result.ok)
+      return {
+        ok: true,
+        output: result.output,
+        durationMs,
+        modelCallId: id,
+        ...(result.sources && { sources: result.sources }),
+      }
     const { resetAt: _, ...failure } = result
     return { ...failure, durationMs, modelCallId: id }
   }

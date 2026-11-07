@@ -83,6 +83,8 @@ export async function sendReminderCard(
   conv: ConversationRow,
   step: CardStep,
   text: string,
+  /** Why the ping comes now and the page of its fact, for Boris (spec 2026-11-07-organic-pings). */
+  extra: { why?: string | null; source?: string | null } = {},
 ): Promise<{ taskId: string; messageId: number }> {
   await expireOldCards(d.db, conv.id, rowId)
   const [l] = conv.orderId ? await d.db.select().from(lead).where(eq(lead.id, conv.orderId)) : []
@@ -98,6 +100,8 @@ export async function sendReminderCard(
       orderTitle: l ? shownTitle(l.id, l.title) : null,
       step,
       text,
+      why: extra.why ?? null,
+      source: extra.source ?? null,
     }),
     [[button(b.send, 'send'), button(b.edit, 'edit'), button(b.skip, 'skip')]],
     { place: { conversation: conv.id } },

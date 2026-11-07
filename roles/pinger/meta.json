@@ -1,0 +1,9 @@
+{
+  "name": "pinger",
+  "version": 1,
+  "model": "sonnet",
+  "priority": "P2",
+  "timeoutMs": 240000,
+  "tools": ["WebSearch", "WebFetch"],
+  "maxBudgetUsd": 1
+}

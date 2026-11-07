@@ -19,7 +19,7 @@ import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
-// ST-M7-18 (docs/product/boris-replies-digest.md): the post from the core's own timer, through the real gateway on the
+// ST-M7-19 (docs/product/boris-replies-digest.md): the post from the core's own timer, through the real gateway on the
 // fake CLI and the real bot on the fake Telegram, to the proposal a press makes. All the data here is made up.
 
 const ROOT = resolve(import.meta.dirname, '../..')

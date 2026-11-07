@@ -1,5 +1,6 @@
 import type { ChatAuthor } from '@sara/shared'
 import { siteLines } from '../site/view'
+import { ITEM_RU, type PingScenario, SCENARIO_RU } from './pingScenario'
 import type { CaseHit, CheckIssue, Dossier, DossierMessage, MindHit, Recall } from './types'
 
 const WHO: Record<ChatAuthor, string> = {
@@ -222,22 +223,39 @@ export function formatCheckerDossier(d: Dossier): string {
   ].join('\n\n')
 }
 
-/** What a reminder is: which one of how many, the tone, and whether the client read our message. */
-export type ReminderFacts = { ordinal: number; of: number; friendly: boolean; read: boolean }
+/**
+ * What the code knows of a quiet client before the Pinger decides (spec 2026-11-07-organic-pings): the scenario and
+ * the words it stands on, which ping of how many, whether he read our message, and what the Pinger may choose now.
+ */
+export type PingFacts = {
+  scenario: PingScenario
+  ordinal: number
+  of: number
+  read: boolean
+  /** The client never wrote: he is silent since the bid. */
+  sinceBid: boolean
+  now: Date
+  /** «Позже» is still allowed, up to this moment; null: decide now. */
+  laterUntil: Date | null
+  /** The rewrite after a fact without a page: no news and no facts any more. */
+  noNews: boolean
+}
+
+const dayMonthOf = (day: string) => `${day.slice(8, 10)}.${day.slice(5, 7)}`
 
 /**
- * The reminder role's input, by the headings it reads (roles/reminder/role.md): the order, the client, the whole
- * chat, the message of ours he did not answer, what this reminder is, and the records of the mind. «Прочитал» is
- * «да» only when the platform told so; otherwise it is not known, and the role writes the softer short text.
- * «Переделать» appears only on the rewrite after failed checks.
+ * The Pinger's input, by the headings it reads (roles/pinger/role.md): the order, the client, the whole chat, the
+ * message of ours he did not answer, the situation as the code read it, what may be chosen now, and the records of
+ * the mind. «Прочитал» is «да» only when the platform told so. «Переделать» appears only on a rewrite.
  */
-export function formatReminderInput(
+export function formatPingInput(
   d: Dossier,
   records: MindHit[],
-  r: ReminderFacts,
+  f: PingFacts,
   retry: CheckIssue[],
 ): string {
   const lastOurs = d.messages.findLast((m) => m.side === 'specialist')
+  const sc = f.scenario
   const parts: string[] = [FRAME_NOTE, orderPart(d), clientPart(d)]
   parts.push(
     ['## Переписка', ...(d.messages.length ? d.messages.map(chatLine) : ['Пока ничего.'])].join(
@@ -247,15 +265,45 @@ export function formatReminderInput(
   parts.push(['## Наше последнее сообщение', lastOurs ? lastOurs.text : 'Не известно.'].join('\n'))
   parts.push(
     [
-      '## Напоминание',
-      `По счёту: ${r.ordinal} из ${r.of}`,
-      `Клиент прочитал наше сообщение: ${r.read ? 'да' : 'неизвестно'}`,
-      `Тон: ${r.friendly ? 'дружеский' : 'обычный'}`,
+      '## Ситуация',
+      `Сценарий: ${SCENARIO_RU[sc.kind]}`,
+      ...(sc.quote ? [`Слова, на которых он стоит: «${sc.quote}»`] : []),
+      ...(sc.item ? [`Ждем от клиента: ${ITEM_RU[sc.item]}`] : []),
+      ...(sc.day
+        ? [
+            sc.kind === 'after_meeting'
+              ? `День следующего шага: ${dayMonthOf(sc.day)}`
+              : `Клиент назвал день: ${dayMonthOf(sc.day)}`,
+          ]
+        : []),
+      ...(sc.nextStep ? [`Следующий шаг после созвона: ${sc.nextStep}`] : []),
+      `С отклика клиент ни разу не писал: ${f.sinceBid ? 'да' : 'нет'}`,
+      `Клиент прочитал наше последнее сообщение: ${f.read ? 'да' : 'нет или неизвестно'}`,
+      `Пинг по счету: ${f.ordinal} из ${f.of}${f.ordinal >= f.of ? ', последний: мягко, без давления, как на прощание' : ''}`,
+      `Сейчас: ${moscow(f.now.toISOString())} по Москве`,
+    ].join('\n'),
+  )
+  parts.push(
+    [
+      '## Можно',
+      '- ping: написать клиенту сейчас.',
+      f.laterUntil
+        ? `- later: подождать еще 1-3 дня, но не позже ${moscow(f.laterUntil.toISOString())}.`
+        : '- later: нельзя, ждать больше нельзя: реши сейчас.',
+      '- boris: клиенту не писать, сказать Борису.',
     ].join('\n'),
   )
   parts.push(
     ['## Записи разума', ...(records.length ? records.map(record) : ['Записей нет.'])].join('\n\n'),
   )
-  if (retry.length) parts.push(['## Переделать', ...retry.map((x) => `- ${x.detail}`)].join('\n'))
+  const redo = [
+    ...retry.map((x) => `- ${x.detail}`),
+    ...(f.noNews
+      ? [
+          '- Без новостей и фактов: простое человеческое сообщение по сути заказа, поле hook пустое.',
+        ]
+      : []),
+  ]
+  if (redo.length) parts.push(['## Переделать', ...redo].join('\n'))
   return `${parts.join('\n\n')}\n`
 }

@@ -7,7 +7,7 @@ import {
   ExaminerOutput,
   InterlocutorOutput,
   MOVES,
-  ReminderOutput,
+  PingerOutput,
   TOPICS,
 } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
@@ -32,9 +32,16 @@ const M4_ROLES = {
     meta: { version: 6, model: 'haiku', fallbackModel: 'sonnet', priority: 'P0', timeoutMs: 60000 },
     schema: CheckerOutput,
   },
-  reminder: {
-    meta: { version: 2, model: 'sonnet', priority: 'P1', timeoutMs: 120000 },
-    schema: ReminderOutput,
+  pinger: {
+    meta: {
+      version: 1,
+      model: 'sonnet',
+      priority: 'P2',
+      timeoutMs: 240000,
+      tools: ['WebSearch', 'WebFetch'],
+      maxBudgetUsd: 1,
+    },
+    schema: PingerOutput,
   },
   examiner: {
     meta: { version: 2, model: 'sonnet', fallbackModel: 'opus', priority: 'P3', timeoutMs: 120000 },

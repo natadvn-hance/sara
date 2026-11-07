@@ -65,7 +65,11 @@ import {
   setSeriesDeps,
 } from './leads/series'
 import { type StaleSweep, startStaleSweep } from './leads/staleCards'
-import { answerQuestion as answerBorisQuestion, handleBorisMessage } from './learning/inbox'
+import {
+  answerQuestion as answerBorisQuestion,
+  type BorisMessage,
+  handleBorisMessage,
+} from './learning/inbox'
 import { startLearningJobs } from './learning/jobs'
 import { DRAFT_KINDS, markAnswered, type QuestionRow, titleOf } from './learning/questions'
 import { ensureMindIndex } from './mind/indexer'
@@ -84,11 +88,16 @@ import type { SchoolDeps } from './school/types'
 import { registerScreenProxy } from './screen/screenProxy'
 import { createTurnKeys, registerSecretaryMcp, SECRETARY_MCP_PATH } from './secretary/mcp'
 import { createSecretary, type Secretary } from './secretary/secretary'
+import { memory } from './secretary/store'
 import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
 import { getSetting } from './settings/store'
 import { startSheetSync } from './sheet/sync'
 import type { Fetched } from './site/fetch'
+import { createTalkAnswers } from './talk/answers'
+import { createLoraLink } from './talk/lora'
+import { registerTalkRoutes } from './talk/routes'
+import { createVoice } from './talk/voice'
 import { createResolver, type Press } from './tasks/resolve'
 import { testCommand } from './testLeads/command'
 import { routeTestOrders } from './testLeads/router'
@@ -174,6 +183,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   let secretary: Secretary | null = null
   let secretaryTools: SecretaryDeps | null = null
   const turnKeys = createTurnKeys()
+  // The answers the voice app waits for (ADR-028).
+  const talkAnswers = createTalkAnswers()
   const commandDeps = (): Parameters<typeof onConvPress>[0] => ({
     db,
     notifier: bot.notifier,
@@ -227,25 +238,27 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     modelPath: config.whisperModel,
     workDir: join(config.dataDir, 'voice'),
   })
+  // Boris's words take one way, typed or spoken, from Telegram or from the voice app (ADR-028).
+  const onBorisMessage = (m: BorisMessage) =>
+    handleBorisMessage(
+      {
+        db,
+        transcriber,
+        onDraftText: (a) =>
+          pipeline ? pipeline.onDraftText(a) : Promise.resolve('Сара ещё запускается'),
+        onCardReply: (r) => onConvReply(commandDeps(), r),
+        onConvEdit: (a) => onConvEdit(commandDeps(), a),
+        onSecretary: (w) =>
+          secretary ? secretary.take(w) : Promise.resolve('Сара ещё запускается'),
+        onClientText: (c) => onClientText(commandDeps(), c),
+      },
+      m,
+    )
   const bot = createBotControl({
     db,
     apiRoot: config.telegramApiRoot,
     onPress,
-    onMessage: (m) =>
-      handleBorisMessage(
-        {
-          db,
-          transcriber,
-          onDraftText: (a) =>
-            pipeline ? pipeline.onDraftText(a) : Promise.resolve('Сара ещё запускается'),
-          onCardReply: (r) => onConvReply(commandDeps(), r),
-          onConvEdit: (a) => onConvEdit(commandDeps(), a),
-          onSecretary: (w) =>
-            secretary ? secretary.take(w) : Promise.resolve('Сара ещё запускается'),
-          onClientText: (c) => onClientText(commandDeps(), c),
-        },
-        m,
-      ),
+    onMessage: onBorisMessage,
     voiceDir: join(config.dataDir, 'voice'),
     // Each new notice rings the phone and the computer of the kinds Boris chose (pult v2 design 6).
     onNotice: (kind) => void pushNotice({ db, secrets, publicUrl: config.publicUrl }, kind),
@@ -485,6 +498,21 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   registerSchoolRoutes(app, school)
   registerConversationRoutes(app, commandDeps())
   registerSecretaryMcp(app, { keys: turnKeys, deps: () => secretaryTools })
+  registerTalkRoutes(app, {
+    transcribe: (path) => transcriber.transcribe(path),
+    handle: onBorisMessage,
+    answers: talkAnswers,
+    voice: createVoice({
+      url: config.voiceUrl,
+      ffmpegBin: config.ffmpegBin,
+      workDir: join(config.dataDir, 'voice'),
+    }),
+    history: () => memory(db, new Date(), []),
+    // Lora in the app (ADR-028): her session's own channel takes the words by her key.
+    lora: createLoraLink(),
+    loraToken: config.loraToken,
+    workDir: join(config.dataDir, 'voice'),
+  })
   // The made-up Profi.ru of test orders: if it cannot start, the live Sara works on without test orders.
   testLeads = await startTestLeads({
     db,
@@ -513,6 +541,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     dataDir: config.dataDir,
     publicUrl: config.publicUrl,
     titleOf: (q) => titleOf(db, q),
+    answered: (talks, a) => talkAnswers.give(talks, a),
   })
 
   const token = await secrets.get('telegram_bot_token')
@@ -580,6 +609,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     profi,
     notifier: bot.notifier,
     close: (taskId) => lp.closeOnSite(taskId, 'recheck'),
+    feeFound: (taskId, rub) => lp.feeFound(taskId, rub),
     tickMs: o.recheckTickMs,
     now: o.now,
   })
