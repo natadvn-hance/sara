@@ -66,6 +66,8 @@ jobs:
           npm_config_store_dir: ${{ runner.tool_cache }}/pnpm-store
       - run: pnpm check
       - run: pnpm check:ports
+      # The voice service's worker life (ADR-028), stdlib only: no model, no torch.
+      - run: python3 -I -m unittest discover -s infra/voice -p 'test_*.py'
       - if: github.event_name == 'pull_request'
         run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}
       - run: pnpm trace ${{ startsWith(github.head_ref, 'release-please--') && '--strict' || '' }}
