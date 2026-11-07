@@ -2,14 +2,16 @@ import { newEventId } from '@sara/shared'
 import { and, asc, desc, eq, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../db/client'
-import { chatMessage, meeting } from '../db/schema'
+import { chatMessage, jobRun, lead, meeting } from '../db/schema'
 import { advanceTo } from '../domain/deal'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
-import { markShown } from '../notify/forum'
+import { firstName } from '../leads/clientName'
+import { markShown, topicIntro } from '../notify/forum'
 import { type MeetingCardView, meetingCard } from '../notify/meetingCard'
 import type { Notifier } from '../notify/notifier'
 import { getSetting } from '../settings/store'
+import { contactsLine, contactsOf } from './contacts'
 import { clientNames } from './dossier'
 import { dealOf } from './stage'
 import { getConversation as getConversationRow } from './store'
@@ -89,7 +91,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 export type MeetingDeps = {
   db: Db
   gateway: Pick<Gateway, 'call'>
-  notifier: Pick<Notifier, 'sendText' | 'editText' | 'pinPost' | 'forumOn'>
+  notifier: Pick<Notifier, 'sendText' | 'editText' | 'pinPost' | 'forumOn' | 'topicPosts'>
   now?: () => Date
 }
 
@@ -372,7 +374,10 @@ async function card(
   pin: boolean,
 ): Promise<void> {
   if (!(await d.notifier.forumOn?.())) return
-  const html = meetingCard(v, now)
+  const html = meetingCard(
+    { ...v, contacts: v.contacts ?? (await contactsLineOf(d.db, conv)) },
+    now,
+  )
   const [row] = await d.db.select({ ref: meeting.cardRef }).from(meeting).where(eq(meeting.id, id))
   if (row?.ref != null) {
     try {
@@ -426,6 +431,33 @@ async function openMeeting(db: Db, conversationId: string) {
   return m ?? null
 }
 
+/** Meetings of one call closer than this are one meeting, whoever wrote them down. */
+const SAME_CALL_MS = 24 * 3600_000
+
+/**
+ * The meeting an outcome belongs to (Boris, 06.11: the outcome of Lora found no meeting Boris had entered by hand and made
+ * a second one): of the conversation's meetings, any source and any outcome, the one nearest in time to the call, within
+ * a day; failing that, the latest with no outcome yet.
+ */
+export async function standingMeeting(db: Db, conversationId: string, around: Date) {
+  const all = await db
+    .select()
+    .from(meeting)
+    .where(
+      and(
+        eq(meeting.conversationId, conversationId),
+        sql`${meeting.status} not in ('cancelled', 'duplicate')`,
+      ),
+    )
+    .orderBy(desc(meeting.createdAt))
+  const near = all
+    .filter((m) => m.startsAt)
+    .map((m) => ({ m, d: Math.abs(new Date(m.startsAt ?? 0).getTime() - around.getTime()) }))
+    .filter((x) => x.d <= SAME_CALL_MS)
+    .sort((a, b) => a.d - b.d)[0]
+  return near?.m ?? all.find((m) => m.outcome === null) ?? null
+}
+
 /**
  * Writes down the outcome of a call (Boris, 03.11: «после проведения встречи хочу, чтобы внутри чата с клиентом была
  * информация о том что встреча была проведена и следующие шаги»): the meeting gets its result and next step, a held
@@ -439,16 +471,17 @@ export async function recordMeetingResult(
   now: Date,
 ): Promise<string> {
   const at = r.at ? new Date(r.at) : null
-  const known = await openMeeting(d.db, conv.id)
+  const known = await standingMeeting(d.db, conv.id, at && !Number.isNaN(at.getTime()) ? at : now)
   const id = known?.id ?? newEventId()
   const outcome = r.held ? 'held' : 'missed'
   const startsAt = known?.startsAt ?? (at && !Number.isNaN(at.getTime()) ? at.toISOString() : null)
   const fields = {
     outcome,
     status: 'booked',
-    result: r.result,
-    nextStep: r.nextStep,
-    nextStepOn: r.nextStepOn,
+    // What an earlier word of the call said stays when this one adds to it.
+    result: r.result ?? known?.result ?? null,
+    nextStep: r.nextStep ?? known?.nextStep ?? null,
+    nextStepOn: r.nextStepOn ?? known?.nextStepOn ?? null,
     resultSource: r.source,
     resultAt: now.toISOString(),
     startsAt,
@@ -498,9 +531,9 @@ export async function recordMeetingResult(
       how: known?.how ?? null,
       caller: known?.caller ?? null,
       quote: null,
-      result: r.result,
-      nextStep: r.nextStep,
-      nextStepOn: r.nextStepOn,
+      result: r.result ?? known?.result ?? null,
+      nextStep: r.nextStep ?? known?.nextStep ?? null,
+      nextStepOn: r.nextStepOn ?? known?.nextStepOn ?? null,
     },
     now,
     false,
@@ -673,4 +706,171 @@ export function startMeetingTick(d: MeetingDeps, tickMs = 60_000): { stop(): voi
       })
   }, tickMs)
   return { stop: () => clearInterval(timer) }
+}
+
+/**
+ * Once: a call written down twice (Boris's by hand, then Lora's outcome as a second row) is one meeting. Of the meetings of
+ * a conversation whose times are within a day, the oldest stays and takes the outcome, the card and the next step of the
+ * others; the others are marked `duplicate` (not deleted), and the readers of meetings leave them out. A mark in job_run
+ * keeps it from repeating. Returns how many rows were marked.
+ */
+export async function dedupeMeetings(db: Db): Promise<number> {
+  const taken = await db
+    .insert(jobRun)
+    .values({ name: 'meetings_dedup', day: '2000-01-01' })
+    .onConflictDoNothing()
+    .returning({ day: jobRun.day })
+  if (taken.length === 0) return 0
+  const rows = await db
+    .select()
+    .from(meeting)
+    .where(
+      and(
+        sql`${meeting.conversationId} is not null`,
+        sql`${meeting.startsAt} is not null`,
+        sql`${meeting.status} not in ('cancelled', 'duplicate', 'maybe')`,
+      ),
+    )
+    .orderBy(asc(meeting.conversationId), asc(meeting.createdAt))
+  let marked = 0
+  const byConv = new Map<string, typeof rows>()
+  for (const r of rows)
+    byConv.set(r.conversationId as string, [...(byConv.get(r.conversationId as string) ?? []), r])
+  for (const list of byConv.values()) {
+    const kept: (typeof rows)[number][] = []
+    for (const m of list) {
+      const t = new Date(m.startsAt ?? 0).getTime()
+      const keeper = kept.find(
+        (k) => Math.abs(new Date(k.startsAt ?? 0).getTime() - t) <= SAME_CALL_MS,
+      )
+      if (!keeper) {
+        kept.push(m)
+        continue
+      }
+      await db
+        .update(meeting)
+        .set({
+          outcome: keeper.outcome ?? m.outcome,
+          result: keeper.result ?? m.result,
+          nextStep: keeper.nextStep ?? m.nextStep,
+          nextStepOn: keeper.nextStepOn ?? m.nextStepOn,
+          resultSource: keeper.resultSource ?? m.resultSource,
+          resultAt: keeper.resultAt ?? m.resultAt,
+          cardRef: keeper.cardRef ?? m.cardRef,
+          nextRemindedAt: keeper.nextRemindedAt ?? m.nextRemindedAt,
+          amountRub: keeper.amountRub ?? m.amountRub,
+          note: keeper.note ?? m.note,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(meeting.id, keeper.id))
+      await db
+        .update(meeting)
+        .set({ status: 'duplicate', updatedAt: new Date().toISOString() })
+        .where(eq(meeting.id, m.id))
+      Object.assign(keeper, {
+        outcome: keeper.outcome ?? m.outcome,
+        result: keeper.result ?? m.result,
+        nextStep: keeper.nextStep ?? m.nextStep,
+        nextStepOn: keeper.nextStepOn ?? m.nextStepOn,
+        cardRef: keeper.cardRef ?? m.cardRef,
+      })
+      marked++
+    }
+  }
+  return marked
+}
+
+/** The contacts line of a conversation, without the name the order already carries. */
+async function contactsLineOf(db: Db, conv: ConversationRow): Promise<string | null> {
+  const [l] = conv.orderId
+    ? await db.select({ name: lead.clientName }).from(lead).where(eq(lead.id, conv.orderId))
+    : []
+  const own = l?.name ? firstName(l.name) : null
+  return contactsLine(await contactsOf(db, { conversationId: conv.id }, own ? [own] : []))
+}
+
+const hash = (s: string) => {
+  let h = 5381
+  for (const ch of s) h = ((h << 5) + h + ch.charCodeAt(0)) | 0
+  return (h >>> 0).toString(36)
+}
+
+/** The card of a meeting drawn again from its row (the contacts changed). */
+async function redraw(
+  d: MeetingDeps,
+  conv: ConversationRow,
+  m: typeof meeting.$inferSelect,
+  now: Date,
+) {
+  const status: MeetingCardView['status'] =
+    m.outcome === 'held'
+      ? 'held'
+      : m.outcome === 'missed'
+        ? 'missed'
+        : m.expiredAt
+          ? 'expired'
+          : m.status === 'maybe'
+            ? 'maybe'
+            : 'booked'
+  await card(
+    d,
+    conv,
+    m.id,
+    {
+      status,
+      at: m.startsAt ? new Date(m.startsAt).toISOString() : null,
+      how: m.how,
+      caller: m.caller,
+      quote: m.quote,
+      result: m.result,
+      nextStep: m.nextStep,
+      nextStepOn: m.nextStepOn,
+    },
+    now,
+    false,
+  )
+}
+
+/**
+ * New contacts in the talk (a name, a phone, a Telegram, a mail): the first post of the topic and the card of the
+ * meeting are drawn again with them, once for each set. Never throws.
+ */
+export async function refreshContacts(d: MeetingDeps, conv: ConversationRow): Promise<void> {
+  try {
+    if (conv.closedAt || !(await d.notifier.forumOn?.())) return
+    const line = await contactsLineOf(d.db, conv)
+    if (!line) return
+    const key = conv.orderId ?? `conv:${conv.id}`
+    if (!(await markShown(d.db, key, `contacts:${hash(line)}`))) return
+    const place = { conversation: conv.id }
+    const first = (await d.notifier.topicPosts?.(place))?.[0]
+    if (first !== undefined && d.notifier.editText)
+      await d.notifier
+        .editText(first, (await topicIntro(d.db, key)).intro, undefined, { html: true })
+        .catch(() => {})
+    const now = d.now?.() ?? new Date()
+    const rows = await d.db
+      .select()
+      .from(meeting)
+      .where(
+        and(
+          eq(meeting.conversationId, conv.id),
+          sql`${meeting.status} not in ('cancelled', 'duplicate')`,
+          sql`${meeting.cardRef} is not null`,
+        ),
+      )
+    for (const m of rows) await redraw(d, conv, m, now).catch(() => {})
+  } catch (e) {
+    console.error('contacts not refreshed', e instanceof Error ? e.message.slice(0, 200) : e)
+  }
+}
+
+/** The news of a chat for the meeting side: the contacts first, then the call booked in it. */
+export async function meetingNews(
+  d: MeetingDeps,
+  conv: ConversationRow,
+  added: StoredMessage[],
+): Promise<void> {
+  await refreshContacts(d, conv)
+  await readMeeting(d, conv, added)
 }

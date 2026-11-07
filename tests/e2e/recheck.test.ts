@@ -436,12 +436,12 @@ describe('a bid that ended ORDER_CLOSED (FR-LEAD-5)', () => {
     press('bid')
     await until(() => said(TEXTS.bidRefused(TITLE, 'ORDER_CLOSED')))
     const cardEdits = () => tg.edited.filter((e) => e.message_id === messageId)
-    await until(() => cardEdits().length === 1)
-    expect(cardEdits()[0]).toMatchObject({
+    // The card folds while the bid goes (#247), then ends as the closed card, still the same message.
+    await until(() => (cardEdits().at(-1)?.text ?? '').includes(TEXTS.closedCard))
+    expect(cardEdits().at(-1)).toMatchObject({
       message_id: messageId,
       reply_markup: { inline_keyboard: [] },
     })
-    expect(cardEdits()[0]?.text).toContain(TEXTS.closedCard)
     // What Boris pressed stays his decision; the lead is closed all the same.
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'bid' })
     expect((await leadOf(id))?.status).toBe('closed')
