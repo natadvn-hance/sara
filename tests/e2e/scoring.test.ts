@@ -191,11 +191,14 @@ describe('scoring in the lead pipeline', () => {
     expect(close?.text).toBe('Закрыть заявку')
     tg.pushPress(111, close?.callback_data ?? '')
     await until(() => tg.edited.length === 1)
-    expect(tg.edited[0]).toMatchObject({
-      message_id: cards()[0]?.message_id,
-      reply_markup: { inline_keyboard: [] },
-    })
+    expect(tg.edited[0]).toMatchObject({ message_id: cards()[0]?.message_id })
+    // The order's buttons are gone; one row of reasons stands in their place (07.11.2026).
+    const taskId = close?.callback_data.split(':')[1]
+    expect(tg.edited[0]?.reply_markup?.inline_keyboard.flat().map((b) => b.callback_data)).toEqual(
+      ['whyprofile', 'whybudget', 'whyclient', 'whyother'].map((a) => `t:${taskId}:${a}`),
+    )
     expect(tg.edited[0]?.text.startsWith('<b>📁 Заявка закрыта</b> · ')).toBe(true)
+    expect(tg.edited[0]?.text).toContain('<i>Похоже, сайт, а не маркетинг</i>')
     expect(tg.edited[0]?.text).toContain('Открыть на Профи.ру')
     await new Promise((r) => setTimeout(r, 800))
     expect(tg.sent.some((m) => m.text.startsWith('Почему пропустил'))).toBe(false)

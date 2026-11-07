@@ -184,6 +184,24 @@ describe('the lead card layout', () => {
     expect(lines.at(-1)).toBe(LINK)
   })
 
+  it("07.11: under the score, Boris's own decisions on similar orders, when there are two or more", () => {
+    const head = (similar: LeadCard['similar']) =>
+      leadCardText({ ...full, similar })
+        .split('\n')
+        .slice(2, 4)
+    expect(head({ n: 5, closed: 4, bid: 1, reason: 'не наш профиль' })).toEqual([
+      `🎯 <b>балл 68</b>  ·  💰 до 150 000 ₽  ·  🧾 отклик 210${NBSP}₽`,
+      '🧭 Похожие ты закрывал 4 из 5 (не наш профиль)',
+    ])
+    expect(head({ n: 4, closed: 1, bid: 3, reason: null })[1]).toBe(
+      '🧭 На похожие ты откликался 3 из 4',
+    )
+    expect(leadCardText({ ...full, similar: null })).not.toContain('🧭')
+    expect(
+      leadCardText({ ...full, similar: { n: 1, closed: 1, bid: 0, reason: null } }),
+    ).not.toContain('🧭')
+  })
+
   it('FR-LEAD-7: a card of an old lead, without reading, client info or draft, is shorter and not an error', () => {
     const text = leadCardText(card)
     expect(text.split('\n')).toEqual([
@@ -457,6 +475,34 @@ describe('the card of an order closed on Profi.ru', () => {
     )
     expect(stale).not.toContain(DASH)
     expect(stale).not.toContain('🔒')
+  })
+
+  it('07.11: the short card says why: a guess, his pick, or that Sara could not guess; a card closed on the site does not', () => {
+    const guess = { text: 'не наш профиль: SMM ведение', by: 'guess' as const, buttons: [] }
+    expect(closedLeadCardText({ ...full, closedByBoris: true, closeReason: guess })).toBe(
+      `<b>📁 Заявка закрыта</b> · ${full.title}\n<i>Похоже, не наш профиль: SMM ведение</i>\n${SHORT_LINK}`,
+    )
+    expect(
+      closedLeadCardText({
+        ...full,
+        stale: { since: PUB, at: at(27 * H) },
+        closeReason: { text: 'маленький бюджет', by: 'boris', buttons: [] },
+      }).split('\n')[1],
+    ).toBe('<i>Причина: маленький бюджет</i>')
+    expect(
+      closedLeadCardText({
+        ...full,
+        closedByBoris: true,
+        closeReason: { text: null, by: 'guess', buttons: [] },
+      }).split('\n')[1],
+    ).toBe('<i>Причину не угадала</i>')
+    expect(
+      closedLeadCardText({
+        ...full,
+        closed: { since: PUB, published: true, at: at(H), exact: true, openUntil: null },
+        closeReason: guess,
+      }),
+    ).not.toContain('Похоже')
   })
 
   it('FR-LEAD-5: spans read the way Boris says them', () => {
