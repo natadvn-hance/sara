@@ -384,6 +384,7 @@ describe('the bell: every message of Sara with its state', () => {
       ['📅 Встреча назначена', 'meeting'],
       ['💬 Анна: новое сообщение', 'client'],
       ['Сегодня отсеяла 12 заявок. На грани:', 'summary'],
+      ['📊 <b>Итоги дня</b> · 4 ноября', 'summary'],
       ['Записала новый текст', 'system'],
     ]
     for (const [text, kind] of cases) expect(classifyNotice(text), text).toBe(kind)

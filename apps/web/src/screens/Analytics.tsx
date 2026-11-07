@@ -156,6 +156,35 @@ function Tables({ v }: { v: AnalyticsView }) {
         </div>
       </Card>
 
+      <Card title="Встречи по месяцам" icon="calendar" i={4}>
+        <div className="table-wrap">
+          <table className="t">
+            <thead>
+              <tr>
+                <th>Месяц</th>
+                <th className="n">Назначено</th>
+                <th className="n">Прошло</th>
+                <th className="n">Не состоялось</th>
+                <th className="n">Без итога</th>
+              </tr>
+            </thead>
+            <tbody>
+              {v.meetings
+                .filter((m) => m.booked > 0 || m.month === 'ИТОГО')
+                .map((m) => (
+                  <tr key={m.month} className={m.month === 'ИТОГО' ? 'total' : undefined}>
+                    <td>{m.month}</td>
+                    <td className="n">{m.booked}</td>
+                    <td className="n">{m.held}</td>
+                    <td className="n">{m.missed}</td>
+                    <td className="n">{m.noWord}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
       <Card
         title="Лог клиентов"
         icon="user"

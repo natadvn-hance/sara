@@ -578,6 +578,11 @@ export function analytics(year: number): AnalyticsView {
       { stage: 'Отвалился', count: 10, share: 24.4 },
     ],
     months,
+    meetings: [
+      { month: 'Октябрь', booked: 4, held: 2, missed: 1, noWord: 1 },
+      { month: 'Ноябрь', booked: 3, held: 1, missed: 0, noWord: 0 },
+      { month: 'ИТОГО', booked: 7, held: 3, missed: 1, noWord: 1 },
+    ],
     notes: [
       'Суммы договоров, выручка, средний чек и LTV появятся с итогами встреч (M6): Сара их пока не знает.',
       'Отклики старой Сары до 24.10 сюда пока не перенесены.',

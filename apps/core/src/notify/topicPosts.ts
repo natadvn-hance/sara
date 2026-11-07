@@ -36,6 +36,15 @@ export function stamp(at: string | Date, now: Date = new Date()): string {
   return `${m.getUTCDate()} ${MONTHS[m.getUTCMonth()]}${year}, ${hh}:${mm}`
 }
 
+/** «7 ноября» from a day written `ГГГГ-ММ-ДД` (a Moscow day, no time). */
+export function dayMonth(on: string, now: Date = new Date()): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(on)
+  if (!m) return on
+  const year =
+    Number(m[1]) === new Date(now.getTime() + 3 * 3600_000).getUTCFullYear() ? '' : ` ${m[1]}`
+  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] ?? ''}${year}`
+}
+
 const quote = (text: string) => `<blockquote>${hyphen(text.trim())}</blockquote>`
 
 /** What the client wrote. */
@@ -100,6 +109,8 @@ export function introPost(o: {
   budget: string | null
   seenAt: string | null
   text: string | null
+  /** The people and their ways to reach them as the chat says, one line. */
+  contacts?: string | null
 }): string {
   const head = `📌 <b>${hyphen(o.title ?? (o.orderId ? `Заказ №${o.orderId}` : 'Клиент без заказа'))}</b>`
   const who = [o.clientName, o.city, o.budget ? `бюджет ${o.budget}` : null]
@@ -116,6 +127,7 @@ export function introPost(o: {
   const lines = [
     head,
     who || null,
+    o.contacts ? `<b>Контакты:</b> ${hyphen(o.contacts)}` : null,
     o.seenAt ? `Заявка от ${stamp(o.seenAt)}` : null,
     request ? `\n${hyphen(request.length > 300 ? `${request.slice(0, 299)}…` : request)}` : null,
     facts.length
