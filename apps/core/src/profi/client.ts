@@ -42,8 +42,13 @@ export type ProfiClient = {
  * the tab's queue (up to 150 s), the typing (up to 25 s) and the check that it stands in the chat (up to 15 s) can
  * together take minutes, and a slow send that succeeded must not look like a lost answer.
  */
-/** Whatever reaches a client has no «ё» (Boris, 31.10.2026): the last point before the node, whoever wrote the text. */
-const withoutYo = (text: string) => text.replace(/ё/g, 'е').replace(/Ё/g, 'Е')
+/**
+ * Whatever reaches a client has no «ё» (Boris, 31.10.2026) and no quotes in «ёлочки», the main typographic marks of a
+ * model's text in his chats (his voice skill, 07.11.2026): plain quotes instead. The last point before the node,
+ * whoever wrote the text; chat and outbox texts are compared without quotes (normalizeText), so nothing else changes.
+ */
+export const clientTypography = (text: string) =>
+  text.replace(/ё/g, 'е').replace(/Ё/g, 'Е').replace(/[«»]/g, '"')
 
 const TAB_TIMEOUT_MS = 4 * 60_000
 /** The node presses nothing in the last half minute of the wait: its answer could no longer arrive in time. */
@@ -119,7 +124,7 @@ export function createProfiClient(o: {
     submitBid: (i) => {
       const unsigned = {
         ...i,
-        text: withoutYo(i.text),
+        text: clientTypography(i.text),
         not_after: new Date(
           Date.now() + tabMs - Math.min(PRESS_MARGIN_MS, tabMs / 4),
         ).toISOString(),
@@ -139,11 +144,11 @@ export function createProfiClient(o: {
         'profi.send_message',
         {
           ...i,
-          text: withoutYo(i.text),
+          text: clientTypography(i.text),
           permit: signMessagePermit(o.permitSecret, {
             accountId: i.account_id,
             chatId: i.chat_id,
-            text: withoutYo(i.text),
+            text: clientTypography(i.text),
             key: i.idempotency_key,
           }),
         },

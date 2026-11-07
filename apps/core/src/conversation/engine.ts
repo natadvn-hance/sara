@@ -21,8 +21,19 @@ import type {
   TurnPlan,
 } from './types'
 
-/** Records on every turn: who Sara is, the greeting, Boris's topics, Hance's values, the speech portrait. */
-export const ALWAYS = ['j-constitution', 'j-greeting', 'j-autonomy', 'j-hance-values', 's-portrait']
+/**
+ * Records on every turn: who Sara is, the greeting, Boris's topics, Hance's values, the speech portrait and the form of
+ * his text. The tone came only when the search happened to find it (07.11.2026: Boris's voice skill showed the model
+ * writes drier than he does without it).
+ */
+export const ALWAYS = [
+  'j-constitution',
+  'j-greeting',
+  'j-autonomy',
+  'j-hance-values',
+  's-portrait',
+  'j-tone',
+]
 
 /** One rewrite after failed checks, then a draft (M4 design 5.6). */
 const MAX_ATTEMPTS = 2
