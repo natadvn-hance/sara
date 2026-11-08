@@ -31,22 +31,28 @@ export function createLoraLink(o: { now?: () => number } = {}) {
       remember({ author: 'boris', text: w.text, at: w.at })
       for (const f of wake.splice(0)) f()
     },
-    /** The next word for Lora, or null after `ms` with none. */
-    async next(ms: number): Promise<LoraWord | null> {
+    /**
+     * The next word for Lora, or null after `ms` with none. A request that has gone (`signal`, the channel cut its ask)
+     * takes nothing: its word stays in the queue for the next ask, never lost to a closed socket.
+     */
+    async next(ms: number, signal?: AbortSignal): Promise<LoraWord | null> {
       lastSeen = now()
-      if (queue.length === 0)
+      if (queue.length === 0 && !signal?.aborted)
         await new Promise<void>((done) => {
-          const go = () => {
+          const finish = () => {
             clearTimeout(timer)
+            const i = wake.indexOf(finish)
+            if (i >= 0) wake.splice(i, 1)
+            signal?.removeEventListener('abort', finish)
             done()
           }
-          const timer = setTimeout(() => {
-            const i = wake.indexOf(go)
-            if (i >= 0) wake.splice(i, 1)
-            done()
-          }, ms)
-          wake.push(go)
+          const timer = setTimeout(finish, ms)
+          wake.push(finish)
+          signal?.addEventListener('abort', finish, { once: true })
         })
+      // The word is taken a tick later, so a request closing in the same moment as the word comes keeps away from it.
+      await new Promise<void>((r) => setImmediate(r))
+      if (signal?.aborted) return null
       lastSeen = now()
       return queue.shift() ?? null
     },

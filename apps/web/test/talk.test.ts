@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { failureOf, HttpError } from '../src/talk/client'
 import { firstAgent } from '../src/talk/engine'
 import { createSilence, recordingType, splitSpeech, waitForAnswer } from '../src/talk/logic'
 
@@ -119,5 +120,13 @@ describe('the voice app: her first words come first', () => {
     ])
     expect(splitSpeech('Да-да, Борь, я тут.')).toEqual(['Да-да, Борь, я тут.', ''])
     expect(splitSpeech('Ок. Сделаю.')).toEqual(['Ок. Сделаю.', ''])
+  })
+})
+
+describe('the voice app: «Нет связи» says why', () => {
+  it('FR-NOTIF-5: a refusal shows its code, another failure its name', () => {
+    expect(failureOf(new HttpError(502, 'Bad Gateway'))).toBe('код 502')
+    expect(failureOf(new TypeError('Load failed'))).toBe('TypeError')
+    expect(failureOf(new Error('нет звука'))).toBe('нет звука')
   })
 })

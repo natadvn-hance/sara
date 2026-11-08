@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import cookie from '@fastify/cookie'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startSession } from '../../src/auth/session'
 import type { BorisMessage, BorisReply } from '../../src/learning/inbox'
 import { TEXTS } from '../../src/notify/cards'
@@ -276,5 +276,30 @@ describe('the voice app: Lora by default, Sara on call', () => {
     expect(handled).toEqual([expect.objectContaining({ text: 'что по лидам сегодня?' })])
     const back = await say('верни Лору', 'sara')
     expect(back.json()).toMatchObject({ switch: 'lora', reply: { text: AGENTS.lora.greeting } })
+  })
+})
+
+describe('the voice app: every request leaves a line', () => {
+  it('FR-NOTIF-5: the log tells the path, the code and the time, never the words said', async () => {
+    const lines: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((l: string) => void lines.push(l))
+    try {
+      await app.inject({
+        method: 'POST',
+        url: '/api/talk?agent=sara',
+        headers: { cookie: session },
+        payload: { text: 'секретное слово' },
+      })
+      await app.inject({
+        url: '/api/talk/0199a000-0000-7000-8000-000000000001',
+        headers: { cookie: session },
+      })
+    } finally {
+      spy.mockRestore()
+    }
+    const talk = lines.filter((l) => l.startsWith('talk '))
+    expect(talk[0]).toMatch(/^talk POST \/api\/talk agent=sara 200 \d+ms body=\d+$/)
+    expect(talk[1]).toMatch(/^talk GET \/api\/talk\/:id agent=- 404 /)
+    expect(talk.join('\n')).not.toContain('секретное')
   })
 })

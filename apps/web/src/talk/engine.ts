@@ -1,4 +1,4 @@
-import { type Agent, type Sent, SignedOut, talkApi } from './client'
+import { type Agent, failureOf, type Sent, SignedOut, talkApi } from './client'
 import { createSilence, splitSpeech, waitForAnswer } from './logic'
 import { createPlayer, keepAwake, type Mic, openMic, type Played, speakLocally } from './media'
 
@@ -219,7 +219,7 @@ export function createTalkEngine(
     } catch (e) {
       if (signedOut(e)) return
       patch(mine, { pending: false })
-      add({ who: 'note', text: TALK_NOTES.failed })
+      add({ who: 'note', text: `${TALK_NOTES.failed} (${failureOf(e)})` })
       idle()
     }
   }
@@ -307,7 +307,7 @@ export function createTalkEngine(
       }
     } catch (e) {
       if (signedOut(e)) return
-      add({ who: 'note', text: TALK_NOTES.failed })
+      add({ who: 'note', text: `${TALK_NOTES.failed} (${failureOf(e)})` })
       set({ phase: 'idle' })
     }
   }

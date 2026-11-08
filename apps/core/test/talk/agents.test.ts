@@ -76,3 +76,26 @@ describe('the voice app: the link to Lora', () => {
     expect(link.connected()).toBe(false)
   })
 })
+
+describe('the voice app: a word for Lora is never lost', () => {
+  it('FR-NOTIF-5: a wait whose request has gone is dropped, and the word stays for the next ask', async () => {
+    const link = createLoraLink()
+    const gone = new AbortController()
+    const dropped = link.next(5000, gone.signal)
+    gone.abort()
+    expect(await dropped).toBeNull()
+    link.push({ talk: 't9', text: 'проверка связи', voice: true, at: '2026-11-08T11:20:00.000Z' })
+    expect(await link.next(100)).toMatchObject({ talk: 't9', text: 'проверка связи' })
+  })
+
+  it('FR-NOTIF-5: a request that closes while it is woken does not take the word', async () => {
+    const link = createLoraLink()
+    const gone = new AbortController()
+    const waiting = link.next(5000, gone.signal)
+    // The word comes and the request closes in the same moment, before the waiter runs.
+    link.push({ talk: 't10', text: 'ещё раз', voice: false, at: '2026-11-08T11:21:00.000Z' })
+    gone.abort()
+    expect(await waiting).toBeNull()
+    expect(await link.next(100)).toMatchObject({ talk: 't10' })
+  })
+})
