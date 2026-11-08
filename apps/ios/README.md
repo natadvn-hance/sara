@@ -85,6 +85,8 @@
 - Замеры скорости: долгое нажатие на строку состояния вверху экрана. Там
   по каждому вопросу видно, сколько он говорил, сколько ждали паузу, сколько
   заняли загрузка с распознаванием, ответ Лоры или Сары и голос.
-- Шрифты Onest и Martian Mono собраны из файлов сайта
-  (`_1. Projects/Hance/Сайт/assets/fonts`) скриптом `tools/fonts.py`,
-  иконка нарисована `tools/make-icon.swift`.
+- Оформление одно с PWA (`talk-design-language.md`, PR #270): шрифт
+  Involve с сайта hance.pro (`Проекты/hance/site/assets/fonts`), метки
+  Martian Mono (собран из веб-шрифтов сайта скриптом `tools/fonts.py`),
+  логотип `logo-hance-current.svg`. Иконка нарисована
+  `tools/make-icon.swift`.

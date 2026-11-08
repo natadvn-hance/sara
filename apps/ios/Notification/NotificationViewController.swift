@@ -101,7 +101,7 @@ struct ReplyCard: View {
             }
             if cards > 0 {
                 Text("Кнопки пришли в Telegram и во Входящие пульта")
-                    .font(HanceFont.text(13, .medium))
+                    .font(HanceFont.text(13))
                     .foregroundStyle(p.accentInk)
             }
         }

@@ -46,11 +46,9 @@
 	<true/>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Onest-Regular.ttf</string>
-		<string>Onest-Medium.ttf</string>
-		<string>Onest-SemiBold.ttf</string>
+		<string>Involve-Regular.ttf</string>
+		<string>Involve-SemiBold.ttf</string>
 		<string>MartianMono-Regular.ttf</string>
-		<string>MartianMono-Medium.ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

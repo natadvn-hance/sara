@@ -31,8 +31,6 @@ final class TalkEngine: ObservableObject {
     @Published private(set) var note: String?
     @Published private(set) var signedIn: Bool
     @Published private(set) var timings: [TurnTimings] = TurnTimings.load()
-    /// Where the colour of the other one opens from: the point Boris touched, or the orb.
-    @Published var revealFrom: CGPoint?
     /// The app is on screen: answers go to the screen, not to notifications.
     var onScreen = true
 
@@ -124,13 +122,12 @@ final class TalkEngine: ObservableObject {
     }
 
     /// A tap on the other one's picture: she comes and greets.
-    func call(_ who: HanceAgent, from point: CGPoint? = nil) {
+    func call(_ who: HanceAgent) {
         guard who != agent, phase == .idle || phase == .done || phase == .failed || phase == .speaking else { return }
         turn += 1
         let mine = turn
         speaker.stop()
         flow?.cancel()
-        revealFrom = point
         become(who)
         flow = Task { await self.say(who.greeting, cards: 0, followUp: false, turn: mine) }
     }
@@ -154,10 +151,7 @@ final class TalkEngine: ObservableObject {
     /// From Siri «Открой Hance», a notification's «Ответить голосом» or the island: the app is on screen and listens.
     func openAndListen(_ who: HanceAgent) {
         if phase.isBusy { return }
-        if who != agent {
-            revealFrom = nil
-            become(who)
-        }
+        if who != agent { become(who) }
         listen()
     }
 
@@ -251,10 +245,7 @@ final class TalkEngine: ObservableObject {
     private func answered(_ sent: Sent, spoken: Bool, typed: String?, turn mine: Int) async {
         guard mine == turn else { return }
         heard = typed ?? sent.heard ?? Self.notes.notHeard
-        if let to = sent.switchTo {
-            revealFrom = nil
-            become(to)
-        }
+        if let to = sent.switchTo { become(to) }
         if let reply = sent.reply {
             clock.answered = Date()
             return await say(reply.text, cards: reply.buttons ? 1 : 0, followUp: spoken && sent.heard != nil, turn: mine)

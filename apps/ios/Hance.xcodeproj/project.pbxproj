@@ -12,23 +12,22 @@
 		0867A51A5AED2FA7C2B6F979 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
 		08C3BE05CC41C0BF9FA447F6 /* HanceWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B7455A5F0D11201F6030750 /* HanceWidgets.swift */; };
 		0D71C81B83CAC857A7E1FA16 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494752230CCEB0631BD6FEAB /* Intents.swift */; };
+		0D83C536C3994B5DE8127ED3 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		122513EC9DE3AFE92AD99501 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
 		180F0A05D2ABA03161FAEC44 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
 		1A91D5B2AA5DED69ECC1A3CF /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
 		1D75A6394B21670FA035FA26 /* HanceWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7892F42A30B9D0294537D01A /* HanceWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1DD3CD1A7CD8E7602EF38AED /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
-		2155869ED4B4B45BAAD298C0 /* Onest-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */; };
 		25A08494C9BB4968C71EEAD9 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
 		273D1DF6695E591F43FC4C09 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
-		27588ABFD4BE6F36207934E1 /* Onest-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */; };
 		28431E50ECF2ACD05E026330 /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */; };
 		2870AE5F46BDD5BDFE28BC78 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E739C8A762606790E910E1D /* CoreClient.swift */; };
 		339234649382555EBAD59985 /* HanceNotification.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FCC37739D929CD8374A64D5 /* HanceNotification.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		37BF84676C1EC1879668E160 /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
 		3B7DECECCD969C9A04432B41 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */; };
 		408D75E123918542D895024F /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
 		409C40C4EB50334BCE04601B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 90BF89146EA45C249DDF15BF /* Assets.xcassets */; };
 		42002A4BE98B21A14582DD3E /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
-		446F2CA8DB776546D364E9CA /* Onest-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */; };
 		45511C0C885C452D45B9CCB2 /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
 		4658100E09FE8B5BF5E2227C /* CoreClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08E2BB6599ABBAB1B582322A /* CoreClientTests.swift */; };
 		46E681B0499489E703A1D5DF /* Wav.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342ACCC1EA3276479549B29C /* Wav.swift */; };
@@ -41,36 +40,31 @@
 		6127272D111F56F430740C01 /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
 		62061A97DC9D62467336564D /* NotificationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EC235690ED85973807EAAEC /* NotificationViewController.swift */; };
 		6C53B45A778768656EB9ACCC /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
-		73A1155EE112763CC37E36D4 /* MartianMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */; };
 		77D8027E7B7A992B36A5BD28 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9CF7D4A329FFACD4BB363851 /* Assets.xcassets */; };
-		7BBC267656B62249B573AA4F /* Onest-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */; };
+		810381AF0F22B124A6B3761E /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
 		8409D1BF10A9C3443353B6EA /* AnswerBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */; };
 		87318EC69623ACD0EE25C108 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
-		89D9E50B7FEFD97CEC1D1C52 /* Onest-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */; };
 		96230E662C9FE6E2DB7D65EB /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B59901B1EA1C4649BEAFDE0 /* Support.swift */; };
 		9714A668C8FB3BD3835D8364 /* TalkScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234D484032E679A4187AE9A0 /* TalkScreen.swift */; };
 		978D6440DD2432CC6EBC2BF3 /* HanceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA60CF2214FE0D810C7EB59 /* HanceApp.swift */; };
-		988D563D1CFE9C04074E923F /* MartianMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */; };
+		985296D6C70CD13AB03E11A2 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		9B1F93BB91098E4EED1862A1 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
 		A11A6073CCEB9CD82576DB71 /* TalkEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93B76D253F76B4F1BFC2E64 /* TalkEngine.swift */; };
-		A25BE1B88C794048471C5E03 /* Onest-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */; };
-		AD41EE58D1AA373BB13AE95E /* Onest-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */; };
 		ADE49118F4FA60705E24872D /* SilenceDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */; };
 		B2003C361F4D097D4A36BD6D /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
 		BFEEAFBA93227E89E6A2FBF4 /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
-		C1EFF97087AAF841544A90E3 /* Orb.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08DBA8465455FB6702C1976 /* Orb.swift */; };
 		C7AD80C5D389CFAADED0CEF7 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
-		C86130DA4CF1052CFB48789C /* Onest-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */; };
 		C8CC653292359206D8DA6A91 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4176F77F1F4D8454C8B9E1DE /* Sheets.swift */; };
 		CEA1DAB8D718E5EFA770D050 /* TalkLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05B4AD23A1E8DE0838D8DD79 /* TalkLiveActivity.swift */; };
 		CEE10557B210C50CD9175ACF /* SpeechChunkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */; };
 		D1B107EDD4339D6B96014344 /* AnswerWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9D5D2F357894B785773B5F /* AnswerWait.swift */; };
+		DAAFF017E33D0481706CDD12 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		E32BD04277A9637AD41063B0 /* AnswerWaitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */; };
 		E7DD18D64126389FB07D22F4 /* Mic.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06640BE7BA84F21BC840DB /* Mic.swift */; };
-		E99A01ED225639068CA9AE0A /* MartianMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */; };
+		EBE3E6EBF5D9EC5063115B21 /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
 		F176537965628CB78E16E7B8 /* Earcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E267B5B1FD895845A8D23FF /* Earcon.swift */; };
+		F26993DFFCDED49C88102C91 /* AvatarStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 665CD155617AC12938D9EF66 /* AvatarStage.swift */; };
 		F2C64B5ADDB27F89F417DF3B /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
-		F517A1688301CE547227D265 /* Onest-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,12 +111,8 @@
 		08E2BB6599ABBAB1B582322A /* CoreClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClientTests.swift; sourceTree = "<group>"; };
 		09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilenceDetectorTests.swift; sourceTree = "<group>"; };
 		0B7455A5F0D11201F6030750 /* HanceWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceWidgets.swift; sourceTree = "<group>"; };
-		16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "MartianMono-Medium.ttf"; sourceTree = "<group>"; };
 		1FCC37739D929CD8374A64D5 /* HanceNotification.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HanceNotification.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Onest-SemiBold.ttf"; sourceTree = "<group>"; };
 		234D484032E679A4187AE9A0 /* TalkScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkScreen.swift; sourceTree = "<group>"; };
-		2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Onest-Regular.ttf"; sourceTree = "<group>"; };
-		293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Onest-Medium.ttf"; sourceTree = "<group>"; };
 		2E2E0C12C02EAC73A7186093 /* Wordmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wordmark.swift; sourceTree = "<group>"; };
 		342ACCC1EA3276479549B29C /* Wav.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wav.swift; sourceTree = "<group>"; };
 		350132D3E31E66B3154B520B /* HanceTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -136,6 +126,7 @@
 		4E739C8A762606790E910E1D /* CoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClient.swift; sourceTree = "<group>"; };
 		5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerBanner.swift; sourceTree = "<group>"; };
 		5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		665CD155617AC12938D9EF66 /* AvatarStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarStage.swift; sourceTree = "<group>"; };
 		66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunkerTests.swift; sourceTree = "<group>"; };
 		6764B70361BF2831DCAB0EE7 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
 		6AB12B71572D5D2376BFBBE2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -151,12 +142,13 @@
 		A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerWaitTests.swift; sourceTree = "<group>"; };
 		ACFD14035E16132BEA9A7756 /* Brand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Brand.swift; sourceTree = "<group>"; };
 		AD06640BE7BA84F21BC840DB /* Mic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mic.swift; sourceTree = "<group>"; };
+		AD469B3E40120589311F2517 /* Involve-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Involve-Regular.ttf"; sourceTree = "<group>"; };
 		B93B76D253F76B4F1BFC2E64 /* TalkEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkEngine.swift; sourceTree = "<group>"; };
 		C695714E5A7578DFE49B7298 /* SilenceDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilenceDetector.swift; sourceTree = "<group>"; };
 		CEA60CF2214FE0D810C7EB59 /* HanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceApp.swift; sourceTree = "<group>"; };
+		D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Involve-SemiBold.ttf"; sourceTree = "<group>"; };
 		DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "MartianMono-Regular.ttf"; sourceTree = "<group>"; };
 		EEA23B0D7058A41AF35B6217 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
-		F08DBA8465455FB6702C1976 /* Orb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Orb.swift; sourceTree = "<group>"; };
 		F4209E24635DB2A603522BF6 /* SpeechChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunker.swift; sourceTree = "<group>"; };
 		F9EF12B146DC66D45B44B10E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FF82234EB3D6450BC147BCA7 /* KnightHop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnightHop.swift; sourceTree = "<group>"; };
@@ -227,7 +219,7 @@
 			isa = PBXGroup;
 			children = (
 				5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */,
-				F08DBA8465455FB6702C1976 /* Orb.swift */,
+				665CD155617AC12938D9EF66 /* AvatarStage.swift */,
 				4176F77F1F4D8454C8B9E1DE /* Sheets.swift */,
 				234D484032E679A4187AE9A0 /* TalkScreen.swift */,
 			);
@@ -299,11 +291,9 @@
 		E3B6C61532260076E661A04A /* Fonts */ = {
 			isa = PBXGroup;
 			children = (
-				16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */,
+				AD469B3E40120589311F2517 /* Involve-Regular.ttf */,
+				D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */,
 				DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */,
-				293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */,
-				2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */,
-				20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -457,11 +447,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				409C40C4EB50334BCE04601B /* Assets.xcassets in Resources */,
-				988D563D1CFE9C04074E923F /* MartianMono-Medium.ttf in Resources */,
+				37BF84676C1EC1879668E160 /* Involve-Regular.ttf in Resources */,
+				985296D6C70CD13AB03E11A2 /* Involve-SemiBold.ttf in Resources */,
 				BFEEAFBA93227E89E6A2FBF4 /* MartianMono-Regular.ttf in Resources */,
-				7BBC267656B62249B573AA4F /* Onest-Medium.ttf in Resources */,
-				446F2CA8DB776546D364E9CA /* Onest-Regular.ttf in Resources */,
-				27588ABFD4BE6F36207934E1 /* Onest-SemiBold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -470,11 +458,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				3B7DECECCD969C9A04432B41 /* Assets.xcassets in Resources */,
-				73A1155EE112763CC37E36D4 /* MartianMono-Medium.ttf in Resources */,
+				EBE3E6EBF5D9EC5063115B21 /* Involve-Regular.ttf in Resources */,
+				0D83C536C3994B5DE8127ED3 /* Involve-SemiBold.ttf in Resources */,
 				F2C64B5ADDB27F89F417DF3B /* MartianMono-Regular.ttf in Resources */,
-				F517A1688301CE547227D265 /* Onest-Medium.ttf in Resources */,
-				A25BE1B88C794048471C5E03 /* Onest-Regular.ttf in Resources */,
-				AD41EE58D1AA373BB13AE95E /* Onest-SemiBold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -483,11 +469,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				77D8027E7B7A992B36A5BD28 /* Assets.xcassets in Resources */,
-				E99A01ED225639068CA9AE0A /* MartianMono-Medium.ttf in Resources */,
+				810381AF0F22B124A6B3761E /* Involve-Regular.ttf in Resources */,
+				DAAFF017E33D0481706CDD12 /* Involve-SemiBold.ttf in Resources */,
 				0129F9707A92FF2780CB686E /* MartianMono-Regular.ttf in Resources */,
-				C86130DA4CF1052CFB48789C /* Onest-Medium.ttf in Resources */,
-				89D9E50B7FEFD97CEC1D1C52 /* Onest-Regular.ttf in Resources */,
-				2155869ED4B4B45BAAD298C0 /* Onest-SemiBold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -541,6 +525,7 @@
 				1A91D5B2AA5DED69ECC1A3CF /* Agent.swift in Sources */,
 				8409D1BF10A9C3443353B6EA /* AnswerBanner.swift in Sources */,
 				D1B107EDD4339D6B96014344 /* AnswerWait.swift in Sources */,
+				F26993DFFCDED49C88102C91 /* AvatarStage.swift in Sources */,
 				180F0A05D2ABA03161FAEC44 /* Brand.swift in Sources */,
 				2870AE5F46BDD5BDFE28BC78 /* CoreClient.swift in Sources */,
 				F176537965628CB78E16E7B8 /* Earcon.swift in Sources */,
@@ -550,7 +535,6 @@
 				0867A51A5AED2FA7C2B6F979 /* KnightHop.swift in Sources */,
 				57F92B7E8BC37EFEC2F84B49 /* KnightMark.swift in Sources */,
 				E7DD18D64126389FB07D22F4 /* Mic.swift in Sources */,
-				C1EFF97087AAF841544A90E3 /* Orb.swift in Sources */,
 				0006C09B3779B7C51AF7166A /* SessionStore.swift in Sources */,
 				C8CC653292359206D8DA6A91 /* Sheets.swift in Sources */,
 				4894B233B9B3B52E0033A1E5 /* SilenceDetector.swift in Sources */,

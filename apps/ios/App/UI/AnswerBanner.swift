@@ -57,7 +57,7 @@ struct AnswerBanner: View {
             .fixedSize(horizontal: false, vertical: true)
             if card.cards > 0 {
                 Label("Кнопки пришли в Telegram и во Входящие пульта", systemImage: "rectangle.on.rectangle")
-                    .font(HanceFont.text(13, .medium))
+                    .font(HanceFont.text(13))
                     .foregroundStyle(palette.accentInk)
             }
         }

@@ -110,7 +110,7 @@ struct CompactPhase: View {
                 Bars(values: Array(state.bars.suffix(5)), color: palette.accent, height: 16, width: 3)
             case .thinking:
                 Text(timerInterval: state.since...Date.distantFuture, countsDown: false)
-                    .font(HanceFont.mono(12, .medium))
+                    .font(HanceFont.mono(12))
                     .monospacedDigit()
                     .foregroundStyle(palette.accent)
                     .frame(width: 38, alignment: .trailing)
@@ -144,7 +144,7 @@ struct PhaseStrip: View {
             case .listening, .speaking:
                 Bars(values: state.bars, color: palette.accent, height: height, width: 5)
                 Spacer(minLength: 0)
-                Text(state.phase == .listening ? "говори" : "отвечает")
+                Text(state.phase.label)
                     .monoLabel(10)
                     .foregroundStyle(palette.accent)
             case .thinking:
@@ -155,14 +155,14 @@ struct PhaseStrip: View {
                 }
                 .tint(palette.accent)
                 Text(timerInterval: state.since...Date.distantFuture, countsDown: false)
-                    .font(HanceFont.mono(13, .medium))
+                    .font(HanceFont.mono(13))
                     .monospacedDigit()
                     .foregroundStyle(palette.accent)
                     .frame(width: 46, alignment: .trailing)
             case .sending:
                 Bars(values: Array(repeating: 0.35, count: 7), color: palette.accent.opacity(0.6), height: height, width: 5)
                 Spacer(minLength: 0)
-                Text("разбирает").monoLabel(10).foregroundStyle(palette.accent)
+                Text(state.phase.label).monoLabel(10).foregroundStyle(palette.accent)
             default:
                 KnightMark().fill(palette.accent).frame(width: height * 0.7, height: height * 0.7)
                 Spacer(minLength: 0)
@@ -230,7 +230,7 @@ struct LockScreenTalk: View {
                     }
                     Text(state.line ?? state.agent.role)
                         .font(HanceFont.text(14))
-                        .foregroundStyle(p.ink2)
+                        .foregroundStyle(p.muted)
                         .lineLimit(2)
                 }
                 Spacer(minLength: 0)

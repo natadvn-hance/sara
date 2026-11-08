@@ -5,9 +5,10 @@ from fontTools.merge import Merger
 
 src, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
+# Involve (the words) is used as the site ships it: Проекты/hance/site/assets/fonts/Involve-*.ttf.
+# Martian Mono (the labels) comes from the site's web fonts, three subsets merged into one static TTF.
 fams = {
-  'Onest': ('onest', {'Regular': 400, 'Medium': 500, 'SemiBold': 600}),
-  'MartianMono': ('martian-mono', {'Regular': 400, 'Medium': 500}),
+  'MartianMono': ('martian-mono', {'Regular': 400}),
 }
 for fam, (prefix, weights) in fams.items():
   for style, w in weights.items():

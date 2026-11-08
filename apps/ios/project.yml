@@ -19,11 +19,9 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
 fontsList: &fonts
-  - Onest-Regular.ttf
-  - Onest-Medium.ttf
-  - Onest-SemiBold.ttf
+  - Involve-Regular.ttf
+  - Involve-SemiBold.ttf
   - MartianMono-Regular.ttf
-  - MartianMono-Medium.ttf
 targets:
   Hance:
     type: application

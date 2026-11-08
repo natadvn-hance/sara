@@ -39,7 +39,7 @@ struct LoginView: View {
                     .onSubmit(signIn)
                 if let error {
                     Text(error)
-                        .font(HanceFont.text(14, .medium))
+                        .font(HanceFont.text(14))
                         .foregroundStyle(palette.accentInk)
                 }
                 Button(action: signIn) {
@@ -154,12 +154,12 @@ struct TimingsSheet: View {
                                     .foregroundStyle(palette.muted)
                                 Spacer()
                                 Text("до голоса \(sec(t.total))")
-                                    .font(HanceFont.mono(12, .medium))
+                                    .font(HanceFont.mono(12))
                                     .foregroundStyle(palette.accentInk)
                             }
                             Text(parts(t))
                                 .font(HanceFont.mono(11))
-                                .foregroundStyle(palette.ink2)
+                                .foregroundStyle(palette.muted)
                         }
                         .padding(.vertical, 4)
                     }

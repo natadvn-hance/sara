@@ -23,16 +23,17 @@ struct KnightMark: Shape {
     }
 }
 
-/// The logo as on the site's header: the knight in the colour of the one who speaks, the word in ink.
+/// The logo as logo-hance-current.svg: the knight in the colour of the one who speaks, the word «hance» in ink, its
+/// foot on the knight's foot.
 struct HanceLogo: View {
-    var height: CGFloat = 20
+    var height: CGFloat = 22
     var mark: Color
     var word: Color
 
     var body: some View {
-        HStack(alignment: .center, spacing: height * 0.42) {
+        HStack(alignment: .bottom, spacing: height * 40 / 140) {
             KnightMark().fill(mark).frame(width: height, height: height)
-            Wordmark().fill(word).frame(width: height * 3.95 * 0.86, height: height * 0.86)
+            Wordmark().fill(word).frame(width: height * 445.9 / 140, height: height * 112.8 / 140)
         }
         .accessibilityElement()
         .accessibilityLabel("Hance")

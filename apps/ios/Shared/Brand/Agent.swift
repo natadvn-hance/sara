@@ -31,14 +31,14 @@ enum TalkPhase: String, Codable, Hashable, Sendable {
     /// No answer: no network, a lost answer.
     case failed
 
-    /// As the PWA says it: «Лора слушает», «Сара думает».
+    /// In her own words, as the PWA says it: на связи, слушаю, расслышала, думаю, говорю.
     var label: String {
         switch self {
         case .idle: return "на связи"
-        case .listening: return "слушает"
-        case .sending: return "разбирает"
-        case .thinking: return "думает"
-        case .speaking: return "говорит"
+        case .listening: return "слушаю"
+        case .sending: return "расслышала"
+        case .thinking: return "думаю"
+        case .speaking: return "говорю"
         case .done: return "ответила"
         case .failed: return "нет ответа"
         }
