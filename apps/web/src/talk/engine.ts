@@ -1,5 +1,5 @@
-import { type Agent, type Sent, SignedOut, talkApi } from './client'
-import { createSilence, waitForAnswer } from './logic'
+import { type Agent, failureOf, type Sent, SignedOut, talkApi } from './client'
+import { createSilence, splitSpeech, waitForAnswer } from './logic'
 import { createPlayer, keepAwake, type Mic, openMic, type Played, speakLocally } from './media'
 
 export type Phase = 'loading' | 'login' | 'idle' | 'listening' | 'sending' | 'thinking' | 'speaking'
@@ -153,14 +153,26 @@ export function createTalkEngine(
     set({ phase: 'speaking' })
     let played: Played
     try {
-      const audio = await talkApi.speak(text, agent)
+      // Both parts are asked for at once: the first plays while the second is still being made.
+      const [first, rest] = splitSpeech(text)
+      const firstAudio = talkApi.speak(first, agent)
+      const restAudio = rest ? talkApi.speak(rest, agent) : Promise.resolve(null)
+      restAudio.catch(() => {})
+      const audio = await firstAudio
       if (mine !== turn) return
       if (touched) {
         stopLoop()
         closeMic()
         audioSession('playback')
       }
-      played = audio ? await player.play(audio) : await speakLocally(text)
+      if (!audio) played = await speakLocally(text)
+      else {
+        played = await player.play(audio)
+        if (played === 'played' && rest && mine === turn) {
+          const more = await restAudio.catch(() => null)
+          if (mine === turn) played = more ? await player.play(more) : await speakLocally(rest)
+        }
+      }
     } catch (e) {
       if (signedOut(e)) return
       played = 'failed'
@@ -207,7 +219,7 @@ export function createTalkEngine(
     } catch (e) {
       if (signedOut(e)) return
       patch(mine, { pending: false })
-      add({ who: 'note', text: TALK_NOTES.failed })
+      add({ who: 'note', text: `${TALK_NOTES.failed} (${failureOf(e)})` })
       idle()
     }
   }
@@ -242,7 +254,7 @@ export function createTalkEngine(
     recording = m.record()
     const silence = createSilence({
       threshold: 0.06,
-      pauseMs: 1400,
+      pauseMs: 900,
       startWaitMs: followUp ? 6000 : 10_000,
       maxMs: 90_000,
     })
@@ -268,18 +280,6 @@ export function createTalkEngine(
     }, 100)
   }
 
-  /** The chat with one of them so far, as the core keeps it. */
-  async function historyOf(agent: Agent): Promise<Item[]> {
-    const lines = await talkApi.history(agent)
-    return lines.map((l) => ({
-      id: uid(),
-      agent,
-      who: l.author === 'boris' ? 'boris' : 'agent',
-      text: l.text,
-      at: Date.parse(l.at),
-    }))
-  }
-
   /** She greets: her line in the feed and in her voice; with the side button the mic is opened first. */
   async function greet(followUp: boolean): Promise<void> {
     const text = AGENT_UI[view.agent].greeting
@@ -298,15 +298,16 @@ export function createTalkEngine(
     loaded = true
     try {
       const params = new URLSearchParams(window.location.search)
-      const [lora, sara] = await Promise.all([historyOf('lora'), historyOf('sara')])
-      set({ phase: 'idle', items: [...lora, ...sara].sort((a, b) => a.at - b.at) })
+      // No feed to fill: the voice is woken at once instead, so her first answer is not slowed by the model's load.
+      await talkApi.start()
+      set({ phase: 'idle' })
       if (params.get('go') === '1') {
         window.history.replaceState(null, '', window.location.pathname)
         await greet(true)
       }
     } catch (e) {
       if (signedOut(e)) return
-      add({ who: 'note', text: TALK_NOTES.failed })
+      add({ who: 'note', text: `${TALK_NOTES.failed} (${failureOf(e)})` })
       set({ phase: 'idle' })
     }
   }

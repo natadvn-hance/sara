@@ -35,6 +35,25 @@ const SpeakBody = z.object({ text: z.string().trim().min(1).max(4000), agent: Ag
 const AgentQuery = z.object({ agent: AgentId.optional() })
 const LoraReply = z.object({ talk: z.uuid(), text: z.string().trim().min(1).max(4000) })
 
+/**
+ * One line a request in the log (Boris 08.11: «Нет связи» could not be told apart): the path without the talk's id,
+ * the agent, the code, the time, the size, an error's own words. Never the words said.
+ */
+function journal(scope: FastifyInstance): void {
+  scope.addHook('onError', async (req, _reply, err) => {
+    ;(req as { talkError?: string }).talkError = err.message.slice(0, 200)
+  })
+  scope.addHook('onResponse', async (req, reply) => {
+    const path = req.url.split('?')[0]?.replace(/[0-9a-f-]{36}/, ':id')
+    const agent = /[?&]agent=(\w+)/.exec(req.url)?.[1] ?? '-'
+    const size = req.headers['content-length'] ?? '0'
+    const error = (req as { talkError?: string }).talkError
+    console.log(
+      `talk ${req.method} ${path} agent=${agent} ${reply.statusCode} ${Math.round(reply.elapsedTime)}ms body=${size}${error ? ` error=${error}` : ''}`,
+    )
+  })
+}
+
 const same = (a: string, b: string) => {
   const x = Buffer.from(a)
   const y = Buffer.from(b)
@@ -78,6 +97,7 @@ export function registerTalkRoutes(
 ): void {
   /** Lora's channel, from her session on the server: by her key only, never by the pult's sign-in. */
   app.register(async (lora) => {
+    journal(lora)
     lora.addHook('onRequest', async (req, reply) => {
       if (!d.loraToken) return reply.code(503).send({ error: 'the app channel is off' })
       const given = req.headers['x-sara-lora-token']
@@ -85,7 +105,12 @@ export function registerTalkRoutes(
         return reply.code(401).send({ error: 'unauthorized' })
     })
     lora.get(`${LORA_APP_PATH}/next`, async (_req, reply) => {
-      const w = await d.lora.next(d.waitMs ?? WAIT_MS)
+      // The channel may cut its ask: its word must not go to a closed socket.
+      const gone = new AbortController()
+      reply.raw.on('close', () => {
+        if (!reply.raw.writableEnded) gone.abort()
+      })
+      const w = await d.lora.next(d.waitMs ?? WAIT_MS, gone.signal)
       return w ?? reply.code(204).send()
     })
     lora.post(`${LORA_APP_PATH}/reply`, async (req, reply) => {
@@ -99,6 +124,7 @@ export function registerTalkRoutes(
   })
 
   app.register(async (scoped) => {
+    journal(scoped)
     scoped.addHook('onRequest', requireSession)
     scoped.addContentTypeParser(
       /^(?:audio\/|video\/mp4|application\/octet-stream)/,

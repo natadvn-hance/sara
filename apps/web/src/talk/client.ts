@@ -17,6 +17,23 @@ export type Line = { author: 'boris' | 'sara' | 'lora'; text: string; at: string
 
 export class SignedOut extends Error {}
 
+/** A refusal of the core, with its code: the app shows the code, so «Нет связи» is never a mystery. */
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+/** A short name of what went wrong, for the small print under «Нет связи». */
+export function failureOf(e: unknown): string {
+  if (e instanceof HttpError) return `код ${e.status}`
+  if (e instanceof Error) return e.name === 'Error' ? e.message.slice(0, 60) : e.name
+  return 'неизвестно'
+}
+
 async function call(path: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(path, {
     ...init,
@@ -30,7 +47,7 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
 
 const json = async <T>(res: Response): Promise<T> => {
   const data = (await res.json().catch(() => ({}))) as T & { error?: string }
-  if (!res.ok && res.status !== 404) throw new Error(data.error ?? 'Нет связи.')
+  if (!res.ok && res.status !== 404) throw new HttpError(res.status, data.error ?? 'Нет связи.')
   return data
 }
 
@@ -76,4 +93,8 @@ export const talkApi = {
     return res.ok ? res.blob() : null
   },
   warm: () => void call('/api/talk/warm', { method: 'POST' }).catch(() => {}),
+  /** The voice woken at the start, which also says whether Boris is signed in (SignedOut otherwise). */
+  start: async () => {
+    await call('/api/talk/warm', { method: 'POST' })
+  },
 }

@@ -37,6 +37,22 @@ export function recordingType(supported: (type: string) => boolean): string {
   return ''
 }
 
+/**
+ * The answer in two parts for her voice: the first sentence alone, so it is ready and playing while the rest is still
+ * being made. A short answer stays whole.
+ */
+export function splitSpeech(text: string): [string, string] {
+  const t = text.trim()
+  const re = /[.!?…](?=\s)/g
+  for (let m = re.exec(t); m; m = re.exec(t)) {
+    const end = m.index + 1
+    if (end >= 25 && end <= 220 && t.length - end >= 20)
+      return [t.slice(0, end), t.slice(end).trim()]
+    if (end > 220) break
+  }
+  return [t, '']
+}
+
 export type TalkState =
   | { state: 'done'; text: string; cards: number }
   | { state: 'waiting' }
