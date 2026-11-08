@@ -56,6 +56,10 @@ export type FakeTelegram = {
   /** Buttons replaced on a sent message (editMessageReplyMarkup): a card decided in the pult. */
   markups: { message_id: number; reply_markup: EditedMessage['reply_markup'] }[]
   answers: { callback_query_id: string; text?: string }[]
+  /** Messages deleted by the bot (deleteMessage), as chat and message number. */
+  deleted: { chat_id: number; message_id: number }[]
+  /** deleteMessage answers «not enough rights» like a bot that may not delete. */
+  setDeleteRefused(on: boolean): void
   /** sendChatAction calls («печатает…»), in order. */
   actions: string[]
   pushStart(chatId: number): void
@@ -79,6 +83,8 @@ export type FakeTelegram = {
   /** Calls the fake answers with a plain `true` (setMyCommands, setChatMenuButton...), in order. */
   calls: { method: string; params: Record<string, unknown> }[]
   pushGroupText(m: GroupText): void
+  /** A voice message in a group (a topic when `thread` is given). */
+  pushGroupVoice(m: Omit<GroupText, 'text'>): void
   /** A press in a group, by `fromId`, on a message in `thread`. */
   pushGroupPress(chatId: number, fromId: number, data: string, thread?: number): string
   /** The bot's own membership changed (taken out of the group: `left` or `kicked`). */
@@ -180,6 +186,8 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   let nextCallback = 1
   let conflict = false
   let fileBroken = false
+  let deleteRefused = false
+  const deleted: FakeTelegram['deleted'] = []
   let rejectHtml = false
   let sendDelayMs = 0
   const now = () => Math.floor(Date.now() / 1000)
@@ -360,6 +368,10 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           else t.closed = method === 'closeForumTopic'
           return reply(true)
         }
+        case 'deleteMessage':
+          if (deleteRefused) return refuse(res, 400, "Bad Request: message can't be deleted")
+          deleted.push({ chat_id: Number(params.chat_id), message_id: Number(params.message_id) })
+          return reply(true)
         case 'editMessageReplyMarkup':
           markups.push({ message_id: Number(params.message_id), reply_markup: params.reply_markup })
           return reply(true)
@@ -484,6 +496,10 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
         },
       })
     },
+    deleted,
+    setDeleteRefused(on) {
+      deleteRefused = on
+    },
     setFileBroken(on) {
       fileBroken = on
     },
@@ -502,6 +518,42 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     },
     topics,
     calls,
+    pushGroupVoice(m) {
+      const chat = {
+        id: m.chatId,
+        type: 'supergroup',
+        title: m.title ?? 'Сара · клиенты',
+        is_forum: true,
+      }
+      const messageId = nextId(m.chatId)
+      const fileId = `voice-${m.chatId}-${messageId}`
+      const topic = m.thread !== undefined ? topicOf(m.chatId, m.thread) : undefined
+      updates.push({
+        update_id: nextUpdate++,
+        message: {
+          message_id: messageId,
+          date: now(),
+          chat,
+          from: { id: m.fromId, is_bot: false, first_name: 'Борис' },
+          voice: {
+            file_id: fileId,
+            file_unique_id: `u-${fileId}`,
+            duration: 3,
+            mime_type: 'audio/ogg',
+          },
+          ...(m.thread !== undefined && {
+            message_thread_id: m.thread,
+            is_topic_message: true,
+            reply_to_message: {
+              message_id: m.thread,
+              date: now(),
+              chat,
+              forum_topic_created: { name: topic?.name ?? 'тема', icon_color: 7322096 },
+            },
+          }),
+        },
+      })
+    },
     pushGroupText(m) {
       const chat = {
         id: m.chatId,

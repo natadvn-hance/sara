@@ -30,6 +30,7 @@ export type RoleName =
   | 'reply-cleaner'
   | 'meeting'
   | 'meeting-result'
+  | 'topic-chat'
 
 export async function loadRole(
   rolesDir: string,

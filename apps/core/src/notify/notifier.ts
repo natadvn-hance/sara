@@ -72,6 +72,11 @@ export type Notifier = {
   setTopicStage?(place: { conversation: string } | { order: string }, dot: string): Promise<void>
   /** The references of the bot's posts in the client's topic, the oldest first (the intro is the first); empty without one. */
   topicPosts?(place: { conversation: string } | { order: string }): Promise<number[]>
+  /**
+   * Deletes a post of the topic (the bot's or Boris's): true when Telegram did. The bot needs can_delete_messages, and
+   * Telegram deletes only within 48 hours; any refusal is false, never a throw.
+   */
+  deletePost?(ref: number): Promise<boolean>
   /** Pins a post of the bot in its topic or chat, quietly; it never throws. */
   pinPost?(ref: number): Promise<void>
   /** Whether Boris's forum is bound: a message for a client's topic is worth sending only then. It never throws. */

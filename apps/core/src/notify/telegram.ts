@@ -749,6 +749,16 @@ export function createTelegramRuntime(d: {
           })
           .catch((e: unknown) => console.error('card not marked', short(e)))
       },
+      async deletePost(ref) {
+        const at = await locate(ref)
+        if (!at) return false
+        try {
+          return await bot.api.deleteMessage(at.to, at.id)
+        } catch (e) {
+          console.error('post not deleted', short(e))
+          return false
+        }
+      },
       async editText(ref, text, rows, o) {
         const at = await locate(ref)
         if (!at) return void console.error('message not edited: unknown', ref)

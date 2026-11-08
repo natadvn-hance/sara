@@ -35,8 +35,10 @@ services:
       SARA_SHEET_URL: ${SARA_SHEET_URL:-}
       SARA_SHEET_SECRET: ${SARA_SHEET_SECRET:-}
       SARA_LORA_TOKEN: ${SARA_LORA_TOKEN:-}
+      # Lora's speech service through /srv/voice-share (docs/superpowers/specs/2026-11-07-topic-chat-design.md, 7).
+      SARA_VOICE_SOCKET: ${SARA_VOICE_SOCKET:-}
     # The mind: a clone of natadvn-hance/sara-mind on the host, read only for the core (RB-17).
-    volumes: [sara-data:/data, /opt/sara-mind:/data/mind:ro]
+    volumes: [sara-data:/data, /opt/sara-mind:/data/mind:ro, /srv/voice-share:/srv/voice-share]
     depends_on: [postgres]
     networks: [edge, internal]
 

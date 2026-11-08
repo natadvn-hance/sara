@@ -162,7 +162,7 @@ describe('model gateway', () => {
     ])
   })
 
-  it('ADR-027 (07.11.2026): only the pinger names built-in tools; every other role runs with none', async () => {
+  it('ADR-027 (07.11.2026): only the pinger and the topic chat name built-in tools; every other role runs with none', async () => {
     const { readdir } = await import('node:fs/promises')
     const withTools: string[] = []
     for (const name of await readdir(join(ROOT, 'roles'))) {
@@ -171,7 +171,7 @@ describe('model gateway', () => {
       ) as { tools?: string[] }
       if (meta.tools) withTools.push(`${name}: ${meta.tools.join(',')}`)
     }
-    expect(withTools).toEqual(['pinger: WebSearch,WebFetch'])
+    expect(withTools).toEqual(['pinger: WebSearch,WebFetch', 'topic-chat: WebSearch,WebFetch'])
   })
 
   it('ADR-027 (07.11.2026): a stream gives its last result and the pages the tools returned, not what the model wrote', () => {

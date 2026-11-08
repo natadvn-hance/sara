@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { mkdir, rm } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, rm } from 'node:fs/promises'
+import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { newEventId } from '@sara/shared'
 
@@ -65,6 +66,67 @@ export function createTranscriber(c: {
         return r.ok && text ? text : null
       } finally {
         await rm(wav, { force: true })
+      }
+    },
+  }
+}
+
+/**
+ * Boris's voice heard by Lora's speech service on the same server (docs/superpowers/specs/2026-11-07-topic-chat-design.md,
+ * section 4): one faster-whisper model in memory for both. The voice is copied to the shared folder, the socket gets one
+ * JSON line `{"op":"transcribe","path":...}` and answers one line `{"ok":true,"text":...}`. No socket, a silent service
+ * or an empty text is null, never a throw; the copy is removed at once.
+ */
+export function createSocketTranscriber(c: {
+  socketPath: string
+  dropDir: string
+  timeoutMs?: number
+}): Transcriber {
+  const timeoutMs = c.timeoutMs ?? 120_000
+  const ask = (path: string) =>
+    new Promise<string | null>((done) => {
+      let buf = ''
+      let finished = false
+      const end = (v: string | null) => {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        sock.destroy()
+        done(v)
+      }
+      const sock = createConnection(c.socketPath)
+      const timer = setTimeout(() => end(null), timeoutMs)
+      sock.on('connect', () => sock.write(`${JSON.stringify({ op: 'transcribe', path })}\n`))
+      sock.on('data', (b: Buffer) => {
+        buf += b.toString('utf8')
+        const nl = buf.indexOf('\n')
+        if (nl < 0) return
+        try {
+          const r = JSON.parse(buf.slice(0, nl)) as { ok?: boolean; text?: unknown }
+          end(r.ok && typeof r.text === 'string' && r.text.trim() ? r.text.trim() : null)
+        } catch {
+          end(null)
+        }
+      })
+      sock.on('error', (e) => {
+        console.error('voice socket', e.message)
+        end(null)
+      })
+      sock.on('close', () => end(null))
+    })
+  return {
+    async transcribe(audioPath) {
+      const drop = join(c.dropDir, `${newEventId()}.oga`)
+      try {
+        await mkdir(c.dropDir, { recursive: true })
+        await copyFile(audioPath, drop)
+        await chmod(drop, 0o640)
+        return await ask(drop)
+      } catch (e) {
+        console.error('voice socket', e instanceof Error ? e.message : e)
+        return null
+      } finally {
+        await rm(drop, { force: true })
       }
     },
   }

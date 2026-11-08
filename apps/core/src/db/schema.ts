@@ -503,6 +503,36 @@ export const topicShown = core.table(
   (t) => [primaryKey({ columns: [t.key, t.ref] })],
 )
 
+/**
+ * The discussion of a message in a client's topic (docs/superpowers/specs/2026-11-07-topic-chat-design.md): Boris's
+ * words to the chat in the topic, the transcript of his voice, Sara's lines and her interim versions. Once the topic
+ * shows our sent message, these posts are deleted (or folded) and `cleared_at` set. Only the post's reference is kept,
+ * never the words of a post the bot did not write.
+ */
+export const topicDiscussion = core.table(
+  'topic_discussion',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    conversationId: uuid('conversation_id').notNull(),
+    /** The post's reference (negative, `telegram_post`). */
+    ref: integer('ref').notNull(),
+    /** boris | transcript | sara | version */
+    kind: text('kind').notNull(),
+    /** The words of the post (his, the transcript, Sara's), for the next turn's input; emptied once cleared. */
+    text: text('text'),
+    /** A version's card task (`conv_say`): a newer version or the clearing closes it. */
+    taskId: uuid('task_id'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    clearedAt: ts('cleared_at'),
+    /** deleted | folded | kept (a post of Boris's Telegram would not delete) */
+    clearedHow: text('cleared_how'),
+  },
+  (t) => [
+    uniqueIndex('topic_discussion_ref').on(t.ref),
+    index('topic_discussion_open').on(t.conversationId, t.clearedAt),
+  ],
+)
+
 /** Every chat message Sara knows, live or exported from history, with whose voice it is (FR-CONV-2, FR-TRAIN-1). */
 export const chatMessage = core.table(
   'chat_message',

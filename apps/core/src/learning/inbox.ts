@@ -116,7 +116,7 @@ export async function handleBorisMessage(
       voice: boolean
       messageId?: number
       at: Date
-    }): Promise<BorisReply>
+    }): Promise<BorisReply | null>
   },
   m: BorisMessage,
 ): Promise<BorisReply | null> {

@@ -150,6 +150,10 @@ export const EVENT_TYPES = [
   'exam.golden_worse',
   /** ADR-027: one turn of the Secretary: which tools it used and how it ended, never the words. */
   'secretary.answered',
+  /** The chat in a client's topic (docs/superpowers/specs/2026-11-07-topic-chat-design.md): one turn, tools and outcome, never the words. */
+  'topic.chat_answered',
+  /** The discussion of a sent message removed from the topic: the posts' numbers deleted and folded, never their words. */
+  'topic.discussion_cleared',
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
