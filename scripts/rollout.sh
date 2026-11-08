@@ -15,6 +15,9 @@ cd "$(dirname "$0")/.."
 C="docker compose -f infra/compose.prod.yml --env-file .env"
 OLD="${1:-}"
 STATE="${SARA_DEPLOY_STATE:-$HOME/.sara-deployed}"
+# Services this deploy leaves as they run, by the operator's word (SARA_DEPLOY_SKIP="profi-node"): for a change the
+# service does not use when the disk has no room to rebuild it. Their record stays, so the next deploy still sees it.
+SKIP=" ${SARA_DEPLOY_SKIP:-} "
 HEAD=$(git rev-parse HEAD)
 mkdir -p "$STATE"
 
@@ -73,6 +76,7 @@ echo "Свободно на диске перед сборкой: $(free_gb) Г�
 for s in $($C config --services); do
   # The database is an image of its own, never built here.
   [ "$s" = postgres ] && continue
+  case "$SKIP" in *" $s "*) echo "== ${s}: оставляю как есть (SARA_DEPLOY_SKIP)"; continue ;; esac
   if ! changed "$s"; then
     echo "== ${s}: без изменений, не собираю"
     echo "$HEAD" > "$STATE/$s"
