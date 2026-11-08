@@ -78,7 +78,13 @@ describe("Boris's new voice on test orders first (07.11.2026)", () => {
     await putRecord(
       root,
       `mind/directions/${DIR}/judgment/talking.md`,
-      { id: 'j-talking-hance', type: 'judgment', scope: DIR, title: 'Разговор Hance', stages: ['talking'] },
+      {
+        id: 'j-talking-hance',
+        type: 'judgment',
+        scope: DIR,
+        title: 'Разговор Hance',
+        stages: ['talking'],
+      },
       '## Правило: разговор\nСвоё.',
     )
     await ensureMindIndex(db, root)
