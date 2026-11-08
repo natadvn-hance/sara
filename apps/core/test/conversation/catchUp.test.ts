@@ -17,7 +17,9 @@ let started: string[]
 const start = async (c: { chatId: string }) => {
   started.push(c.chatId)
 }
-const NOW = new Date('2026-11-01T10:00:00.000Z')
+// From the real clock: startCatchUp looks back 7 days from the moment it runs, so a fixed date stopped finding the
+// test's chat a week later (08.11.2026, every CI run touching conversations failed on it).
+const NOW = new Date()
 const ago = (min: number) => new Date(NOW.getTime() - min * 60_000).toISOString()
 
 /** A chat with these messages (author, minutes ago), stored as the sync stores them. */
