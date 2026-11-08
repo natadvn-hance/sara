@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 
 /** Sara's answer to words said in the voice app (ADR-028): her text, and how many cards with buttons went to Telegram. */
-export type TalkAnswer = { text: string; cards: number }
+export type TalkAnswer = {
+  text: string
+  cards: number
+  /** For an answer given at once: what was heard and who answers now, so a phone that lost the reply still learns it. */
+  heard?: string | null
+  switch?: 'lora' | 'sara'
+}
 
 export type TalkWait =
   | { state: 'done'; answer: TalkAnswer }
@@ -26,9 +32,10 @@ export function createTalkAnswers(o: { now?: () => number; keepMs?: number } = {
   }
 
   return {
-    open(): string {
+    /** A new talk: under the phone's own id when it gave one (so it can ask again after a lost reply). */
+    open(given?: string): string {
       sweep()
-      const id = randomUUID()
+      const id = given && !talks.has(given) ? given : randomUUID()
       talks.set(id, { at: now(), answer: null, wake: [] })
       return id
     },

@@ -32,7 +32,7 @@ const WAIT_MS = 25_000
 const AgentId = z.enum(AGENT_IDS)
 const TypedWords = z.object({ text: z.string().trim().min(1).max(4000) })
 const SpeakBody = z.object({ text: z.string().trim().min(1).max(4000), agent: AgentId.optional() })
-const AgentQuery = z.object({ agent: AgentId.optional() })
+const AgentQuery = z.object({ agent: AgentId.optional(), talk: z.uuid().optional() })
 const LoraReply = z.object({ talk: z.uuid(), text: z.string().trim().min(1).max(4000) })
 
 /**
@@ -137,6 +137,26 @@ export function registerTalkRoutes(
       const asked = AgentQuery.safeParse(req.query ?? {})
       if (!asked.success) return reply.code(400).send({ error: TALK_TEXTS.empty })
       let agent: Agent = asked.data.agent ?? 'sara'
+      // The phone names the talk itself: when the reply is lost on a bad line, it asks for the answer by this id.
+      const talk = d.answers.open(asked.data.talk)
+      const atOnce = (
+        heard: string | null,
+        replyText: string,
+        o: { buttons?: boolean; switch?: Agent } = {},
+      ) => {
+        d.answers.give([talk], {
+          text: replyText,
+          cards: o.buttons ? 1 : 0,
+          heard,
+          ...(o.switch && { switch: o.switch }),
+        })
+        return {
+          heard,
+          talk: null,
+          ...(o.switch && { switch: o.switch }),
+          reply: { text: replyText, buttons: o.buttons ?? false },
+        }
+      }
       let text: string
       const spoken = Buffer.isBuffer(req.body)
       if (Buffer.isBuffer(req.body)) {
@@ -149,8 +169,7 @@ export function registerTalkRoutes(
         try {
           await writeFile(path, req.body)
           const heard = await d.transcribe(path)
-          if (!heard)
-            return { heard: null, talk: null, reply: { text: TEXTS.voiceFailed, buttons: false } }
+          if (!heard) return atOnce(null, TEXTS.voiceFailed)
           text = heard
         } finally {
           await rm(path, { force: true })
@@ -165,36 +184,16 @@ export function registerTalkRoutes(
       const call = switchTo(text, agent)
       if (call) {
         agent = call.agent
-        if (!call.rest)
-          return {
-            heard,
-            talk: null,
-            switch: agent,
-            reply: { text: AGENTS[agent].greeting, buttons: false },
-          }
+        if (!call.rest) return atOnce(heard, AGENTS[agent].greeting, { switch: agent })
         text = call.rest
       }
       const switched = call ? { switch: agent } : {}
       if (agent === 'lora') {
-        if (!d.loraToken)
-          return {
-            heard,
-            talk: null,
-            ...switched,
-            reply: { text: TALK_TEXTS.loraOff, buttons: false },
-          }
-        if (!d.lora.connected())
-          return {
-            heard,
-            talk: null,
-            ...switched,
-            reply: { text: TALK_TEXTS.loraAway, buttons: false },
-          }
-        const talk = d.answers.open()
+        if (!d.loraToken) return atOnce(heard, TALK_TEXTS.loraOff, switched)
+        if (!d.lora.connected()) return atOnce(heard, TALK_TEXTS.loraAway, switched)
         d.lora.push({ talk, text, voice: spoken, at: new Date().toISOString() })
         return { heard, talk, ...switched, reply: null }
       }
-      const talk = d.answers.open()
       const r = await d.handle({
         text,
         voicePath: null,
@@ -203,9 +202,9 @@ export function registerTalkRoutes(
         talk,
         at: new Date(),
       })
-      return r === null
-        ? { heard, talk, ...switched, reply: null }
-        : { heard, talk: null, ...switched, reply: shown(r) }
+      if (r === null) return { heard, talk, ...switched, reply: null }
+      const s = shown(r)
+      return atOnce(heard, s.text, { buttons: s.buttons, ...switched })
     })
 
     scoped.get('/api/talk/history', async (req, reply) => {

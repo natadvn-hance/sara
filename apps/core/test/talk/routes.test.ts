@@ -303,3 +303,24 @@ describe('the voice app: every request leaves a line', () => {
     expect(talk.join('\n')).not.toContain('секретное')
   })
 })
+
+describe('the voice app: a reply lost on a bad line', () => {
+  it('FR-NOTIF-5: the phone names the talk, and asks by that name for an answer it never got', async () => {
+    const id = '0199a000-0000-7000-8000-0000000000aa'
+    // The phone sent the words but never got the reply: the answer waits under its own id.
+    await app.inject({
+      method: 'POST',
+      url: `/api/talk?agent=lora&talk=${id}`,
+      headers: { cookie: session },
+      payload: { text: 'Позови Сару' },
+    })
+    const r = await app.inject({ url: `/api/talk/${id}`, headers: { cookie: session } })
+    expect(r.json()).toEqual({
+      state: 'done',
+      text: AGENTS.sara.greeting,
+      cards: 0,
+      heard: 'Позови Сару',
+      switch: 'sara',
+    })
+  })
+})

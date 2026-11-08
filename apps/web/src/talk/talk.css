@@ -150,6 +150,12 @@
 .talk-logo-word {
   fill: var(--ink);
 }
+.talk-status,
+.talk-role {
+  font: 600 13px / 1.4 var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .talk-status {
   display: flex;
   align-items: center;
