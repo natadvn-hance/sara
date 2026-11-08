@@ -233,7 +233,26 @@ export function createTalkEngine(
     if (audio.size < 1500) return idle()
     const mine = add({ who: 'boris', text: '…', pending: true })
     const agent = view.agent
-    await send(mine, true, () => talkApi.sendVoice(audio, agent))
+    const talk = crypto.randomUUID()
+    await send(mine, true, async () => {
+      try {
+        return await talkApi.sendVoice(audio, agent, talk)
+      } catch (e) {
+        // The words may have reached the core and only the reply was lost (a bad line): ask by the talk's own id.
+        if (!(e instanceof TypeError)) throw e
+        const r = await waitForAnswer(talk, talkApi.answer, {
+          retry: (x) => !(x instanceof SignedOut),
+          deadlineMs: 6 * 60_000,
+        })
+        if (r.state !== 'done') throw e
+        return {
+          heard: r.heard ?? '…',
+          talk: null,
+          reply: { text: r.text, buttons: r.cards > 0 },
+          ...(r.switch && { switch: r.switch }),
+        }
+      }
+    })
   }
 
   async function listen(followUp = false): Promise<void> {
@@ -254,7 +273,8 @@ export function createTalkEngine(
     recording = m.record()
     const silence = createSilence({
       threshold: 0.06,
-      pauseMs: 900,
+      pauseMs: 1200,
+      minSpeechMs: 300,
       startWaitMs: followUp ? 6000 : 10_000,
       maxMs: 90_000,
     })

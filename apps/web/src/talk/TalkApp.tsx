@@ -174,7 +174,7 @@ export function TalkApp() {
     <main className={`talk talk-${view.phase}`} data-agent={agent}>
       <header className="talk-top">
         <HanceLogo hop={hop} />
-        <span className="talk-mono talk-status" aria-live="polite">
+        <span className="talk-status" aria-live="polite">
           <i className="talk-dot" aria-hidden="true" />
           {status}
         </span>
@@ -210,7 +210,7 @@ export function TalkApp() {
         <h1 key={`n-${agent}`} className="talk-name">
           {AGENT_UI[agent].name}
         </h1>
-        <p className="talk-mono talk-role">{AGENT_UI[agent].role}</p>
+        <p className="talk-role">{AGENT_UI[agent].role}</p>
         <p key={`${last?.id ?? 'none'}-${view.phase}`} className="talk-caption" aria-live="polite">
           {caption ?? ''}
         </p>
