@@ -1,6 +1,6 @@
 import { newEventId } from '@sara/shared'
 import { and, eq, sql } from 'drizzle-orm'
-import type { Db } from '../db/client'
+import type { Db, DbOrTx } from '../db/client'
 import { deal, jobRun } from '../db/schema'
 import { advanceTo, type DealStage } from '../domain/deal'
 import type { ConversationRow } from './types'
@@ -22,7 +22,7 @@ import type { ConversationRow } from './types'
 const STAGES_BEFORE_TALK: readonly string[] = ['found', 'queued', 'bid_sent', 'dormant']
 
 /** The deal of a conversation: the one it was made with, else the one of its order. */
-export async function dealOf(db: Db, conv: Pick<ConversationRow, 'dealId' | 'orderId'>) {
+export async function dealOf(db: DbOrTx, conv: Pick<ConversationRow, 'dealId' | 'orderId'>) {
   if (conv.dealId) {
     const [d] = await db.select().from(deal).where(eq(deal.id, conv.dealId))
     if (d) return d

@@ -123,6 +123,12 @@ export const TASK_KINDS: Record<string, { title: string; actions: TaskActionSpec
   },
 }
 
+/**
+ * A pair of the daily post of Boris's replies (FR-SPEECH-5). Its buttons live in the post and a press edits the post,
+ * so the Inbox does not list it: a post left unread must not pile up rows there.
+ */
+export const REPLY_SAMPLE_TASK = 'reply_sample'
+
 /** The question kinds Sara asks Boris and how each reads in the Inbox. */
 export const QUESTION_KINDS: Record<string, { title: string; answer: string }> = {
   why_skip: { title: 'Почему пропустил?', answer: 'Причина' },

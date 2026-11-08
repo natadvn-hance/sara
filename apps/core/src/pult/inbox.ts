@@ -4,10 +4,11 @@ import {
   type InboxItem,
   type InboxView,
   QUESTION_KINDS,
+  REPLY_SAMPLE_TASK,
   TASK_KINDS,
   type TaskActionSpec,
 } from '@sara/shared'
-import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, isNull, ne } from 'drizzle-orm'
 import type { DbOrTx } from '../db/client'
 import {
   bidHold,
@@ -65,7 +66,7 @@ export async function inboxView(db: DbOrTx, now = new Date()): Promise<InboxView
   const all = await db
     .select()
     .from(task)
-    .where(eq(task.state, 'open'))
+    .where(and(eq(task.state, 'open'), ne(task.kind, REPLY_SAMPLE_TASK)))
     .orderBy(asc(task.createdAt))
   const leadIds = all.filter((t) => t.entityKind === 'lead').map((t) => t.entityId)
   const leads = new Map(

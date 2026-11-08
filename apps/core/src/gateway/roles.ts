@@ -27,6 +27,7 @@ export type RoleName =
   | 'site-reader'
   | 'links-digest'
   | 'analytics-insights'
+  | 'reply-cleaner'
   | 'meeting'
   | 'meeting-result'
 
