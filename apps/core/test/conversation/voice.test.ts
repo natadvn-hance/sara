@@ -67,6 +67,26 @@ describe("Boris's new voice on test orders first (07.11.2026)", () => {
     expect(withoutTrial(always, true).map((h) => h.id)).toEqual(['j-tone', 's-portrait', 'j-voice'])
   })
 
+  it("a stage's rule is found with the trial scope too, the direction's own first (08.11.2026: the list broke the order)", async () => {
+    const root = await tempMind()
+    await putRecord(
+      root,
+      'mind/shared/judgment/talking.md',
+      { id: 'j-talking', type: 'judgment', title: 'Разговор', stages: ['talking'] },
+      '## Правило: разговор\nОбщее.',
+    )
+    await putRecord(
+      root,
+      `mind/directions/${DIR}/judgment/talking.md`,
+      { id: 'j-talking-hance', type: 'judgment', scope: DIR, title: 'Разговор Hance', stages: ['talking'] },
+      '## Правило: разговор\nСвоё.',
+    )
+    await ensureMindIndex(db, root)
+    expect((await mind.byStage('talking', scopesOf(DIR, true)))?.id).toBe('j-talking-hance')
+    expect((await mind.byStage('talking', scopesOf(DIR, false)))?.id).toBe('j-talking-hance')
+    expect((await mind.byStage('talking', scopesOf('other', true)))?.id).toBe('j-talking')
+  })
+
   it('the trial portrait bans its phrases only where the new voice is on', async () => {
     await voiceMind()
     expect(await mind.bannedPhrases()).toEqual([])

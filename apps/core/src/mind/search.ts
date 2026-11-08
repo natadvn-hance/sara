@@ -188,7 +188,12 @@ export function createMindSearch(db: Db): MindSearch {
             sql`${mindIndex.stages} @> ${JSON.stringify([stage])}::jsonb`,
           ),
         )
-        .orderBy(sql`(${mindIndex.scope} = ${scope}) desc`, mindIndex.recordId)
+        // The direction's own record first (the first scope), then any other but the shared one.
+        .orderBy(
+          sql`(${mindIndex.scope} = ${scopeList(scope)[0]}) desc`,
+          sql`(${mindIndex.scope} <> 'shared') desc`,
+          mindIndex.recordId,
+        )
         .limit(1)
       return r ? toHit(r, 0) : null
     },
