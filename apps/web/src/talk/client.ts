@@ -76,4 +76,8 @@ export const talkApi = {
     return res.ok ? res.blob() : null
   },
   warm: () => void call('/api/talk/warm', { method: 'POST' }).catch(() => {}),
+  /** The voice woken at the start, which also says whether Boris is signed in (SignedOut otherwise). */
+  start: async () => {
+    await call('/api/talk/warm', { method: 'POST' })
+  },
 }

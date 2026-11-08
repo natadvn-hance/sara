@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { firstAgent } from '../src/talk/engine'
-import { createSilence, recordingType, waitForAnswer } from '../src/talk/logic'
+import { createSilence, recordingType, splitSpeech, waitForAnswer } from '../src/talk/logic'
 
 describe('the voice app: when Boris stops speaking', () => {
   it('FR-NOTIF-5: the recording ends after a pause that follows speech, not before he starts', () => {
@@ -104,5 +104,20 @@ describe('the voice app: who answers first', () => {
     expect(firstAgent('?go=1')).toBe('lora')
     expect(firstAgent('?agent=sara&go=1')).toBe('sara')
     expect(firstAgent('?agent=nobody')).toBe('lora')
+  })
+})
+
+describe('the voice app: her first words come first', () => {
+  it('FR-NOTIF-5: the first sentence is made and played while the rest is still being made', () => {
+    expect(
+      splitSpeech(
+        'В очереди две заявки, обе по сайтам. Первая из Краснодара, вторая из Сочи, обе свежие.',
+      ),
+    ).toEqual([
+      'В очереди две заявки, обе по сайтам.',
+      'Первая из Краснодара, вторая из Сочи, обе свежие.',
+    ])
+    expect(splitSpeech('Да-да, Борь, я тут.')).toEqual(['Да-да, Борь, я тут.', ''])
+    expect(splitSpeech('Ок. Сделаю.')).toEqual(['Ок. Сделаю.', ''])
   })
 })
