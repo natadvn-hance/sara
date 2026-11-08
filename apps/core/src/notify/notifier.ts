@@ -43,7 +43,7 @@ export type Notifier = {
     o?: {
       html?: boolean
       loud?: boolean
-      /** Without a sound at any hour (a hypothesis of the analytics topic). */
+      /** Without a sound at any hour (a hypothesis of the analytics topic, the daily post of his replies). */
       quiet?: boolean
       place?: Place
       notice?: NoticeHint

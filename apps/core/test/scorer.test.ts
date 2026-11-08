@@ -63,6 +63,52 @@ describe('scorer', () => {
     expect(text).toContain('Порог: 56')
   })
 
+  it("FR-MIND-3: the Scorer sees Boris's decisions on similar orders after the order, their clients' names hidden", async () => {
+    const gw = await gateway({ scorer: scorerAnswer(85) })
+    const precedents = [
+      {
+        leadId: '1',
+        title: 'Ведение Instagram для кофейни Тимура',
+        category: 'SMM',
+        clientName: 'Тимур',
+        label: 'no' as const,
+        reason: { code: 'profile' as const, detail: 'SMM ведение' },
+        chosen: false,
+      },
+      {
+        leadId: '2',
+        title: 'Стратегия продвижения клиники',
+        category: 'Маркетинг',
+        clientName: 'Вера',
+        label: 'yes' as const,
+        reason: null,
+        chosen: false,
+      },
+      {
+        leadId: '3',
+        title: 'Ведение ВК',
+        category: 'SMM',
+        clientName: 'Олег',
+        label: 'no' as const,
+        reason: { code: 'budget' as const, detail: null },
+        chosen: true,
+      },
+    ]
+    await scoreOrder(gw, await order(), RULES_V1, { escalate: false, precedents })
+    const [c] = await calls()
+    expect(c?.stdin).toContain(
+      [
+        'Решения Бориса по похожим заказам (его прошлые нажатия, самые похожие первыми):',
+        '- «Ведение Instagram для кофейни [имя 1]» (SMM): закрыл, похоже: не наш профиль: SMM ведение',
+        '- «Стратегия продвижения клиники» (Маркетинг): откликнулся',
+        '- «Ведение ВК» (SMM): закрыл, причина: маленький бюджет',
+      ].join('\n'),
+    )
+    expect(c?.stdin).not.toContain('Тимур')
+    // Without precedents the input is as it always was.
+    expect(scorerInput(await order(), RULES_V1)).not.toContain('Решения Бориса')
+  })
+
   it('FR-LEAD-3: a stop factor drops the order whatever the score', () => {
     expect(decide(RULES_V1, scorerAnswer(90, { stop_factor: 'direct' }))).toEqual({
       score: 90,

@@ -1,5 +1,6 @@
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
+import { REPLY_SAMPLE_TASK } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { seedAccounts } from './accounts/accounts'
@@ -33,6 +34,7 @@ import { sendTurnReply } from './conversation/outbox'
 import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
 import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
+import { onReplySamplePress, startReplyDigest } from './conversation/replyDigest'
 import { registerConversationRoutes } from './conversation/routes'
 import { setSendDeps, startSendJob } from './conversation/sendFlow'
 import { prepareJob } from './conversation/sendJob'
@@ -216,6 +218,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
         { db, markDone: async (id, note) => void (await bot.notifier.markDone?.(id, note)) },
         p,
       )
+    if (t?.kind === REPLY_SAMPLE_TASK)
+      return onReplySamplePress({ db, notifier: bot.notifier }, p.taskId, p.action)
     return pipeline ? pipeline.onPress(p) : 'Сара ещё запускается'
   }
   const onPress = createResolver({
@@ -608,6 +612,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   })
   const schoolJobs = startSchoolJobs({ ...school, tickMs: o.schoolTickMs })
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
+  const replyDigest = startReplyDigest(
+    // The limit is shared with the live Sara: at the limit the post waits for tomorrow.
+    { db, notifier: bot.notifier, gateway: withoutLimitWait(gateway) },
+    o.learningTickMs,
+    o.now,
+  )
   // Once each: deals whose client already answered move on to talking, and the false «закрыт на сайте» marks go.
   // Once: a call written down twice is one meeting, the extra row marked, not deleted.
   void dedupeMeetings(db).catch((e) =>
@@ -690,6 +700,7 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
       reconcile.stop()
       clearInterval(mindTimer)
       conversationSummary.stop()
+      replyDigest.stop()
       owed.stop()
       topicRestore.stop()
       meetingTick.stop()

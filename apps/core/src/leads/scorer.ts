@@ -8,6 +8,7 @@ import {
   weightedScore,
 } from '@sara/shared'
 import type { Gateway } from '../gateway/gateway'
+import { type Precedent, precedentsText } from '../learning/precedents'
 import { namesToHide } from './clientName'
 import { sorterInput } from './sorter'
 
@@ -58,9 +59,17 @@ function thresholdLine(r: DirectionRules, category?: string): string {
   return `Порог: ${r.threshold} (по видам заказа: ${by.join(', ')})`
 }
 
-/** What the Scorer sees: the rules, then the order. The client's name is never put in it, and one inside the text is hidden by the gateway (ADR-016). */
-export function scorerInput(o: ProfiOrder, rules: DirectionRules): string {
-  return `${rulesText(rules, o.category)}\n\nЗаказ\n\n${sorterInput(o)}`
+/**
+ * What the Scorer sees: the rules, then the order, then Boris's own decisions on similar orders (07.11.2026), if any.
+ * No client's name is put in it, and one inside a text or a title is hidden by the gateway (ADR-016).
+ */
+export function scorerInput(
+  o: ProfiOrder,
+  rules: DirectionRules,
+  precedents: Precedent[] = [],
+): string {
+  const past = precedentsText(precedents)
+  return `${rulesText(rules, o.category)}\n\nЗаказ\n\n${sorterInput(o)}${past ? `\n\n${past}` : ''}`
 }
 
 /** The total and the decision are the code's: weights stay data, one set of axis scores gives one result. */
@@ -100,16 +109,19 @@ export async function scoreOrder(
     priority?: 'P0' | 'P1' | 'P2' | 'P3'
     /** Told why a model call gave no answer (for example `limit_reached`), before the score is a miss. */
     onFailure?: (errorClass: string) => void
+    /** Boris's decisions on similar orders; a backtest and a trial leave them out, they compare rules alone. */
+    precedents?: Precedent[]
   } = {},
 ): Promise<Scored | null> {
-  const input = scorerInput(o, rules)
+  const precedents = opts.precedents ?? []
+  const input = scorerInput(o, rules, precedents)
   const once = async (model: 'haiku' | 'sonnet'): Promise<Scored | null> => {
     const r = await gw.call('scorer', input, ScorerOutput, {
       model,
       priority: opts.priority,
       correlationId: opts.correlationId,
       causationId: opts.causationId,
-      redact: { names: namesToHide(o.client_name) },
+      redact: { names: namesToHide(o.client_name, ...precedents.map((p) => p.clientName)) },
     })
     if (!r.ok) opts.onFailure?.(r.errorClass)
     if (!r.ok || !fits(rules, r.output)) return null

@@ -25,6 +25,8 @@ export const EVENT_TYPES = [
   'lead.scored',
   'lead.skipped',
   'lead.labeled',
+  /** Boris pressed a reason under a folded card: the code, the detail and Sara's guess before it (no client words). */
+  'lead.reason_set',
   'lead.stale',
   'lead.page_read',
   /** Stage 1 «Отсев»: the criteria that fired, unclear or lacked data (no quotes: they stay on the lead). */
@@ -86,6 +88,8 @@ export const EVENT_TYPES = [
   'rules.applied',
   'rules.declined',
   'rules.proposal_invalid',
+  /** A proposal no longer waits: made for older rules (why: stale) or three days without an answer (why: unanswered). */
+  'rules.expired',
   // M4: conversations, the mind, the history and the exam (no client text in payloads)
   'profi.specialist_message',
   'profi.client_typing',
@@ -109,6 +113,9 @@ export const EVENT_TYPES = [
   'conv.reminder_sent',
   'conv.dormant',
   'conv.day_summary',
+  'conv.replies_digest',
+  'conv.reply_sampled',
+  'conv.reply_dropped',
   'conv.owed_reminded',
   'conv.topic_restored',
   'meeting.read',

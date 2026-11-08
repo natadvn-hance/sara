@@ -338,6 +338,11 @@ export const leadScore = core.table(
     confidence: real('confidence').notNull(),
     model: text('model').notNull(),
     backtest: boolean('backtest').notNull().default(false),
+    /**
+     * Boris's own decisions on similar past orders that the Scorer saw with this order (07.11.2026), as
+     * `{ items: [{ id, label, code, detail }] }`; null: none were looked for (a backtest, an older score).
+     */
+    precedents: jsonb('precedents'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [index('lead_score_lead').on(t.leadId, t.backtest)],
@@ -353,6 +358,15 @@ export const leadLabel = core.table('lead_label', {
   score: integer('score'),
   scoreVersion: integer('score_version'),
   surprise: boolean('surprise').notNull().default(false),
+  /**
+   * Why Boris said no, from the short list (learning/reasons.ts, 07.11.2026): Sara's guess, or Boris's own pick or
+   * words (`reason_by`: guess | boris). `guess_code` keeps the first guess after he corrects it. Null on a yes.
+   */
+  reasonCode: text('reason_code'),
+  reasonDetail: text('reason_detail'),
+  reasonBy: text('reason_by'),
+  guessCode: text('guess_code'),
+  reasonAt: ts('reason_at'),
   at: ts('at').notNull().defaultNow(),
 })
 
@@ -387,8 +401,12 @@ export const ruleProposal = core.table('rule_proposal', {
   summary: text('summary').notNull(),
   why: text('why').notNull(),
   backtest: jsonb('backtest').notNull(),
+  /** asked | applied | declined | stale (made for older rules) | expired (no answer for 3 days). */
   state: text('state').notNull(),
   taskId: uuid('task_id'),
+  /** The reason Boris kept closing cards with that brought this proposal; null: his explained surprises did. */
+  reasonCode: text('reason_code'),
+  reasonDetail: text('reason_detail'),
   createdAt: ts('created_at').notNull().defaultNow(),
   decidedAt: ts('decided_at'),
 })
@@ -581,6 +599,40 @@ export const convTurn = core.table(
     finishedAt: ts('finished_at'),
   },
   (t) => [index('conv_turn_conversation').on(t.conversationId, t.createdAt)],
+)
+
+/**
+ * One reply of Boris shown in the daily post (FR-SPEECH-5): the row is what keeps a pair from coming twice and what the
+ * post is drawn from on each press. The texts are as Boris saw them: client data behind tags, his typos fixed. A row's
+ * id is the id of the task behind its buttons.
+ */
+export const replyPick = core.table(
+  'reply_pick',
+  {
+    id: uuid('id').primaryKey(),
+    turnId: text('turn_id').notNull().unique(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversation.id),
+    /** The first of Boris's messages in the reply: two turns over one client message show him once. */
+    firstMessageId: text('first_message_id').notNull(),
+    /** When the last of them was sent: what the client's answer is counted from. */
+    repliedAt: ts('replied_at').notNull(),
+    similarity: integer('similarity').notNull(),
+    /** Its place in the post, from 0. */
+    position: integer('position').notNull(),
+    clientText: text('client_text').notNull(),
+    draftText: text('draft_text').notNull(),
+    replyText: text('reply_text').notNull(),
+    /** The words of a commercial promise found in the reply. */
+    promises: jsonb('promises').$type<string[]>().notNull().default([]),
+    postMessageId: bigint('post_message_id', { mode: 'number' }),
+    /** The button pressed: `apply` («В образцы») or `drop` («Не надо»); null while it waits. */
+    decision: text('decision'),
+    decidedAt: ts('decided_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('reply_pick_reply').on(t.conversationId, t.firstMessageId)],
 )
 
 /** The searchable copy of the confirmed mind records (FR-MIND-2); proposals never get here (FR-MIND-3). */

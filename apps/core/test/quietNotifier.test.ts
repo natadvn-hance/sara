@@ -69,6 +69,14 @@ describe('quiet hours of every notification', () => {
     expect(flags()).toEqual([true, true, true, true])
   })
 
+  it('FR-SPEECH-5: buttons sent as quiet have no sound at any hour', async () => {
+    await setSetting(db, 'cards.quiet_hours', null, 'boris')
+    await bot.notifier.sendButtons('Разбор', [[{ text: 'В образцы', callbackData: 't:x:apply' }]], {
+      quiet: true,
+    })
+    expect(flags()).toEqual([true])
+  })
+
   it('FR-NOTIF-2: outside quiet hours they come with sound', async () => {
     await setSetting(db, 'cards.quiet_hours', null, 'boris')
     await sendAll()

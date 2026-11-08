@@ -1,12 +1,18 @@
 import { newEventId } from '@sara/shared'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { event, lead, leadScore, task } from '../src/db/schema'
+import { event, lead, leadLabel, leadScore, task } from '../src/db/schema'
 import { seedDirection } from '../src/direction/store'
 import type { Gateway } from '../src/gateway/gateway'
 import { appendEvent } from '../src/journal/journal'
 import { createLeadPipeline, type LeadPipeline } from '../src/leads/pipeline'
-import { type LeadCard, leadCardText, TEXTS, telegramTextLength } from '../src/notify/cards'
+import {
+  closedLeadCardText,
+  type LeadCard,
+  leadCardText,
+  TEXTS,
+  telegramTextLength,
+} from '../src/notify/cards'
 import type { Notifier } from '../src/notify/notifier'
 import { analystAnswer } from './helpers/analyst'
 import { openTestDb, resetDb } from './helpers/db'
@@ -584,6 +590,33 @@ describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
       await expect(pipeline.closeStale(taskId, NOW)).resolves.toBe(true)
       expect(await taskRow(taskId)).toMatchObject({ state: 'resolved' })
     })
+
+    it('07.11: the card nobody pressed is a weak no with the guessed reason; a press keeps it the stale card, with his reason', async () => {
+      const taskId = await waiting('93209', 30)
+      expect(await pipeline.closeStale(taskId, NOW)).toBe(true)
+      expect(
+        (await db.select().from(leadLabel).where(eq(leadLabel.leadId, '93209')))[0],
+      ).toMatchObject({
+        label: 'weak_no',
+        source: 'ignored',
+        reasonCode: 'site',
+        reasonBy: 'guess',
+      })
+      expect(closedCards[0]?.card.closeReason).toMatchObject({
+        text: 'сайт, а не маркетинг',
+        by: 'guess',
+      })
+      closedCards = []
+      expect(await pipeline.onPress({ taskId, action: 'whyprofile' })).toBe(
+        'Записала: не наш профиль',
+      )
+      expect(closedCards[0]?.card.stale).toEqual({ since: old(30), at: NOW.toISOString() })
+      expect(closedCards[0]?.card.closeReason).toEqual({
+        text: 'не наш профиль',
+        by: 'boris',
+        buttons: [],
+      })
+    })
   })
 
   describe('when it closed, from the journal', () => {
@@ -653,6 +686,70 @@ describe('a card whose order closed on Profi.ru (FR-LEAD-5)', () => {
       expect(w).toMatchObject({ published: false, exact: false })
       near(w?.since, 150)
     })
+  })
+})
+
+describe('the reason of a close (07.11.2026)', () => {
+  const taskRow = async (id: string) => (await db.select().from(task).where(eq(task.id, id)))[0]
+  const sentCard = async (id: string, over: Partial<typeof lead.$inferInsert> = {}) => {
+    const taskId = await openLead(id, over)
+    await db.update(task).set({ telegramMessageId: 11 }).where(eq(task.id, taskId))
+    return taskId
+  }
+
+  it('«Закрыть заявку» folds the card with the guessed reason and four buttons; one press makes it his, the buttons go', async () => {
+    const taskId = await sentCard('93301')
+    expect(await pipeline.onPress({ taskId, action: 'skip' })).toBe(TEXTS.skipped)
+    const folded = closedCards[0]?.card
+    expect(folded?.closedByBoris).toBe(true)
+    expect(folded?.closeReason).toMatchObject({ text: 'сайт, а не маркетинг', by: 'guess' })
+    expect(folded?.closeReason?.buttons.map((b) => b.text)).toEqual([
+      'Не наш профиль',
+      'Бюджет',
+      'Клиент',
+      'Другое',
+    ])
+    expect(folded?.closeReason?.buttons[1]?.callbackData).toBe(`t:${taskId}:whybudget`)
+    expect(folded && closedLeadCardText(folded)).toBe(
+      [
+        '<b>📁 Заявка закрыта</b> · Сайт для клиники',
+        '<i>Похоже, сайт, а не маркетинг</i>',
+        '<a href="https://profi.ru/backoffice/n.php?o=93301">Открыть на Профи.ру</a>',
+      ].join('\n'),
+    )
+    closedCards = []
+    expect(await pipeline.onPress({ taskId, action: 'whybudget' })).toBe(
+      'Записала: маленький бюджет',
+    )
+    expect(closedCards).toHaveLength(1)
+    expect(closedCards[0]?.card.closeReason).toEqual({
+      text: 'маленький бюджет',
+      by: 'boris',
+      buttons: [],
+    })
+    expect(closedLeadCardText(closedCards[0]?.card as LeadCard)).toContain(
+      '<i>Причина: маленький бюджет</i>',
+    )
+    expect(await events()).toContain('lead.reason_set')
+  })
+
+  it("a close from the pult with Boris's words shows them as his reason, without buttons", async () => {
+    const taskId = await sentCard('93302')
+    await pipeline.onPress({ taskId, action: 'skip', source: 'pult', reason: 'копейки' })
+    expect(closedCards[0]?.card.closeReason).toEqual({
+      text: 'маленький бюджет',
+      by: 'boris',
+      buttons: [],
+    })
+  })
+
+  it('a reason press on a card still waiting, or one never labeled, changes nothing', async () => {
+    const taskId = await sentCard('93303')
+    expect(await pipeline.onPress({ taskId, action: 'whybudget' })).toBe(TEXTS.alreadyDone)
+    expect(await taskRow(taskId)).toMatchObject({ state: 'open' })
+    expect(closedCards).toEqual([])
+    const done = await openLead('93304', {}, 'resolved')
+    expect(await pipeline.onPress({ taskId: done, action: 'whybudget' })).toBe(TEXTS.alreadyDone)
   })
 })
 

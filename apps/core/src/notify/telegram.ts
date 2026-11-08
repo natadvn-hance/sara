@@ -609,16 +609,20 @@ export function createTelegramRuntime(d: {
   }
 
   /**
-   * A message of Telegram HTML edited in place, with the buttons taken away. As for a send, markup Telegram refuses
-   * goes as plain text. Any other refusal (the message was deleted, or already shows this) is logged, never thrown:
-   * one message that cannot be edited must not stop the others.
+   * A message of Telegram HTML edited in place, its buttons taken away or replaced by one row (the reasons under a
+   * short card). As for a send, markup Telegram refuses goes as plain text. Any other refusal (the message was
+   * deleted, or already shows this) is logged, never thrown: one message that cannot be edited must not stop the others.
    */
-  async function closeHtml(ref: number, html: string): Promise<void> {
+  async function closeHtml(
+    ref: number,
+    html: string,
+    row: { text: string; callbackData: string }[] = [],
+  ): Promise<void> {
     const at = await locate(ref)
     if (!at) return void console.error('telegram did not edit the closed card: unknown', ref)
     const { to, id: messageId } = at
     const opts = {
-      reply_markup: { inline_keyboard: [] },
+      reply_markup: { inline_keyboard: row.length > 0 ? keyboard([row]) : [] },
       link_preview_options: { is_disabled: true },
     }
     try {
@@ -707,7 +711,7 @@ export function createTelegramRuntime(d: {
           })
       },
       async closeLeadCard(messageId, c) {
-        await closeHtml(messageId, closedLeadCardText(c))
+        await closeHtml(messageId, closedLeadCardText(c), c.closeReason?.buttons)
       },
       async sendText(text, o) {
         const silent = o?.quiet || (await silentNow(o?.loud))
