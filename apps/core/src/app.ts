@@ -27,6 +27,7 @@ import {
   meetingNews,
   readBorisResult,
   recordMeetingResult,
+  refreshMeetingContacts,
   startMeetingTick,
 } from './conversation/meetings'
 import { sendTurnReply } from './conversation/outbox'
@@ -560,9 +561,12 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   const conversationSummary = startConvDaySummary({ db, notifier: bot.notifier }, o.learningTickMs)
   // Once each: deals whose client already answered move on to talking, and the false «закрыт на сайте» marks go.
   // Once: a call written down twice is one meeting, the extra row marked, not deleted.
-  void dedupeMeetings(db).catch((e) =>
-    console.error('meeting duplicates pass failed', e instanceof Error ? e.message : e),
-  )
+  // Then the meetings already on a card get the contacts of their talk drawn in, once.
+  void dedupeMeetings(db)
+    .catch((e) =>
+      console.error('meeting duplicates pass failed', e instanceof Error ? e.message : e),
+    )
+    .then(() => refreshMeetingContacts(meetingDeps))
   void backfillTalking(db).catch((e) =>
     console.error('deal stages pass failed', e instanceof Error ? e.message : e),
   )

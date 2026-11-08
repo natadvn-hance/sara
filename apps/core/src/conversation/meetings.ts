@@ -865,6 +865,37 @@ export async function refreshContacts(d: MeetingDeps, conv: ConversationRow): Pr
   }
 }
 
+/**
+ * Once at start: the meetings already on a card get the contacts of their talk (part 3 came after them, 07.11.2026),
+ * so the first post and the card show them without waiting for the client's next word. A set drawn before is skipped
+ * by refreshContacts itself, so a restart draws nothing again. Never throws.
+ */
+export async function refreshMeetingContacts(d: MeetingDeps): Promise<number> {
+  try {
+    const rows = await d.db
+      .selectDistinct({ id: meeting.conversationId })
+      .from(meeting)
+      .where(
+        and(
+          sql`${meeting.status} not in ('cancelled', 'duplicate')`,
+          sql`${meeting.cardRef} is not null`,
+          sql`${meeting.conversationId} is not null`,
+        ),
+      )
+    let n = 0
+    for (const r of rows) {
+      const conv = r.id ? await getConversationRow(d.db, r.id) : null
+      if (!conv) continue
+      await refreshContacts(d, conv)
+      n++
+    }
+    return n
+  } catch (e) {
+    console.error('meeting contacts pass failed', e instanceof Error ? e.message.slice(0, 200) : e)
+    return 0
+  }
+}
+
 /** The news of a chat for the meeting side: the contacts first, then the call booked in it. */
 export async function meetingNews(
   d: MeetingDeps,

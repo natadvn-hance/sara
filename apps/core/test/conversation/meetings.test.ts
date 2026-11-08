@@ -9,6 +9,7 @@ import {
   parseMoscow,
   readMeeting,
   refreshContacts,
+  refreshMeetingContacts,
 } from '../../src/conversation/meetings'
 import { waitingClients } from '../../src/conversation/owed'
 import { ensureConversation } from '../../src/conversation/store'
@@ -398,5 +399,47 @@ describe('contacts on the topic', () => {
     expect(posted[0]).toContain('Марина Сергеевна')
     await refreshContacts({ ...deps, notifier: n } as never, conv)
     expect(posted.length).toBe(1)
+  })
+
+  it('FR-CONV-13: at start a meeting already on a card gets the contacts once, a cancelled one does not', async () => {
+    const { conv } = await chat([
+      ['client', 'Наберите Марине Сергеевне по номеру 8900 123-45-67', 5],
+    ])
+    const at = new Date(NOW.getTime() + 86_400_000).toISOString()
+    await db.insert(meeting).values([
+      {
+        id: newEventId(),
+        conversationId: conv.id,
+        title: 'Созвон',
+        startsAt: at,
+        status: 'booked',
+        source: 'chat',
+        cardRef: 501,
+      },
+      {
+        id: newEventId(),
+        conversationId: conv.id,
+        title: 'Созвон',
+        startsAt: at,
+        status: 'duplicate',
+        source: 'lora',
+        cardRef: 502,
+      },
+    ])
+    const posted: number[] = []
+    const n = {
+      ...notifier,
+      topicPosts: async () => [-77],
+      editText: async (ref: number) => {
+        posted.push(ref)
+      },
+    }
+    expect(await refreshMeetingContacts({ ...deps, notifier: n } as never)).toBe(1)
+    expect(posted).toContain(-77)
+    expect(posted).toContain(501)
+    expect(posted).not.toContain(502)
+    const drawn = posted.length
+    await refreshMeetingContacts({ ...deps, notifier: n } as never)
+    expect(posted.length).toBe(drawn)
   })
 })
