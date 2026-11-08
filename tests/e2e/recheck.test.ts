@@ -340,11 +340,16 @@ describe('a card that waited more than a day (FR-LEAD-10)', () => {
     const reads = fake.orderReads.length
     expect(await app.stale.tick()).toEqual({ closed: 1 })
     expect(tg.edited).toHaveLength(1)
-    expect(tg.edited[0]).toMatchObject({
-      message_id: messageId,
-      parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [] },
-    })
+    expect(tg.edited[0]).toMatchObject({ message_id: messageId, parse_mode: 'HTML' })
+    // No order button is left: only the reasons Boris may press, under Sara's guess (07.11.2026).
+    const left = tg.edited[0]?.reply_markup?.inline_keyboard.flat() ?? []
+    expect(left.map((b) => b.callback_data.split(':')[2])).toEqual([
+      'whyprofile',
+      'whybudget',
+      'whyclient',
+      'whyother',
+    ])
+    expect(tg.edited[0]?.text).toContain('<i>Похоже, сайт, а не маркетинг</i>')
     expect(tg.edited[0]?.text).toContain(`<b>${TEXTS.staleCard}</b> · ${TITLE} · ждала решения`)
     expect(tg.edited[0]?.text).toContain(`${TEXTS.closedLink}</a>`)
     expect(await taskOf(id)).toMatchObject({ state: 'resolved', resolution: 'skip' })

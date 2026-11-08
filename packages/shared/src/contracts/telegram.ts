@@ -17,6 +17,17 @@ export const TASK_ACTIONS = [
   'close',
   /** M5: «Все да» under a batch of lessons. */
   'all',
+  /**
+   * Boris's reason under a folded lead card, one press (07.11.2026): `why` and the code of apps/core learning/reasons.ts.
+   */
+  'whyprofile',
+  'whysite',
+  'whybudget',
+  'whyclient',
+  'whyvague',
+  'whycompete',
+  'whyfee',
+  'whyother',
 ] as const
 export type TaskAction = (typeof TASK_ACTIONS)[number]
 

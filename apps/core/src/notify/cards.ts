@@ -39,6 +39,14 @@ export type ClosedWhen = {
   openUntil: string | null
 }
 
+export type CloseReason = {
+  /** The reason in words; null: Sara could not guess one. */
+  text: string | null
+  by: 'guess' | 'boris'
+  /** One row under the short card; empty once Boris chose. */
+  buttons: { text: string; callbackData: string }[]
+}
+
 export type LeadCard = {
   taskId: string
   /** Profi.ru's order number: the link to the order is built from it. */
@@ -93,6 +101,13 @@ export type LeadCard = {
   stale?: { since: string; at: string } | null
   /** Boris closed the card himself («Закрыть заявку»): the short card says so and nothing else. */
   closedByBoris?: boolean
+  /**
+   * Why the card was closed or went stale (07.11.2026): Sara's guess («Похоже, …») or Boris's pick («Причина: …»), and
+   * the buttons that correct a guess with one press. None: the short card has no reason line.
+   */
+  closeReason?: CloseReason | null
+  /** Boris's own decisions on orders like this one, as the Scorer saw them (07.11.2026); none under two. */
+  similar?: { n: number; closed: number; bid: number; reason: string | null } | null
   /**
    * The client's own site as Sara read it (Boris, 30.10.2026): its short summary against the order, or «сайт не
    * открылся»; and the example sites the client named. None: the order names no site.
@@ -212,18 +227,35 @@ export const TEXTS = {
     why: string,
     changes: string[],
     b: { checked: number; changed: number; towardBoris: number; against: number },
+    /** What brought it, when a reason Boris kept closing cards with did (07.11.2026). */
+    basis: string | null = null,
   ) =>
     [
       `Предлагаю поправку правил (v${from} → v${from + 1}): ${summary}`,
+      ...(basis ? [`Повод: ${basis}`] : []),
       `Почему: ${why}`,
       `Что меняется: ${changes.join('; ')}`,
       `На последних ${b.checked} ${plural(b.checked, ['заявке', 'заявках', 'заявках'])} это изменило бы ${b.changed} ${plural(b.changed, ['решение', 'решения', 'решений'])}: ${b.towardBoris} в твою сторону, ${b.against} против.`,
     ].join('\n'),
+  /** The «Повод» of a proposal: how often Boris closed a card for one reason, and how many of them he named himself. */
+  proposalBasis: (n: number, reason: string, chosen: number) =>
+    `${n} ${plural(n, ['раз', 'раза', 'раз'])} закрыл с причиной «${reason}»${chosen > 0 ? `, из них ${chosen} ты выбрал сам` : ''}`,
   applyButton: 'Применить',
   dropButton: 'Не надо',
   applied: (v: number) => `Применила, теперь правила v${v}`,
   kept: (v: number) => `Хорошо, оставляю v${v}`,
-  proposalStale: 'Правила уже поменялись, предложение устарело',
+  proposalStale: 'Правила уже поменялись, предложение устарело. Пришлю новое, если повод останется',
+  /** The one line that takes the place of the buttons of a proposal that no longer waits. */
+  proposalExpired: 'Устарело',
+  /** The reason line of a short card (07.11.2026). */
+  reasonGuess: (r: string) => `Похоже, ${r}`,
+  reasonBoris: (r: string) => `Причина: ${r}`,
+  reasonUnknown: 'Причину не угадала',
+  reasonSaved: (r: string) => `Записала: ${r}`,
+  /** Under the score on a card: Boris's own decisions on orders like this one. */
+  similarClosed: (closed: number, n: number, reason: string | null) =>
+    `🧭 Похожие ты закрывал ${closed} из ${n}${reason ? ` (${reason})` : ''}`,
+  similarBid: (bid: number, n: number) => `🧭 На похожие ты откликался ${bid} из ${n}`,
   editButton: 'Изменить',
   askDraft: (title: string) =>
     `Пришли новый текст отклика на «${title}» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама. Цену услуги можно прислать отдельной строкой, например «цена 5000».`,
@@ -383,6 +415,18 @@ function headLines(c: LeadCard): string[] {
     ...(c.reminder ? [`<b>⏰ ${title}</b>`, '<i>Заявка ждёт решения</i>'] : [`<b>🔔 ${title}</b>`]),
     ...(c.city.trim() ? [`📍 ${clean(c.city, CAP.short)}`] : []),
     facts.filter(Boolean).join('  ·  '),
+    ...similarLines(c),
+  ]
+}
+
+/** «🧭 Похожие ты закрывал 4 из 5 (не наш профиль)», or how often he bid on them when he mostly did. */
+function similarLines(c: LeadCard): string[] {
+  const s = c.similar
+  if (!s || s.n < 2) return []
+  return [
+    s.closed >= s.bid
+      ? esc(TEXTS.similarClosed(s.closed, s.n, s.reason))
+      : esc(TEXTS.similarBid(s.bid, s.n)),
   ]
 }
 
@@ -629,8 +673,15 @@ function closedWhenText(w: ClosedWhen): string {
  * says so instead, with how long it waited.
  */
 export function closedLeadCardText(c: LeadCard): string {
+  const link = `<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
+  // Why it was closed or went stale (07.11.2026); an order closed on Profi.ru is no decision of Boris's.
+  const why = c.closed && !c.stale && !c.closedByBoris ? [] : reasonLines(c.closeReason)
   if (c.closedByBoris)
-    return `${[`<b>${TEXTS.closedByBorisCard}</b>`, clean(c.title, CAP.title)].join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
+    return [
+      [`<b>${TEXTS.closedByBorisCard}</b>`, clean(c.title, CAP.title)].join(' · '),
+      ...why,
+      link,
+    ].join('\n')
   const head = c.stale
     ? [
         `<b>${TEXTS.staleCard}</b>`,
@@ -639,7 +690,13 @@ export function closedLeadCardText(c: LeadCard): string {
       ]
     : [`<b>${TEXTS.closedCard}</b>`, clean(c.title, CAP.title)]
   if (c.closed && !c.stale) head.push(closedWhenText(c.closed))
-  return `${head.join(' · ')}\n<a href="${orderUrl(c.orderId)}">${TEXTS.closedLink}</a>`
+  return [head.join(' · '), ...why, link].join('\n')
+}
+
+function reasonLines(r: CloseReason | null | undefined): string[] {
+  if (!r) return []
+  if (!r.text) return r.by === 'guess' ? [`<i>${TEXTS.reasonUnknown}</i>`] : []
+  return [`<i>${esc(r.by === 'boris' ? TEXTS.reasonBoris(r.text) : TEXTS.reasonGuess(r.text))}</i>`]
 }
 
 const READING_PARTS = [

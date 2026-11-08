@@ -338,6 +338,11 @@ export const leadScore = core.table(
     confidence: real('confidence').notNull(),
     model: text('model').notNull(),
     backtest: boolean('backtest').notNull().default(false),
+    /**
+     * Boris's own decisions on similar past orders that the Scorer saw with this order (07.11.2026), as
+     * `{ items: [{ id, label, code, detail }] }`; null: none were looked for (a backtest, an older score).
+     */
+    precedents: jsonb('precedents'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [index('lead_score_lead').on(t.leadId, t.backtest)],
@@ -353,6 +358,15 @@ export const leadLabel = core.table('lead_label', {
   score: integer('score'),
   scoreVersion: integer('score_version'),
   surprise: boolean('surprise').notNull().default(false),
+  /**
+   * Why Boris said no, from the short list (learning/reasons.ts, 07.11.2026): Sara's guess, or Boris's own pick or
+   * words (`reason_by`: guess | boris). `guess_code` keeps the first guess after he corrects it. Null on a yes.
+   */
+  reasonCode: text('reason_code'),
+  reasonDetail: text('reason_detail'),
+  reasonBy: text('reason_by'),
+  guessCode: text('guess_code'),
+  reasonAt: ts('reason_at'),
   at: ts('at').notNull().defaultNow(),
 })
 
@@ -387,8 +401,12 @@ export const ruleProposal = core.table('rule_proposal', {
   summary: text('summary').notNull(),
   why: text('why').notNull(),
   backtest: jsonb('backtest').notNull(),
+  /** asked | applied | declined | stale (made for older rules) | expired (no answer for 3 days). */
   state: text('state').notNull(),
   taskId: uuid('task_id'),
+  /** The reason Boris kept closing cards with that brought this proposal; null: his explained surprises did. */
+  reasonCode: text('reason_code'),
+  reasonDetail: text('reason_detail'),
   createdAt: ts('created_at').notNull().defaultNow(),
   decidedAt: ts('decided_at'),
 })

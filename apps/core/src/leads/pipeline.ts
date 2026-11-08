@@ -3,6 +3,7 @@ import {
   AnalystOutput,
   ClientInfo,
   type EventEnvelope,
+  formatCallback,
   type GetOrderOutput,
   isTestOrder,
   LeadScreen,
@@ -26,7 +27,8 @@ import { lostRoute, routeOrder } from '../direction/router'
 import { activeRules } from '../direction/store'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
-import { recordLabel } from '../learning/labels'
+import { reasonOnCard, recordLabel, setReason } from '../learning/labels'
+import { similarDecisions, similarOnCard, storePrecedents } from '../learning/precedents'
 import { onProposalPress } from '../learning/proposals'
 import {
   askForDraft,
@@ -35,7 +37,14 @@ import {
   type DraftAnswer,
   markAnswered,
 } from '../learning/questions'
-import { analysisMessages, type ClosedWhen, type LeadCard, TEXTS } from '../notify/cards'
+import { codeOfAction, REASON_BUTTONS, reasonAction, reasonText } from '../learning/reasons'
+import {
+  analysisMessages,
+  type ClosedWhen,
+  type CloseReason,
+  type LeadCard,
+  TEXTS,
+} from '../notify/cards'
 import type { Notifier } from '../notify/notifier'
 import { type ProfiClient, ProfiError } from '../profi/client'
 import { getSetting } from '../settings/store'
@@ -728,12 +737,32 @@ async function processOrder(e: EventEnvelope): Promise<void> {
 
   const accountId = e.account_id ?? 'hance-marketing'
   const scored = await DBOS.runStep(
-    async (): Promise<(Scored & { version: number }) | null> => {
+    async (): Promise<
+      (Scored & { version: number; precedents?: ReturnType<typeof storePrecedents> }) | null
+    > => {
       // Any failure here (no rules, the model down) brings the card unscored: the order is never lost.
       try {
         const { version, rules } = await activeRules(d().db, accountId)
-        const s = await scoreOrder(d().gateway, order, rules, { correlationId, causationId: e.id })
-        if (!s) return null
+        // Boris's own decisions on orders like this one go with it (07.11.2026); without them it is scored as before.
+        const precedents = await similarDecisions(d().db, accountId, {
+          orderId: order.order_id,
+          title: order.title,
+          category: order.category,
+          text: order.text,
+        }).catch((err) => {
+          console.error(
+            'precedents skipped',
+            err instanceof Error ? err.message.slice(0, 200) : err,
+          )
+          return []
+        })
+        const found = await scoreOrder(d().gateway, order, rules, {
+          correlationId,
+          causationId: e.id,
+          precedents,
+        })
+        if (!found) return null
+        const s = { ...found, precedents: storePrecedents(precedents) }
         // A text that looks like a vacancy loses points; the stop `vacancy` of the rules stays the Scorer's own
         // insurance, the screen stops the clear ones earlier and with a quote.
         const cut = screen?.penalty ?? 0
@@ -776,6 +805,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             reason: scored.reason,
             confidence: scored.confidence,
             model: scored.model,
+            // A score from before the precedents (a workflow replayed across the update) keeps none.
+            precedents: scored.precedents ?? null,
           })
           // A test order goes on to its card, so it never stands among the day's dropped orders.
           if (scored.decision === 'drop' && !test) {
@@ -976,6 +1007,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     reason: sorted.reason,
     bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
+    similar: similarOnCard(scored?.precedents),
     unscored: !scored,
     // The same text as every later card and as the bid: the greeting of this hour, the voice rules applied (the case
     // lines the program put in are tidied too), so Boris never approves a text that is not the one to be sent.
@@ -1084,6 +1116,7 @@ async function cardOfFound(
     reason: s.reason ?? null,
     bidPriceRub: l.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
+    similar: similarOnCard(sc?.precedents),
     reminder,
     // The card shows the bid as it would go out now: the greeting of this hour, the voice rules applied. Nothing says
     // that the greeting may change; it is built again when the bid is sent.
@@ -1201,6 +1234,62 @@ async function closedWhenOf(l: LeadRow, at: Date): Promise<ClosedWhen> {
 }
 
 /**
+ * The reason line of a short card and its buttons (07.11.2026): Sara's guess with three other reasons and «Другое»
+ * to correct it in one press, or Boris's own pick without buttons. Never throws: the card folds without it.
+ */
+async function closeReasonOf(
+  found: NonNullable<Awaited<ReturnType<typeof leadOfTask>>>,
+): Promise<CloseReason | null> {
+  try {
+    const r = await reasonOnCard(d().db, found.lead.id)
+    if (!r) return null
+    return {
+      text: r.reason ? reasonText(r.reason) : null,
+      by: r.by,
+      buttons: r.buttons.map((code) => ({
+        text: REASON_BUTTONS[code],
+        callbackData: formatCallback(found.task.id, reasonAction(code)),
+      })),
+    }
+  } catch (err) {
+    console.error(
+      'close reason skipped',
+      found.task.id,
+      err instanceof Error ? err.message.slice(0, 200) : err,
+    )
+    return null
+  }
+}
+
+/**
+ * Boris's press on a reason under a short card: his reason replaces the guess, and every message of the card shows
+ * it, without buttons now.
+ */
+async function onReasonPress(taskId: string, action: TaskAction): Promise<string> {
+  const code = codeOfAction(action)
+  const found = await leadOfTask(taskId)
+  if (!code || !found || found.task.kind !== 'lead_decision' || found.task.state === 'open')
+    return TEXTS.alreadyDone
+  const at = new Date()
+  const reason = await setReason(d().db, found.lead.id, code, at)
+  if (!reason) return TEXTS.alreadyDone
+  // A stale card stays the stale card, with the wait it had when it went stale.
+  await closeCardMessages(
+    found,
+    found.lead.status === 'stale'
+      ? { stale: new Date(found.task.resolvedAt ?? at) }
+      : { byBoris: true },
+  ).catch((err) =>
+    console.error(
+      'reason not shown on the card',
+      taskId,
+      err instanceof Error ? err.message.slice(0, 200) : err,
+    ),
+  )
+  return TEXTS.reasonSaved(reasonText(reason))
+}
+
+/**
  * Every message the card of this task went out as (its first card and the cards sent again), edited into the short
  * closed card, or the short stale card (`stale`). The numbers come from the journal (card.sent) and from the task,
  * which also holds those sent before the journal kept them. One message Telegram will not edit never stops the others.
@@ -1241,6 +1330,8 @@ async function closeCardMessages(
       : o.stale
         ? { stale: { since: new Date(first).toISOString(), at: o.stale.toISOString() } }
         : { closed: await closedWhenOf(found.lead, new Date()) }),
+    // A card Boris closed or let go stale says why, as far as Sara can tell (07.11.2026); one closed on the site not.
+    ...((o.byBoris || o.stale) && { closeReason: await closeReasonOf(found) }),
   }
   for (const id of [...ids].sort((a, b) => a - b)) {
     try {
@@ -1610,7 +1701,7 @@ async function bringCard(
 async function onWant(reviewId: string): Promise<string> {
   const l = await bringCard(reviewId, 'lead_review', 'want')
   if (!l) return TEXTS.alreadyDone
-  learnFrom({ leadId: l.id, label: 'yes', source: 'summary' }, 'why_want', l.title)
+  void learnFrom({ leadId: l.id, label: 'yes', source: 'summary' }, 'why_want', l.title)
   return TEXTS.wantCard
 }
 
@@ -1634,8 +1725,8 @@ async function onOpen(heldId: string): Promise<string> {
 }
 
 /**
- * The label and the «почему?» after a decision. Not awaited and never thrown: learning must not hold up or
- * break a bid or a card that already happened.
+ * The label and the «почему?» after a decision. Never thrown: learning must not break a bid or a card that already
+ * happened. A bid does not wait for it; a close awaits it, so its short card can show the guessed reason.
  */
 function learnFrom(
   label: Parameters<typeof recordLabel>[1],
@@ -1643,10 +1734,10 @@ function learnFrom(
   title: string,
   /** The reason came with the press (the pult): nothing to ask. */
   ask = true,
-): void {
+): Promise<void> {
   // A test order teaches nothing: no label, no «почему?» (docs/ops/test-leads.md).
-  if (isTestOrder(label.leadId)) return
-  void (async () => {
+  if (isTestOrder(label.leadId)) return Promise.resolve()
+  return (async () => {
     const labeled = await recordLabel(d().db, label)
     if (labeled.surprise && ask)
       await askWhy(d(), { kind: why, entityId: label.leadId, title }, new Date())
@@ -1673,6 +1764,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       if (action === 'edit') return onEdit(taskId)
       if (action === 'razbor') return onAnalysis(taskId)
       if (action === 'apply' || action === 'drop') return onProposalPress(d(), taskId, action)
+      if (codeOfAction(action)) return onReasonPress(taskId, action)
       if (action !== 'bid' && action !== 'skip') return TEXTS.alreadyDone
       const found = await leadOfTask(taskId)
       if (!found) return TEXTS.alreadyDone
@@ -1790,7 +1882,7 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       await deliverDecision(taskId, action)
       if (outboxId) await startOutboxDelivery(outboxId)
       const fromPult = source === 'pult' || source === 'hold'
-      learnFrom(
+      const learned = learnFrom(
         {
           leadId: l.id,
           label: action === 'bid' ? 'yes' : 'no',
@@ -1802,6 +1894,8 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
         // No «почему?» after a close (Boris, 31.10.2026): the label keeps what the rules need to guess the reason.
         action === 'bid' && !fromPult,
       )
+      // The short card shows the guessed reason, so it waits for the label (one quick write that never throws).
+      if (action === 'skip') await learned
       // «Закрыть заявку»: the card he pressed is edited into «📁 Заявка закрыта», whoever pressed (the bot, the pult,
       // the secretary); a card that never went out has nothing to edit.
       if (action === 'skip' && found.task.kind === 'lead_decision')
@@ -1943,6 +2037,14 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
           taskId,
           err instanceof Error ? err.message.slice(0, 200) : err,
         ),
+      )
+      // The card nobody pressed is a weak no (the ignore sweep's label, written here when it has not come yet, since
+      // the task is no longer open for it) and its short card shows the guessed reason.
+      await learnFrom(
+        { leadId: l.id, label: 'weak_no', source: 'ignored' },
+        'why_skip',
+        l.title,
+        false,
       )
       await closeCardMessages(found, { stale: at })
       return true

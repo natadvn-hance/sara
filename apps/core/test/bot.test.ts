@@ -188,6 +188,30 @@ describe('telegram bot', () => {
     expect(tg.sent).toHaveLength(2)
   })
 
+  it('07.11: a card Boris closed folds with its guessed reason and one row of reason buttons', async () => {
+    tg.pushStart(111)
+    await until(() => tg.sent.length === 1)
+    const { messageId } = await bot.notifier.sendLeadCard(CARD)
+    const buttons = [
+      { text: 'Бюджет', callbackData: `t:${CARD.taskId}:whybudget` },
+      { text: 'Другое', callbackData: `t:${CARD.taskId}:whyother` },
+    ]
+    await bot.notifier.closeLeadCard(messageId, {
+      ...CARD,
+      closedByBoris: true,
+      closeReason: { text: 'сайт, а не маркетинг', by: 'guess', buttons },
+    })
+    expect(tg.edited[0]?.text).toContain('<i>Похоже, сайт, а не маркетинг</i>')
+    expect(tg.edited[0]?.reply_markup).toEqual({
+      inline_keyboard: [
+        [
+          { text: 'Бюджет', callback_data: `t:${CARD.taskId}:whybudget` },
+          { text: 'Другое', callback_data: `t:${CARD.taskId}:whyother` },
+        ],
+      ],
+    })
+  })
+
   it('FR-LEAD-5: the closed card of a very long order is short: the order text is gone', async () => {
     tg.pushStart(111)
     await until(() => tg.sent.length === 1)
