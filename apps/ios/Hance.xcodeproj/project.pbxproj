@@ -1,0 +1,908 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0006C09B3779B7C51AF7166A /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA23B0D7058A41AF35B6217 /* SessionStore.swift */; };
+		0129F9707A92FF2780CB686E /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
+		0867A51A5AED2FA7C2B6F979 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
+		08C3BE05CC41C0BF9FA447F6 /* HanceWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B7455A5F0D11201F6030750 /* HanceWidgets.swift */; };
+		0D71C81B83CAC857A7E1FA16 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494752230CCEB0631BD6FEAB /* Intents.swift */; };
+		122513EC9DE3AFE92AD99501 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
+		180F0A05D2ABA03161FAEC44 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
+		1A91D5B2AA5DED69ECC1A3CF /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
+		1D75A6394B21670FA035FA26 /* HanceWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7892F42A30B9D0294537D01A /* HanceWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		1DD3CD1A7CD8E7602EF38AED /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
+		2155869ED4B4B45BAAD298C0 /* Onest-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */; };
+		25A08494C9BB4968C71EEAD9 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
+		273D1DF6695E591F43FC4C09 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
+		27588ABFD4BE6F36207934E1 /* Onest-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */; };
+		28431E50ECF2ACD05E026330 /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */; };
+		2870AE5F46BDD5BDFE28BC78 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E739C8A762606790E910E1D /* CoreClient.swift */; };
+		339234649382555EBAD59985 /* HanceNotification.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FCC37739D929CD8374A64D5 /* HanceNotification.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3B7DECECCD969C9A04432B41 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */; };
+		408D75E123918542D895024F /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
+		409C40C4EB50334BCE04601B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 90BF89146EA45C249DDF15BF /* Assets.xcassets */; };
+		42002A4BE98B21A14582DD3E /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
+		446F2CA8DB776546D364E9CA /* Onest-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */; };
+		45511C0C885C452D45B9CCB2 /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
+		4658100E09FE8B5BF5E2227C /* CoreClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08E2BB6599ABBAB1B582322A /* CoreClientTests.swift */; };
+		46E681B0499489E703A1D5DF /* Wav.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342ACCC1EA3276479549B29C /* Wav.swift */; };
+		4894B233B9B3B52E0033A1E5 /* SilenceDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C695714E5A7578DFE49B7298 /* SilenceDetector.swift */; };
+		4D7963ACA465C1E6926816CA /* HanceShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1FC0B32B2A9F60521CE9EC /* HanceShortcuts.swift */; };
+		4F5A3D95171AE1711F475FC2 /* SpeechChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4209E24635DB2A603522BF6 /* SpeechChunker.swift */; };
+		4FD02E9262D6F26318173E51 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494752230CCEB0631BD6FEAB /* Intents.swift */; };
+		531CE3BEE6A6DCDBAB2847ED /* VoiceUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DF8A3657667729344E05B0 /* VoiceUpload.swift */; };
+		57F92B7E8BC37EFEC2F84B49 /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
+		6127272D111F56F430740C01 /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
+		62061A97DC9D62467336564D /* NotificationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EC235690ED85973807EAAEC /* NotificationViewController.swift */; };
+		6C53B45A778768656EB9ACCC /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
+		73A1155EE112763CC37E36D4 /* MartianMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */; };
+		77D8027E7B7A992B36A5BD28 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9CF7D4A329FFACD4BB363851 /* Assets.xcassets */; };
+		7BBC267656B62249B573AA4F /* Onest-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */; };
+		8409D1BF10A9C3443353B6EA /* AnswerBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */; };
+		87318EC69623ACD0EE25C108 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
+		89D9E50B7FEFD97CEC1D1C52 /* Onest-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */; };
+		96230E662C9FE6E2DB7D65EB /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B59901B1EA1C4649BEAFDE0 /* Support.swift */; };
+		9714A668C8FB3BD3835D8364 /* TalkScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234D484032E679A4187AE9A0 /* TalkScreen.swift */; };
+		978D6440DD2432CC6EBC2BF3 /* HanceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA60CF2214FE0D810C7EB59 /* HanceApp.swift */; };
+		988D563D1CFE9C04074E923F /* MartianMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */; };
+		9B1F93BB91098E4EED1862A1 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
+		A11A6073CCEB9CD82576DB71 /* TalkEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93B76D253F76B4F1BFC2E64 /* TalkEngine.swift */; };
+		A25BE1B88C794048471C5E03 /* Onest-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */; };
+		AD41EE58D1AA373BB13AE95E /* Onest-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */; };
+		ADE49118F4FA60705E24872D /* SilenceDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */; };
+		B2003C361F4D097D4A36BD6D /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
+		BFEEAFBA93227E89E6A2FBF4 /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
+		C1EFF97087AAF841544A90E3 /* Orb.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08DBA8465455FB6702C1976 /* Orb.swift */; };
+		C7AD80C5D389CFAADED0CEF7 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
+		C86130DA4CF1052CFB48789C /* Onest-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */; };
+		C8CC653292359206D8DA6A91 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4176F77F1F4D8454C8B9E1DE /* Sheets.swift */; };
+		CEA1DAB8D718E5EFA770D050 /* TalkLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05B4AD23A1E8DE0838D8DD79 /* TalkLiveActivity.swift */; };
+		CEE10557B210C50CD9175ACF /* SpeechChunkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */; };
+		D1B107EDD4339D6B96014344 /* AnswerWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9D5D2F357894B785773B5F /* AnswerWait.swift */; };
+		E32BD04277A9637AD41063B0 /* AnswerWaitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */; };
+		E7DD18D64126389FB07D22F4 /* Mic.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06640BE7BA84F21BC840DB /* Mic.swift */; };
+		E99A01ED225639068CA9AE0A /* MartianMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */; };
+		F176537965628CB78E16E7B8 /* Earcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E267B5B1FD895845A8D23FF /* Earcon.swift */; };
+		F2C64B5ADDB27F89F417DF3B /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
+		F517A1688301CE547227D265 /* Onest-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		65458C60560A35F127DC913D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 94876879E790EDE69903D5B4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FC00484EE054DF50A5833479;
+			remoteInfo = HanceWidgets;
+		};
+		E1F5FF9B0442634C53057933 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 94876879E790EDE69903D5B4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9E4DF8CE845A170C36E49351;
+			remoteInfo = Hance;
+		};
+		F6FA5DA1C3B2F5B3F7164279 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 94876879E790EDE69903D5B4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1DC439BEE83E1FD8D910549D;
+			remoteInfo = HanceNotification;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		1C63237C86F4016AA79765D4 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1D75A6394B21670FA035FA26 /* HanceWidgets.appex in Embed Foundation Extensions */,
+				339234649382555EBAD59985 /* HanceNotification.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		05B4AD23A1E8DE0838D8DD79 /* TalkLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkLiveActivity.swift; sourceTree = "<group>"; };
+		08E2BB6599ABBAB1B582322A /* CoreClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClientTests.swift; sourceTree = "<group>"; };
+		09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilenceDetectorTests.swift; sourceTree = "<group>"; };
+		0B7455A5F0D11201F6030750 /* HanceWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceWidgets.swift; sourceTree = "<group>"; };
+		16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "MartianMono-Medium.ttf"; sourceTree = "<group>"; };
+		1FCC37739D929CD8374A64D5 /* HanceNotification.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HanceNotification.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Onest-SemiBold.ttf"; sourceTree = "<group>"; };
+		234D484032E679A4187AE9A0 /* TalkScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkScreen.swift; sourceTree = "<group>"; };
+		2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Onest-Regular.ttf"; sourceTree = "<group>"; };
+		293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Onest-Medium.ttf"; sourceTree = "<group>"; };
+		2E2E0C12C02EAC73A7186093 /* Wordmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wordmark.swift; sourceTree = "<group>"; };
+		342ACCC1EA3276479549B29C /* Wav.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wav.swift; sourceTree = "<group>"; };
+		350132D3E31E66B3154B520B /* HanceTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3E267B5B1FD895845A8D23FF /* Earcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Earcon.swift; sourceTree = "<group>"; };
+		3EC235690ED85973807EAAEC /* NotificationViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationViewController.swift; sourceTree = "<group>"; };
+		4176F77F1F4D8454C8B9E1DE /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
+		435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkActivityAttributes.swift; sourceTree = "<group>"; };
+		45351CAA1463E02EA922F9D3 /* KnightMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnightMark.swift; sourceTree = "<group>"; };
+		494752230CCEB0631BD6FEAB /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
+		4B1FC0B32B2A9F60521CE9EC /* HanceShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceShortcuts.swift; sourceTree = "<group>"; };
+		4E739C8A762606790E910E1D /* CoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClient.swift; sourceTree = "<group>"; };
+		5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerBanner.swift; sourceTree = "<group>"; };
+		5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunkerTests.swift; sourceTree = "<group>"; };
+		6764B70361BF2831DCAB0EE7 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
+		6AB12B71572D5D2376BFBBE2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		7892F42A30B9D0294537D01A /* HanceWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HanceWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		7FE484EB002E81A9BBC2EB1B /* Hance.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Hance.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		84DF8A3657667729344E05B0 /* VoiceUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceUpload.swift; sourceTree = "<group>"; };
+		8C9D5D2F357894B785773B5F /* AnswerWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerWait.swift; sourceTree = "<group>"; };
+		8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
+		8FF7E949FEA41DE168460B09 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		90BF89146EA45C249DDF15BF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9B59901B1EA1C4649BEAFDE0 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
+		9CF7D4A329FFACD4BB363851 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerWaitTests.swift; sourceTree = "<group>"; };
+		ACFD14035E16132BEA9A7756 /* Brand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Brand.swift; sourceTree = "<group>"; };
+		AD06640BE7BA84F21BC840DB /* Mic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mic.swift; sourceTree = "<group>"; };
+		B93B76D253F76B4F1BFC2E64 /* TalkEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkEngine.swift; sourceTree = "<group>"; };
+		C695714E5A7578DFE49B7298 /* SilenceDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilenceDetector.swift; sourceTree = "<group>"; };
+		CEA60CF2214FE0D810C7EB59 /* HanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceApp.swift; sourceTree = "<group>"; };
+		DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "MartianMono-Regular.ttf"; sourceTree = "<group>"; };
+		EEA23B0D7058A41AF35B6217 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		F08DBA8465455FB6702C1976 /* Orb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Orb.swift; sourceTree = "<group>"; };
+		F4209E24635DB2A603522BF6 /* SpeechChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunker.swift; sourceTree = "<group>"; };
+		F9EF12B146DC66D45B44B10E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FF82234EB3D6450BC147BCA7 /* KnightHop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnightHop.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0E1EB685F919B66DF14B35A3 /* Brand */ = {
+			isa = PBXGroup;
+			children = (
+				6764B70361BF2831DCAB0EE7 /* Agent.swift */,
+				ACFD14035E16132BEA9A7756 /* Brand.swift */,
+				FF82234EB3D6450BC147BCA7 /* KnightHop.swift */,
+				45351CAA1463E02EA922F9D3 /* KnightMark.swift */,
+				2E2E0C12C02EAC73A7186093 /* Wordmark.swift */,
+			);
+			path = Brand;
+			sourceTree = "<group>";
+		};
+		246F3845982B5BF6089D4A7E /* Talk */ = {
+			isa = PBXGroup;
+			children = (
+				8C9D5D2F357894B785773B5F /* AnswerWait.swift */,
+				9B59901B1EA1C4649BEAFDE0 /* Support.swift */,
+				B93B76D253F76B4F1BFC2E64 /* TalkEngine.swift */,
+			);
+			path = Talk;
+			sourceTree = "<group>";
+		};
+		3C562B81631D1AA1A7106249 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				E4B3DA7A925F0E8C8461C5A2 /* Activity */,
+				0E1EB685F919B66DF14B35A3 /* Brand */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		50BC31C5F777755A6C7B6734 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				4B1FC0B32B2A9F60521CE9EC /* HanceShortcuts.swift */,
+			);
+			path = Intents;
+			sourceTree = "<group>";
+		};
+		77C9B917FC156DBFBF235201 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				4E739C8A762606790E910E1D /* CoreClient.swift */,
+				EEA23B0D7058A41AF35B6217 /* SessionStore.swift */,
+				84DF8A3657667729344E05B0 /* VoiceUpload.swift */,
+				342ACCC1EA3276479549B29C /* Wav.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		8405677881026159B8B56563 /* Notification */ = {
+			isa = PBXGroup;
+			children = (
+				5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */,
+				8FF7E949FEA41DE168460B09 /* Info.plist */,
+				3EC235690ED85973807EAAEC /* NotificationViewController.swift */,
+			);
+			path = Notification;
+			sourceTree = "<group>";
+		};
+		9E8221D456D4FD65399F1064 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */,
+				F08DBA8465455FB6702C1976 /* Orb.swift */,
+				4176F77F1F4D8454C8B9E1DE /* Sheets.swift */,
+				234D484032E679A4187AE9A0 /* TalkScreen.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		B975B033AB604A33A35A8D5E /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */,
+				08E2BB6599ABBAB1B582322A /* CoreClientTests.swift */,
+				09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */,
+				66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		CA43F817AFFD57B75B7A1F14 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				3E267B5B1FD895845A8D23FF /* Earcon.swift */,
+				AD06640BE7BA84F21BC840DB /* Mic.swift */,
+				C695714E5A7578DFE49B7298 /* SilenceDetector.swift */,
+				8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */,
+				F4209E24635DB2A603522BF6 /* SpeechChunker.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		D5AE30582F0E1653D8A208D8 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				CA43F817AFFD57B75B7A1F14 /* Audio */,
+				77C9B917FC156DBFBF235201 /* Core */,
+				50BC31C5F777755A6C7B6734 /* Intents */,
+				246F3845982B5BF6089D4A7E /* Talk */,
+				9E8221D456D4FD65399F1064 /* UI */,
+				9CF7D4A329FFACD4BB363851 /* Assets.xcassets */,
+				CEA60CF2214FE0D810C7EB59 /* HanceApp.swift */,
+				6AB12B71572D5D2376BFBBE2 /* Info.plist */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		D714880E9860DED23D9D6C3C = {
+			isa = PBXGroup;
+			children = (
+				D5AE30582F0E1653D8A208D8 /* App */,
+				E3B6C61532260076E661A04A /* Fonts */,
+				8405677881026159B8B56563 /* Notification */,
+				3C562B81631D1AA1A7106249 /* Shared */,
+				B975B033AB604A33A35A8D5E /* Tests */,
+				D791B55D0B4A3DD15840D289 /* Widgets */,
+				FD3598D69F16F45AF21D7F5C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D791B55D0B4A3DD15840D289 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				90BF89146EA45C249DDF15BF /* Assets.xcassets */,
+				0B7455A5F0D11201F6030750 /* HanceWidgets.swift */,
+				F9EF12B146DC66D45B44B10E /* Info.plist */,
+				05B4AD23A1E8DE0838D8DD79 /* TalkLiveActivity.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		E3B6C61532260076E661A04A /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				16D909FB38920DDB0AD2B0F2 /* MartianMono-Medium.ttf */,
+				DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */,
+				293697C02ADD4AB0AA8A6385 /* Onest-Medium.ttf */,
+				2430A6D5BF6B65EEC21C533E /* Onest-Regular.ttf */,
+				20EFDB404A8EC19E85C4EC65 /* Onest-SemiBold.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+		E4B3DA7A925F0E8C8461C5A2 /* Activity */ = {
+			isa = PBXGroup;
+			children = (
+				494752230CCEB0631BD6FEAB /* Intents.swift */,
+				435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */,
+			);
+			path = Activity;
+			sourceTree = "<group>";
+		};
+		FD3598D69F16F45AF21D7F5C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7FE484EB002E81A9BBC2EB1B /* Hance.app */,
+				1FCC37739D929CD8374A64D5 /* HanceNotification.appex */,
+				350132D3E31E66B3154B520B /* HanceTests.xctest */,
+				7892F42A30B9D0294537D01A /* HanceWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1DC439BEE83E1FD8D910549D /* HanceNotification */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 15783AD4B64707D22CE6AB64 /* Build configuration list for PBXNativeTarget "HanceNotification" */;
+			buildPhases = (
+				BFBE7A6035A0C536D63EE220 /* Sources */,
+				6C5FCFA04C807E7108A746BE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HanceNotification;
+			packageProductDependencies = (
+			);
+			productName = HanceNotification;
+			productReference = 1FCC37739D929CD8374A64D5 /* HanceNotification.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		9E4DF8CE845A170C36E49351 /* Hance */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 65E6EA8816CB6A3A48B8118E /* Build configuration list for PBXNativeTarget "Hance" */;
+			buildPhases = (
+				C242F24DC1278CFA249C85DB /* Sources */,
+				84A7F33CA892DC00C6A527E6 /* Resources */,
+				1C63237C86F4016AA79765D4 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				823B506D113A4A8192BF49B1 /* PBXTargetDependency */,
+				12D55A347F1EC2AD73891EF8 /* PBXTargetDependency */,
+			);
+			name = Hance;
+			packageProductDependencies = (
+			);
+			productName = Hance;
+			productReference = 7FE484EB002E81A9BBC2EB1B /* Hance.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B8BDD2198D5732AD407CC88F /* HanceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A9FEFD4421905885180D3634 /* Build configuration list for PBXNativeTarget "HanceTests" */;
+			buildPhases = (
+				391A5D9A902A181044277696 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C6D010F523E6BFDE9C0338A2 /* PBXTargetDependency */,
+			);
+			name = HanceTests;
+			packageProductDependencies = (
+			);
+			productName = HanceTests;
+			productReference = 350132D3E31E66B3154B520B /* HanceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		FC00484EE054DF50A5833479 /* HanceWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7CCAC32D71E3D8BDA8A8E23F /* Build configuration list for PBXNativeTarget "HanceWidgets" */;
+			buildPhases = (
+				522F5B4C0E2C63292046B197 /* Sources */,
+				3F1E8CD4DD8ABFD4983E86FB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HanceWidgets;
+			packageProductDependencies = (
+			);
+			productName = HanceWidgets;
+			productReference = 7892F42A30B9D0294537D01A /* HanceWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		94876879E790EDE69903D5B4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					1DC439BEE83E1FD8D910549D = {
+						ProvisioningStyle = Automatic;
+					};
+					9E4DF8CE845A170C36E49351 = {
+						ProvisioningStyle = Automatic;
+					};
+					B8BDD2198D5732AD407CC88F = {
+						ProvisioningStyle = Automatic;
+					};
+					FC00484EE054DF50A5833479 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = C38285EE048C70EC48158990 /* Build configuration list for PBXProject "Hance" */;
+			developmentRegion = ru;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				ru,
+			);
+			mainGroup = D714880E9860DED23D9D6C3C;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = FD3598D69F16F45AF21D7F5C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9E4DF8CE845A170C36E49351 /* Hance */,
+				FC00484EE054DF50A5833479 /* HanceWidgets */,
+				1DC439BEE83E1FD8D910549D /* HanceNotification */,
+				B8BDD2198D5732AD407CC88F /* HanceTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3F1E8CD4DD8ABFD4983E86FB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				409C40C4EB50334BCE04601B /* Assets.xcassets in Resources */,
+				988D563D1CFE9C04074E923F /* MartianMono-Medium.ttf in Resources */,
+				BFEEAFBA93227E89E6A2FBF4 /* MartianMono-Regular.ttf in Resources */,
+				7BBC267656B62249B573AA4F /* Onest-Medium.ttf in Resources */,
+				446F2CA8DB776546D364E9CA /* Onest-Regular.ttf in Resources */,
+				27588ABFD4BE6F36207934E1 /* Onest-SemiBold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6C5FCFA04C807E7108A746BE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3B7DECECCD969C9A04432B41 /* Assets.xcassets in Resources */,
+				73A1155EE112763CC37E36D4 /* MartianMono-Medium.ttf in Resources */,
+				F2C64B5ADDB27F89F417DF3B /* MartianMono-Regular.ttf in Resources */,
+				F517A1688301CE547227D265 /* Onest-Medium.ttf in Resources */,
+				A25BE1B88C794048471C5E03 /* Onest-Regular.ttf in Resources */,
+				AD41EE58D1AA373BB13AE95E /* Onest-SemiBold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		84A7F33CA892DC00C6A527E6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				77D8027E7B7A992B36A5BD28 /* Assets.xcassets in Resources */,
+				E99A01ED225639068CA9AE0A /* MartianMono-Medium.ttf in Resources */,
+				0129F9707A92FF2780CB686E /* MartianMono-Regular.ttf in Resources */,
+				C86130DA4CF1052CFB48789C /* Onest-Medium.ttf in Resources */,
+				89D9E50B7FEFD97CEC1D1C52 /* Onest-Regular.ttf in Resources */,
+				2155869ED4B4B45BAAD298C0 /* Onest-SemiBold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		391A5D9A902A181044277696 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E32BD04277A9637AD41063B0 /* AnswerWaitTests.swift in Sources */,
+				4658100E09FE8B5BF5E2227C /* CoreClientTests.swift in Sources */,
+				ADE49118F4FA60705E24872D /* SilenceDetectorTests.swift in Sources */,
+				CEE10557B210C50CD9175ACF /* SpeechChunkerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		522F5B4C0E2C63292046B197 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9B1F93BB91098E4EED1862A1 /* Agent.swift in Sources */,
+				B2003C361F4D097D4A36BD6D /* Brand.swift in Sources */,
+				08C3BE05CC41C0BF9FA447F6 /* HanceWidgets.swift in Sources */,
+				4FD02E9262D6F26318173E51 /* Intents.swift in Sources */,
+				408D75E123918542D895024F /* KnightHop.swift in Sources */,
+				6127272D111F56F430740C01 /* KnightMark.swift in Sources */,
+				122513EC9DE3AFE92AD99501 /* TalkActivityAttributes.swift in Sources */,
+				CEA1DAB8D718E5EFA770D050 /* TalkLiveActivity.swift in Sources */,
+				42002A4BE98B21A14582DD3E /* Wordmark.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BFBE7A6035A0C536D63EE220 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C7AD80C5D389CFAADED0CEF7 /* Agent.swift in Sources */,
+				25A08494C9BB4968C71EEAD9 /* Brand.swift in Sources */,
+				87318EC69623ACD0EE25C108 /* KnightHop.swift in Sources */,
+				6C53B45A778768656EB9ACCC /* KnightMark.swift in Sources */,
+				62061A97DC9D62467336564D /* NotificationViewController.swift in Sources */,
+				45511C0C885C452D45B9CCB2 /* Wordmark.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C242F24DC1278CFA249C85DB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A91D5B2AA5DED69ECC1A3CF /* Agent.swift in Sources */,
+				8409D1BF10A9C3443353B6EA /* AnswerBanner.swift in Sources */,
+				D1B107EDD4339D6B96014344 /* AnswerWait.swift in Sources */,
+				180F0A05D2ABA03161FAEC44 /* Brand.swift in Sources */,
+				2870AE5F46BDD5BDFE28BC78 /* CoreClient.swift in Sources */,
+				F176537965628CB78E16E7B8 /* Earcon.swift in Sources */,
+				978D6440DD2432CC6EBC2BF3 /* HanceApp.swift in Sources */,
+				4D7963ACA465C1E6926816CA /* HanceShortcuts.swift in Sources */,
+				0D71C81B83CAC857A7E1FA16 /* Intents.swift in Sources */,
+				0867A51A5AED2FA7C2B6F979 /* KnightHop.swift in Sources */,
+				57F92B7E8BC37EFEC2F84B49 /* KnightMark.swift in Sources */,
+				E7DD18D64126389FB07D22F4 /* Mic.swift in Sources */,
+				C1EFF97087AAF841544A90E3 /* Orb.swift in Sources */,
+				0006C09B3779B7C51AF7166A /* SessionStore.swift in Sources */,
+				C8CC653292359206D8DA6A91 /* Sheets.swift in Sources */,
+				4894B233B9B3B52E0033A1E5 /* SilenceDetector.swift in Sources */,
+				28431E50ECF2ACD05E026330 /* Speaker.swift in Sources */,
+				4F5A3D95171AE1711F475FC2 /* SpeechChunker.swift in Sources */,
+				96230E662C9FE6E2DB7D65EB /* Support.swift in Sources */,
+				273D1DF6695E591F43FC4C09 /* TalkActivityAttributes.swift in Sources */,
+				A11A6073CCEB9CD82576DB71 /* TalkEngine.swift in Sources */,
+				9714A668C8FB3BD3835D8364 /* TalkScreen.swift in Sources */,
+				531CE3BEE6A6DCDBAB2847ED /* VoiceUpload.swift in Sources */,
+				46E681B0499489E703A1D5DF /* Wav.swift in Sources */,
+				1DD3CD1A7CD8E7602EF38AED /* Wordmark.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		12D55A347F1EC2AD73891EF8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1DC439BEE83E1FD8D910549D /* HanceNotification */;
+			targetProxy = F6FA5DA1C3B2F5B3F7164279 /* PBXContainerItemProxy */;
+		};
+		823B506D113A4A8192BF49B1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC00484EE054DF50A5833479 /* HanceWidgets */;
+			targetProxy = 65458C60560A35F127DC913D /* PBXContainerItemProxy */;
+		};
+		C6D010F523E6BFDE9C0338A2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9E4DF8CE845A170C36E49351 /* Hance */;
+			targetProxy = E1F5FF9B0442634C53057933 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2A23096EAA7059F75015134E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hance.app/Hance";
+			};
+			name = Release;
+		};
+		4EC6605D9D0980EDAA1CEAC0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = Widgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk.widgets;
+				PRODUCT_NAME = HanceWidgets;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HANCE_WIDGETS";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		66C411170E1C0F75F55BDB6E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		6EA7FA158914BDD082F6EA16 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = Notification/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk.notification;
+				PRODUCT_NAME = HanceNotification;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		904969457EB255F1207402E9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = Notification/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk.notification;
+				PRODUCT_NAME = HanceNotification;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		97D24A088652D7634D2B991A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = Widgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk.widgets;
+				PRODUCT_NAME = HanceWidgets;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HANCE_WIDGETS";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9B733F433E424273AE68087F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		CF4E9BC0301294EB861C70CF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk;
+				PRODUCT_NAME = Hance;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HANCE_APP";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D636BBC50A312942722D9357 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk;
+				PRODUCT_NAME = Hance;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HANCE_APP";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F15C4C8810986A74AB656971 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.talk.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hance.app/Hance";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		15783AD4B64707D22CE6AB64 /* Build configuration list for PBXNativeTarget "HanceNotification" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				904969457EB255F1207402E9 /* Debug */,
+				6EA7FA158914BDD082F6EA16 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		65E6EA8816CB6A3A48B8118E /* Build configuration list for PBXNativeTarget "Hance" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D636BBC50A312942722D9357 /* Debug */,
+				CF4E9BC0301294EB861C70CF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7CCAC32D71E3D8BDA8A8E23F /* Build configuration list for PBXNativeTarget "HanceWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				97D24A088652D7634D2B991A /* Debug */,
+				4EC6605D9D0980EDAA1CEAC0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A9FEFD4421905885180D3634 /* Build configuration list for PBXNativeTarget "HanceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F15C4C8810986A74AB656971 /* Debug */,
+				2A23096EAA7059F75015134E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C38285EE048C70EC48158990 /* Build configuration list for PBXProject "Hance" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				66C411170E1C0F75F55BDB6E /* Debug */,
+				9B733F433E424273AE68087F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 94876879E790EDE69903D5B4 /* Project object */;
+}
