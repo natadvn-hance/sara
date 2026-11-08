@@ -9,6 +9,7 @@ import { NOT_NAMES } from './check/phrases'
 import { getConversation } from './store'
 import { inMoscowHours } from './time'
 import type { ConversationRow, Dossier, DossierMessage } from './types'
+import { voiceOn } from './voice'
 
 /**
  * The client messages a turn answers: those after our side's last message and after the last message a finished
@@ -148,6 +149,7 @@ export async function buildDossier(
     conversationId,
     accountId: conv.accountId,
     scope: conv.accountId,
+    voice: await voiceOn(db, conv.chatId),
     order,
     clientName,
     clientInfo,

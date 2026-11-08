@@ -182,6 +182,11 @@ export const SETTINGS = {
    */
   'conv.reminders': { schema: z.boolean(), default: true },
   /**
+   * Boris's voice from his skill «Голос Бориса» (07.11.2026), the mind's records of scope `trial`: on test orders only
+   * («test», his «да, но в тестовом режиме») or in every conversation («all») once he says it sounds like him.
+   */
+  'conv.voice': { schema: z.enum(['test', 'all']), default: 'test' },
+  /**
    * Pings to quiet clients go without Boris's press (spec 2026-11-07-organic-pings). Off: each ping is a card in the
    * client's topic and goes only on «Отправить». The pauses and the shadow hold a ping either way.
    */
