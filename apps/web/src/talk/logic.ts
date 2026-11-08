@@ -11,17 +11,24 @@ export function createSilence(o: {
   pauseMs: number
   startWaitMs: number
   maxMs: number
+  /** How much loud time makes speech: a click or a breath before the first word is not (08.11). */
+  minSpeechMs?: number
 }) {
   let start: number | null = null
+  let prev: number | null = null
+  let loudMs = 0
   let spoke = false
   let lastLoud = 0
   return {
     feed(level: number, at: number): SilenceStep {
       start ??= at
+      const dt = prev === null ? 0 : at - prev
+      prev = at
       if (at - start >= o.maxMs) return spoke ? 'stop' : 'nothing'
       if (level >= o.threshold) {
-        spoke = true
+        loudMs += dt
         lastLoud = at
+        if (loudMs >= (o.minSpeechMs ?? 0)) spoke = true
         return 'listen'
       }
       if (!spoke) return at - start >= o.startWaitMs ? 'nothing' : 'listen'
@@ -54,7 +61,7 @@ export function splitSpeech(text: string): [string, string] {
 }
 
 export type TalkState =
-  | { state: 'done'; text: string; cards: number }
+  | { state: 'done'; text: string; cards: number; heard?: string | null; switch?: 'lora' | 'sara' }
   | { state: 'waiting' }
   | { state: 'gone' }
 

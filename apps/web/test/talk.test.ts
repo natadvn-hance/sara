@@ -130,3 +130,24 @@ describe('the voice app: «Нет связи» says why', () => {
     expect(failureOf(new Error('нет звука'))).toBe('нет звука')
   })
 })
+
+describe('the voice app: a click is not a word', () => {
+  it('FR-NOTIF-5: a short noise before he speaks does not end the recording', () => {
+    const s = createSilence({
+      threshold: 0.05,
+      pauseMs: 1200,
+      startWaitMs: 8000,
+      maxMs: 60_000,
+      minSpeechMs: 300,
+    })
+    expect(s.feed(0.01, 0)).toBe('listen')
+    // A click of 100 ms, then quiet: no speech yet, so the pause does not count.
+    expect(s.feed(0.4, 100)).toBe('listen')
+    expect(s.feed(0.01, 200)).toBe('listen')
+    expect(s.feed(0.01, 2000)).toBe('listen')
+    // Real speech: loud for half a second, then a pause ends it.
+    for (let t = 2100; t <= 2600; t += 100) expect(s.feed(0.3, t)).toBe('listen')
+    expect(s.feed(0.01, 3000)).toBe('listen')
+    expect(s.feed(0.01, 3900)).toBe('stop')
+  })
+})
