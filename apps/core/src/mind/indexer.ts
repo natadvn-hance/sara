@@ -24,6 +24,13 @@ function inForce(r: MindRecord, today: string): boolean {
   )
 }
 
+/** What the prompt shows as Boris's words: a mark of a commercial promise goes with them, so Sara reads the two together. */
+function borisWords(r: MindRecord): string | null {
+  const said = r.sections.Борис || null
+  const promise = r.sections.Обещание
+  return said && promise ? `${said}\n(${promise})` : said
+}
+
 function toRow(r: MindRecord, mindVersion: string) {
   const f = r.front
   const example = f.type === 'example'
@@ -39,7 +46,7 @@ function toRow(r: MindRecord, mindVersion: string) {
     title: r.title,
     body: r.body,
     exampleClient: example ? r.sections.Клиент || null : null,
-    exampleBoris: example ? r.sections.Борис || null : null,
+    exampleBoris: example ? borisWords(r) : null,
     version: f.version,
     mindVersion,
     // A case also carries the marker lexeme, so the fact search can leave it out and the case search can find it.

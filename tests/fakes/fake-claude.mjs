@@ -105,8 +105,39 @@ process.stdin.on('end', async () => {
     return
   }
   const result = { type: 'result', subtype: 'success', is_error: false, result: 'done' }
-  if (mode !== 'no_structured') result.structured_output = JSON.parse(output)
-  process.stdout.write(JSON.stringify(result))
+  // "$web": [links] in an answer: the pages a web search gave this run (a role with tools); not part of the answer.
+  const answer = JSON.parse(output)
+  const plain = answer !== null && typeof answer === 'object' && !Array.isArray(answer)
+  const { $web: web, ...structured } = plain ? answer : {}
+  if (mode !== 'no_structured') result.structured_output = plain ? structured : answer
+  if (argOf('--output-format') !== 'stream-json') {
+    process.stdout.write(JSON.stringify(result))
+    return
+  }
+  // How CLI 2.1.319 prints a run with --output-format stream-json --verbose: one event a line, the result last.
+  const lines = [{ type: 'system', subtype: 'init', tools: (argOf('--tools') ?? '').split(',') }]
+  if (Array.isArray(web) && web.length > 0) {
+    lines.push({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'tu_1', name: 'WebSearch', input: { query: 'q' } }],
+      },
+    })
+    lines.push({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tu_1',
+            content: `Web search results for query: "q"\n\nLinks: ${JSON.stringify(web.map((url) => ({ title: 't', url })))}`,
+          },
+        ],
+      },
+    })
+  }
+  lines.push(result)
+  process.stdout.write(`${lines.map((l) => JSON.stringify(l)).join('\n')}\n`)
 })
 
 /** The calls of a script over stateless Streamable HTTP, each after its own initialize, as a real client may. */

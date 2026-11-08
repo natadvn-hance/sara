@@ -12,11 +12,11 @@ import {
   MIND_ID_PREFIX,
   MIND_TYPES,
   MindFrontmatter,
+  PingerOutput,
   PROFI_ERROR_CLASSES,
   PROFI_EVENT_PAYLOADS,
   PROFI_TOOLS,
   parseCallback,
-  ReminderOutput,
   SETTINGS,
   SendMessageInput,
   TASK_ACTIONS,
@@ -149,7 +149,7 @@ describe('M4 contracts', () => {
     for (const id of ['case.ad', 'case.link']) expect(CHECK_SEVERITY[id as 'case.ad']).toBe('S3')
   })
 
-  it('FR-CONV-4: the Checker, reminder and judge answers have their shapes', () => {
+  it('FR-CONV-4: the Checker, pinger and judge answers have their shapes', () => {
     expect(
       CheckerOutput.safeParse({
         unsupported: [],
@@ -158,7 +158,14 @@ describe('M4 contracts', () => {
         promises: [],
       }).success,
     ).toBe(true)
-    expect(ReminderOutput.safeParse({ text: '', fact_ids: [] }).success).toBe(false)
+    // A text alone is a ping; «later» further than three days, or a fact with no page, is not an answer.
+    expect(PingerOutput.parse({ text: 'Добрый день!', fact_ids: [] })).toMatchObject({
+      decision: 'ping',
+      hook: null,
+      later_days: null,
+    })
+    expect(PingerOutput.safeParse({ decision: 'later', later_days: 5 }).success).toBe(false)
+    expect(PingerOutput.safeParse({ text: 'x', hook: { fact: 'рынок вырос' } }).success).toBe(false)
     expect(
       ExaminerOutput.safeParse({ tone: 6, voice: 3, procedure_ok: true, notes: '' }).success,
     ).toBe(false)

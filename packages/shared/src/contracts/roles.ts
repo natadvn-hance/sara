@@ -6,6 +6,11 @@ export const MODELS = ['haiku', 'sonnet', 'opus'] as const
 export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const
 /** The CLI's `--effort` levels; a role without one runs at the CLI's default. */
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+/**
+ * The CLI's built-in tools a role may have (ADR-027, amendment of 07.11.2026): only reading the web, and only for the
+ * roles that name them. Every other role runs with `--tools ""`.
+ */
+export const ROLE_TOOLS = ['WebSearch', 'WebFetch'] as const
 
 export const RoleMeta = z.object({
   name: z.string().min(1),
@@ -15,8 +20,18 @@ export const RoleMeta = z.object({
   priority: z.enum(PRIORITIES),
   timeoutMs: z.number().int().positive(),
   effort: z.enum(EFFORTS).optional(),
+  /** Built-in tools of the CLI the role may use; left out, none (`--tools ""`). */
+  tools: z.array(z.enum(ROLE_TOOLS)).min(1).optional(),
+  /** A run that would spend more stops (`--max-budget-usd`): a role with tools never loops on the subscription. */
+  maxBudgetUsd: z.number().positive().optional(),
 })
 export type RoleMeta = z.infer<typeof RoleMeta>
+
+/** FR-SPEECH-5: Boris's replies by their number, with only the typos fixed. */
+export const ReplyCleanerOutput = z.object({
+  replies: z.array(z.object({ n: z.number().int().positive(), text: z.string().min(1) })),
+})
+export type ReplyCleanerOutput = z.infer<typeof ReplyCleanerOutput>
 
 export const SorterOutput = z.object({
   verdict: z.enum(['fit', 'maybe', 'reject']),

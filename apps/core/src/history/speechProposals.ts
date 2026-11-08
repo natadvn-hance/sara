@@ -24,13 +24,16 @@ const moscowDate = (d: Date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(d)
 
 /** The C6 fields as YAML; every value is a plain word, a date or a JSON-quoted string. */
-function frontmatter(f: MindFrontmatter): string {
+export function frontmatter(f: MindFrontmatter): string {
   const lines = [
     `id: ${f.id}`,
     `type: ${f.type}`,
     `scope: ${f.scope}`,
     `status: ${f.status}`,
     `version: ${f.version}`,
+    ...(f.title ? [`title: ${JSON.stringify(f.title)}`] : []),
+    ...(f.topic ? [`topic: ${f.topic}`] : []),
+    ...(f.tones?.length ? ['tones:', ...f.tones.map((t) => `  - ${t}`)] : []),
     'sources:',
     ...f.sources.map((s) => `  - ${JSON.stringify(s)}`),
     `valid_from: ${f.valid_from}`,

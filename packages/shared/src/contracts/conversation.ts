@@ -132,12 +132,30 @@ export const CheckerOutput = z.object({
 })
 export type CheckerOutput = z.infer<typeof CheckerOutput>
 
-/** A reminder to a client who went quiet (FR-CONV-12). */
-export const ReminderOutput = z.object({
-  text: z.string().min(1).max(600),
-  fact_ids: z.array(z.string()).max(6),
+/**
+ * The Pinger's answer (FR-CONV-12, spec 2026-11-07-organic-pings): whether to write to the quiet client now, wait once
+ * more inside the window the code gave, or tell Boris instead; and the text. A fresh fact goes in `hook` with the page
+ * it came from; the code drops a fact whose page the run did not really get. The defaults let an answer with a text
+ * alone stand as a ping.
+ */
+export const PINGER_DECISIONS = ['ping', 'later', 'boris'] as const
+export const PingerOutput = z.object({
+  decision: z.enum(PINGER_DECISIONS).default('ping'),
+  /** Why now (or why later, or why Boris): one line Boris reads on the card. */
+  why_now: z.string().max(300).default(''),
+  /** For «later»: in how many days to look again (the code keeps it inside the window). */
+  later_days: z.number().int().min(1).max(3).nullable().default(null),
+  /** For «ping»: the message to the client. */
+  text: z.string().max(600).default(''),
+  hook: z
+    .object({ fact: z.string().min(1).max(400), source_url: z.string().min(1).max(600) })
+    .nullable()
+    .default(null),
+  fact_ids: z.array(z.string()).max(6).default([]),
+  /** For «boris»: what to tell him. */
+  boris_note: z.string().max(400).nullable().default(null),
 })
-export type ReminderOutput = z.infer<typeof ReminderOutput>
+export type PingerOutput = z.infer<typeof PingerOutput>
 
 /** The exam judge's marks (FR-TRAIN-8). */
 export const ExaminerOutput = z.object({
@@ -181,6 +199,8 @@ export const CHECK_SEVERITY = {
   'case.no_examples': 'S2',
   'voice.third_person': 'S2',
   'checker.case': 'S2',
+  // A fact or a news hook in a ping with no page the search really gave (spec 2026-11-07-organic-pings): a lie.
+  'hook.unsourced': 'S1',
 } as const satisfies Record<string, 'S1' | 'S2' | 'S3'>
 export type CheckId = keyof typeof CHECK_SEVERITY
 export const CHECK_IDS = Object.keys(CHECK_SEVERITY) as CheckId[]

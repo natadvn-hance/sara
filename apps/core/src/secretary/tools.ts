@@ -61,6 +61,8 @@ export type TurnContext = {
   questions: QuestionRow[]
   /** The tools this turn called, for the journal. */
   used: string[]
+  /** The cards with buttons this turn's tools sent to Telegram: the voice app tells Boris they are there (ADR-028). */
+  cards?: number
 }
 
 type Tool<I extends z.ZodObject> = {
@@ -233,7 +235,7 @@ export const SECRETARY_TOOLS = {
 
   set_setting: tool({
     description:
-      'Поменять настройку, как в пульте. Лимиты (money.*, cards.*, conv.cards_per_day, secretary.turns_per_day) свободно. outbound.bids, outbound.messages, conv.autopilot, conv.reminders только выключить (false). Остальное нельзя.',
+      'Поменять настройку, как в пульте. Лимиты (money.*, cards.*, conv.cards_per_day, conv.pings_per_day, secretary.turns_per_day) свободно. outbound.bids, outbound.messages, conv.autopilot, conv.reminders, conv.pings_auto только выключить (false). Остальное нельзя.',
     input: z.object({ key: z.string(), value: z.unknown() }),
     run: async (d, _t, i) => {
       if (!(i.key in SETTINGS) || !pultMay(i.key, i.value)) return done(false, PULT_TEXTS.locked)
@@ -408,8 +410,19 @@ export async function runTool(
   const input = def.input.safeParse(restore(args ?? {}, t.redactor.tags))
   if (!input.success) return { text: input.error.message.slice(0, 500), isError: true }
   t.used.push(name)
+  // Every card a tool sends is counted for the turn, whichever way the tool sends it.
+  const counted: SecretaryDeps = {
+    ...d,
+    notifier: {
+      sendButtons: async (...a) => {
+        const sent = await d.notifier.sendButtons(...a)
+        t.cards = (t.cards ?? 0) + 1
+        return sent
+      },
+    },
+  }
   try {
-    const out = await def.run(d, t, input.data)
+    const out = await def.run(counted, t, input.data)
     return { text: t.redactor.hide(JSON.stringify(out)), isError: false }
   } catch (e) {
     console.error('secretary tool failed', name, e instanceof Error ? e.message : e)

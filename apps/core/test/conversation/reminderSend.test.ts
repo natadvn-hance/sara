@@ -14,7 +14,13 @@ afterAll(close)
 
 const CHAT = '95147898'
 const TEXT = 'Анна, здравствуйте! Как у вас дела с сайтом для клиники?'
-const PLAN: Planned = { at: new Date().toISOString(), step: 1, tone: 'check_in' }
+const PLAN: Planned = {
+  at: new Date().toISOString(),
+  step: 1,
+  tone: 'check_in',
+  scenario: { kind: 'since_bid', quote: null, item: null, day: null, nextStep: null },
+  latest: new Date().toISOString(),
+}
 const profi = stubProfi([])
 let sends: string[]
 let deps: RemindDeps

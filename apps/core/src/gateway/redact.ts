@@ -170,6 +170,10 @@ export function redact(text: string, names: (string | null | undefined)[] = []):
 /** A tag like `[имя 3]` is in the text: one that `restore` did not know stays as the model wrote it. */
 export const hasTag = (text: string) => /\[\s*(?:телефон|почта|ссылка|имя)\s*\d+\s*\]/iu.test(text)
 
+/** The tags a text holds, sorted: two texts with the same list hide the same values. */
+export const tagsIn = (text: string): string[] =>
+  [...text.matchAll(TAG)].map((m) => `${m[1]?.toLowerCase()} ${m[2]}`).sort()
+
 /** Puts the hidden values back into every string of a model's answer; a tag it does not know stays as written. */
 export function restore<T>(value: T, tags: Map<string, string>): T {
   if (typeof value === 'string')

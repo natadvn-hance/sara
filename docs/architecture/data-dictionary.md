@@ -125,6 +125,7 @@
 | `mind_index` | `record_id`, `path`, `type`, `scope`, `topic`, `tones`, `stages`, `title`, `body`, `example_client`, `example_boris`, `version`, `mind_version`, `tsv` (полнотекстовый по-русски), `embedding` (vector 384) | Н (обезличено) | индекс подтверждённых записей разума |
 | `mind_gap` (M4) | `id`, `turn_id` (ход, `teacher:…` или `sim:…`), `text`, `topic`, `question_id`, `lesson_id` (M5: урок интервью, закрывший пробел) | Н | чего не хватило (FR-MIND-4) |
 | `mind_proposal` (M4) | `id`, `path` (уникален), `content`, `kind`, `source`, `state` (`new`, `exported`, `accepted`, `declined`), `exported_at`; M5: `lesson_id`, `action` (`create`, `update`, `outdate`), `record_id`, `section`, `base_version`, `change` (jsonb, из чего писатель собирает файл), `decided_at`, `commit_id`, `reject_reason` | Н (обезличено) | предложения в разум до «да» Бориса (FR-MIND-3) |
+| `reply_pick` | `id` (он же номер задачи `reply_sample`), `turn_id` (уникален), `conversation_id`, `first_message_id`, `replied_at`, `similarity`, `position`, `client_text`, `draft_text`, `reply_text`, `promises`, `post_message_id`, `decision` (`apply`, `drop`), `decided_at` | П | пара из поста разбора ответов Бориса (FR-SPEECH-5): строка не даёт паре прийти второй раз, из неё перерисовывается пост. Тексты только с метками вместо данных клиента, ответ без опечаток |
 | `lesson` (M5) | `id`, `n` (порядковый номер, из него номера записей), `source` (`edit`, `say`, `compare`, `training`, `interview`, `teacher`, `review`, `history`, `import`), `source_ref` (уникален с `source`), `scope`, `topic`, `tone`, `question_type`, `client_text`, `before`, `after`, `insight`, `kind`, `state` (`new`, `ready`, `asked`, `yes`, `no`, `skip`, `dropped`), `in_place`, `sim`, `attempts`, `batch_id`, `task_id`, `reason`, `model_call_id`, `commit_id`, `created_at`, `decided_at` | П (обезличено, 2 года) | уроки (FR-TRAIN-6) |
 | `lesson_batch` (M5) | `id`, `lesson_ids`, `task_id`, `telegram_message_id`, `sent_at`, `closed_at`, `commit_id` | Н | пачка уроков в Telegram |
 | `mind_commit` (M5) | `id` (строка `Sara-Commit`), `sha`, `kind` (`accept`, `revert`, `sync`), `proposal_ids`, `lesson_ids`, `mind_version_before`, `reverts_id`, `created_at`, `pushed_at` | Н | коммиты писателя разума (ADR-025) |
@@ -139,7 +140,7 @@
 
 | Данные | Срок | Как |
 |---|---|---|
-| Переписка закрытых клиентов (`message.text`, `lead.text`, `client_name`) | 2 года после закрытия | ночная задача очищает текст, оставляя цифры для аналитики |
+| Переписка закрытых клиентов (`message.text`, `lead.text`, `client_name`, тексты `reply_pick`) | 2 года после закрытия | ночная задача очищает текст, оставляя цифры для аналитики |
 | Контакты (`client_contact`) | 30 дней после встречи | ночная задача |
 | Сырые данные площадки (`node.raw_*`) | 30 дней | ночная задача |
 | Удаление по просьбе клиента | сразу | одна команда из пульта: схемы `node` и `core`, событие `privacy.erased` без данных |

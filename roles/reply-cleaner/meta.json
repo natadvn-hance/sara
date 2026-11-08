@@ -1,0 +1,7 @@
+{
+  "name": "reply-cleaner",
+  "version": 1,
+  "model": "haiku",
+  "priority": "P3",
+  "timeoutMs": 60000
+}

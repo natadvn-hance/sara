@@ -40,6 +40,18 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'confirm',
     kind: 'flag',
   },
+  'conv.pings_auto': {
+    title: 'Пинги уходят без твоего нажатия',
+    hint: 'Выключено: каждый пинг замолчавшему клиенту приходит карточкой в его тему и уходит только по «Отправить».',
+    edit: 'confirm',
+    kind: 'flag',
+  },
+  'conv.pings_per_day': {
+    title: 'Пингер: вызовов в день',
+    hint: 'Пингер ищет в интернете свежий повод, это тратит общую подписку. Сверх лимита пинг ждет утра. 0: только готовые тексты.',
+    edit: 'free',
+    kind: 'count',
+  },
   'school.on': { title: 'Ночная школа', edit: 'locked', kind: 'flag' },
   'money.daily_bids': { title: 'Откликов в день', edit: 'free', kind: 'count' },
   'money.daily_budget_rub': {
@@ -127,6 +139,12 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'count',
   },
+  'digest.boris_replies': {
+    title: 'Разбор твоих ответов раз в день',
+    hint: 'Утром пост без звука: где ты ответил не как Сара, и кнопки «В образцы», «Не надо». Один дешевый вызов Claude в день, только когда есть что показать.',
+    edit: 'free',
+    kind: 'flag',
+  },
   'calls.offer': {
     title: 'Предлагает созвон после отклика',
     hint: 'Последнее сообщение серии: созвониться на полчаса, три времени на выбор.',
@@ -171,6 +189,8 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'outbound.messages',
       'conv.autopilot',
       'conv.reminders',
+      'conv.pings_auto',
+      'conv.pings_per_day',
       'pipeline.leads',
       'pipeline.conversations',
       'conv.v1_writes',
@@ -201,6 +221,7 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
       'conv.night',
       'conv.reminder_quiet',
       'secretary.turns_per_day',
+      'digest.boris_replies',
     ],
   },
   {

@@ -47,7 +47,7 @@ setRemindDeps({
     dataDir: join(dir, 'data'),
     extraEnv: {
       FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify({
-        reminder: {
+        pinger: {
           text: '[имя 1], здравствуйте! Как у вас дела с сайтом для клиники?',
           fact_ids: ['s-portrait', 'k-process-start'],
         },

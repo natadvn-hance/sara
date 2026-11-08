@@ -10,7 +10,7 @@ export type RoleName =
   | 'analyst'
   | 'interlocutor'
   | 'checker'
-  | 'reminder'
+  | 'pinger'
   | 'examiner'
   | 'onboarding-about'
   | 'onboarding-stops'
@@ -27,6 +27,7 @@ export type RoleName =
   | 'site-reader'
   | 'links-digest'
   | 'analytics-insights'
+  | 'reply-cleaner'
   | 'meeting'
   | 'meeting-result'
 

@@ -182,6 +182,13 @@ export const SETTINGS = {
    */
   'conv.reminders': { schema: z.boolean(), default: true },
   /**
+   * Pings to quiet clients go without Boris's press (spec 2026-11-07-organic-pings). Off: each ping is a card in the
+   * client's topic and goes only on «Отправить». The pauses and the shadow hold a ping either way.
+   */
+  'conv.pings_auto': { schema: z.boolean(), default: false },
+  /** Calls of the Pinger a Moscow day (it may search the web); past them a ping waits for the morning. */
+  'conv.pings_per_day': { schema: z.number().int().nonnegative(), default: 20 },
+  /**
    * FR-NOTIF-4: turns of the Secretary (Opus) a Moscow day; past them Sara says so and keeps quiet till morning. 0
    * turns the chat off.
    */
@@ -212,6 +219,11 @@ export const SETTINGS = {
       NOTICE_KINDS.map((k) => [k, k !== 'summary' && k !== 'system']),
     ) as Record<NoticeKind, boolean>,
   },
+  /**
+   * FR-SPEECH-5: once a day a silent post of Boris's own replies that differ most from Sara's drafts, with «В образцы»
+   * and «Не надо». Off until the deploy turns it on: it takes one cheap model call on a day with something to show.
+   */
+  'digest.boris_replies': { schema: z.boolean(), default: false },
   /** FR-MIND-2: local vectors beside the full-text search, when they proved cheap. */
   'mind.vectors': { schema: z.boolean(), default: false },
   /** M5: the school's jobs and lesson batches; off until the deploy turns it on, as pipeline.*. */

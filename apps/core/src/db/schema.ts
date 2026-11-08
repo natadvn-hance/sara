@@ -571,6 +571,40 @@ export const convTurn = core.table(
   (t) => [index('conv_turn_conversation').on(t.conversationId, t.createdAt)],
 )
 
+/**
+ * One reply of Boris shown in the daily post (FR-SPEECH-5): the row is what keeps a pair from coming twice and what the
+ * post is drawn from on each press. The texts are as Boris saw them: client data behind tags, his typos fixed. A row's
+ * id is the id of the task behind its buttons.
+ */
+export const replyPick = core.table(
+  'reply_pick',
+  {
+    id: uuid('id').primaryKey(),
+    turnId: text('turn_id').notNull().unique(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversation.id),
+    /** The first of Boris's messages in the reply: two turns over one client message show him once. */
+    firstMessageId: text('first_message_id').notNull(),
+    /** When the last of them was sent: what the client's answer is counted from. */
+    repliedAt: ts('replied_at').notNull(),
+    similarity: integer('similarity').notNull(),
+    /** Its place in the post, from 0. */
+    position: integer('position').notNull(),
+    clientText: text('client_text').notNull(),
+    draftText: text('draft_text').notNull(),
+    replyText: text('reply_text').notNull(),
+    /** The words of a commercial promise found in the reply. */
+    promises: jsonb('promises').$type<string[]>().notNull().default([]),
+    postMessageId: bigint('post_message_id', { mode: 'number' }),
+    /** The button pressed: `apply` («В образцы») or `drop` («Не надо»); null while it waits. */
+    decision: text('decision'),
+    decidedAt: ts('decided_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('reply_pick_reply').on(t.conversationId, t.firstMessageId)],
+)
+
 /** The searchable copy of the confirmed mind records (FR-MIND-2); proposals never get here (FR-MIND-3). */
 export const mindIndex = core.table(
   'mind_index',

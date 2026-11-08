@@ -455,3 +455,30 @@ describe('a bid that ended ORDER_CLOSED (FR-LEAD-5)', () => {
     expect(leadCards()).toHaveLength(1)
   }, 60000)
 })
+
+describe('a fee the first look missed (07.11.2026)', () => {
+  it('FR-LEAD-5: a later look that finds the fee writes it to the lead and draws the waiting card again', async () => {
+    const id = orderId()
+    const before = leadCards().length
+    // The tariff rendered late: the first read of the page has no fee.
+    fake.setOrderPage(id, { bid_price_rub: 0 })
+    await fake.emitOrder({ order_id: id, ...BOARD, seen_at: plus(first(), -60).toISOString() })
+    await until(() => leadCards().length === before + 1)
+    await until(async () => (await taskOf(id))?.telegramMessageId != null)
+    const messageId = leadCards().at(-1)?.message_id ?? -1
+    expect(leadCards().at(-1)?.text).toContain('цена отклика пока неизвестна')
+    expect((await leadOf(id))?.bidPriceRub).toBe(0)
+    fake.setOrderPage(id, { bid_price_rub: 1250 })
+    await app.recheck.tick(first())
+    await until(async () => (await leadOf(id))?.bidPriceRub === 1250)
+    const edits = () => tg.edited.filter((e) => e.message_id === messageId)
+    await until(() => edits().length > 0)
+    expect(edits().at(-1)?.text).not.toContain('цена отклика пока неизвестна')
+    expect((await taskOf(id))?.state).toBe('open')
+    // A fee already known is kept: a later page with another one does not overwrite it.
+    fake.setOrderPage(id, { bid_price_rub: 999 })
+    await app.recheck.tick(plus(first(), 16))
+    await settle()
+    expect((await leadOf(id))?.bidPriceRub).toBe(1250)
+  }, 60000)
+})
