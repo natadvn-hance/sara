@@ -18,6 +18,8 @@
 		encode zstd gzip
 		root * /srv
 		header Content-Security-Policy "frame-ancestors 'self'"
+		# The page is asked for every time: a phone that kept an old one would ask for files a deploy removed (08.11).
+		header Cache-Control "no-cache"
 		rewrite * /talk.html
 		file_server
 	}
@@ -28,6 +30,10 @@
 		header Content-Security-Policy "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org"
 		# The service worker of Web Push is never kept stale.
 		header /sw.js Cache-Control "no-cache"
+		# The pages are asked for every time; the built files carry their hash in the name and never change.
+		@pages path / /index.html /talk.html /manifest.webmanifest /talk.webmanifest
+		header @pages Cache-Control "no-cache"
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
 		try_files {path} /index.html
 		file_server
 	}
