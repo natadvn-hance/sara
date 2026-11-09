@@ -47,6 +47,7 @@ targets:
         UIBackgroundModes:
           - audio
         NSMicrophoneUsageDescription: Hance слушает тебя, когда ты говоришь с Лорой и Сарой. Запись уходит только на сервер Сары.
+        NSSpeechRecognitionUsageDescription: Hance разбирает твои слова прямо на телефоне, чтобы Лора и Сара отвечали быстрее.
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
         UIAppFonts: *fonts

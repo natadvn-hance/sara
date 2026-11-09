@@ -1,4 +1,5 @@
 import AVFoundation
+import Speech
 
 /// Where Boris's voice comes from: the microphone, or in a test a file played as if he spoke.
 protocol VoiceSource: AnyObject {
@@ -185,3 +186,93 @@ final class Mic: VoiceSource {
         }
     }
 #endif
+
+/// Boris's words heard on the phone itself (Apple's speech recognition, Russian, on the device when it can): the text
+/// goes to the core as typed words, so a question does not wait for the server's whisper and does not need it. Nil
+/// when Boris did not allow it or the phone cannot hear Russian now; then the recording goes to the server as before.
+final class Ears: @unchecked Sendable {
+    private static let format = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+    private let request = SFSpeechAudioBufferRecognitionRequest()
+    private var task: SFSpeechRecognitionTask?
+    private let lock = NSLock()
+    private var best = ""
+    private var over = false
+    private var waiting: CheckedContinuation<String, Never>?
+
+    /// Asks Boris once, on screen; never from the background, where iOS shows no question.
+    static func askOnce() async {
+        guard SFSpeechRecognizer.authorizationStatus() == .notDetermined else { return }
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            SFSpeechRecognizer.requestAuthorization { _ in c.resume() }
+        }
+    }
+
+    init?() {
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized,
+            let r = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU")), r.isAvailable
+        else { return nil }
+        request.requiresOnDeviceRecognition = r.supportsOnDeviceRecognition
+        request.shouldReportPartialResults = true
+        request.taskHint = .dictation
+        request.addsPunctuation = true
+        task = r.recognitionTask(with: request) { [weak self] result, error in
+            self?.heard(result, error)
+        }
+    }
+
+    /// 16 kHz mono 16-bit PCM from the microphone; the audio thread.
+    func feed(_ pcm: Data) {
+        let n = pcm.count / 2
+        guard n > 0, let b = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: AVAudioFrameCount(n)),
+            let out = b.floatChannelData?[0]
+        else { return }
+        b.frameLength = AVAudioFrameCount(n)
+        pcm.withUnsafeBytes { raw in
+            let s = raw.bindMemory(to: Int16.self)
+            for i in 0..<n { out[i] = Float(s[i]) / 32768 }
+        }
+        request.append(b)
+    }
+
+    /// He finished: the words heard, or nil when there were none within a couple of seconds.
+    func finish(within seconds: Double = 2.5) async -> String? {
+        request.endAudio()
+        let text: String = await withCheckedContinuation { c in
+            let now: String? = lock.withLock {
+                if over { return best }
+                waiting = c
+                return nil
+            }
+            if let now { c.resume(returning: now) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { [weak self] in self?.answer() }
+        }
+        task?.cancel()
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    func cancel() {
+        task?.cancel()
+        request.endAudio()
+        answer()
+    }
+
+    private func heard(_ result: SFSpeechRecognitionResult?, _ error: Error?) {
+        let last = result?.isFinal == true || error != nil
+        lock.withLock {
+            if let result { best = result.bestTranscription.formattedString }
+            if last { over = true }
+        }
+        if last { answer() }
+    }
+
+    private func answer() {
+        let (c, text): (CheckedContinuation<String, Never>?, String) = lock.withLock {
+            let c = waiting
+            waiting = nil
+            return (c, best)
+        }
+        c?.resume(returning: text)
+    }
+}

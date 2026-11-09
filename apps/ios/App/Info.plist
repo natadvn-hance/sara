@@ -40,6 +40,8 @@
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Hance слушает тебя, когда ты говоришь с Лорой и Сарой. Запись уходит только на сервер Сары.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Hance разбирает твои слова прямо на телефоне, чтобы Лора и Сара отвечали быстрее.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>

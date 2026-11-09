@@ -190,6 +190,7 @@ final class TalkEngine: ObservableObject {
         try await client.login(password: password)
         signedIn = true
         _ = await micAllowed()
+        await Ears.askOnce()
         await Notifier.ask()
         loadGreetings()
     }
@@ -214,6 +215,8 @@ final class TalkEngine: ObservableObject {
             return endTalk(final: .failed)
         }
         guard mine == turn else { return }
+        if onScreen { await Ears.askOnce() }
+        guard mine == turn else { return }
         client.warm()
         note = nil
         if !followUp { card = nil }
@@ -222,7 +225,12 @@ final class TalkEngine: ObservableObject {
         detector = SilenceDetector(startWaitMs: followUp ? 6000 : 10_000)
         let up = VoiceUpload(client: client, agent: agent)
         upload = up
-        source.record(into: { up.append($0) })
+        // The phone hears the words itself as he speaks; the recording goes up too, for when it cannot.
+        let ears = Ears()
+        source.record(into: { pcm in
+            up.append(pcm)
+            ears?.feed(pcm)
+        })
         set(.listening, line: nil)
         Earcon.listening()
 
@@ -233,10 +241,12 @@ final class TalkEngine: ObservableObject {
         )
         guard mine == turn, let step else {
             up.cancel()
+            ears?.cancel()
             return
         }
         if step == .nothing || up.seconds < 0.4 {
             up.cancel()
+            ears?.cancel()
             upload = nil
             // He said nothing after her answer: the answer stays on the Lock Screen a while, as after any answer.
             if followUp, let last = card {
@@ -249,7 +259,16 @@ final class TalkEngine: ObservableObject {
         clock.stopped = Date()
         set(.sending, line: nil)
         do {
-            let sent = try await up.finish()
+            let sent: Sent
+            if let words = await ears?.finish() {
+                // Heard on the phone: the words go as text, no recording and no whisper on the server to wait for.
+                up.cancel()
+                log.notice("heard on the phone, \(words.count) chars")
+                sent = try await client.sendText(words, agent: agent)
+            } else {
+                log.notice("the phone heard no words, the recording goes to the server")
+                sent = try await up.finish()
+            }
             upload = nil
             clock.heard = Date()
             guard mine == turn else { return }
