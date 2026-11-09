@@ -1,14 +1,14 @@
 import AVFoundation
 
-/// Hance starts to listen: two dull wooden knocks, «тук-тук», the first a little higher, like a Volvo's indicator
-/// (Boris, 09.11). It heard the end: two soft notes down. With the phone in the pocket and the side button pressed,
-/// they say what the screen cannot.
+/// Hance starts to listen: two dull wooden knocks, «тук-тук», the first a little higher, like a Volvo's indicator; it
+/// heard the end: the same two the other way round (Boris, 09.11). With the phone in the pocket and the side button
+/// pressed, they say what the screen cannot.
 @MainActor
 enum Earcon {
     private static var players: [AVAudioPlayer] = []
 
-    static func listening() { play(knocks(), volume: 0.7) }
-    static func heard() { play(tones([987.77, 659.25]), volume: 0.32) }
+    static func listening() { play(knocks([520, 430]), volume: 0.7) }
+    static func heard() { play(knocks([430, 520]), volume: 0.7) }
 
     private static func play(_ wav: Data, volume: Float) {
         guard let p = try? AVAudioPlayer(data: wav) else { return }
@@ -54,21 +54,6 @@ enum Earcon {
         let peak = mix.map(abs).max() ?? 1
         var pcm = Data()
         for v in mix { pcm.appendLE(UInt16(bitPattern: Int16(v / max(peak, 0.0001) * 0.9 * 30_000))) }
-        return wav(pcm)
-    }
-
-    /// The notes one after another, 75 ms each with a soft edge, as a WAV.
-    private static func tones(_ notes: [Double]) -> Data {
-        let each = Int(rate * 0.075)
-        var pcm = Data()
-        for f in notes {
-            for i in 0..<each {
-                let t = Double(i) / rate
-                let edge = min(1, Double(i) / (rate * 0.008), Double(each - i) / (rate * 0.03))
-                let v = sin(2 * .pi * f * t) * 0.6 + sin(4 * .pi * f * t) * 0.12
-                pcm.appendLE(UInt16(bitPattern: Int16(max(-1, min(1, v * edge)) * 30_000)))
-            }
-        }
         return wav(pcm)
     }
 
