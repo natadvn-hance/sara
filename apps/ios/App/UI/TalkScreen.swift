@@ -1,3 +1,4 @@
+import ActivityKit
 import SwiftUI
 
 /// The talk as a voice assistant (Boris, 08.11), in the language of the Hance proposal pages (hance.pro/ekaterina_kp,
@@ -271,6 +272,26 @@ enum Demo {
 
     static func start(_ meter: LevelMeter) {
         guard on else { return }
+        #if DEBUG
+            // HANCE_DEMO_ISLAND=1: the same phase in the Dynamic Island and on the Lock Screen, with moving bars.
+            if ProcessInfo.processInfo.environment["HANCE_DEMO_ISLAND"] != nil, let phase {
+                let who = agent ?? .lora
+                let line: String? = phase == .speaking ? "Встреча с Алёной в 15:00, я напомню за полчаса." : nil
+                let since = Date()
+                let activity = try? Activity.request(
+                    attributes: TalkActivityAttributes(startedAt: since),
+                    content: .init(state: .quiet(who, phase, line: line), staleDate: nil), pushType: nil)
+                Task { @MainActor in
+                    while let activity {
+                        let bars = (0..<7).map { _ in Double.random(in: 0.15...1) }
+                        let s = TalkActivityAttributes.ContentState(
+                            agent: who, phase: phase, since: since, line: line, bars: bars)
+                        await activity.update(.init(state: s, staleDate: nil))
+                        try? await Task.sleep(for: .milliseconds(500))
+                    }
+                }
+            }
+        #endif
         Task { @MainActor in
             var t = 0.0
             while true {

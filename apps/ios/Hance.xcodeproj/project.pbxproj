@@ -18,6 +18,7 @@
 		1A91D5B2AA5DED69ECC1A3CF /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
 		1D75A6394B21670FA035FA26 /* HanceWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7892F42A30B9D0294537D01A /* HanceWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1DD3CD1A7CD8E7602EF38AED /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
+		23E24BB76F0EEC1A5BACE1D5 /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
 		25A08494C9BB4968C71EEAD9 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
 		273D1DF6695E591F43FC4C09 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
 		28431E50ECF2ACD05E026330 /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */; };
@@ -25,6 +26,7 @@
 		339234649382555EBAD59985 /* HanceNotification.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FCC37739D929CD8374A64D5 /* HanceNotification.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		37BF84676C1EC1879668E160 /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
 		3B7DECECCD969C9A04432B41 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */; };
+		3E578EE23A41137D925C205B /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
 		408D75E123918542D895024F /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
 		409C40C4EB50334BCE04601B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 90BF89146EA45C249DDF15BF /* Assets.xcassets */; };
 		42002A4BE98B21A14582DD3E /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
@@ -42,8 +44,10 @@
 		6C53B45A778768656EB9ACCC /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
 		77D8027E7B7A992B36A5BD28 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9CF7D4A329FFACD4BB363851 /* Assets.xcassets */; };
 		810381AF0F22B124A6B3761E /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
+		838993AFBCFE719ABF2BB64B /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
 		8409D1BF10A9C3443353B6EA /* AnswerBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */; };
 		87318EC69623ACD0EE25C108 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
+		9070D08790B22D2F72118A68 /* TalkWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321B750BDED9FD89E33A43BD /* TalkWidget.swift */; };
 		96230E662C9FE6E2DB7D65EB /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B59901B1EA1C4649BEAFDE0 /* Support.swift */; };
 		9714A668C8FB3BD3835D8364 /* TalkScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234D484032E679A4187AE9A0 /* TalkScreen.swift */; };
 		978D6440DD2432CC6EBC2BF3 /* HanceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA60CF2214FE0D810C7EB59 /* HanceApp.swift */; };
@@ -114,6 +118,7 @@
 		1FCC37739D929CD8374A64D5 /* HanceNotification.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HanceNotification.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		234D484032E679A4187AE9A0 /* TalkScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkScreen.swift; sourceTree = "<group>"; };
 		2E2E0C12C02EAC73A7186093 /* Wordmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wordmark.swift; sourceTree = "<group>"; };
+		321B750BDED9FD89E33A43BD /* TalkWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkWidget.swift; sourceTree = "<group>"; };
 		342ACCC1EA3276479549B29C /* Wav.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wav.swift; sourceTree = "<group>"; };
 		350132D3E31E66B3154B520B /* HanceTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3E267B5B1FD895845A8D23FF /* Earcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Earcon.swift; sourceTree = "<group>"; };
@@ -126,6 +131,7 @@
 		4E739C8A762606790E910E1D /* CoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClient.swift; sourceTree = "<group>"; };
 		5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerBanner.swift; sourceTree = "<group>"; };
 		5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5F44FE31C5C3EAC449B4123A /* Pixels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pixels.swift; sourceTree = "<group>"; };
 		665CD155617AC12938D9EF66 /* AvatarStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarStage.swift; sourceTree = "<group>"; };
 		66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunkerTests.swift; sourceTree = "<group>"; };
 		6764B70361BF2831DCAB0EE7 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
@@ -162,6 +168,7 @@
 				ACFD14035E16132BEA9A7756 /* Brand.swift */,
 				FF82234EB3D6450BC147BCA7 /* KnightHop.swift */,
 				45351CAA1463E02EA922F9D3 /* KnightMark.swift */,
+				5F44FE31C5C3EAC449B4123A /* Pixels.swift */,
 				2E2E0C12C02EAC73A7186093 /* Wordmark.swift */,
 			);
 			path = Brand;
@@ -284,6 +291,7 @@
 				0B7455A5F0D11201F6030750 /* HanceWidgets.swift */,
 				F9EF12B146DC66D45B44B10E /* Info.plist */,
 				05B4AD23A1E8DE0838D8DD79 /* TalkLiveActivity.swift */,
+				321B750BDED9FD89E33A43BD /* TalkWidget.swift */,
 			);
 			path = Widgets;
 			sourceTree = "<group>";
@@ -499,8 +507,10 @@
 				4FD02E9262D6F26318173E51 /* Intents.swift in Sources */,
 				408D75E123918542D895024F /* KnightHop.swift in Sources */,
 				6127272D111F56F430740C01 /* KnightMark.swift in Sources */,
+				3E578EE23A41137D925C205B /* Pixels.swift in Sources */,
 				122513EC9DE3AFE92AD99501 /* TalkActivityAttributes.swift in Sources */,
 				CEA1DAB8D718E5EFA770D050 /* TalkLiveActivity.swift in Sources */,
+				9070D08790B22D2F72118A68 /* TalkWidget.swift in Sources */,
 				42002A4BE98B21A14582DD3E /* Wordmark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -514,6 +524,7 @@
 				87318EC69623ACD0EE25C108 /* KnightHop.swift in Sources */,
 				6C53B45A778768656EB9ACCC /* KnightMark.swift in Sources */,
 				62061A97DC9D62467336564D /* NotificationViewController.swift in Sources */,
+				23E24BB76F0EEC1A5BACE1D5 /* Pixels.swift in Sources */,
 				45511C0C885C452D45B9CCB2 /* Wordmark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -535,6 +546,7 @@
 				0867A51A5AED2FA7C2B6F979 /* KnightHop.swift in Sources */,
 				57F92B7E8BC37EFEC2F84B49 /* KnightMark.swift in Sources */,
 				E7DD18D64126389FB07D22F4 /* Mic.swift in Sources */,
+				838993AFBCFE719ABF2BB64B /* Pixels.swift in Sources */,
 				0006C09B3779B7C51AF7166A /* SessionStore.swift in Sources */,
 				C8CC653292359206D8DA6A91 /* Sheets.swift in Sources */,
 				4894B233B9B3B52E0033A1E5 /* SilenceDetector.swift in Sources */,

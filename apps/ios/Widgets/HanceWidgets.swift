@@ -6,6 +6,7 @@ import WidgetKit
 struct HanceWidgets: WidgetBundle {
     var body: some Widget {
         TalkLiveActivity()
+        TalkWidget()
         TalkControl()
         CallSaraControl()
     }

@@ -14,7 +14,8 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
         let card = ReplyCard(
             agent: HanceAgent(rawValue: info["agent"] as? String ?? "") ?? .lora,
             text: info["text"] as? String ?? content.body,
-            cards: info["cards"] as? Int ?? 0)
+            cards: info["cards"] as? Int ?? 0,
+            at: notification.date)
         if let host {
             host.rootView = card
             return
@@ -41,11 +42,14 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     }
 }
 
-/// Her face springs in with a knight's move, a drop of her colour breathes behind it, and her words come up one by one.
+/// Her answer as a page of Hance (hance.pro/ekaterina_kp, Boris 09.11): her square face comes in with a knight's move
+/// and corner marks, her index, role and big name beside it, a hairline with the time, and her words lighting up one
+/// by one from a faint grey, as the two-tone headlines of the pages.
 struct ReplyCard: View {
     let agent: HanceAgent
     let text: String
     let cards: Int
+    let at: Date
     @Environment(\.colorScheme) private var scheme
     @State private var shown = Date.distantFuture
     @State private var arrived = false
@@ -53,74 +57,68 @@ struct ReplyCard: View {
     var body: some View {
         let p = Palette.of(agent, dark: scheme == .dark)
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                ZStack {
-                    TimelineView(.animation) { tl in
-                        let t = tl.date.timeIntervalSinceReferenceDate
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [p.accent.opacity(0.55), p.accent.opacity(0)], center: .center, startRadius: 8,
-                                    endRadius: 44)
-                            )
-                            .scaleEffect(1 + 0.12 * sin(t * 2.2))
+            HStack(alignment: .top, spacing: 14) {
+                SquareFace(agent: agent, size: 68, radius: 16, busy: arrived)
+                    .scaleEffect(arrived ? 1 : 0.6)
+                    .opacity(arrived ? 1 : 0)
+                    .knightHop(trigger: arrived, step: 6)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(agent.index).foregroundStyle(p.accentInk)
+                        Text(agent.role).foregroundStyle(p.muted)
                     }
-                    .frame(width: 84, height: 84)
-                    Image(agent.photo)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 54, height: 54)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(p.paper, lineWidth: 2.5))
-                        .scaleEffect(arrived ? 1 : 0.3)
-                        .knightHop(trigger: arrived, step: 6)
-                }
-                .frame(width: 70, height: 70)
-                VStack(alignment: .leading, spacing: 3) {
+                    .monoLabel(9.5)
                     Text(agent.name)
-                        .font(HanceFont.text(22, .semibold))
+                        .font(HanceFont.text(34, .semibold))
+                        .tracking(-1.3)
                         .foregroundStyle(p.ink)
-                    Text(agent.role)
-                        .monoLabel(10)
-                        .foregroundStyle(p.muted)
+                        .offset(y: arrived ? 0 : 12)
+                        .opacity(arrived ? 1 : 0)
                 }
-                Spacer()
-                KnightMark()
-                    .fill(p.accent)
-                    .frame(width: 20, height: 20)
-                    .rotationEffect(.degrees(arrived ? 0 : -90))
+                Spacer(minLength: 0)
+                PixelKnight(color: p.accent, cell: 6, gap: 1.5)
+                    .padding(.top, 4)
                     .opacity(arrived ? 1 : 0)
             }
+            HStack {
+                Text("ответ").foregroundStyle(p.muted)
+                Spacer()
+                Text(at, format: .dateTime.hour().minute()).foregroundStyle(p.ink)
+            }
+            .monoLabel(9.5)
+            .overlay(alignment: .top) { Rectangle().fill(p.line).frame(height: 0.5).offset(y: -8) }
+            .padding(.top, 4)
             TimelineView(.animation(minimumInterval: 0.04)) { tl in
                 let words = text.split(separator: " ", omittingEmptySubsequences: false)
                 let n = Int(max(0, tl.date.timeIntervalSince(shown)) * 18)
                 Text(attributed(words: words, upTo: n, palette: p))
-                    .font(HanceFont.reading(17))
+                    .font(HanceFont.reading(18))
                     .lineSpacing(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if cards > 0 {
-                Text("Кнопки пришли в Telegram и во Входящие пульта")
-                    .font(HanceFont.text(13))
-                    .foregroundStyle(p.accentInk)
+                HStack(spacing: 6) {
+                    Rectangle().fill(p.accent).frame(width: 5, height: 5)
+                    Text("Кнопки в Telegram и во Входящих пульта")
+                }
+                .monoLabel(9.5)
+                .foregroundStyle(p.accentInk)
             }
         }
         .padding(18)
-        .background(
-            LinearGradient(colors: [p.accentSoft, p.bg], startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
+        .background(p.bg)
         .onAppear {
             shown = Date().addingTimeInterval(0.35)
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.62)) { arrived = true }
+            withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.7)) { arrived = true }
         }
     }
 
-    /// The words up to the n-th in ink, the next one fading in, the rest not yet there.
+    /// The words up to the n-th in ink, the rest waiting in a faint grey, as the pages' two-tone headlines.
     private func attributed(words: [Substring], upTo n: Int, palette p: Palette) -> AttributedString {
         var out = AttributedString()
         for (i, w) in words.enumerated() {
             var piece = AttributedString(String(w) + (i + 1 < words.count ? " " : ""))
-            piece.foregroundColor = i < n ? p.ink : (i == n ? p.ink.opacity(0.35) : p.ink.opacity(0))
+            piece.foregroundColor = i < n ? p.ink : p.ink.opacity(0.16)
             out += piece
         }
         return out

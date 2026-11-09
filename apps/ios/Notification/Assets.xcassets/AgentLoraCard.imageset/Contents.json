@@ -1,0 +1,6 @@
+{
+  "images" : [
+    { "filename" : "lora-card.jpg", "idiom" : "universal" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

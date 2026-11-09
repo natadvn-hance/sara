@@ -60,30 +60,6 @@ struct HeroCard: View {
     }
 }
 
-/// Four corner marks, like the frame of a viewfinder.
-struct CornerMarks: Shape {
-    let arm: CGFloat
-    let inset: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let r = rect.insetBy(dx: inset, dy: inset)
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY + arm))
-        p.addLine(to: CGPoint(x: r.minX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.minX + arm, y: r.minY))
-        p.move(to: CGPoint(x: r.maxX - arm, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY + arm))
-        p.move(to: CGPoint(x: r.maxX, y: r.maxY - arm))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.maxX - arm, y: r.maxY))
-        p.move(to: CGPoint(x: r.minX + arm, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.minX, y: r.maxY - arm))
-        return p
-    }
-}
-
 /// The plate of the proposal pages («ОПОР 1 / НАГРУЗКА 100 %»): who and what she does, one number of the moment and a
 /// thin bar. Listening and speaking, the number and the bar are the loudness; thinking, the time and a stepping bar.
 struct HUDPlate: View {
