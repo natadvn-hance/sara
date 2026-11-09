@@ -1,14 +1,14 @@
 import AVFoundation
 
-/// Hance starts to listen: two dull wooden knocks, «тук-тук», the first a little higher, like a Volvo's indicator; it
+/// Hance starts to listen: two round, dull knocks, «тук-тук», the first a little higher, like a Volvo's indicator; it
 /// heard the end: the same two the other way round (Boris, 09.11). With the phone in the pocket and the side button
 /// pressed, they say what the screen cannot.
 @MainActor
 enum Earcon {
     private static var players: [AVAudioPlayer] = []
 
-    static func listening() { play(knocks([520, 430]), volume: 0.7) }
-    static func heard() { play(knocks([430, 520]), volume: 0.7) }
+    static func listening() { play(knocks([300, 250]), volume: 0.8) }
+    static func heard() { play(knocks([250, 300]), volume: 0.8) }
 
     private static func play(_ wav: Data, volume: Float) {
         guard let p = try? AVAudioPlayer(data: wav) else { return }
@@ -21,34 +21,39 @@ enum Earcon {
 
     nonisolated private static let rate = 44_100.0
 
-    /// Two knocks of a small block of wood, 120 ms apart: each a short low body that sinks a little in pitch, a weaker
-    /// overtone that dies first and a soft muffled tap at the start; no ring, nothing bright.
-    nonisolated static func knocks(_ pitches: [Double] = [520, 430], apart: Double = 0.12) -> Data {
-        let length = Int(rate * (apart * Double(pitches.count - 1) + 0.09))
+    /// Two round, dull knocks 130 ms apart, like the relay of a Volvo's indicator (Boris, 09.11: «круглее и тупее»):
+    /// each a low tone that sinks a little in its first milliseconds, with a soft attack and a short body; no click of
+    /// noise, no bright overtone, and a gentle low-pass over all, so nothing in it is sharp.
+    nonisolated static func knocks(_ pitches: [Double] = [300, 250], apart: Double = 0.13) -> Data {
+        let each = 0.11
+        let length = Int(rate * (apart * Double(pitches.count - 1) + each))
         var mix = [Double](repeating: 0, count: length)
-        var seed: UInt32 = 2_463_534_242
         for (k, f0) in pitches.enumerated() {
             let start = Int(rate * apart * Double(k))
-            let level = k == 0 ? 1.0 : 0.88
-            var phase1 = 0.0
-            var phase2 = 0.0
-            var muffled = 0.0
-            for i in 0..<Int(rate * 0.09) where start + i < length {
+            let level = k == 0 ? 1.0 : 0.9
+            var phase = 0.0
+            var under = 0.0
+            for i in 0..<Int(rate * each) where start + i < length {
                 let t = Double(i) / rate
-                // The pitch sinks a few percent in the first milliseconds: that is the «тук», not a «тинь».
-                let f = f0 * (1 + 0.07 * exp(-t / 0.004))
-                phase1 += 2 * .pi * f / rate
-                phase2 += 2 * .pi * f * 2.6 / rate
-                let body = sin(phase1) * exp(-t / 0.024)
-                let overtone = sin(phase2) * 0.22 * exp(-t / 0.008)
-                seed ^= seed << 13
-                seed ^= seed >> 17
-                seed ^= seed << 5
-                let noise = Double(seed) / Double(UInt32.max) * 2 - 1
-                muffled += 0.18 * (noise - muffled)
-                let tap = muffled * 1.6 * exp(-t / 0.0015)
-                let attack = min(1, t / 0.0008)
-                mix[start + i] += level * attack * (body + overtone + tap)
+                // The «тук»: the pitch sinks 10 % in the first 6 ms, so it lands rather than rings.
+                let f = f0 * (1 + 0.1 * exp(-t / 0.006))
+                phase += 2 * .pi * f / rate
+                under += 2 * .pi * f * 0.5 / rate
+                let body = sin(phase) * exp(-t / 0.03)
+                // A little of the octave below gives it weight, gone in a few milliseconds.
+                let weight = sin(under) * 0.35 * exp(-t / 0.012)
+                // A soft attack of 3 ms: round, not a click.
+                let attack = 1 - exp(-t / 0.003)
+                mix[start + i] += level * attack * (body + weight)
+            }
+        }
+        // Two passes of a one-pole low-pass near 1,4 kHz take off what is left of the edge.
+        let a = exp(-2 * .pi * 1400 / rate)
+        for _ in 0..<2 {
+            var y = 0.0
+            for i in mix.indices {
+                y = (1 - a) * mix[i] + a * y
+                mix[i] = y
             }
         }
         let peak = mix.map(abs).max() ?? 1
