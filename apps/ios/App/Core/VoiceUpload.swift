@@ -52,19 +52,34 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             finished = true
             pump()
         }
+        #if DEBUG
+            // The last recording, byte for byte as it went up, for a look from the Mac (devicectl copy from).
+            let bytes = queue.sync { Wav.header(dataBytes: nil) + pcm }
+            if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                try? bytes.write(to: docs.appendingPathComponent("last-talk.wav"))
+            }
+        #endif
+        let all = queue.sync { pcm }
+        let sent: Sent
         do {
             guard let task else { throw URLError(.cancelled) }
             let res = try await task.value
-            if res.1.statusCode == 200 { return try client.decodeSent(res) }
-            throw CoreError.http(res.1.statusCode, CoreClient.errorText(res.0))
+            guard res.1.statusCode == 200 else { throw CoreError.http(res.1.statusCode, CoreClient.errorText(res.0)) }
+            sent = try client.decodeSent(res)
         } catch CoreError.signedOut {
             throw CoreError.signedOut
         } catch {
             // No way to the core at all: sending the whole recording again would only double the wait.
             if Task.isCancelled || error.isOffline { throw error }
-            let all = queue.sync { pcm }
             return try await client.sendVoice(wav: Wav.file(pcm: all), agent: agent)
         }
+        // No words heard in a real recording: once more as a whole file with exact sizes. The streamed WAV says
+        // "very long" in its header, which a strict reader on the server may refuse.
+        guard sent.heard == nil, sent.talk == nil, Wav.seconds(pcmBytes: all.count) >= 0.6 else { return sent }
+        log.notice("streamed voice not heard, sending it whole")
+        let again = try await client.sendVoice(wav: Wav.file(pcm: all), agent: agent)
+        log.notice("whole voice: \(again.heard == nil ? "not heard either" : "heard", privacy: .public)")
+        return again
     }
 
     /// Nothing goes to the core: the request is cut first, and the stream is closed only after, so the core never
