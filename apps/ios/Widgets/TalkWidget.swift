@@ -85,21 +85,24 @@ struct TalkWidgetView: View {
 
     /// The Lock Screen, wide: her square face, «[01] ЛОРА» and «Говорить».
     private var rectangular: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 7) {
             Image(HanceAgent.lora.cardPhoto)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 46, height: 46)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            VStack(alignment: .leading, spacing: 1) {
+                .frame(width: 34, height: 34)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 0) {
                 Text("\(HanceAgent.lora.index) \(HanceAgent.lora.name)")
-                    .monoLabel(10)
+                    .monoLabel(8.5)
+                    .lineLimit(1)
                     .opacity(0.75)
                 Text("Говорить")
-                    .font(HanceFont.text(19, .semibold))
+                    .font(HanceFont.text(15, .semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .widgetAccentable()
             }
+            .layoutPriority(1)
             Spacer(minLength: 0)
         }
         .accessibilityLabel("Говорить с Лорой")
