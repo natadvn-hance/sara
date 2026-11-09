@@ -46,10 +46,12 @@ function journal(scope: FastifyInstance): void {
   scope.addHook('onResponse', async (req, reply) => {
     const path = req.url.split('?')[0]?.replace(/[0-9a-f-]{36}/, ':id')
     const agent = /[?&]agent=(\w+)/.exec(req.url)?.[1] ?? '-'
+    // How the phone's mic did (loudness, meter, track): numbers and words of the browser, never Boris's words.
+    const diag = /[?&]diag=([\w.,%-]{1,120})/.exec(req.url)?.[1]
     const size = req.headers['content-length'] ?? '0'
     const error = (req as { talkError?: string }).talkError
     console.log(
-      `talk ${req.method} ${path} agent=${agent} ${reply.statusCode} ${Math.round(reply.elapsedTime)}ms body=${size}${error ? ` error=${error}` : ''}`,
+      `talk ${req.method} ${path} agent=${agent} ${reply.statusCode} ${Math.round(reply.elapsedTime)}ms body=${size}${diag ? ` mic=${decodeURIComponent(diag).replace(/[^\w.,/-]/g, '')}` : ''}${error ? ` error=${error}` : ''}`,
     )
   })
 }

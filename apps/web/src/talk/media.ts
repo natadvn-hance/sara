@@ -8,6 +8,8 @@ export type Mic = {
   /** The loudness now, 0..1; -1 when the browser gives no way to measure it (then a tap ends the recording). */
   level(): number
   record(): { stop(): Promise<Blob>; cancel(): void }
+  /** Whether the microphone gives sound at all: its track live and not muted by the system, the meter running. */
+  health(): { live: boolean; muted: boolean; meter: string }
   close(): void
 }
 
@@ -36,6 +38,14 @@ export async function openMic(): Promise<Mic> {
   }
   const buf = new Float32Array(1024)
   return {
+    health() {
+      const t = stream.getAudioTracks()[0]
+      return {
+        live: t?.readyState === 'live',
+        muted: t?.muted ?? true,
+        meter: ctx?.state ?? 'none',
+      }
+    },
     level() {
       if (!analyser || ctx?.state !== 'running') return -1
       analyser.getFloatTimeDomainData(buf)
@@ -100,6 +110,8 @@ export function createPlayer() {
   const audio = new Audio()
   audio.preload = 'auto'
   let silent: string | null = null
+  /** The one silent play that unlocks the player, once per page; the mic starts only after it is over. */
+  let unlocking: Promise<void> | null = null
   let finish: ((p: Played) => void) | null = null
   const end = (p: Played) => {
     const f = finish
@@ -109,12 +121,22 @@ export function createPlayer() {
   audio.onended = () => end('played')
   audio.onerror = () => end('failed')
   return {
-    unlock() {
+    unlock(): Promise<void> {
+      if (unlocking) return unlocking
       silent ??= silentWav()
-      if (!audio.paused) return
-      audio.src = silent
-      void audio.play().catch(() => {})
+      const src = silent
+      unlocking = new Promise<void>((done) => {
+        if (!audio.paused) return done()
+        audio.src = src
+        const settle = () => done()
+        audio.addEventListener('ended', settle, { once: true })
+        setTimeout(settle, 400)
+        audio.play().catch(settle)
+      })
+      return unlocking
     },
+    /** The silent play is over (WebKit: a page that plays while the mic starts may get a mic of silence). */
+    settled: (): Promise<void> => unlocking ?? Promise.resolve(),
     play(blob: Blob): Promise<Played> {
       end('stopped')
       const url = URL.createObjectURL(blob)
