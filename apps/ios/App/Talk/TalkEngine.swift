@@ -15,7 +15,8 @@ final class TalkEngine: ObservableObject {
         noMic: "Нет доступа к микрофону. Разреши его для Hance в Настройках.",
         late: "Ответа нет шесть минут. Спроси ещё раз.",
         gone: "Ответ потерялся: сервер перезапускался. Скажи ещё раз.",
-        failed: "Нет связи. Проверь интернет и попробуй ещё раз."
+        failed: "Нет связи. Проверь интернет и попробуй ещё раз.",
+        offline: "Нет связи с сервером Сары. Проверь интернет или VPN и скажи ещё раз."
     )
 
     /// Who answers now: Lora by default.
@@ -327,7 +328,7 @@ final class TalkEngine: ObservableObject {
         }
         if error is CancellationError || Task.isCancelled { return }
         log.error("talk failed: \(String(describing: error), privacy: .public)")
-        show(Self.notes.failed)
+        show(error.isOffline ? Self.notes.offline : Self.notes.failed)
         endTalk(final: .failed)
     }
 

@@ -180,3 +180,18 @@ final class CoreClient: @unchecked Sendable {
         Task.detached { _ = try? await s.data(for: r) }
     }
 }
+
+extension Error {
+    /// The phone does not reach the core at all (no network, a VPN or a network that blocks the server, a timeout),
+    /// as opposed to the core answering with an error.
+    var isOffline: Bool {
+        guard let u = self as? URLError else { return false }
+        switch u.code {
+        case .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet,
+            .secureConnectionFailed, .dataNotAllowed, .internationalRoamingOff:
+            return true
+        default:
+            return false
+        }
+    }
+}

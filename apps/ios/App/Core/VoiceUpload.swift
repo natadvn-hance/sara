@@ -29,7 +29,7 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         super.init()
         output.open()
         pending = Wav.header(dataBytes: nil)
-        var r = client.request("/api/talk?agent=\(agent.rawValue)", method: "POST", type: "audio/wav", timeout: 150)
+        var r = client.request("/api/talk?agent=\(agent.rawValue)", method: "POST", type: "audio/wav", timeout: 45)
         r.httpBodyStream = i
         let request = r
         task = Task { [client, weak self] in try await client.send(request, delegate: self) }
@@ -60,7 +60,8 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         } catch CoreError.signedOut {
             throw CoreError.signedOut
         } catch {
-            if Task.isCancelled { throw error }
+            // No way to the core at all: sending the whole recording again would only double the wait.
+            if Task.isCancelled || error.isOffline { throw error }
             let all = queue.sync { pcm }
             return try await client.sendVoice(wav: Wav.file(pcm: all), agent: agent)
         }
