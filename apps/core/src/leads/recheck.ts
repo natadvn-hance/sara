@@ -12,6 +12,12 @@ import { mskHour } from './cardFlow'
  * he must not press «Откликнуться» on a closed order): a fresh one closes soonest.
  */
 const LOOK_EVERY_MS = { fresh: 15 * 60_000, day: 3600_000, older: 3 * 3600_000 }
+/**
+ * A fresh card that does not know its bid's fee (the first read failed or came before the price showed) is looked at
+ * again after 2 minutes, not 15: orders go fast, and Boris should see the price before he presses (09.11.2026: a card
+ * went out without it, and its order was closed on the site 18 minutes later).
+ */
+const NO_FEE_EVERY_MS = 2 * 60_000
 /** An order seen this recently is fresh. */
 const FRESH_MS = 3 * 3600_000
 const DAY_MS = 24 * 3600_000
@@ -57,7 +63,8 @@ const ago = (at: Date, ms: number) => new Date(at.getTime() - ms).toISOString()
 /**
  * FR-LEAD-5: a card that waits for Boris's decision may outlive its order: the client closes it, and the card still
  * says «Откликнуться». Every `tickMs` (5 minutes) the waiting cards whose look is due have their order page read again
- * through the node, a few at a time, never at night: a fresh order's every 15 minutes, a day-old one's every hour,
+ * through the node, a few at a time, never at night: a fresh order's every 15 minutes (every 2 while its card does not
+ * know the bid's fee), a day-old one's every hour,
  * an older one's every 3 hours, and at once an order gone from the feed. A closed order's card goes to `close`.
  * When most of a pass looks closed and the latest pages of fresh orders look closed too, the site more likely
  * changed than the clients: nothing is closed, Boris is told (once a day). Old orders closing together are no doubt
@@ -105,6 +112,8 @@ export function startCardRecheck(d: {
       ) look
       cross join lateral (
         select case
+          when l.seen_at > ${ago(at, FRESH_MS)}::timestamptz and l.bid_price_rub = 0
+            then ${ago(at, NO_FEE_EVERY_MS)}::timestamptz
           when l.seen_at > ${ago(at, FRESH_MS)}::timestamptz then ${ago(at, LOOK_EVERY_MS.fresh)}::timestamptz
           when l.seen_at > ${ago(at, DAY_MS)}::timestamptz then ${ago(at, LOOK_EVERY_MS.day)}::timestamptz
           else ${ago(at, LOOK_EVERY_MS.older)}::timestamptz
