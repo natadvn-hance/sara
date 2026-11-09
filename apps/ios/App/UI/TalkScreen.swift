@@ -1,53 +1,61 @@
 import SwiftUI
 
-/// The talk as a voice assistant (Boris, 08.11), one language with the PWA (talk-design-language.md): the logo and
-/// her status on top; her face big in the middle, which is the button; her name, her role and one line under it; the
-/// hint and the call of the other one below. No feed of messages: her answer comes as a plate that grows out of the
-/// Dynamic Island and lights up word by word as she says it.
+/// The talk as a voice assistant (Boris, 08.11), in the language of the Hance proposal pages (hance.pro/ekaterina_kp,
+/// Boris 09.11): the logo and the call of the other one on top; her photo card with its plate, the button of the talk,
+/// and the strip of pixels under it; her index, role, big name and one line, set to the left like a page; the hint and
+/// the keyboard below. Her answer comes as a plate that grows out of the Dynamic Island. The other one comes in through
+/// a pixel wipe of her colour.
 struct TalkScreen: View {
     @EnvironmentObject private var engine: TalkEngine
     @Environment(\.colorScheme) private var scheme
-    @State private var under: HanceAgent = .lora
-    @State private var reveal: CGFloat = 1
-    @State private var faceAt: CGPoint = .zero
+    /// Who the screen shows: changes in the middle of the wipe, when the pixels cover it all.
+    @State private var shown: HanceAgent = .lora
+    @State private var wipe: Double = 0
+    @State private var wipeOut = false
+    @State private var wipeColor: Color = .clear
+    @State private var wipeSeed = 1
     @State private var typing = false
     @State private var showTimings = false
 
-    private var palette: Palette { .of(engine.agent, dark: scheme == .dark) }
+    private var agent: HanceAgent { Demo.agent ?? shown }
+    private var phase: TalkPhase { Demo.phase ?? engine.phase }
+    private var palette: Palette { .of(agent, dark: scheme == .dark) }
 
     var body: some View {
         GeometryReader { geo in
-            let face = min(geo.size.width * 0.64, 260, geo.size.height * 0.34)
+            let width = geo.size.width - 40
+            let cardHeight = min(width * 1.1, geo.size.height * 0.5)
             ZStack(alignment: .top) {
-                Backdrop(
-                    under: Palette.of(under, dark: scheme == .dark), over: palette, reveal: reveal, center: faceAt)
+                palette.bg.ignoresSafeArea()
 
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     topBar
-                    Spacer(minLength: 0)
-                    Button {
-                        engine.press()
-                    } label: {
-                        // Her clouds spread wider than the screen; only the face and a little air take room.
-                        AvatarStage(
-                            agent: engine.agent, phase: engine.phase, meter: engine.meter, palette: palette, size: face)
-                            .frame(width: face, height: face * 1.3)
-                    }
-                    .buttonStyle(FacePress())
-                    .disabled(engine.phase == .sending || engine.phase == .thinking)
-                    .background(
-                        GeometryReader { g in
-                            Color.clear.onAppear {
-                                faceAt = CGPoint(x: g.frame(in: .global).midX, y: g.frame(in: .global).midY)
-                            }
+                    Spacer(minLength: 10)
+                    ZStack(alignment: .topTrailing) {
+                        Button {
+                            engine.press()
+                        } label: {
+                            HeroCard(
+                                agent: agent, phase: phase, palette: palette,
+                                size: CGSize(width: width, height: cardHeight))
                         }
-                    )
+                        .buttonStyle(CardPress())
+                        .disabled(phase == .sending || phase == .thinking)
+                        HUDPlate(agent: agent, phase: phase, meter: engine.meter, since: engine.since, palette: palette)
+                            .padding(12)
+                            .onLongPressGesture { showTimings = true }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint("Долгое нажатие: замеры скорости")
+                    }
+                    PixelBand(phase: phase, meter: engine.meter, palette: palette)
+                        .frame(width: width)
+                        .padding(.top, 12)
                     who
-                        .padding(.top, 10)
+                        .padding(.top, 20)
                     line
-                        .padding(.top, 14)
-                        .frame(minHeight: 84, alignment: .top)
-                    Spacer(minLength: 0)
+                        .padding(.top, 8)
+                        .frame(minHeight: 56, alignment: .top)
+                    Spacer(minLength: 6)
                     bottom
                 }
                 .padding(.horizontal, 20)
@@ -56,7 +64,7 @@ struct TalkScreen: View {
                 if let card = engine.card {
                     AnswerBanner(
                         card: card, palette: Palette.of(card.agent, dark: scheme == .dark),
-                        speaking: engine.phase == .speaking, since: engine.since,
+                        speaking: phase == .speaking, since: engine.since,
                         onClose: { withAnimation(Motion.ease(0.5)) { engine.dismissCard() } },
                         onReplay: { engine.replay() }
                     )
@@ -66,20 +74,23 @@ struct TalkScreen: View {
                     .transition(.asymmetric(insertion: .identity, removal: .move(edge: .top).combined(with: .opacity)))
                     .zIndex(2)
                 }
+
+                PixelWipe(progress: wipe, out: wipeOut, seed: wipeSeed)
+                    .fill(wipeColor)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .zIndex(3)
             }
             .animation(Motion.ease(0.6), value: engine.card)
         }
         .foregroundStyle(palette.ink)
-        .animation(Motion.ease(0.9), value: engine.agent)
-        .onChange(of: engine.agent) { old, _ in
-            // The new colour opens as a circle from her face.
-            under = old
-            reveal = 0
-            withAnimation(Motion.ease(0.9)) { reveal = 1 }
+        .onChange(of: engine.agent) { _, new in change(to: new) }
+        .onAppear {
+            shown = engine.agent
+            Demo.start(engine.meter)
         }
-        .onAppear { under = engine.agent }
         .sheet(isPresented: $typing) {
-            TypeSheet(agent: engine.agent, palette: palette) { text in
+            TypeSheet(agent: agent, palette: palette) { text in
                 typing = false
                 engine.send(text: text)
             }
@@ -90,57 +101,55 @@ struct TalkScreen: View {
                 .environmentObject(engine)
                 .presentationDetents([.medium, .large])
         }
-        .sensoryFeedback(.impact(weight: .light), trigger: engine.phase == .listening)
+        .sensoryFeedback(.impact(weight: .light), trigger: phase == .listening)
         .sensoryFeedback(.selection, trigger: engine.agent)
+    }
+
+    /// Her colour falls over the page in pixels, the page changes under them, and they fall away.
+    private func change(to new: HanceAgent) {
+        wipeColor = Palette.of(new, dark: scheme == .dark).accent
+        wipeSeed += 1
+        wipeOut = false
+        wipe = 0
+        withAnimation(Motion.wipe(0.45)) {
+            wipe = 1
+        } completion: {
+            shown = new
+            wipeOut = true
+            wipe = 0
+            withAnimation(Motion.wipe(0.6)) { wipe = 1 }
+        }
     }
 
     private var topBar: some View {
         HStack {
             HanceLogo(height: 22, mark: palette.accent, word: palette.ink)
-                .knightHop(trigger: engine.agent, step: 6)
+                .knightHop(trigger: agent, step: 6)
             Spacer()
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(engine.phase.isBusy ? palette.accent : palette.muted)
-                    .frame(width: 7, height: 7)
-                    .phaseAnimator([1.0, 0.3]) { dot, x in
-                        dot.opacity(engine.phase.isBusy ? x : 1)
-                    } animation: { _ in .easeInOut(duration: 0.7) }
-                Text("\(engine.agent.name) · \(engine.phase.label)")
-                    .monoLabel(11)
-                    .foregroundStyle(palette.muted)
-                    .contentTransition(.interpolate)
-                if engine.phase == .thinking {
-                    Text(engine.since, style: .timer)
-                        .font(HanceFont.mono(11))
-                        .monospacedDigit()
-                        .foregroundStyle(palette.accentInk)
-                }
+            CallOther(agent: agent.other, dark: scheme == .dark) {
+                engine.call(agent.other)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(palette.paper.opacity(0.7)))
-            .overlay(Capsule().stroke(palette.line, lineWidth: 0.5))
-            .onLongPressGesture { showTimings = true }
-            .accessibilityAddTraits(.isButton)
-            .accessibilityHint("Долгое нажатие: замеры скорости")
+            .disabled(phase == .listening || phase == .sending || phase == .thinking)
         }
         .padding(.top, 8)
     }
 
     private var who: some View {
-        VStack(spacing: 6) {
-            Text(engine.agent.name)
-                .font(HanceFont.text(44, .semibold))
-                .tracking(-1.54)
-                .id(engine.agent)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Text(agent == .lora ? "[01]" : "[02]")
+                    .foregroundStyle(palette.accentInk)
+                Text(agent.role)
+                    .foregroundStyle(palette.muted)
+            }
+            .monoLabel(10)
+            Text(agent.name)
+                .font(HanceFont.text(56, .semibold))
+                .tracking(-2.4)
+                .id(agent)
                 .transition(.push(from: .bottom).combined(with: .opacity))
-            Text(engine.agent.role)
-                .monoLabel(11)
-                .foregroundStyle(palette.muted)
-                .id("role-\(engine.agent.rawValue)")
-                .transition(.opacity)
         }
+        .animation(Motion.reveal(0.7), value: agent)
     }
 
     /// One line under her name: what she heard while she thinks, or what went wrong.
@@ -149,7 +158,7 @@ struct TalkScreen: View {
             if let note = engine.note {
                 Text(note)
                     .foregroundStyle(palette.accentInk)
-            } else if engine.phase == .sending || engine.phase == .thinking, let heard = engine.heard {
+            } else if phase == .sending || phase == .thinking, let heard = engine.heard {
                 Text("«\(heard)»")
                     .foregroundStyle(palette.ink)
             } else {
@@ -158,127 +167,118 @@ struct TalkScreen: View {
         }
         .font(HanceFont.text(19))
         .lineLimit(3)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 8)
+        .multilineTextAlignment(.leading)
         .transition(.opacity)
         .animation(Motion.ease(0.4), value: engine.note)
-        .animation(Motion.ease(0.4), value: engine.phase)
+        .animation(Motion.ease(0.4), value: phase)
     }
 
     private var hint: String {
-        switch engine.phase {
-        case .listening: return "Говори, я слушаю. Пауза закончит запись"
-        case .sending: return "Распознаю голос"
-        case .thinking: return "\(engine.agent.name) думает"
-        case .speaking: return "Нажми, чтобы остановить"
-        default: return "Нажми и говори · «позови \(engine.agent.other.accusative)»"
+        switch phase {
+        case .listening: return "Говори. Пауза закончит запись"
+        case .sending: return "Отправляю"
+        case .thinking: return "\(agent.name) думает"
+        case .speaking: return "Нажми на фото, чтобы остановить"
+        default: return "Нажми на фото и говори"
         }
     }
 
     private var bottom: some View {
-        VStack(spacing: 16) {
+        HStack(alignment: .center, spacing: 12) {
             Text(hint)
-                .font(HanceFont.text(15))
+                .monoLabel(10)
                 .foregroundStyle(palette.muted)
-                .multilineTextAlignment(.center)
+                .lineLimit(2)
                 .contentTransition(.opacity)
-                .animation(Motion.ease(0.3), value: engine.phase)
-            HStack(alignment: .center) {
-                Button {
-                    typing = true
-                } label: {
-                    Image(systemName: "keyboard")
-                        .font(.system(size: 18, weight: .medium))
-                        .frame(width: 52, height: 52)
-                        .background(Circle().fill(palette.paper.opacity(0.8)))
-                        .overlay(Circle().stroke(palette.line, lineWidth: 0.5))
-                }
-                .accessibilityLabel("Написать \(engine.agent.dative)")
-                .disabled(engine.phase.isBusy)
-                Spacer()
-                CallOther(agent: engine.agent.other, palette: palette) {
-                    engine.call(engine.agent.other)
-                }
-                .disabled(engine.phase == .listening || engine.phase == .sending || engine.phase == .thinking)
+                .animation(Motion.ease(0.3), value: phase)
+            Spacer()
+            Button {
+                typing = true
+            } label: {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(palette.ink)
+                    .frame(width: 52, height: 52)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(palette.paper))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(palette.line, lineWidth: 0.5))
             }
-            .foregroundStyle(palette.muted)
+            .accessibilityLabel("Написать \(agent.dative)")
+            .disabled(phase.isBusy)
         }
     }
 }
 
-/// Her face gives a little under the finger.
-struct FacePress: ButtonStyle {
+/// Her card gives a little under the finger.
+struct CardPress: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
             .animation(Motion.spring(0.35), value: configuration.isPressed)
     }
 }
 
-/// The pill «Позвать Сару» with her small picture: a tap calls her.
+/// «Позвать Сару →» in her colour, like «Созвон →» of the proposal pages, with her small face: a tap calls her.
 struct CallOther: View {
     let agent: HanceAgent
-    let palette: Palette
+    let dark: Bool
     let action: () -> Void
 
     var body: some View {
+        let p = Palette.of(agent, dark: dark)
         Button(action: action) {
-            HStack(spacing: 10) {
-                Text("Позвать \(agent.accusative)")
-                    .monoLabel(10)
-                    .foregroundStyle(palette.ink)
+            HStack(spacing: 8) {
                 Image(agent.photo)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 40, height: 40)
+                    .frame(width: 26, height: 26)
                     .clipShape(Circle())
-                    .overlay(Circle().stroke(palette.paper, lineWidth: 2))
                     .id(agent)
                     .transition(.modifier(active: Flip(angle: -80, opacity: 0), identity: Flip(angle: 0, opacity: 1)))
+                Text("Позвать \(agent.accusative)  →")
+                    .font(HanceFont.text(15, .semibold))
             }
-            .padding(.leading, 16)
-            .padding(.trailing, 4)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(palette.paper.opacity(0.85)))
-            .overlay(Capsule().stroke(palette.line, lineWidth: 0.5))
+            .foregroundStyle(.white)
+            .padding(.leading, 5)
+            .padding(.trailing, 14)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(p.accent))
         }
+        .animation(Motion.reveal(0.6), value: agent)
         .accessibilityLabel("Позвать \(agent.accusative)")
     }
 }
 
-/// The page's colour: the one before, and the new one opening as a circle from her face; over it a soft glow of her
-/// colour (9%) round the face.
-struct Backdrop: View {
-    let under: Palette
-    let over: Palette
-    let reveal: CGFloat
-    let center: CGPoint
+/// A look at the screen without the core, in debug builds: HANCE_DEMO=listening|sending|thinking|speaking|idle and
+/// HANCE_DEMO_AGENT=sara show that phase with a made-up voice, for screenshots of the design.
+@MainActor
+enum Demo {
+    static let phase: TalkPhase? = {
+        #if DEBUG
+            return ProcessInfo.processInfo.environment["HANCE_DEMO"].flatMap(TalkPhase.init(rawValue:))
+        #else
+            return nil
+        #endif
+    }()
+    static let agent: HanceAgent? = {
+        #if DEBUG
+            return ProcessInfo.processInfo.environment["HANCE_DEMO_AGENT"].flatMap(HanceAgent.init(rawValue:))
+        #else
+            return nil
+        #endif
+    }()
+    static var on: Bool { phase != nil }
 
-    var body: some View {
-        GeometryReader { g in
-            let frame = g.frame(in: .global)
-            let local = CGPoint(x: center.x - frame.minX, y: center.y - frame.minY)
-            let far = hypot(max(local.x, g.size.width - local.x), max(local.y, g.size.height - local.y)) + 40
-            let glowAt = UnitPoint(x: local.x / max(1, g.size.width), y: local.y / max(1, g.size.height))
-            ZStack {
-                layer(under, g.size, glowAt)
-                layer(over, g.size, glowAt)
-                    .mask(
-                        Circle()
-                            .frame(width: far * 2 * reveal, height: far * 2 * reveal)
-                            .position(local)
-                    )
+    static func start(_ meter: LevelMeter) {
+        guard on else { return }
+        Task { @MainActor in
+            var t = 0.0
+            while true {
+                t += 0.03
+                let syllables = max(0, sin(t * 9) * 0.5 + sin(t * 3.1) * 0.35 + 0.2)
+                meter.feed(min(1, syllables * (0.6 + 0.4 * sin(t * 0.7))))
+                try? await Task.sleep(for: .milliseconds(30))
             }
-        }
-        .ignoresSafeArea()
-    }
-
-    private func layer(_ p: Palette, _ size: CGSize, _ at: UnitPoint) -> some View {
-        ZStack {
-            p.bg
-            RadialGradient(
-                colors: [p.accent.opacity(0.09), p.accent.opacity(0)], center: at, startRadius: 0,
-                endRadius: max(size.width, size.height) * 0.6)
         }
     }
 }

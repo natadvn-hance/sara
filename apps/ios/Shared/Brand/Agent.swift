@@ -15,6 +15,8 @@ enum HanceAgent: String, Codable, CaseIterable, Hashable, Sendable {
     var other: HanceAgent { self == .lora ? .sara : .lora }
     /// Her picture in the asset catalogs of the app and the widgets.
     var photo: String { self == .lora ? "AgentLora" : "AgentSara" }
+    /// Her square photo for the big card of the talk (the circle above is for small places).
+    var cardPhoto: String { self == .lora ? "AgentLoraCard" : "AgentSaraCard" }
     /// What she says when she is called (agents.ts): the core answers a call with it.
     var greeting: String { self == .lora ? "Борь, я на связи." : "Да-да, Борь, я тут." }
 }

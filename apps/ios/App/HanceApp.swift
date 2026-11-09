@@ -11,7 +11,7 @@ struct HanceApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if engine.signedIn {
+                if engine.signedIn || Demo.on {
                     TalkScreen()
                 } else {
                     LoginView()

@@ -1,165 +1,290 @@
 import SwiftUI
 
-/// The middle of the screen, one language with the PWA (talk-design-language.md): her face big, and behind it three
-/// blurred clouds of her colour that slowly change shape and turn. Listening, the clouds and the ring grow with Boris's
-/// voice; thinking, a gradient arc spins round her and three knights fly on an orbit; speaking, the clouds pulse with
-/// her voice and rings go out in waves. At rest the face floats a little.
-struct AvatarStage: View {
+// The middle of the talk in the language of the Hance proposal pages (hance.pro/ekaterina_kp, Boris 09.11): no blurred
+// clouds and no glow. A photo card with a technical plate on it, a strip of square pixels under it that lives with the
+// talk, corner marks while she works, and the other one coming in through a pixel wipe.
+
+extension Motion {
+    /// The wipe of the proposal pages, cubic-bezier(.76,0,.24,1): slow out, fast through, slow in.
+    static func wipe(_ duration: Double) -> Animation { .timingCurve(0.76, 0, 0.24, 1, duration: duration) }
+    /// Their reveal, cubic-bezier(.16,1,.3,1).
+    static func reveal(_ duration: Double) -> Animation { .timingCurve(0.16, 1, 0.3, 1, duration: duration) }
+}
+
+/// A small integer hash in 0..<1: the same cell and frame give the same value, so the pixels flicker by steps, not by
+/// chance every frame.
+func pixelNoise(_ a: Int, _ b: Int, _ c: Int) -> Double {
+    var h = UInt64(bitPattern: Int64(a &* 73_856_093 ^ b &* 19_349_663 ^ c &* 83_492_791))
+    h ^= h >> 33
+    h = h &* 0xff51_afd7_ed55_8ccd
+    h ^= h >> 33
+    return Double(h % 10_000) / 10_000
+}
+
+/// Her photo as a card, the button of the talk. While she listens, thinks or speaks, four corner marks frame her.
+struct HeroCard: View {
     let agent: HanceAgent
     let phase: TalkPhase
-    let meter: LevelMeter
     let palette: Palette
-    /// The face's diameter.
-    let size: CGFloat
+    let size: CGSize
 
     var body: some View {
         ZStack {
-            TimelineView(.animation) { tl in
-                let t = tl.date.timeIntervalSinceReferenceDate
-                let e = phase == .listening || phase == .speaking ? meter.value : 0
-                ZStack {
-                    clouds(t, e)
-                    Canvas { ctx, canvas in marks(ctx, canvas, t, e) }
-                }
-            }
-            Face(agent: agent, palette: palette, size: size)
-                .phaseAnimator([-1.0, 1.0]) { face, y in
-                    face.offset(y: phase.isBusy ? 0 : y * 3.5)
-                } animation: { _ in .easeInOut(duration: 3) }
+            palette.accent
+            Image(agent.cardPhoto)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size.width, height: size.height, alignment: .top)
+                .clipped()
+            CornerMarks(arm: 16, inset: 14)
+                .stroke(palette.paper, style: StrokeStyle(lineWidth: 2.5, lineCap: .square))
+                .opacity(phase.isBusy ? 1 : 0)
+                .scaleEffect(phase.isBusy ? 1 : 1.04)
+                .animation(Motion.reveal(0.5), value: phase.isBusy)
         }
-        .frame(width: size * 1.9, height: size * 1.9)
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(palette.line, lineWidth: 0.5))
+        .overlay(alignment: .bottomLeading) {
+            Text(agent.name)
+                .monoLabel(10)
+                .foregroundStyle(palette.accentInk)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 4).fill(palette.paper))
+                .padding(14)
+        }
+        .shadow(color: .black.opacity(0.07), radius: 16, y: 8)
         .accessibilityElement()
         .accessibilityLabel("\(agent.name), \(phase.label)")
     }
-
-    /// Three clouds: each a wobbling drop, turning at its own pace (9, 12, 15 s), blurred together.
-    private func clouds(_ t: Double, _ e: Double) -> some View {
-        let grow: Double
-        switch phase {
-        case .listening: grow = 1 + 0.55 * e
-        case .speaking: grow = 1 + 0.3 * e + 0.04 * sin(t * 5)
-        case .thinking: grow = 1.06 + 0.04 * sin(t * 2.4)
-        default: grow = 1 + 0.03 * sin(t * 1.1)
-        }
-        let periods: [Double] = [9, 12, 15]
-        return ZStack {
-            ForEach(0..<3, id: \.self) { i in
-                let turn = t * 2 * .pi / periods[i] * (i == 1 ? -1 : 1)
-                Blob(time: t * 0.35 + Double(i) * 2.1, energy: 0.9)
-                    .fill(i == 1 ? palette.accentSoft : palette.accent)
-                    .frame(width: size * (1.08 - 0.06 * Double(i)), height: size * (0.98 + 0.05 * Double(i)))
-                    .offset(x: cos(turn) * size * 0.07, y: sin(turn) * size * 0.07)
-                    .rotationEffect(.radians(turn))
-                    .opacity(i == 1 ? 0.85 : 0.55)
-            }
-        }
-        .scaleEffect(grow)
-        .blur(radius: size * 0.11)
-    }
-
-    /// The ring, the waves, the thinking arc with its knights, the arc of the voice going up.
-    private func marks(_ ctx: GraphicsContext, _ canvas: CGSize, _ t: Double, _ e: Double) {
-        let c = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
-        let r = size / 2
-        func circle(_ radius: CGFloat) -> Path {
-            Path(ellipseIn: CGRect(x: c.x - radius, y: c.y - radius, width: radius * 2, height: radius * 2))
-        }
-        switch phase {
-        case .listening:
-            let rr = (r + 7) * (1 + 0.16 * e)
-            ctx.stroke(circle(rr), with: .color(palette.accent.opacity(0.85)), lineWidth: 2.5)
-        case .speaking:
-            for i in 0..<3 {
-                let f = ((t + Double(i) * 0.7) / 2.1).truncatingRemainder(dividingBy: 1)
-                let rr = r * (1.02 + 0.62 * f)
-                ctx.stroke(
-                    circle(rr), with: .color(palette.accent.opacity(pow(1 - f, 1.4) * (0.35 + 0.55 * e))),
-                    lineWidth: 1.5 + 2 * (1 - f))
-            }
-        case .thinking:
-            let start = Angle.radians(t * 2 * .pi / 1.4)
-            var arc = Path()
-            arc.addArc(center: c, radius: r + 9, startAngle: start, endAngle: start + .degrees(120), clockwise: false)
-            ctx.stroke(
-                arc,
-                with: .conicGradient(
-                    Gradient(colors: [palette.accent.opacity(0), palette.accent]), center: c,
-                    angle: start - .degrees(4)),
-                style: StrokeStyle(lineWidth: 4, lineCap: .round))
-            for k in 0..<3 {
-                let a = t * 2 * .pi / 3.2 + Double(k) * 2 * .pi / 3
-                let p = CGPoint(x: c.x + cos(a) * r * 1.3, y: c.y + sin(a) * r * 1.3)
-                let s: CGFloat = 11
-                var knight = ctx
-                knight.translateBy(x: p.x, y: p.y)
-                knight.rotate(by: .radians(a + .pi / 2))
-                knight.fill(
-                    KnightMark().path(in: CGRect(x: -s / 2, y: -s / 2, width: s, height: s)),
-                    with: .color(palette.accent))
-            }
-        case .sending:
-            let start = Angle.radians(t * 7)
-            var arc = Path()
-            arc.addArc(center: c, radius: r + 9, startAngle: start, endAngle: start + .degrees(80), clockwise: false)
-            ctx.stroke(arc, with: .color(palette.accent), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-        default:
-            ctx.stroke(circle(r + 7), with: .color(palette.accent.opacity(0.25)), lineWidth: 1.5)
-        }
-    }
 }
 
-/// A cloud's outline: a circle that wobbles.
-struct Blob: Shape {
-    var time: Double
-    var energy: Double
+/// Four corner marks, like the frame of a viewfinder.
+struct CornerMarks: Shape {
+    let arm: CGFloat
+    let inset: CGFloat
 
     func path(in rect: CGRect) -> Path {
-        let c = CGPoint(x: rect.midX, y: rect.midY)
-        let rx = rect.width / 2 * 0.9
-        let ry = rect.height / 2 * 0.9
-        let amp = 0.025 + 0.08 * energy
+        let r = rect.insetBy(dx: inset, dy: inset)
         var p = Path()
-        let n = 96
-        for i in 0...n {
-            let a = Double(i) / Double(n) * 2 * .pi
-            let w1: Double = 0.55 * sin(3 * a + time * 1.6)
-            let w2: Double = 0.3 * sin(5 * a - time * 2.3 + 1.3)
-            let w3: Double = 0.15 * sin(2 * a + time * 0.9 + 0.4)
-            let k: Double = 1 + amp * (w1 + w2 + w3)
-            let pt = CGPoint(x: c.x + cos(a) * rx * k, y: c.y + sin(a) * ry * k)
-            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
-        }
-        p.closeSubpath()
+        p.move(to: CGPoint(x: r.minX, y: r.minY + arm))
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.minX + arm, y: r.minY))
+        p.move(to: CGPoint(x: r.maxX - arm, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY + arm))
+        p.move(to: CGPoint(x: r.maxX, y: r.maxY - arm))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.maxX - arm, y: r.maxY))
+        p.move(to: CGPoint(x: r.minX + arm, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY - arm))
         return p
     }
 }
 
-/// Her face. When the other one comes, the new face turns in like a card (from -80 degrees, a spring of 0.9 s).
-struct Face: View {
+/// The plate of the proposal pages («ОПОР 1 / НАГРУЗКА 100 %»): who and what she does, one number of the moment and a
+/// thin bar. Listening and speaking, the number and the bar are the loudness; thinking, the time and a stepping bar.
+struct HUDPlate: View {
     let agent: HanceAgent
+    let phase: TalkPhase
+    let meter: LevelMeter
+    let since: Date
     let palette: Palette
-    let size: CGFloat
 
     var body: some View {
-        ZStack {
-            Image(agent.photo)
-                .resizable()
-                .scaledToFill()
-                .frame(width: size, height: size)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(palette.paper.opacity(0.95), lineWidth: 3))
-                .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
-                .id(agent)
-                .transition(
-                    .asymmetric(
-                        insertion: .modifier(active: Flip(angle: -80, opacity: 0), identity: Flip(angle: 0, opacity: 1)),
-                        removal: .modifier(active: Flip(angle: 80, opacity: 0), identity: Flip(angle: 0, opacity: 1))))
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !phase.isBusy)) { tl in
+            let t = tl.date.timeIntervalSince(since)
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    Text(agent.name).foregroundStyle(palette.ink)
+                    Spacer(minLength: 8)
+                    Rectangle()
+                        .fill(phase.isBusy ? palette.accent : palette.muted)
+                        .frame(width: 5, height: 5)
+                        .opacity(phase.isBusy && Int(t * 2.5) % 2 == 1 ? 0.25 : 1)
+                    Text(phase.label).foregroundStyle(phase.isBusy ? palette.accentInk : palette.muted)
+                }
+                HStack {
+                    Text(caption).foregroundStyle(palette.muted)
+                    Spacer(minLength: 8)
+                    Text(value(t)).foregroundStyle(palette.ink).monospacedDigit()
+                }
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(palette.line)
+                        Rectangle()
+                            .fill(phase == .listening || phase == .speaking ? palette.accent : palette.ink)
+                            .frame(width: g.size.width * fill(t))
+                    }
+                }
+                .frame(height: 3)
+            }
+            .monoLabel(9.5)
         }
-        .animation(Motion.spring(0.9), value: agent)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .frame(width: 168)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(palette.paper.opacity(0.94)))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(palette.line, lineWidth: 0.5))
+    }
+
+    private var caption: String {
+        switch phase {
+        case .listening: return "голос"
+        case .sending: return "отправка"
+        case .thinking: return "ответ через"
+        case .speaking: return "громкость"
+        case .failed: return "связь"
+        default: return "канал"
+        }
+    }
+
+    private func value(_ t: Double) -> String {
+        switch phase {
+        case .listening, .speaking: return "\(Int((min(1, meter.value * 1.25) * 100).rounded())) %"
+        case .sending, .thinking:
+            let s = max(0, Int(t))
+            return String(format: "%02d:%02d", s / 60, s % 60)
+        case .failed: return "нет"
+        default: return "открыт"
+        }
+    }
+
+    /// The bar: the loudness, or for thinking a fill in ten steps every 1,2 s.
+    private func fill(_ t: Double) -> CGFloat {
+        switch phase {
+        case .listening, .speaking: return CGFloat(min(1, meter.value * 1.25))
+        case .sending, .thinking: return CGFloat((Int(t / 0.12) % 10) + 1) / 10
+        case .failed: return 0
+        default: return 1
+        }
     }
 }
 
-/// A turn round the upright axis, as the PWA's rotateY.
+/// The strip of square pixels under her card. Empty cells stay as a faint grid. At rest a knight walks it by knight's
+/// moves; listening, his voice runs through it as columns from the bottom; sending, a column scans across; thinking,
+/// the pixels flicker in steps; speaking, her voice opens columns from the middle.
+struct PixelBand: View {
+    let phase: TalkPhase
+    let meter: LevelMeter
+    let palette: Palette
+    @State private var tape = PixelTape()
+
+    static let cell: CGFloat = 8
+    static let gap: CGFloat = 3
+    static let rows = 6
+    static var height: CGFloat { CGFloat(rows) * (cell + gap) - gap }
+
+    var body: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                let step = Self.cell + Self.gap
+                let cols = max(1, Int((size.width + Self.gap) / step))
+                let x0 = (size.width - (CGFloat(cols) * step - Self.gap)) / 2
+                tape.feed(t, meter.value, cols: cols, on: phase == .listening || phase == .speaking)
+                func cell(_ c: Int, _ r: Int, _ color: Color, _ opacity: Double = 1) {
+                    let rect = CGRect(
+                        x: x0 + CGFloat(c) * step, y: CGFloat(r) * step, width: Self.cell, height: Self.cell)
+                    ctx.fill(Path(rect), with: .color(color.opacity(opacity)))
+                }
+                let rows = Self.rows
+                for c in 0..<cols { for r in 0..<rows { cell(c, r, palette.line, 0.55) } }
+                switch phase {
+                case .listening:
+                    for c in 0..<cols {
+                        let h = Int((min(1, tape.cols[c] * 1.3) * Double(rows)).rounded(.up))
+                        for k in 0..<h { cell(c, rows - 1 - k, palette.accent, k == h - 1 ? 0.55 : 1) }
+                    }
+                case .speaking:
+                    let mid = Double(rows - 1) / 2
+                    for c in 0..<cols {
+                        let half = min(1, tape.cols[c] * 1.3) * Double(rows) / 2
+                        for r in 0..<rows where abs(Double(r) - mid) < half + 0.01 {
+                            cell(c, r, palette.accent, abs(Double(r) - mid) + 1 > half ? 0.5 : 1)
+                        }
+                    }
+                case .sending:
+                    let head = Int(t / 0.04) % (cols + 8)
+                    for (k, o) in [1.0, 0.5, 0.22].enumerated() where head - k >= 0 && head - k < cols {
+                        for r in 0..<rows { cell(head - k, r, palette.accent, o) }
+                    }
+                case .thinking:
+                    let frame = Int(t / 0.11)
+                    for c in 0..<cols {
+                        for r in 0..<rows {
+                            let n = pixelNoise(c, r, frame)
+                            if n < 0.2 { cell(c, r, n < 0.07 ? palette.ink : palette.accent, n < 0.12 ? 1 : 0.5) }
+                        }
+                    }
+                default:
+                    // The knight: two across, one up or down, every 0,8 s; its last two squares fade behind it.
+                    let s = Int(t / 0.8)
+                    for back in 0..<3 {
+                        let k = s - back
+                        let c = ((k * 2) % cols + cols) % cols
+                        let r = rows - 2 - ((k % 2 + 2) % 2) * 2
+                        let o = [1.0, 0.4, 0.15][back]
+                        cell(c, r, palette.accent, o)
+                        cell(c, r + 1, palette.accent, o)
+                        cell((c + 1) % cols, r, palette.accent, o)
+                    }
+                }
+            }
+        }
+        .frame(height: Self.height)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The loudness as columns that run from right to left, one new column every 45 ms.
+final class PixelTape {
+    var cols: [Double] = []
+    private var last: Double = 0
+
+    func feed(_ t: Double, _ v: Double, cols n: Int, on: Bool) {
+        if cols.count != n { cols = Array(repeating: 0, count: n) }
+        guard t - last >= 0.045 else { return }
+        last = t
+        cols.removeFirst()
+        cols.append(on ? v : 0)
+    }
+}
+
+/// The page's change of colour on the proposal pages: square pixels fall over the screen from the top with a ragged
+/// edge, then fall away the same way and leave the new page. `progress` 0 to 1 covers; with `out` it uncovers.
+struct PixelWipe: Shape {
+    var progress: Double
+    var out: Bool
+    var seed: Int
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let cell: CGFloat = 26
+        let cols = Int((rect.width / cell).rounded(.up))
+        let rows = Int((rect.height / cell).rounded(.up))
+        var p = Path()
+        guard progress > 0 || out else { return p }
+        for r in 0..<rows {
+            for c in 0..<cols {
+                let edge = Double(r) / Double(max(1, rows)) * 0.6 + pixelNoise(c, r, seed) * 0.4
+                let covered = out ? edge >= progress : edge < progress
+                if covered {
+                    p.addRect(CGRect(x: CGFloat(c) * cell, y: CGFloat(r) * cell, width: cell + 0.5, height: cell + 0.5))
+                }
+            }
+        }
+        return p
+    }
+}
+
+/// A turn round the upright axis, for the small face in the call button.
 struct Flip: ViewModifier {
     let angle: Double
     let opacity: Double
