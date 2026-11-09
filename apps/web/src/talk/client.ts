@@ -66,9 +66,10 @@ export const talkApi = {
         ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Не вышло войти.',
       )
   },
-  sendVoice: async (audio: Blob, agent: Agent, talk: string) =>
+  /** `diag`: how the mic did (loudness, meter, track), no words, for the core's log. */
+  sendVoice: async (audio: Blob, agent: Agent, talk: string, diag = '') =>
     json<Sent>(
-      await call(`/api/talk?agent=${agent}&talk=${talk}`, {
+      await call(`/api/talk?agent=${agent}&talk=${talk}&diag=${encodeURIComponent(diag)}`, {
         method: 'POST',
         headers: { 'content-type': audio.type || 'audio/mp4' },
         body: audio,

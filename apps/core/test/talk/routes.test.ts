@@ -294,10 +294,17 @@ describe('the voice app: every request leaves a line', () => {
         url: '/api/talk/0199a000-0000-7000-8000-000000000001',
         headers: { cookie: session },
       })
+      await app.inject({
+        method: 'POST',
+        url: `/api/talk?agent=lora&diag=${encodeURIComponent('peak0.004,running,live,open,9.8s,audio/mp4')}`,
+        headers: { cookie: session, 'content-type': 'audio/mp4' },
+        payload: Buffer.from('fake m4a'),
+      })
     } finally {
       spy.mockRestore()
     }
     const talk = lines.filter((l) => l.startsWith('talk '))
+    expect(talk[2]).toContain('mic=peak0.004,running,live,open,9.8s,audio/mp4')
     expect(talk[0]).toMatch(/^talk POST \/api\/talk agent=sara 200 \d+ms body=\d+$/)
     expect(talk[1]).toMatch(/^talk GET \/api\/talk\/:id agent=- 404 /)
     expect(talk.join('\n')).not.toContain('секретное')

@@ -53,19 +53,17 @@ export const TALK_NOTES = {
   late: 'Ответа нет шесть минут. Спроси ещё раз.',
   gone: 'Ответ потерялся: сервер перезапускался. Скажи ещё раз.',
   failed: 'Нет связи. Проверь интернет и попробуй ещё раз.',
+  silentMic:
+    'Микрофон не даёт звука. Закрой приложение смахиванием и открой снова; если не поможет, проверь доступ к микрофону в настройках Safari.',
 } as const
 
 const uid = () => Math.random().toString(36).slice(2)
+/** Below this the whole recording is silence: a mic that gives nothing (speech is well above 0.06). */
+const SILENT = 0.012
 
 /** Who answers first: `?agent=sara` in the address, Lora otherwise. */
 export function firstAgent(search: string): Agent {
   return new URLSearchParams(search).get('agent') === 'sara' ? 'sara' : 'lora'
-}
-
-/** iOS 16.4+ lets a page say what its sound is for; elsewhere nothing happens. */
-function audioSession(type: 'auto' | 'playback'): void {
-  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession
-  if (session) session.type = type
 }
 
 /**
@@ -103,6 +101,8 @@ export function createTalkEngine(
   let loop: number | null = null
   let release: () => void = () => {}
   let closeTimer: number | null = null
+  /** The loudest the mic gave in this recording (-1: no meter), and when it began. */
+  let heard: { started: number; peak: number } | null = null
   /** Bumped by every stop, new recording or leaving the page: an older voice still on its way is not played. */
   let turn = 0
   /** Boris touched the page: the player is unlocked, so Sara's voice can go to the loudspeaker with the mic closed. */
@@ -111,7 +111,8 @@ export function createTalkEngine(
     'pointerdown',
     () => {
       touched = true
-      player.unlock()
+      // Never while the mic is open: a play during capture is what WebKit answers with a silent mic.
+      if (!mic) void player.unlock()
     },
     { capture: true },
   )
@@ -163,7 +164,6 @@ export function createTalkEngine(
       if (touched) {
         stopLoop()
         closeMic()
-        audioSession('playback')
       }
       if (!audio) played = await speakLocally(text)
       else {
@@ -231,12 +231,23 @@ export function createTalkEngine(
     if (!rec) return
     const audio = await rec.stop()
     if (audio.size < 1500) return idle()
+    // A mic that gives silence is said so, and the silence is not sent (09.11: iOS gave seconds of nothing).
+    const h = mic?.health() ?? { live: false, muted: true, meter: 'none' }
+    const peak = heard?.peak ?? -1
+    const ms = Date.now() - (heard?.started ?? Date.now())
+    const diag = `peak${peak.toFixed(3)},${h.meter},${h.live ? 'live' : 'ended'},${h.muted ? 'muted' : 'open'},${Math.round(ms / 100) / 10}s,${audio.type.split(';')[0] || 'none'}`
+    if (!h.live || h.muted || (peak >= 0 && peak < SILENT && ms > 1500)) {
+      mic?.close()
+      mic = null
+      add({ who: 'note', text: `${TALK_NOTES.silentMic} (${diag})` })
+      return idle()
+    }
     const mine = add({ who: 'boris', text: '…', pending: true })
     const agent = view.agent
     const talk = crypto.randomUUID()
     await send(mine, true, async () => {
       try {
-        return await talkApi.sendVoice(audio, agent, talk)
+        return await talkApi.sendVoice(audio, agent, talk, diag)
       } catch (e) {
         // The words may have reached the core and only the reply was lost (a bad line): ask by the talk's own id.
         if (!(e instanceof TypeError)) throw e
@@ -257,9 +268,8 @@ export function createTalkEngine(
 
   async function listen(followUp = false): Promise<void> {
     turn++
-    player.unlock()
     if (closeTimer !== null) window.clearTimeout(closeTimer)
-    audioSession('auto')
+    await player.settled()
     try {
       mic ??= await openMic()
     } catch {
@@ -279,6 +289,7 @@ export function createTalkEngine(
       maxMs: 90_000,
     })
     const started = Date.now()
+    heard = { started, peak: -1 }
     set({ phase: 'listening', tapToStop: m.level() < 0, level: 0 })
     stopLoop()
     loop = window.setInterval(() => {
@@ -289,6 +300,7 @@ export function createTalkEngine(
         return
       }
       set({ level: l })
+      if (heard) heard.peak = Math.max(heard.peak, l)
       const step = silence.feed(l, Date.now())
       if (step === 'stop') void finish()
       if (step === 'nothing') {
