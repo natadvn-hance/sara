@@ -13,6 +13,7 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private var pcm = Data()
     private var finished = false
     private var closed = false
+    private var dropped = false
     private var task: Task<(Data, HTTPURLResponse), Error>?
 
     /// Seconds of voice recorded so far.
@@ -65,18 +66,25 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         }
     }
 
+    /// Nothing goes to the core: the request is cut first, and the stream is closed only after, so the core never
+    /// gets an end of the body and never hears a half or a silence as a question.
     func cancel() {
         queue.sync {
             finished = true
-            close()
+            dropped = true
         }
-        task?.cancel()
+        let t = task
+        t?.cancel()
+        Task { [weak self] in
+            _ = await t?.result
+            self?.queue.async { self?.close() }
+        }
     }
 
     /// Writes what the stream can take now; the rest a moment later. Never blocks: a core that answered early (401)
     /// reads nothing more.
     private func pump() {
-        guard !closed else { return }
+        guard !closed, !dropped else { return }
         while !pending.isEmpty && output.hasSpaceAvailable {
             let n = pending.withUnsafeBytes { buf -> Int in
                 guard let p = buf.bindMemory(to: UInt8.self).baseAddress else { return 0 }

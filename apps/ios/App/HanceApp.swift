@@ -7,7 +7,6 @@ import UserNotifications
 struct HanceApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var engine = TalkEngine.shared
-    @Environment(\.scenePhase) private var scene
 
     var body: some Scene {
         WindowGroup {
@@ -21,9 +20,6 @@ struct HanceApp: App {
             .environmentObject(engine)
             .animation(.easeInOut(duration: 0.35), value: engine.signedIn)
             .onOpenURL { url in open(url) }
-        }
-        .onChange(of: scene) { _, now in
-            engine.onScreen = now == .active
         }
     }
 

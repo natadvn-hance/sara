@@ -28,8 +28,10 @@ struct TalkScreen: View {
                     Button {
                         engine.press()
                     } label: {
+                        // Her clouds spread wider than the screen; only the face and a little air take room.
                         AvatarStage(
                             agent: engine.agent, phase: engine.phase, meter: engine.meter, palette: palette, size: face)
+                            .frame(width: face, height: face * 1.3)
                     }
                     .buttonStyle(FacePress())
                     .disabled(engine.phase == .sending || engine.phase == .thinking)
@@ -40,7 +42,6 @@ struct TalkScreen: View {
                             }
                         }
                     )
-                    .padding(.vertical, -face * 0.3)
                     who
                         .padding(.top, 10)
                     line

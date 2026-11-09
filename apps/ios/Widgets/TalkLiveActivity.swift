@@ -142,11 +142,15 @@ struct PhaseStrip: View {
         HStack(spacing: 10) {
             switch state.phase {
             case .listening, .speaking:
+                // The name above already says who listens or speaks; here, how long.
                 Bars(values: state.bars, color: palette.accent, height: height, width: 5)
                 Spacer(minLength: 0)
-                Text(state.phase.label)
-                    .monoLabel(10)
+                Text(timerInterval: state.since...Date.distantFuture, countsDown: false)
+                    .font(HanceFont.mono(12))
+                    .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
                     .foregroundStyle(palette.accent)
+                    .frame(width: 46, alignment: .trailing)
             case .thinking:
                 ProgressView(timerInterval: state.since...state.since.addingTimeInterval(60), countsDown: false) {
                     EmptyView()
@@ -162,7 +166,6 @@ struct PhaseStrip: View {
             case .sending:
                 Bars(values: Array(repeating: 0.35, count: 7), color: palette.accent.opacity(0.6), height: height, width: 5)
                 Spacer(minLength: 0)
-                Text(state.phase.label).monoLabel(10).foregroundStyle(palette.accent)
             default:
                 KnightMark().fill(palette.accent).frame(width: height * 0.7, height: height * 0.7)
                 Spacer(minLength: 0)

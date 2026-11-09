@@ -31,8 +31,9 @@ final class TalkEngine: ObservableObject {
     @Published private(set) var note: String?
     @Published private(set) var signedIn: Bool
     @Published private(set) var timings: [TurnTimings] = TurnTimings.load()
-    /// The app is on screen: answers go to the screen, not to notifications.
-    var onScreen = true
+    /// The app is on screen: answers go to the screen, not to notifications. Asked of iOS each time: an intent from the
+    /// side button wakes the app in the background, where no scene ever becomes active.
+    var onScreen: Bool { UIApplication.shared.applicationState == .active }
 
     let meter = LevelMeter()
     let client: CoreClient
@@ -144,7 +145,15 @@ final class TalkEngine: ObservableObject {
         guard await micAllowed() else {
             throw MicError.noInput
         }
-        try beginTalk()
+        // The island first: iOS stops an intent that records in the background without one.
+        activity.start(state(.listening))
+        guard activity.isOn else { throw NoIsland() }
+        do {
+            try beginTalk()
+        } catch {
+            activity.end(nil, linger: 0)
+            throw error
+        }
         listen()
     }
 
@@ -218,6 +227,9 @@ final class TalkEngine: ObservableObject {
 
         let step = await waitForVerdict()
         source.record(into: nil)
+        log.notice(
+            "listen ended: \(String(describing: step), privacy: .public), \(up.seconds, format: .fixed(precision: 1)) s, turn \(mine == self.turn ? "same" : "changed", privacy: .public)"
+        )
         guard mine == turn, let step else {
             up.cancel()
             return
@@ -225,6 +237,11 @@ final class TalkEngine: ObservableObject {
         if step == .nothing || up.seconds < 0.4 {
             up.cancel()
             upload = nil
+            // He said nothing after her answer: the answer stays on the Lock Screen a while, as after any answer.
+            if followUp, let last = card {
+                line = last.text
+                return endTalk(final: .done)
+            }
             return endTalk(final: nil)
         }
         Earcon.heard()
@@ -290,7 +307,7 @@ final class TalkEngine: ObservableObject {
         }
         let client = self.client
         let played = await speaker.say(text) { [weak self] part in
-            if let cached = await self?.greetings[Self.greetingKey(who, part)] { return cached }
+            if let cached = self?.greetings[Self.greetingKey(who, part)] { return cached }
             return try await client.speak(part, agent: who)
         }
         record()
@@ -377,6 +394,7 @@ final class TalkEngine: ObservableObject {
     }
 
     private func set(_ p: TalkPhase, line newLine: String?) {
+        log.notice("phase \(String(describing: p), privacy: .public)")
         phase = p
         since = Date()
         line = newLine

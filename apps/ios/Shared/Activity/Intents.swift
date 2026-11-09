@@ -19,10 +19,14 @@ enum AgentChoice: String, AppEnum {
 
 /// The side button (Action Button), Siri and the Control Center: Hance listens at once, without opening the app.
 /// It records in the background with the Live Activity in the Dynamic Island, sends, waits and says her answer aloud.
-struct TalkIntent: AudioRecordingIntent {
+/// `LiveActivityIntent` lets it start the island from the background; without the island iOS stops the app.
+struct TalkIntent: AudioRecordingIntent, LiveActivityIntent {
     static var title: LocalizedStringResource = "Поговорить с Hance"
     static var description = IntentDescription("Hance сразу слушает: скажи, и Лора ответит голосом.")
     static var openAppWhenRun: Bool = false
+    /// iOS 26 asks for the modes instead: in the background, and the app on screen only when he must sign in first.
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
 
     @Parameter(title: "Кто отвечает", default: .lora)
     var agent: AgentChoice
@@ -37,12 +41,32 @@ struct TalkIntent: AudioRecordingIntent {
     func perform() async throws -> some IntentResult {
         #if HANCE_APP
             guard TalkEngine.shared.signedIn else {
-                throw needsToContinueInForegroundError(IntentDialog("Сначала войди в Hance паролем пульта."))
+                if #available(iOS 26.0, *) {
+                    throw needsToContinueInForegroundError(IntentDialog(SignInFirst().localizedStringResource))
+                }
+                throw SignInFirst()
             }
-            try await TalkEngine.shared.startFromIntent(agent.agent)
+            do {
+                try await TalkEngine.shared.startFromIntent(agent.agent)
+            } catch is NoIsland {
+                // iOS gave no island, so nothing records in the background: the app comes up and listens on screen.
+                guard #available(iOS 26.0, *) else { throw NoIsland() }
+                try await continueInForeground(nil, alwaysConfirm: false)
+                TalkEngine.shared.openAndListen(agent.agent)
+            }
         #endif
         return .result()
     }
+}
+
+/// Hance is not signed in yet: the password is typed in the app, never through Siri.
+struct SignInFirst: Error, CustomLocalizedStringResourceConvertible {
+    var localizedStringResource: LocalizedStringResource { "Сначала открой Hance и войди паролем пульта." }
+}
+
+/// iOS did not start the Live Activity (the island), and a recording in the background without one is stopped.
+struct NoIsland: Error, CustomLocalizedStringResourceConvertible {
+    var localizedStringResource: LocalizedStringResource { "Открой Hance: iOS не дал показать разговор в Dynamic Island." }
 }
 
 /// The same talk with the app on screen: for Siri «Открой Hance» and for a tap on the island.

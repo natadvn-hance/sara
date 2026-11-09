@@ -54,6 +54,7 @@ async function talk(req, res, url) {
   let agent = url.searchParams.get('agent') === 'sara' ? 'sara' : 'lora'
   const type = String(req.headers['content-type'] ?? '')
   const got = await body(req)
+  if (got.broken) return log(`${type.startsWith('audio/') ? 'voice' : 'text'} ${agent}: cut off after ${got.buf.length} bytes, not heard`)
   let text
   if (type.startsWith('audio/')) {
     const seconds = Math.max(0, (got.buf.length - 44) / 32000)
