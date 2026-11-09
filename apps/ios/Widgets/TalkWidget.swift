@@ -10,7 +10,7 @@ struct TalkWidget: Widget {
         }
         .configurationDisplayName("Hance")
         .description("Лора слушает с одного нажатия, Сара рядом.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
         .contentMarginsDisabled()
     }
 }
@@ -43,14 +43,66 @@ struct TalkWidgetView: View {
     var body: some View {
         let p = Palette.of(.lora, dark: scheme == .dark)
         Group {
-            if family == .systemMedium {
+            switch family {
+            case .systemMedium:
                 medium(p)
-            } else {
+            case .accessoryCircular:
+                circular
+            case .accessoryRectangular:
+                rectangular
+            case .accessoryInline:
+                Label("Лора · говорить", systemImage: "waveform")
+            default:
                 small(p)
             }
         }
-        .containerBackground(for: .widget) { p.bg }
+        .containerBackground(for: .widget) {
+            if isAccessory { Color.clear } else { p.bg }
+        }
         .widgetURL(Self.listen(.lora))
+    }
+
+    private var isAccessory: Bool {
+        family == .accessoryCircular || family == .accessoryRectangular || family == .accessoryInline
+    }
+
+    /// The Lock Screen, round: her face in a ring. The Lock Screen draws it in one tint.
+    private var circular: some View {
+        ZStack {
+            AccessoryWidgetBackground()
+            Image(HanceAgent.lora.cardPhoto)
+                .resizable()
+                .scaledToFill()
+                .clipShape(Circle())
+                .padding(4)
+            Circle()
+                .stroke(lineWidth: 1.5)
+                .widgetAccentable()
+                .padding(1)
+        }
+        .accessibilityLabel("Говорить с Лорой")
+    }
+
+    /// The Lock Screen, wide: her square face, «[01] ЛОРА» and «Говорить».
+    private var rectangular: some View {
+        HStack(spacing: 9) {
+            Image(HanceAgent.lora.cardPhoto)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 46, height: 46)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(HanceAgent.lora.index) \(HanceAgent.lora.name)")
+                    .monoLabel(10)
+                    .opacity(0.75)
+                Text("Говорить")
+                    .font(HanceFont.text(19, .semibold))
+                    .lineLimit(1)
+                    .widgetAccentable()
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityLabel("Говорить с Лорой")
     }
 
     /// Her photo to the edges, the knight in the corner, a plate below: who and «Говорить →».
@@ -67,8 +119,9 @@ struct TalkWidgetView: View {
                     Rectangle().fill(p.accent).frame(width: 5, height: 5)
                 }
                 .monoLabel(9)
-                Text("Говорить  →")
+                Text("Говорить")
                     .font(HanceFont.text(15, .semibold))
+                    .lineLimit(1)
                     .foregroundStyle(p.ink)
             }
             .padding(.horizontal, 10)
@@ -114,10 +167,12 @@ struct TalkWidgetView: View {
                 Spacer(minLength: 6)
                 HStack(spacing: 6) {
                     Link(destination: Self.listen(.lora)) {
-                        Text("Говорить  →")
+                        Text("Говорить")
                             .font(HanceFont.text(13, .semibold))
+                            .lineLimit(1)
+                            .fixedSize()
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, 14)
                             .frame(height: 30)
                             .background(Capsule().fill(p.accent))
                     }
@@ -130,6 +185,8 @@ struct TalkWidgetView: View {
                                 .clipShape(Circle())
                             Text(HanceAgent.sara.name)
                                 .font(HanceFont.text(13, .semibold))
+                                .lineLimit(1)
+                                .fixedSize()
                                 .foregroundStyle(.white)
                         }
                         .padding(.leading, 4)
