@@ -86,6 +86,8 @@ type Seed = {
   kind?: string
   messageId?: number | null
   createdMin?: number
+  /** The bid's fee the lead knows; 0: not known yet. */
+  fee?: number
 }
 
 /** A lead with a decision task and the journal of its card, as the pipeline leaves them. */
@@ -104,7 +106,7 @@ async function card(s: Seed) {
     text: 'Нужен сайт',
     clientName: 'Ирина',
     budgetText: null,
-    bidPriceRub: 210,
+    bidPriceRub: s.fee ?? 210,
     seenAt: before(s.seen ?? s.sent ?? s.createdMin ?? 0).toISOString(),
     status: 'queued',
     correlationId,
@@ -209,6 +211,18 @@ describe('which waiting cards are looked at (FR-LEAD-5)', () => {
     expect(reads).toEqual([waited.id])
     expect(reads).not.toContain(soon.id)
     expect(reads).not.toContain(dayOld.id)
+  })
+
+  it('FR-LEAD-5: a fresh card without the fee is looked at after 2 minutes; with it, after 15 (09.11.2026)', async () => {
+    const noFee = await card({ sent: 3, seen: 20, fee: 0 })
+    const tooSoon = await card({ sent: 1, seen: 20, fee: 0 })
+    const withFee = await card({ sent: 3, seen: 20 })
+    const oldNoFee = await card({ sent: 3, seen: 200, fee: 0 })
+    expect((await recheck().tick(AT)).checked).toBe(1)
+    expect(reads).toEqual([noFee.id])
+    expect(reads).not.toContain(tooSoon.id)
+    expect(reads).not.toContain(withFee.id)
+    expect(reads).not.toContain(oldNoFee.id)
   })
 
   it('FR-LEAD-5: a card of an order older than a day is looked at every 3 hours', async () => {
