@@ -95,6 +95,11 @@ export function registerTalkRoutes(
     loraToken: string | undefined
     workDir: string
     waitMs?: number
+    /**
+     * Sara's immediate answer to words from the app, with his words, into the chat in Telegram: the app and the chat
+     * are one talk (Boris, 09.11). The Secretary's answers get there by her own way.
+     */
+    mirror?(words: string, reply: BorisReply): Promise<void>
   },
 ): void {
   /** Lora's channel, from her session on the server: by her key only, never by the pult's sign-in. */
@@ -205,6 +210,12 @@ export function registerTalkRoutes(
         at: new Date(),
       })
       if (r === null) return { heard, talk, ...switched, reply: null }
+      // The app does not wait for the chat, and a chat that fails does not cost it the answer.
+      void d
+        .mirror?.(heard, r)
+        .catch((e) =>
+          console.error('talk: no copy in Telegram', e instanceof Error ? e.message : e),
+        )
       const s = shown(r)
       return atOnce(heard, s.text, { buttons: s.buttons, ...switched })
     })

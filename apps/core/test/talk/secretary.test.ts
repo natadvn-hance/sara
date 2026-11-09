@@ -16,6 +16,8 @@ const { db, close } = openTestDb()
 afterAll(close)
 
 let telegram: string[]
+/** Whether each Telegram message went without a sound. */
+let quiet: boolean[]
 let typing: number
 let answers: { talks: string[]; answer: TalkAnswer }[]
 let reply: (configPath: string) => Promise<ConverseResult>
@@ -28,8 +30,9 @@ async function secretary() {
     db,
     converse: async (_role, _input, o) => reply(o.mcp?.configPath ?? ''),
     notifier: {
-      sendText: async (text) => {
+      sendText: async (text, o) => {
         telegram.push(text)
+        quiet.push(o?.quiet ?? false)
         return { messageId: telegram.length }
       },
       typing: async () => {
@@ -57,17 +60,21 @@ const words = (text: string, talk?: string): SecretaryWords => ({
 beforeEach(async () => {
   await resetDb(db)
   telegram = []
+  quiet = []
   typing = 0
   answers = []
   reply = async () => ok('**Две** заявки в очереди')
 })
 
 describe('the voice app: the Secretary answers where Boris asked', () => {
-  it('FR-NOTIF-5: words from the app get their answer in the app, not in Telegram, and stay in the one chat', async () => {
+  it('FR-NOTIF-5: words from the app get their answer in the app, and the chat in Telegram shows both quietly', async () => {
     const s = await secretary()
     await s.take(words('что в очереди', 'talk-1'))
     await s.idle()
-    expect(telegram).toEqual([])
+    // One system with the chat (Boris, 09.11): his words and her answer are in Telegram too, without a sound,
+    // since he is listening in the app.
+    expect(telegram).toEqual([SECRETARY_TEXTS.fromApp(['что в очереди']), 'Две заявки в очереди'])
+    expect(quiet).toEqual([true, true])
     expect(typing).toBe(0)
     expect(answers).toEqual([
       { talks: ['talk-1'], answer: { text: 'Две заявки в очереди', cards: 0 } },
@@ -113,7 +120,14 @@ describe('the voice app: the Secretary answers where Boris asked', () => {
       { talks: ['talk-a'], answer: { text: 'Отвечаю обоим', cards: 0 } },
       { talks: ['talk-b'], answer: { text: 'Отвечаю обоим', cards: 0 } },
     ])
-    expect(telegram).toEqual(['Отвечаю обоим'])
+    // The app's words show above each answer; the turn with his Telegram words rings as before.
+    expect(telegram).toEqual([
+      SECRETARY_TEXTS.fromApp(['первое']),
+      'Отвечаю обоим',
+      SECRETARY_TEXTS.fromApp(['из приложения']),
+      'Отвечаю обоим',
+    ])
+    expect(quiet).toEqual([true, true, true, false])
 
     answers = []
     const broken = await createSecretary({
@@ -135,6 +149,11 @@ describe('the voice app: the Secretary answers where Boris asked', () => {
     await broken.take(words('из приложения', 'talk-c'))
     await broken.idle()
     expect(answers[0]).toEqual({ talks: ['talk-c'], answer: { text: 'Ответ', cards: 0 } })
+    // Words from the app alone: a Telegram that fails changes nothing for the app.
+    answers = []
+    await broken.take(words('ещё раз', 'talk-d'))
+    await broken.idle()
+    expect(answers).toEqual([{ talks: ['talk-d'], answer: { text: 'Ответ', cards: 0 } }])
   })
 
   it('FR-NOTIF-5: the cap and a failure reach the app too', async () => {
@@ -155,7 +174,12 @@ describe('the voice app: the Secretary answers where Boris asked', () => {
       talks: ['talk-3'],
       answer: { text: SECRETARY_TEXTS.failed, cards: 0 },
     })
-    expect(telegram).toEqual([])
+    expect(telegram).toEqual([
+      SECRETARY_TEXTS.fromApp(['что в очереди']),
+      SECRETARY_TEXTS.cap(0),
+      SECRETARY_TEXTS.fromApp(['а сейчас']),
+      SECRETARY_TEXTS.failed,
+    ])
   })
 
   it('FR-NOTIF-5: the app hears how many cards with buttons the turn sent to Telegram', async () => {

@@ -93,7 +93,7 @@ import {
   registerToolMcp,
   SECRETARY_MCP_PATH,
 } from './secretary/mcp'
-import { createSecretary, type Secretary } from './secretary/secretary'
+import { createSecretary, SECRETARY_TEXTS, type Secretary } from './secretary/secretary'
 import { memory } from './secretary/store'
 import type { SecretaryDeps } from './secretary/tools'
 import { createSecretStore, type SecretStore } from './secrets/store'
@@ -552,6 +552,13 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
     lora: createLoraLink(),
     loraToken: config.loraToken,
     workDir: join(config.dataDir, 'voice'),
+    // Quietly: he hears the answer in the app already.
+    mirror: async (words, r) => {
+      await bot.notifier.sendText(SECRETARY_TEXTS.fromApp([words]), { quiet: true })
+      if (typeof r === 'string') await bot.notifier.sendText(r, { quiet: true })
+      else if (r.rows.length > 0) await bot.notifier.sendButtons(r.text, r.rows, { quiet: true })
+      else await bot.notifier.sendText(r.text, { quiet: true })
+    },
   })
   // The made-up Profi.ru of test orders: if it cannot start, the live Sara works on without test orders.
   testLeads = await startTestLeads({
