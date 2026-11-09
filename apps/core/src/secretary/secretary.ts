@@ -31,6 +31,8 @@ export const SECRETARY_TEXTS = {
   notConnected:
     'Не могу ответить: Claude не подключён. Кнопки работают, а подключение чинит разработчик.',
   failed: 'Не получилось ответить, сбой у Claude. Попробуй ещё раз через минуту, кнопки работают.',
+  /** His words from the voice app, shown in the chat above her answer (one system with the chat, Boris 09.11). */
+  fromApp: (words: string[]) => `🎙 Из приложения: ${words.join('\n')}`,
 } as const
 
 const moscow = (d: Date, o: Intl.DateTimeFormatOptions) =>
@@ -146,16 +148,30 @@ export function createSecretary(d: {
   let running: Promise<void> | null = null
 
   /**
-   * The answer goes where the words came from: Telegram when any of them came from it, the voice app for the words
-   * said there (ADR-028). The chat keeps it either way, so the talk goes on in the other place.
+   * The answer goes to the voice app for the words said there (ADR-028) and to Telegram always: the app and the chat
+   * are one talk (Boris, 09.11), so his words from the app show in the chat above her answer. When he asked only in
+   * the app, where he hears her already, the chat gets both without a sound. The memory keeps it either way.
    */
   async function say(said: Waiting[], text: string, saved: boolean, cards = 0): Promise<void> {
     // The app first: a Telegram that fails must not leave the app waiting.
     const talks = said.flatMap((w) => (w.talk ? [w.talk] : []))
     if (talks.length > 0) d.answered?.(talks, { text: answerParts(text).join('\n'), cards })
     if (saved) await addLine(d.db, { author: 'sara', text, at: now() })
-    if (said.some((w) => !w.talk))
-      for (const part of answerParts(text)) await d.notifier.sendText(part)
+    const fromApp = said.flatMap((w) => (w.talk ? [w.text] : []))
+    const inTelegram = said.some((w) => !w.talk)
+    try {
+      if (fromApp.length > 0)
+        await d.notifier.sendText(SECRETARY_TEXTS.fromApp(fromApp), { quiet: true })
+      for (const part of answerParts(text))
+        await d.notifier.sendText(part, inTelegram ? undefined : { quiet: true })
+    } catch (e) {
+      // Asked only in the app: the app has its answer, the copy in the chat is not worth a failed turn.
+      if (inTelegram) throw e
+      console.error(
+        'secretary: the talk from the app did not reach Telegram',
+        e instanceof Error ? e.message : e,
+      )
+    }
   }
 
   async function journal(id: string, used: string[], r: ConverseResult | 'cap'): Promise<void> {

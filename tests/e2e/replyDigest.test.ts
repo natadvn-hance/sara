@@ -2,6 +2,7 @@ import { cp, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { newEventId } from '@sara/shared'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
@@ -153,8 +154,8 @@ describe('the daily post of Boris replies, end to end', () => {
     await chatWithReply()
     await new Promise((r) => setTimeout(r, 800))
     expect(post()).toBeUndefined()
-    // Only the digest's own day: after 19:00 Moscow the day summary takes its row too (09.11.2026, red CI at 19:23).
-    expect((await db.select().from(jobRun)).filter((r) => r.name === 'reply_digest')).toEqual([])
+    // Only the digest's own row: the daily summary follows the real clock and runs on its own after 19:00 Moscow time.
+    expect(await db.select().from(jobRun).where(eq(jobRun.name, 'reply_digest'))).toHaveLength(0)
   })
 
   it('FR-SPEECH-5: turned on, the timer posts once without a sound, and a press makes a proposal and edits the post', async () => {

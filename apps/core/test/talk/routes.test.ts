@@ -22,11 +22,16 @@ let replyOf: (m: BorisMessage) => BorisReply | null
 let work: string
 let session: string
 let lora: LoraLink
+/** What went to the chat in Telegram: his words from the app and Sara's immediate answer. */
+let mirrored: { words: string; reply: BorisReply }[]
+let mirrorFails: boolean
 
 beforeEach(async () => {
   answers = createTalkAnswers()
   lora = createLoraLink()
   handled = []
+  mirrored = []
+  mirrorFails = false
   heardFiles = []
   heard = 'что в очереди'
   replyOf = () => null
@@ -57,6 +62,10 @@ beforeEach(async () => {
     loraToken: 'lora-key',
     workDir: work,
     waitMs: 50,
+    mirror: async (words, reply) => {
+      if (mirrorFails) throw new Error('telegram down')
+      mirrored.push({ words, reply })
+    },
   })
   const r = await app.inject({ url: '/test/login' })
   session = String(r.headers['set-cookie']).split(';')[0] ?? ''
@@ -141,6 +150,38 @@ describe('the voice app: Boris speaks, Sara answers', () => {
       payload: { text: 'этот' },
     })
     expect(withButtons.json().reply).toEqual({ text: 'Какой из двух?', buttons: true })
+    // One system with the chat (Boris, 09.11): his words and her answer, buttons and all, are in Telegram too.
+    await vi.waitFor(() => expect(mirrored).toHaveLength(2))
+    expect(mirrored).toEqual([
+      { words: 'дорого', reply: TEXTS.noted('дорого', 'Сайт для кофейни') },
+      {
+        words: 'этот',
+        reply: { text: 'Какой из двух?', rows: [[{ text: 'Первый', callbackData: 'x' }]] },
+      },
+    ])
+  })
+
+  it('FR-NOTIF-5: a chat that fails does not cost the app its answer', async () => {
+    mirrorFails = true
+    replyOf = () => 'Записала'
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/talk',
+      headers: { cookie: session },
+      payload: { text: 'дорого' },
+    })
+    expect(r.json().reply).toEqual({ text: 'Записала', buttons: false })
+  })
+
+  it('FR-NOTIF-5: words for the Secretary are not copied here: the Secretary shows them with her answer', async () => {
+    replyOf = () => null
+    await app.inject({
+      method: 'POST',
+      url: '/api/talk',
+      headers: { cookie: session },
+      payload: { text: 'что в очереди' },
+    })
+    expect(mirrored).toEqual([])
   })
 
   it('FR-NOTIF-5: a voice that is not made out is said so, and goes nowhere', async () => {
