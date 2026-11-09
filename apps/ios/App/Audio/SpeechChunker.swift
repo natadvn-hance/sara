@@ -4,7 +4,7 @@ import Foundation
 /// first piece is short (the first sentence) and the next ones are made while the one before plays. A very long answer
 /// is voiced up to `limit`, at the end of a sentence; the rest is on the screen.
 enum SpeechChunker {
-    static func split(_ text: String, first: Int = 140, rest: Int = 320, limit: Int = 1200) -> [String] {
+    static func split(_ text: String, first: Int = 80, rest: Int = 320, limit: Int = 1200) -> [String] {
         let sentences = within(limit, sentencesOf(text))
         var pieces: [String] = []
         var current = ""

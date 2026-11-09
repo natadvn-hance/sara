@@ -20,9 +20,19 @@ enum MicError: Error {
 enum AudioSessionControl {
     static func activate() throws {
         let s = AVAudioSession.sharedInstance()
-        try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .duckOthers])
+        let options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetoothA2DP, .duckOthers]
+        try s.setCategory(.playAndRecord, mode: .default, options: options)
         try? s.setPreferredIOBufferDuration(0.02)
-        try s.setActive(true)
+        do {
+            try s.setActive(true)
+        } catch let e as NSError where e.code == AVAudioSession.ErrorCode.cannotInterruptOthers.rawValue {
+            // '!int' (560557684): from the background (the side button, the Lock Screen, a control) iOS will not let
+            // a session start that stops other sound, music for one. Then it starts over that sound, which only
+            // gets quieter.
+            log.notice("audio session: cannot interrupt others, starting mixed")
+            try s.setCategory(.playAndRecord, mode: .default, options: options.union(.mixWithOthers))
+            try s.setActive(true)
+        }
     }
 
     static func deactivate() {
@@ -238,8 +248,9 @@ final class Ears: @unchecked Sendable {
         request.append(b)
     }
 
-    /// He finished: the words heard, or nil when there were none within a couple of seconds.
-    func finish(within seconds: Double = 2.5) async -> String? {
+    /// He finished: the words heard, or nil when there were none. The final result is waited for 0,6 s at most;
+    /// after that the last partial one goes, which on the device is almost always the same.
+    func finish(within seconds: Double = 0.6) async -> String? {
         request.endAudio()
         let text: String = await withCheckedContinuation { c in
             let now: String? = lock.withLock {

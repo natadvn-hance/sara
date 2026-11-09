@@ -16,6 +16,13 @@ final class SpeechChunkerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(parts.count, 2)
     }
 
+    func test_a_long_first_sentence_is_cut_short_so_her_voice_starts_sooner() {
+        let text = "Завтра в десять у тебя встреча с Сергеем из Лиги про новый сайт, а в три созвон с Анной по бюджету и рекламе."
+        let parts = SpeechChunker.split(text)
+        XCTAssertLessThanOrEqual(parts[0].count, 80)
+        XCTAssertEqual(parts.joined(separator: " "), text)
+    }
+
     func test_a_very_short_first_sentence_goes_with_the_next() {
         let parts = SpeechChunker.split("Да. Встреча завтра в десять у Сергея. А потом созвон с Анной про новый сайт и бюджет.")
         XCTAssertEqual(parts.first, "Да. Встреча завтра в десять у Сергея.")

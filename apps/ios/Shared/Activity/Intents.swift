@@ -48,9 +48,10 @@ struct TalkIntent: AudioRecordingIntent, LiveActivityIntent {
             }
             do {
                 try await TalkEngine.shared.startFromIntent(agent.agent)
-            } catch is NoIsland {
-                // iOS gave no island, so nothing records in the background: the app comes up and listens on screen.
-                guard #available(iOS 26.0, *) else { throw NoIsland() }
+            } catch {
+                // iOS gave no island, or would not start the microphone in the background: no error on the Lock
+                // Screen, the app comes up and listens on screen.
+                guard #available(iOS 26.0, *) else { throw error }
                 try await continueInForeground(nil, alwaysConfirm: false)
                 TalkEngine.shared.openAndListen(agent.agent)
             }

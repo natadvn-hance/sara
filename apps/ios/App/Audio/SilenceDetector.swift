@@ -29,7 +29,7 @@ struct SilenceDetector {
     /// The room's noise in dB, followed slowly.
     private(set) var room: Double = -55
 
-    init(pauseMs: Double = 1100, startWaitMs: Double = 10_000, maxMs: Double = 90_000, minSpeechMs: Double = 200) {
+    init(pauseMs: Double = 750, startWaitMs: Double = 10_000, maxMs: Double = 90_000, minSpeechMs: Double = 200) {
         self.pauseMs = pauseMs
         self.startWaitMs = startWaitMs
         self.maxMs = maxMs

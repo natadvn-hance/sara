@@ -84,4 +84,15 @@ final class SilenceDetectorTests: XCTestCase {
         XCTAssertEqual(SilenceDetector.level(db: -35), 0.5, accuracy: 0.001)
         XCTAssertEqual(SilenceDetector.level(db: 0), 1)
     }
+
+    func test_by_default_three_quarters_of_a_second_of_quiet_ends_the_recording() {
+        var s = SilenceDetector()
+        var t = 0.0
+        while t < 600 {
+            _ = s.feed(db: -20, at: t)
+            t += 20
+        }
+        XCTAssertEqual(s.feed(db: -70, at: t + 700), .listen)
+        XCTAssertEqual(s.feed(db: -70, at: t + 760), .stop)
+    }
 }

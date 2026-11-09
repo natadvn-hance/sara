@@ -136,12 +136,16 @@ final class TalkEngine: ObservableObject {
 
     /// The side button, Siri or the Control Center: listening starts before the intent returns, with the island up.
     func startFromIntent(_ who: HanceAgent) async throws {
+        // One button, on and off (Boris, 09.11): listening, a press sends what he said; while she thinks or
+        // speaks, a press stops her; otherwise it starts listening.
         if phase == .listening {
             finishListening()
             return
         }
-        if phase == .speaking { stop() }
-        if phase == .sending || phase == .thinking { return }
+        if phase.isBusy {
+            stop()
+            return
+        }
         if who != agent { become(who) }
         guard await micAllowed() else {
             throw MicError.noInput
