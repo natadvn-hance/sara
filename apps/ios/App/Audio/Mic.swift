@@ -209,9 +209,12 @@ final class Ears: @unchecked Sendable {
     }
 
     init?() {
-        guard SFSpeechRecognizer.authorizationStatus() == .authorized,
-            let r = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU")), r.isAvailable
-        else { return nil }
+        let status = SFSpeechRecognizer.authorizationStatus()
+        let r = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU"))
+        log.notice(
+            "ears: allowed \(status == .authorized), recognizer \(r != nil), available \(r?.isAvailable ?? false), on device \(r?.supportsOnDeviceRecognition ?? false)"
+        )
+        guard status == .authorized, let r, r.isAvailable else { return nil }
         request.requiresOnDeviceRecognition = r.supportsOnDeviceRecognition
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
@@ -259,6 +262,7 @@ final class Ears: @unchecked Sendable {
     }
 
     private func heard(_ result: SFSpeechRecognitionResult?, _ error: Error?) {
+        if let error { log.notice("ears: \(String(describing: error), privacy: .public)") }
         let last = result?.isFinal == true || error != nil
         lock.withLock {
             if let result { best = result.bestTranscription.formattedString }
