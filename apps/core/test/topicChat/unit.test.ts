@@ -3,7 +3,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RoleMeta } from '@sara/shared'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildConverseArgs } from '../../src/gateway/claudeCli'
 import { createSocketTranscriber } from '../../src/notify/transcribe'
 import { topicInput, transcriptPost } from '../../src/topicChat/chat'
@@ -128,6 +128,31 @@ describe("voice through Lora's speech service", () => {
     expect(s.seen[0]).toMatchObject({ op: 'transcribe', existed: true })
     expect(s.seen[0]?.path.startsWith(drop)).toBe(true)
     await expect(readFile(s.seen[0]?.path ?? '')).rejects.toThrow()
+  })
+
+  it('FR-NOTIF-4: a voice not heard says why in the log, with time and size, never words (09.11.2026)', async () => {
+    const said: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      said.push(a.join(' '))
+    })
+    try {
+      const bad = await service(() => ({ ok: false, error: 'decode failed' }))
+      await createSocketTranscriber({ socketPath: bad.sock, dropDir: bad.dir }).transcribe(
+        bad.voice,
+      )
+      const empty = await service(() => ({ ok: true, text: ' ' }))
+      await createSocketTranscriber({ socketPath: empty.sock, dropDir: empty.dir }).transcribe(
+        empty.voice,
+      )
+      const ok = await service(() => ({ ok: true, text: 'предложи четверг' }))
+      await createSocketTranscriber({ socketPath: ok.sock, dropDir: ok.dir }).transcribe(ok.voice)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(said).toHaveLength(2)
+    expect(said[0]).toMatch(/^voice socket: the service failed: decode failed \(\d+ ms, 9 B\)$/)
+    expect(said[1]).toMatch(/^voice socket: no words heard \(\d+ ms, 9 B\)$/)
+    expect(said.join(' ')).not.toContain('четверг')
   })
 
   it('FR-NOTIF-4: no socket, an error, an empty text or a silent service is null, never a throw', async () => {
