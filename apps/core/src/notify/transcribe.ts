@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmod, copyFile, mkdir, rm } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, rm, stat } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { newEventId } from '@sara/shared'
@@ -75,7 +75,8 @@ export function createTranscriber(c: {
  * Boris's voice heard by Lora's speech service on the same server (docs/superpowers/specs/2026-11-07-topic-chat-design.md,
  * section 4): one faster-whisper model in memory for both. The voice is copied to the shared folder, the socket gets one
  * JSON line `{"op":"transcribe","path":...}` and answers one line `{"ok":true,"text":...}`. No socket, a silent service
- * or an empty text is null, never a throw; the copy is removed at once.
+ * or an empty text is null, never a throw; the copy is removed at once. Each null says why in the core's log, with the
+ * time and the size of the voice, never its words (09.11.2026: voices came back unheard in 0.2 s and nothing told why).
  */
 export function createSocketTranscriber(c: {
   socketPath: string
@@ -83,36 +84,43 @@ export function createSocketTranscriber(c: {
   timeoutMs?: number
 }): Transcriber {
   const timeoutMs = c.timeoutMs ?? 120_000
-  const ask = (path: string) =>
+  const ask = (path: string, bytes: number) =>
     new Promise<string | null>((done) => {
       let buf = ''
       let finished = false
-      const end = (v: string | null) => {
+      const started = Date.now()
+      const end = (v: string | null, why?: string) => {
         if (finished) return
         finished = true
         clearTimeout(timer)
         sock.destroy()
+        if (v === null && why)
+          console.error(`voice socket: ${why} (${Date.now() - started} ms, ${bytes} B)`)
         done(v)
       }
       const sock = createConnection(c.socketPath)
-      const timer = setTimeout(() => end(null), timeoutMs)
+      const timer = setTimeout(() => end(null, `no answer in ${timeoutMs} ms`), timeoutMs)
       sock.on('connect', () => sock.write(`${JSON.stringify({ op: 'transcribe', path })}\n`))
       sock.on('data', (b: Buffer) => {
         buf += b.toString('utf8')
         const nl = buf.indexOf('\n')
         if (nl < 0) return
         try {
-          const r = JSON.parse(buf.slice(0, nl)) as { ok?: boolean; text?: unknown }
-          end(r.ok && typeof r.text === 'string' && r.text.trim() ? r.text.trim() : null)
+          const r = JSON.parse(buf.slice(0, nl)) as {
+            ok?: boolean
+            text?: unknown
+            error?: unknown
+          }
+          if (!r.ok)
+            return end(null, `the service failed: ${String(r.error ?? 'no reason').slice(0, 160)}`)
+          if (typeof r.text !== 'string' || !r.text.trim()) return end(null, 'no words heard')
+          end(r.text.trim())
         } catch {
-          end(null)
+          end(null, 'an answer that is not JSON')
         }
       })
-      sock.on('error', (e) => {
-        console.error('voice socket', e.message)
-        end(null)
-      })
-      sock.on('close', () => end(null))
+      sock.on('error', (e) => end(null, e.message))
+      sock.on('close', () => end(null, 'closed without an answer'))
     })
   return {
     async transcribe(audioPath) {
@@ -121,7 +129,7 @@ export function createSocketTranscriber(c: {
         await mkdir(c.dropDir, { recursive: true })
         await copyFile(audioPath, drop)
         await chmod(drop, 0o640)
-        return await ask(drop)
+        return await ask(drop, (await stat(drop)).size)
       } catch (e) {
         console.error('voice socket', e instanceof Error ? e.message : e)
         return null
