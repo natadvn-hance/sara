@@ -153,7 +153,8 @@ describe('the daily post of Boris replies, end to end', () => {
     await chatWithReply()
     await new Promise((r) => setTimeout(r, 800))
     expect(post()).toBeUndefined()
-    expect(await db.select().from(jobRun)).toHaveLength(0)
+    // Only the digest's own day: after 19:00 Moscow the day summary takes its row too (09.11.2026, red CI at 19:23).
+    expect((await db.select().from(jobRun)).filter((r) => r.name === 'reply_digest')).toEqual([])
   })
 
   it('FR-SPEECH-5: turned on, the timer posts once without a sound, and a press makes a proposal and edits the post', async () => {
