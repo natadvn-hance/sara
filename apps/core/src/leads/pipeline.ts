@@ -57,6 +57,7 @@ import { seriesWithoutBlocked } from '../text/blockedLinks'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { type AutobidShadowPayload, autobidRule, type Fee, shadowPayload } from './autobidShadow'
 import { casesForBid } from './bidCases'
+import { bidVoiceFor } from './bidVoice'
 import { callOfferTemplate } from './callSlots'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
 import { namesToHide } from './clientName'
@@ -110,10 +111,11 @@ export type LeadPipelineDeps = {
   /** The clock of the greeting a bid text carries (Moscow time of day); tests fix it. */
   now?: () => Date
   /**
-   * The mind: its case search (a bid may tell a case that fits the order, Boris 28.10.2026) and its records by id (the
-   * sites of Hance for an order of a site, Boris 30.10.2026).
+   * The mind: its case search (a bid may tell a case that fits the order, Boris 28.10.2026), its records by id (the
+   * sites of Hance for an order of a site, Boris 30.10.2026; Boris's voice for a bid, 10.11.2026) and the phrases his
+   * portrait says he never says.
    */
-  mind?: Pick<MindSearch, 'cases' | 'byIds'>
+  mind?: Pick<MindSearch, 'cases' | 'byIds'> & Partial<Pick<MindSearch, 'bannedPhrases'>>
   /** How a page of the client's site is fetched; tests give a made-up site, the default is the safe fetch from the server. */
   siteFetch?: (url: string) => Promise<Fetched>
   /** How a file attached to the order is downloaded; tests give bytes, the default is the safe fetch from Profi.ru's hosts. */
@@ -377,6 +379,8 @@ async function draftFor(
     correlationId: string
     causationId?: string
     accountId: string
+    /** The order's number: a test order's bid is written in Boris's voice first (10.11.2026). */
+    orderId: string
     /** The client's own site as read for this order (Boris, 30.10.2026). */
     site?: LeadSite | null
   },
@@ -387,7 +391,12 @@ async function draftFor(
     // A direction with its own case library keeps it; otherwise the cases of the mind that fit the order.
     const mindCases =
       profile && profile.cases.length > 0 ? [] : await casesForBid(d().mind, o, opts.accountId)
-    const { accountId: _account, site: _site, ...rest } = opts
+    // Boris's voice where it is on for this order; a mind that fails leaves the bid as it was.
+    const voice = await bidVoiceFor(d().db, d().mind, opts.orderId).catch((e) => {
+      console.error('bid voice failed', e instanceof Error ? e.message.slice(0, 200) : e)
+      return null
+    })
+    const { accountId: _account, site: _site, orderId: _order, ...rest } = opts
     const blocked = await getSetting(d().db, 'links.blocked')
     const dr = await writeDraft(d().gateway, o, {
       ...rest,
@@ -397,6 +406,7 @@ async function draftFor(
       sites: await sitesForBid(d().mind, o, blocked),
       blockedLinks: blocked,
       site: opts.site ?? null,
+      ...(voice && { voice }),
       now: greetingMoment(),
     })
     // The series ends with an offer to talk for half an hour (Boris, 30.10.2026); its times go in when it is sent.
@@ -957,7 +967,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
             ? null
             : draftFor(
                 { ...order, ...withPage },
-                { correlationId, causationId: e.id, accountId, site },
+                { correlationId, causationId: e.id, accountId, orderId: order.order_id, site },
               ),
         { name: 'draft' },
       )
@@ -1512,6 +1522,7 @@ async function draftThenCard(
       await draftFor(source, {
         correlationId: l.correlationId,
         accountId: l.accountId,
+        orderId: l.id,
         site: await readClientSite(l, source),
       }),
     )

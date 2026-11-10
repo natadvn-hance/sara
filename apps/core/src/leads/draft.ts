@@ -21,6 +21,7 @@ import { siteSection } from '../site/view'
 import { fixClientText, greetingFor, moscowPartOfDay } from '../text/clientText'
 import { neuroSpeech, neuroSpeechReason } from '../text/neuroSpeech'
 import { bidCaseProblems, bidCasesText, chosenCase } from './bidCases'
+import { type BidVoice, bannedIn, bidVoiceText } from './bidVoice'
 import { firstName, namesToHide } from './clientName'
 import { chosenSites, type HanceSite, SITES_SHOWN, sameUrl, siteLine, sitesText } from './siteOrder'
 import { sorterInput } from './sorter'
@@ -68,6 +69,9 @@ export type Draft = {
 }
 /** What the card says about a bid that kept a «не X, а Y» turn. */
 export const NEURO_NOTE = '⚠️ В тексте остался оборот «не X, а Y». Поправьте перед отправкой.'
+/** What the card says about a bid with the voice on that kept a phrase Boris never says (10.11.2026). */
+export const bannedNote = (phrase: string): string =>
+  `⚠️ В тексте осталась фраза «${phrase}», Борис так не говорит. Поправьте перед отправкой.`
 /** No text to send; a reading the model did give stays (its text was too long or not plain). */
 export type DraftMiss = {
   text: null
@@ -575,6 +579,8 @@ export async function writeDraft(
     blockedLinks?: string[]
     /** The client's own site as Sara read it (Boris, 30.10.2026); the text may name a detail of it. */
     site?: LeadSite | null
+    /** Boris's voice where it is on for the order (10.11.2026); none: the Analyst is told what it always was. */
+    voice?: BidVoice | null
     now?: Date
   } = {},
 ): Promise<Draft | DraftMiss> {
@@ -595,6 +601,7 @@ export async function writeDraft(
     sitesText(opts.sites ?? []),
     siteSection(opts.site),
     recentOpenersText(recent),
+    opts.voice ? bidVoiceText(opts.voice) : '',
   ].filter((t) => t !== '')
   const base = analystInput(o, maxBody, extra.join('\n\n'))
   let input = base
@@ -646,6 +653,7 @@ export async function writeDraft(
       sites: _sites,
       blockedLinks: _blocked,
       site: _site,
+      voice: _voice,
       ...callOpts
     } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })
@@ -679,9 +687,25 @@ export async function writeDraft(
         neuroSpeech(body) ??
         (r.output.follow_ups ?? []).map((f) => neuroSpeech(f.text)).find((h) => h !== null) ??
         null
-      if (!neuro) return accept(r.output, text, attempts)
-      if (attempts >= 2) return accept(r.output, text, attempts, NEURO_NOTE)
-      input = `${base}\n\nВ прошлом варианте ${neuroSpeechReason(neuro)}. Перепиши без таких оборотов, остальное сохрани.`
+      // With his voice on, a phrase his portrait says he never says is asked away the same way (10.11.2026).
+      const banned = opts.voice
+        ? bannedIn([body, ...(r.output.follow_ups ?? []).map((f) => f.text)], opts.voice.banned)
+        : null
+      if (!neuro && !banned) return accept(r.output, text, attempts)
+      if (attempts >= 2)
+        return accept(
+          r.output,
+          text,
+          attempts,
+          [neuro && NEURO_NOTE, banned && bannedNote(banned)].filter(Boolean).join('\n'),
+        )
+      const why = [
+        neuro && neuroSpeechReason(neuro),
+        banned && `есть фраза «${banned}», а Борис так не говорит`,
+      ]
+        .filter(Boolean)
+        .join('; ')
+      input = `${base}\n\nВ прошлом варианте ${why}. Перепиши без таких оборотов, остальное сохрани.`
     }
   }
   return { text: null, reason, attempts: 2, analysis }

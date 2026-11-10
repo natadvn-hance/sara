@@ -11,10 +11,12 @@ import { saveProfile } from '../../apps/core/src/direction/profile'
 import { seedDirection } from '../../apps/core/src/direction/store'
 import { askWhy } from '../../apps/core/src/learning/questions'
 import { dailySummary } from '../../apps/core/src/learning/summary'
+import { ensureMindIndex } from '../../apps/core/src/mind/indexer'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { summaryTime } from '../../apps/core/test/helpers/learning'
+import { putRecord, tempMind } from '../../apps/core/test/helpers/mind'
 import { scorerAnswer } from '../../apps/core/test/helpers/scorer'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
@@ -237,6 +239,49 @@ describe('the draft on the card', () => {
     expect((await leadOf(id))?.draftText).toBe(DRAFT)
     const [drafted] = await eventsOf('lead.drafted', id)
     expect(drafted?.payload).toMatchObject({ drafted: true, cases: [] })
+  })
+
+  it("FR-LEAD-6: a real order's Analyst reads no voice of Boris; after conv.voice = «all» it reads the voice of the mind", async () => {
+    // The voice of the trial (sara-mind #11) in a made-up mind: a portrait with a banned phrase, and the voice rule.
+    const root = await tempMind()
+    await putRecord(
+      root,
+      'mind/directions/trial/speech/portrait.md',
+      { id: 's-portrait', type: 'speech', scope: 'trial', title: 'Портрет речи Бориса' },
+      '## Режим\nСтроже: первое касание.\n\n## Никогда не говорит\n- По опыту',
+    )
+    await putRecord(
+      root,
+      'mind/directions/trial/judgment/voice.md',
+      { id: 'j-voice', type: 'judgment', scope: 'trial', title: 'Голос Бориса', tags: ['голос'] },
+      '## Правило: кавычки\nБез ёлочек.',
+    )
+    await ensureMindIndex(db, root)
+    const analystStdins = async () =>
+      (await readFile(claudeLog, 'utf8'))
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+        .filter((c) => c.args.some((a) => a.endsWith('analyst/role.md')))
+        .map((c) => c.stdin)
+
+    const real = orderId()
+    await fake.emitOrder({ order_id: real })
+    await until(() => cards().length === 1)
+    expect(await analystStdins()).toHaveLength(1)
+    expect((await analystStdins())[0]).not.toContain('Голос Бориса')
+
+    await setSetting(db, 'conv.voice', 'all', 'boris')
+    const voiced = orderId()
+    await fake.emitOrder({ order_id: voiced })
+    await until(() => cards().length === 2)
+    const stdin = (await analystStdins())[1] ?? ''
+    expect(stdin).toContain('первое касание')
+    expect(stdin).toContain('[s-portrait] Портрет речи Бориса')
+    expect(stdin).toContain('[j-voice] Голос Бориса')
+    expect(stdin).toContain('Никогда не пиши: «По опыту»')
+    // The form of the bid is the code's, whatever the voice: the greeting, no final period.
+    expect((await leadOf(voiced))?.draftText).toBe(DRAFT)
   })
 
   it('FR-LEAD-6: a shown order comes as a card with the Analyst draft and the price', async () => {
