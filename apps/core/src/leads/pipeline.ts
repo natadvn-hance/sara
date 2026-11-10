@@ -768,7 +768,23 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   }
 
   const accountId = e.account_id ?? 'hance-marketing'
-  const scored = await DBOS.runStep(
+  // The order page is read while the Scorer thinks (Boris, 10.11.2026): orders leave the board in 2-5 minutes and the
+  // read took its own half minute after the score. Every scored order costs a visit of the one tab now, about three
+  // times as many (some 3% of the tab's day); the read of an order that goes no further is simply not kept. An order
+  // the day's cap will hold still waits for the summary unread. A run recorded before this resumes along its old steps
+  // and reads the page after the score, in the 'order-page' block below. The read step is started before the score
+  // step, so the steps keep their numbers on a replay.
+  const pageWithScore = await DBOS.patch('page-with-score')
+  let early: Promise<PageRead> | null = null
+  let earlyHeld = false
+  if (pageWithScore) {
+    earlyHeld = await DBOS.runStep(async () => !test && (await capSpent().catch(() => false)), {
+      name: 'capBeforePage',
+    })
+    if (!earlyHeld)
+      early = DBOS.runStep(() => readPage(accountId, order.order_id), { name: 'orderPage' })
+  }
+  const scoring = DBOS.runStep(
     async (): Promise<
       (Scored & { version: number; precedents?: ReturnType<typeof storePrecedents> }) | null
     > => {
@@ -823,6 +839,13 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     },
     { name: 'score' },
   )
+  // Both end here, before anything else: a run that stops on a drop or another direction leaves no step running, and
+  // a failed step is never left unhandled while the other one runs.
+  const [readEnd, scoreEnd] = await Promise.allSettled([early, scoring])
+  if (scoreEnd.status === 'rejected') throw scoreEnd.reason
+  if (readEnd.status === 'rejected') throw readEnd.reason
+  const scored = scoreEnd.value
+  const earlyRead = readEnd.value
   if (scored) {
     await DBOS.runStep(
       () =>
@@ -893,8 +916,9 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         : `оценка ${scored.score} ниже порога`,
     )
 
-  // Only an order that passed the Sorter and the Scorer on what the board showed costs a visit of the one tab. A run
-  // recorded before this step existed resumes along its old steps and keeps the board's data.
+  // Only an order that passed the Sorter and the Scorer on what the board showed has its page kept: on the lead, in the
+  // journal, in the screen. A run recorded before this step existed resumes along its old steps and keeps the board's
+  // data.
   let withPage: Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'text'> & {
     client_info: ClientInfo | null
     attachments: OrderAttachment[]
@@ -903,14 +927,18 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   let feeFromPage = false
   if (await DBOS.patch('order-page')) {
     // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
-    // (with its draft, draftThenCard).
-    const held = await DBOS.runStep(async () => !test && (await capSpent().catch(() => false)), {
-      name: 'capBeforePage',
-    })
+    // (with its draft, draftThenCard). With the page read alongside the Scorer, the cap was checked before it.
+    const held = pageWithScore
+      ? earlyHeld
+      : await DBOS.runStep(async () => !test && (await capSpent().catch(() => false)), {
+          name: 'capBeforePage',
+        })
     if (!held) {
-      const read = await DBOS.runStep(() => readPage(accountId, order.order_id), {
-        name: 'orderPage',
-      })
+      const read =
+        earlyRead ??
+        (await DBOS.runStep(() => readPage(accountId, order.order_id), {
+          name: 'orderPage',
+        }))
       withPage = fuller(order, read)
       feeFromPage = read.ok && read.page.bid_price_rub > 0
       const verdict = await DBOS.runStep(

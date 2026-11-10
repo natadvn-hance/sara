@@ -31,6 +31,8 @@ let n = 0
 const orderId = () => `${Date.now()}${n++}`
 /** What each role answers in the next calls (fake Claude reads it per call). */
 let byRole: Record<string, unknown> = {}
+/** How much later each role answers (a slow Scorer, as on the live Sara). */
+let delayByRole: Record<string, number> = {}
 
 async function until(cond: () => boolean | Promise<boolean>, ms = 8000) {
   const end = Date.now() + ms
@@ -55,13 +57,14 @@ const journal = async (id: string) =>
     .where(and(eq(event.entityId, id), eq(event.entityKind, 'lead')))
     .orderBy(asc(event.id))
 /** The input each model call of this role got (the fake Claude logs its stdin). */
-const inputsOf = (role: string): string[] =>
+const inputsOf = (role: string): string[] => callsOf(role).map((c) => c.stdin)
+/** Each model call of this role: its input and when it began and ended (the fake Claude logs them). */
+const callsOf = (role: string) =>
   readFileSync(log, 'utf8')
     .split('\n')
     .filter(Boolean)
-    .map((l) => JSON.parse(l) as { args: string[]; stdin: string })
+    .map((l) => JSON.parse(l) as { args: string[]; stdin: string; start: number; end: number })
     .filter((c) => c.args.some((a) => a.endsWith(`roles/${role}/role.md`)))
-    .map((c) => c.stdin)
 
 const CLIENT = {
   name: 'Ирина',
@@ -97,6 +100,7 @@ beforeAll(async () => {
     {
       claudeEnv: () => ({
         FAKE_CLAUDE_OUTPUT_BY_ROLE: JSON.stringify(byRole),
+        FAKE_CLAUDE_DELAY_MS_BY_ROLE: JSON.stringify(delayByRole),
         FAKE_CLAUDE_ARGS_LOG: log,
       }),
       retryDelaysMs: [50, 50, 50, 50, 50],
@@ -119,6 +123,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   byRole = { sorter: FIT, scorer: scorerAnswer(70), analyst: analystAnswer('Понимаю задачу.') }
+  delayByRole = {}
   await resetDb(db)
   await seedDirection(db, 'hance-marketing')
   tg.sent.length = 0
@@ -131,7 +136,7 @@ beforeEach(async () => {
   await setSetting(db, 'outbound.bids', true, 'boris')
 })
 
-describe('the page of an order is read only for a lead worth it', () => {
+describe('the page of an order is read while the Scorer thinks, and kept only for a lead worth it', () => {
   it('FR-LEAD-2: an order the Sorter rejected never has its page read', async () => {
     byRole = { ...byRole, sorter: REJECT }
     const id = orderId()
@@ -141,17 +146,43 @@ describe('the page of an order is read only for a lead worth it', () => {
     expect(fake.orderReads).toEqual([])
   })
 
-  it('FR-LEAD-2: an order the Scorer dropped never has its page read', async () => {
+  it('FR-LEAD-5: the page read starts before the Scorer is done, so the card does not wait for both in turn', async () => {
+    // The Scorer takes about 26 s on the live Sara; here 1.5 s is enough to see the page read start inside it.
+    delayByRole = { scorer: 1500 }
+    const id = orderId()
+    fake.setOrderPage(id, { bid_price_rub: 145, client_info: CLIENT })
+    await fake.emitOrder({ order_id: id, ...BOARD })
+    await until(() => fake.orderReads.includes(id))
+    const readSeen = Date.now()
+    await until(() => cards().length === 1)
+    const [scorer] = callsOf('scorer')
+    expect(scorer).toBeDefined()
+    expect(readSeen).toBeLessThan(scorer?.end ?? 0)
+    // Read once, and what it found is on the lead and the card as before.
+    expect(fake.orderReads).toEqual([id])
+    expect(await leadOf(id)).toMatchObject({ bidPriceRub: 145, clientInfo: CLIENT })
+    expect(cards()[0]?.text).toContain(`отклик 145${NBSP}₽`)
+  })
+
+  it('FR-LEAD-2: an order the Scorer dropped keeps nothing of the page read alongside the Scorer', async () => {
     byRole = { ...byRole, scorer: scorerAnswer(30) }
     const id = orderId()
+    // Even a page that says the order is closed: a dropped order stays dropped, with the board's data.
+    fake.setOrderPage(id, { bid_price_rub: 145, client_info: CLIENT, open: false })
     await fake.emitOrder({ order_id: id, ...BOARD })
     await until(async () => (await leadOf(id))?.status === 'scored_out')
     await settle()
-    expect(fake.orderReads).toEqual([])
+    expect(fake.orderReads).toEqual([id])
+    expect(await leadOf(id)).toMatchObject({
+      status: 'scored_out',
+      bidPriceRub: 0,
+      clientInfo: null,
+    })
+    expect((await journal(id)).map((e) => e.type)).not.toContain('lead.page_read')
     expect(cards()).toHaveLength(0)
   })
 
-  it('FR-LEAD-5: a shown order has its page read once, after the Scorer and before the Analyst', async () => {
+  it('FR-LEAD-5: a shown order has its page read once and kept after the score, before the Analyst', async () => {
     const id = orderId()
     fake.setOrderPage(id, { bid_price_rub: 145, client_info: CLIENT })
     await fake.emitOrder({ order_id: id, ...BOARD })
@@ -345,7 +376,8 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     byRole = { ...byRole, scorer: scorerAnswer(56) }
     await fake.emitOrder({ order_id: id, ...BOARD })
     await until(async () => (await leadOf(id))?.status === 'scored_out')
-    expect(fake.orderReads).toEqual([])
+    // Its page was read alongside the Scorer and not kept: «Взял бы» reads it again, as it may have changed by now.
+    expect(fake.orderReads).toEqual([id])
     await dailySummary({ db: app.db, notifier: app.bot.notifier }, summaryTime())
     await until(() => tg.sent.some((m) => m.text.startsWith('📊')))
     const summary = tg.sent.find((m) => m.text.startsWith('📊'))
@@ -357,7 +389,7 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     fake.setOrderPage(id, { bid_price_rub: 145, client_info: CLIENT })
     await wantDropped(id)
     await until(() => cards().some((m) => m.text.includes('✍️ Отклик')))
-    expect(fake.orderReads).toEqual([id])
+    expect(fake.orderReads).toEqual([id, id])
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 145, clientInfo: CLIENT })
     expect(cards().at(-1)?.text).toContain(`отклик 145${NBSP}₽`)
     expect(inputsOf('analyst')[0]).toContain('На Профи.ру с 7 сентября 2020')
@@ -368,7 +400,7 @@ describe('«Взял бы» on an order the Scorer dropped reads its page too', 
     fake.setOrderPage(id, { fail: 'LAYOUT_CHANGED' })
     await wantDropped(id)
     await until(() => leadCards().length === 1)
-    expect(fake.orderReads).toEqual([id])
+    expect(fake.orderReads).toEqual([id, id])
     expect(leadCards()[0]?.text).toMatch(/цена.*неизвестна/)
     expect(await leadOf(id)).toMatchObject({ bidPriceRub: 0 })
   })

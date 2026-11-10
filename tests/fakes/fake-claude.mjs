@@ -38,8 +38,12 @@ process.stdin.on('data', (c) => {
 process.stdin.on('end', async () => {
   const start = Date.now()
   if (mode === 'sleep') await new Promise((r) => setTimeout(r, sleepMs))
-  // FAKE_CLAUDE_DELAY_MS: any mode answers this much later (a slow limit answer, say).
-  await new Promise((r) => setTimeout(r, Number(process.env.FAKE_CLAUDE_DELAY_MS ?? 0)))
+  // FAKE_CLAUDE_DELAY_MS: any mode answers this much later (a slow limit answer, say). FAKE_CLAUDE_DELAY_MS_BY_ROLE:
+  // {"<role>": ms} adds to it for one role (a slow Scorer, say).
+  const byRoleDelay = JSON.parse(process.env.FAKE_CLAUDE_DELAY_MS_BY_ROLE ?? '{}')[role] ?? 0
+  await new Promise((r) =>
+    setTimeout(r, Number(process.env.FAKE_CLAUDE_DELAY_MS ?? 0) + Number(byRoleDelay)),
+  )
   if (log) {
     appendFileSync(
       log,

@@ -9,6 +9,7 @@ import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
 import { moscowHour } from '../../apps/core/src/conversation/time'
 import { event, lead, task } from '../../apps/core/src/db/schema'
+import { seedDirection } from '../../apps/core/src/direction/store'
 import { cardsToday } from '../../apps/core/src/leads/cardFlow'
 import { dayOf } from '../../apps/core/src/leads/money'
 import { setSetting } from '../../apps/core/src/settings/store'
@@ -16,6 +17,7 @@ import type { TestLeads } from '../../apps/core/src/testLeads/testLeads'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { interlocutorAnswer } from '../../apps/core/test/helpers/conversation'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
+import { scorerAnswer } from '../../apps/core/test/helpers/scorer'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
 
 // Test orders inside the live Sara (Boris, 30.10.2026; docs/ops/test-leads.md): they come to the live bot marked
@@ -36,6 +38,8 @@ let tg: FakeTelegram
 let node: FakeProfi
 let app: RunningApp
 let t: TestLeads
+/** The Scorer's answer for the next orders; none: it answers like the others and the order comes unscored. */
+let scorer: unknown
 
 async function until(cond: () => boolean | Promise<boolean>, ms = 20000) {
   const end = Date.now() + ms
@@ -119,6 +123,7 @@ beforeAll(async () => {
             ],
           },
           interlocutor: interlocutorAnswer(),
+          ...(scorer !== undefined && { scorer }),
         }),
       }),
       retryDelaysMs: [50, 50],
@@ -233,6 +238,30 @@ describe('test orders inside the live Sara', () => {
     const rows = await db.select({ id: lead.id, status: lead.status }).from(lead)
     expect(rows.map((r) => r.id).sort()).toEqual([a, b].sort())
     expect(rows.every((r) => r.status === 'queued')).toBe(true)
+  }, 30000)
+
+  it('FR-LEAD-9: a test order the Scorer would drop brings its card, its page read once alongside the Scorer', async () => {
+    scorer = scorerAnswer(10)
+    // The Scorer needs the direction's rules; without them every order comes unscored.
+    await seedDirection(db, 'hance-marketing')
+    try {
+      const id = await t.stand.addOrder({ from: 'sample', behaviour: 'manual' })
+      await until(() => leadCards().length === 1)
+      const card = leadCards()[0]?.text ?? ''
+      expect(card).toContain('🧪 Тест')
+      expect(card).toContain('В бою карточки бы не было')
+      expect(card).toContain('ниже порога')
+      // The read that ran with the Scorer is the one the card used: the made-up page was opened once.
+      expect(t.stand.fake.orderReads.filter((x) => x === id)).toHaveLength(1)
+      const read = await db
+        .select()
+        .from(event)
+        .where(and(eq(event.type, 'lead.page_read'), eq(event.entityId, id)))
+      expect(read.map((e) => (e.payload as { ok: boolean }).ok)).toEqual([true])
+      expect(nodeSaw().filter((x) => isTestOrder(x))).toEqual([])
+    } finally {
+      scorer = undefined
+    }
   }, 30000)
 
   it('FR-LEAD-9: /test in the bot puts a test order in and names the page; /test_clear erases only test orders', async () => {

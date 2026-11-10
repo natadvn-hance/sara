@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createFakeTelegram, type FakeTelegram } from '../../../../tests/fakes/telegramApi'
 import { type RunningApp, startApp } from '../../src/app'
 import { loadConfig } from '../../src/config'
-import { lead, leadCandidate, leadRoute } from '../../src/db/schema'
+import { event, lead, leadCandidate, leadRoute } from '../../src/db/schema'
 import { saveProfile, seedProfile } from '../../src/direction/profile'
 import { seedDirection } from '../../src/direction/store'
 import { setSetting } from '../../src/settings/store'
@@ -126,8 +126,14 @@ describe('the router in the lead pipeline (FR-LEAD-4)', () => {
       expect(
         (await db.select().from(leadCandidate).where(eq(leadCandidate.orderId, id)))[0]?.decision,
       ).toBe('show')
-      // The order page is not opened for an order nobody gets.
-      expect(fake.orderReads).not.toContain(id)
+      // The order page was read alongside the Scorer, and nothing of it is kept for an order nobody gets.
+      expect(fake.orderReads.filter((x) => x === id)).toHaveLength(1)
+      expect(
+        await db
+          .select()
+          .from(event)
+          .where(and(eq(event.type, 'lead.page_read'), eq(event.entityId, id))),
+      ).toEqual([])
     } finally {
       await saveProfile(db, 'hance-marketing', { state: 'on' }, 'boris')
     }
