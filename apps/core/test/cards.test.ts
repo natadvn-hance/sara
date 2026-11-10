@@ -184,22 +184,43 @@ describe('the lead card layout', () => {
     expect(lines.at(-1)).toBe(LINK)
   })
 
-  it("07.11: under the score, Boris's own decisions on similar orders, when there are two or more", () => {
+  it("FR-LEAD-3: under the score, the share of Boris's bids on similar orders, from enough of them (10.11)", () => {
     const head = (similar: LeadCard['similar']) =>
       leadCardText({ ...full, similar })
         .split('\n')
         .slice(2, 4)
-    expect(head({ n: 5, closed: 4, bid: 1, reason: 'не наш профиль' })).toEqual([
+    const sim = { min: 10, enough: true, reason: null }
+    expect(head({ ...sim, n: 10, closed: 2, bid: 8, pct: 80 })).toEqual([
       `🎯 <b>балл 68</b>  ·  💰 до 150 000 ₽  ·  🧾 отклик 210${NBSP}₽`,
-      '🧭 Похожие ты закрывал 4 из 5 (не наш профиль)',
+      '🧭 На похожие ты откликался в 80% (8 из 10)',
     ])
-    expect(head({ n: 4, closed: 1, bid: 3, reason: null })[1]).toBe(
-      '🧭 На похожие ты откликался 3 из 4',
+    // Mostly closed: his usual reason goes with the share.
+    expect(head({ ...sim, n: 12, closed: 9, bid: 3, pct: 25, reason: 'не наш профиль' })[1]).toBe(
+      '🧭 На похожие ты откликался в 25% (3 из 12), закрывал чаще всего: не наш профиль',
+    )
+    // Too few: no share, only that there are few, honestly.
+    expect(head({ ...sim, n: 4, closed: 1, bid: 3, pct: 75, enough: false })[1]).toBe(
+      '🧭 Похожих решений пока 4, для процента нужно 10',
     )
     expect(leadCardText({ ...full, similar: null })).not.toContain('🧭')
     expect(
-      leadCardText({ ...full, similar: { n: 1, closed: 1, bid: 0, reason: null } }),
+      leadCardText({
+        ...full,
+        similar: { ...sim, n: 0, closed: 0, bid: 0, pct: 0, enough: false },
+      }),
     ).not.toContain('🧭')
+  })
+
+  it('FR-LEAD-9: the shadow of the auto-bid is a mark under the share, never a bid', () => {
+    const similar = { n: 10, closed: 1, bid: 9, pct: 90, min: 10, enough: true, reason: null }
+    const lines = leadCardText({ ...full, similar, autobid: true }).split('\n')
+    expect(lines.slice(3, 5)).toEqual([
+      '🧭 На похожие ты откликался в 90% (9 из 10)',
+      '🤖 Откликнулась бы сама (пока только пометка, отклик не отправлен)',
+    ])
+    expect(leadCardText({ ...full, similar })).not.toContain('🤖')
+    // The buttons stay Boris's: the mark adds none.
+    expect(leadCardKeyboard({ ...full, similar, autobid: true })).toEqual(leadCardKeyboard(full))
   })
 
   it('FR-LEAD-7: a card of an old lead, without reading, client info or draft, is shorter and not an error', () => {

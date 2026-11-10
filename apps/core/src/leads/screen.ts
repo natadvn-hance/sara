@@ -115,13 +115,23 @@ export function ownWords(o: { title: string; text: string }, form: FormParts): s
   const title = space(o.title)
   if (title && !form.parts.has(key(title)) && !key(o.text).includes(key(title)))
     parts.unshift(title)
+  return ownParts(parts, form).flatMap(wordsOf)
+}
+
+/** The parts the client wrote: the form's own parts dropped, of a form label only its answer kept. */
+function ownParts(parts: string[], form: FormParts): string[] {
   const out: string[] = []
   for (const p of parts) {
     if (form.parts.has(key(p))) continue
     const l = labelled(p)
-    out.push(...wordsOf(l && form.labels.has(key(l.label)) ? l.value : p))
+    out.push(l && form.labels.has(key(l.label)) ? l.value : p)
   }
   return out
+}
+
+/** The client's own text without the title: what `ownWords` counts, as text (the similar orders read it). */
+export function ownText(text: string, form: FormParts): string {
+  return ownParts(splitParts(text), form).join('\n')
 }
 
 const MONTHS = [

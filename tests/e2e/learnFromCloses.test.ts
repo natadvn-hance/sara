@@ -2,13 +2,16 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
-import { eq } from 'drizzle-orm'
+import { newEventId } from '@sara/shared'
+import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
-import { lead, leadLabel, leadScore } from '../../apps/core/src/db/schema'
+import { event, lead, leadLabel, leadScore, outbox } from '../../apps/core/src/db/schema'
 import { activeRules, seedDirection } from '../../apps/core/src/direction/store'
 import { createGateway, withoutLimitWait } from '../../apps/core/src/gateway/gateway'
+import { forgetFormParts } from '../../apps/core/src/leads/screen'
+import { forgetWordStats } from '../../apps/core/src/learning/precedents'
 import { maybePropose } from '../../apps/core/src/learning/proposals'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
@@ -58,11 +61,18 @@ async function inputsOf(role: string): Promise<string[]> {
     .map((c) => c.stdin)
 }
 
+/**
+ * The text of a fake order. Each one is a little different, as real orders are: a text that repeats word for word in
+ * three orders is taken for the site's form and is not compared (10.11.2026).
+ */
+const TEXT = (k: number) =>
+  `Нужен сайт для стоматологической клиники: услуги, врачи, онлайн-запись на приём. Хотим понять, какие каналы дадут записи, и выстроить продвижение на весь год. Клиника ${k}.`
+
 /** A new order, its card, and «Закрыть заявку» on it; waits until the card is folded. */
 async function closeOne(): Promise<string> {
   const id = orderId()
   const before = cards().length
-  await fake.emitOrder({ order_id: id })
+  await fake.emitOrder({ order_id: id, text: TEXT(n) })
   await until(() => cards().length === before + 1)
   const edits = tg.edited.length
   tg.pushPress(111, buttonOf(cards().at(-1), ':skip')?.callback_data ?? '')
@@ -117,6 +127,8 @@ afterAll(async () => {
 beforeEach(async () => {
   byRole = { analyst: ANALYST, sorter: FIT, scorer: scorerAnswer(70) }
   await resetDb(db)
+  forgetFormParts()
+  forgetWordStats()
   await seedDirection(db, ACC)
   tg.sent.length = 0
   tg.edited.length = 0
@@ -157,9 +169,10 @@ describe('Sara learns from closed cards (07.11.2026)', { timeout: 60000 }, () =>
     const first = await closeOne()
     await closeOne()
     const id = orderId()
-    await fake.emitOrder({ order_id: id })
+    await fake.emitOrder({ order_id: id, text: TEXT(n) })
     await until(() => cards().length === 3)
-    expect(cards()[2]?.text).toContain('🧭 Похожие ты закрывал 2 из 2 (сайт, а не маркетинг)')
+    // Two are too few for a share (10.11.2026): the card says so.
+    expect(cards()[2]?.text).toContain('🧭 Похожих решений пока 2, для процента нужно 10')
     const input = (await inputsOf('scorer')).at(-1) ?? ''
     expect(input).toContain('Решения Бориса по похожим заказам')
     expect(input).toContain(
@@ -209,5 +222,85 @@ describe('Sara learns from closed cards (07.11.2026)', { timeout: 60000 }, () =>
       tg.answers.some((a) => a.text === `Применила, теперь правила v${active.version + 1}`),
     )
     expect((await activeRules(db, ACC)).rules.threshold).toBe(active.rules.threshold + 5)
+  })
+})
+
+/** Boris's decision on a past order like the fake one, as his press would leave it. */
+async function decidedLike(label: 'yes' | 'no'): Promise<void> {
+  const id = orderId()
+  await db.insert(lead).values({
+    id,
+    accountId: ACC,
+    title: 'Сайт для стоматологической клиники',
+    category: 'Создание сайтов',
+    city: 'Краснодар',
+    text: TEXT(n),
+    clientName: 'Ирина',
+    budgetText: null,
+    bidPriceRub: 150,
+    seenAt: new Date().toISOString(),
+    status: label === 'yes' ? 'bid_sent' : 'skipped',
+    correlationId: newEventId(),
+  })
+  await db.insert(leadLabel).values({ leadId: id, label, source: 'card' })
+}
+
+const shadowOf = async (id: string) =>
+  (
+    await db
+      .select({ payload: event.payload })
+      .from(event)
+      .where(and(eq(event.type, 'lead.autobid_shadow'), eq(event.entityId, id)))
+  ).map((e) => e.payload as Record<string, unknown>)
+
+describe('The shadow of the auto-bid (10.11.2026)', { timeout: 60000 }, () => {
+  it('FR-LEAD-9: bids on more than 80% of ten similar orders and a fresh price of 200 ₽: the card is marked, nothing is sent', async () => {
+    for (let i = 0; i < 10; i++) await decidedLike(i < 9 ? 'yes' : 'no')
+    const id = orderId()
+    fake.setOrderPage(id, { bid_price_rub: 150 })
+    await fake.emitOrder({ order_id: id, text: TEXT(n) })
+    await until(() => cards().length === 1)
+    const text = cards()[0]?.text ?? ''
+    expect(text).toContain('🧭 На похожие ты откликался в 90% (9 из 10)')
+    expect(text).toContain('🤖 Откликнулась бы сама (пока только пометка, отклик не отправлен)')
+    const [shadow] = await shadowOf(id)
+    expect(shadow).toEqual({
+      would: true,
+      misses: [],
+      n: 10,
+      bid: 9,
+      fee_rub: 150,
+      fee_from_page: true,
+      min_similar: 10,
+      min_share_pct: 80,
+      max_fee_rub: 200,
+    })
+    // Numbers and flags only, never the client's words (ADR-016).
+    expect(JSON.stringify(shadow)).not.toMatch(/[а-яё]/i)
+    // Only a mark: no bid asked for, nothing in the outbox, the card waits for Boris.
+    await new Promise((r) => setTimeout(r, 300))
+    expect(await db.select().from(outbox)).toEqual([])
+    expect(await db.select().from(event).where(eq(event.type, 'bid.requested'))).toEqual([])
+    expect((await db.select().from(lead).where(eq(lead.id, id)))[0]?.status).toBe('queued')
+  })
+
+  it('FR-LEAD-9: a bid dearer than the ceiling, or too few similar orders: no mark, the reason journaled as a code', async () => {
+    for (let i = 0; i < 10; i++) await decidedLike('yes')
+    const dear = orderId()
+    // The fake site's own price, 210 ₽: above the 200 ₽ ceiling.
+    await fake.emitOrder({ order_id: dear, text: TEXT(n) })
+    await until(() => cards().length === 1)
+    expect(cards()[0]?.text).toContain('🧭 На похожие ты откликался в 100% (10 из 10)')
+    expect(cards()[0]?.text).not.toContain('🤖')
+    expect((await shadowOf(dear))[0]).toMatchObject({ would: false, misses: ['fee_high'] })
+
+    await setSetting(db, 'autobid.min_similar', 12, 'boris')
+    const few = orderId()
+    fake.setOrderPage(few, { bid_price_rub: 150 })
+    await fake.emitOrder({ order_id: few, text: TEXT(n) })
+    await until(() => cards().length === 2)
+    // The first card waits for Boris, so it is no decision yet: ten similar decisions, the minimum now twelve.
+    expect(cards()[1]?.text).toContain('🧭 Похожих решений пока 10, для процента нужно 12')
+    expect((await shadowOf(few))[0]).toMatchObject({ would: false, misses: ['few_similar'] })
   })
 })

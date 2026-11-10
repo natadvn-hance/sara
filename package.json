@@ -31,6 +31,7 @@
     "deploy": "bash scripts/deploy.sh",
     "profi:samples": "tsx scripts/profi-samples.ts",
     "report:shadow": "pnpm --filter @sara/core report:shadow",
+    "report:autobid": "pnpm --filter @sara/core report:autobid",
     "direction:show": "pnpm --filter @sara/core direction show",
     "direction:rollback": "pnpm --filter @sara/core direction rollback",
     "direction:thresholds": "pnpm --filter @sara/core direction thresholds",

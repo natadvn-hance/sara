@@ -106,8 +106,22 @@ export type LeadCard = {
    * the buttons that correct a guess with one press. None: the short card has no reason line.
    */
   closeReason?: CloseReason | null
-  /** Boris's own decisions on orders like this one, as the Scorer saw them (07.11.2026); none under two. */
-  similar?: { n: number; closed: number; bid: number; reason: string | null } | null
+  /**
+   * Boris's own decisions on orders like this one, as the Scorer saw them (07.11.2026): the share of bids among them
+   * when there are enough (`enough`, 10.11.2026), else only that there are few. None: no similar decision.
+   */
+  similar?: {
+    n: number
+    closed: number
+    bid: number
+    pct: number
+    /** From how many the share counts (`autobid.min_similar`). */
+    min: number
+    enough: boolean
+    reason: string | null
+  } | null
+  /** The shadow of the auto-bid fired (10.11.2026): the card says Sara would have bid by herself; nothing was sent. */
+  autobid?: boolean
   /**
    * The client's own site as Sara read it (Boris, 30.10.2026): its short summary against the order, or «сайт не
    * открылся»; and the example sites the client named. None: the order names no site.
@@ -252,10 +266,12 @@ export const TEXTS = {
   reasonBoris: (r: string) => `Причина: ${r}`,
   reasonUnknown: 'Причину не угадала',
   reasonSaved: (r: string) => `Записала: ${r}`,
-  /** Under the score on a card: Boris's own decisions on orders like this one. */
-  similarClosed: (closed: number, n: number, reason: string | null) =>
-    `🧭 Похожие ты закрывал ${closed} из ${n}${reason ? ` (${reason})` : ''}`,
-  similarBid: (bid: number, n: number) => `🧭 На похожие ты откликался ${bid} из ${n}`,
+  /** Under the score on a card: Boris's own decisions on orders like this one (10.11.2026: a share, from enough). */
+  similarShare: (pct: number, bid: number, n: number, reason: string | null) =>
+    `🧭 На похожие ты откликался в ${pct}% (${bid} из ${n})${reason ? `, закрывал чаще всего: ${reason}` : ''}`,
+  similarFew: (n: number, min: number) => `🧭 Похожих решений пока ${n}, для процента нужно ${min}`,
+  /** The shadow of the auto-bid: only a mark, the bid was not sent (10.11.2026). */
+  autobidShadow: '🤖 Откликнулась бы сама (пока только пометка, отклик не отправлен)',
   editButton: 'Изменить',
   askDraft: (title: string) =>
     `Пришли новый текст отклика на «${title}» ответом на это сообщение, текстом или голосом. Приветствие я добавлю сама. Цену услуги можно прислать отдельной строкой, например «цена 5000».`,
@@ -419,15 +435,23 @@ function headLines(c: LeadCard): string[] {
   ]
 }
 
-/** «🧭 Похожие ты закрывал 4 из 5 (не наш профиль)», or how often he bid on them when he mostly did. */
+/**
+ * «🧭 На похожие ты откликался в 80% (8 из 10)», with his usual reason when he mostly closed them; with too few of
+ * them only how many there are. Then the mark of the auto-bid's shadow, when it fired.
+ */
 function similarLines(c: LeadCard): string[] {
   const s = c.similar
-  if (!s || s.n < 2) return []
-  return [
-    s.closed >= s.bid
-      ? esc(TEXTS.similarClosed(s.closed, s.n, s.reason))
-      : esc(TEXTS.similarBid(s.bid, s.n)),
-  ]
+  const out: string[] = []
+  if (s && s.n > 0)
+    out.push(
+      esc(
+        s.enough
+          ? TEXTS.similarShare(s.pct, s.bid, s.n, s.closed > s.bid ? s.reason : null)
+          : TEXTS.similarFew(s.n, s.min),
+      ),
+    )
+  if (c.autobid) out.push(esc(TEXTS.autobidShadow))
+  return out
 }
 
 /** «На Профи.ру с 7 сентября 2020» as the site writes it; a bare date gets the beginning. */
