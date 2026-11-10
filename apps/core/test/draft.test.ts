@@ -2,8 +2,10 @@ import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { AnalystOutput, ProfiOrder } from '@sara/shared'
 import { describe, expect, it } from 'vitest'
+import type { MindHit } from '../src/conversation/types'
 import { roleJsonSchema } from '../src/gateway/claudeCli'
 import type { CallOptions, Gateway, RoleCallResult } from '../src/gateway/gateway'
+import { type BidVoice, bidVoiceText } from '../src/leads/bidVoice'
 import {
   analystInput,
   BID_TEXT_MAX,
@@ -590,5 +592,111 @@ describe('the Analyst reads the direction (FR-LEAD-6)', () => {
     expect(schema.required).not.toContain('case_ids')
     expect(schema.required).not.toContain('follow_ups')
     expect(schema.required).not.toContain('site_ids')
+  })
+})
+
+describe("the Analyst writes in Boris's voice where it is on (10.11.2026)", () => {
+  const hit = (id: string, type: MindHit['type'], title: string, body: string): MindHit => ({
+    id,
+    type,
+    scope: id === 'j-tone' ? 'shared' : 'trial',
+    title,
+    body,
+    topic: null,
+    tones: [],
+    stages: [],
+    exampleClient: null,
+    exampleBoris: null,
+    rank: 0,
+  })
+  const VOICE: BidVoice = {
+    records: [
+      hit('s-portrait', 'speech', 'Портрет речи Бориса', '## Режим\nСтроже: первое касание.'),
+      hit(
+        'j-tone',
+        'judgment',
+        'Тон и форма текста',
+        '## Правило: форма\nБез точки в конце абзаца.',
+      ),
+      hit('j-voice', 'judgment', 'Голос Бориса', '## Правило: кавычки\nБез ёлочек.'),
+    ],
+    samples: [
+      {
+        ...hit('e-boris-54', 'example', 'Посмотрел видео', '## Клиент\n\n(Прислал видео)'),
+        exampleClient: '(Прислал видео)',
+        exampleBoris: 'Посмотрел ваше видео, получилось занятно',
+      },
+    ],
+    banned: ['По опыту', 'Как вам такое'],
+  }
+
+  it('FR-LEAD-6: without the voice the Analyst is told exactly what it was told before', async () => {
+    const before = stubGateway([answer(BODY)])
+    const none = stubGateway([answer(BODY)])
+    const o = await order()
+    const d1 = await write(before.gw, o)
+    const d2 = await write(none.gw, o, { voice: null })
+    expect(none.inputs).toEqual(before.inputs)
+    expect(before.inputs[0]).toBe(analystInput(o, 478))
+    expect(before.inputs[0]).not.toContain('Голос Бориса')
+    expect(d2).toEqual(d1)
+  })
+
+  it('FR-LEAD-6: with the voice the Analyst reads the section of the voice, the length line still last', async () => {
+    const { gw, inputs, options } = stubGateway([answer(BODY)])
+    const o = await order()
+    const d = await write(gw, o, { voice: VOICE })
+    expect(inputs[0]).toBe(analystInput(o, 478, bidVoiceText(VOICE)))
+    expect(inputs[0]).toContain('[s-portrait] Портрет речи Бориса')
+    expect(inputs[0]).toContain('Борис: Посмотрел ваше видео, получилось занятно')
+    expect(inputs[0]).toContain('Никогда не пиши: «По опыту», «Как вам такое»')
+    expect(inputs[0]?.trim().split('\n').at(-1)).toBe('Длина текста: не больше 478 знаков')
+    // The voice is the Analyst's input, never an option of the model call.
+    expect(options[0]).not.toHaveProperty('voice')
+    // The rules of the form are the code's as before: the greeting, no final period (open decisions 3 and 4).
+    expect(d.text).toBe(`Ирина, добрый день!\n\n${CLEAN}`)
+  })
+
+  it('FR-LEAD-6: a phrase Boris never says is asked once more; kept after two tries, the card says so', async () => {
+    const bad = 'По опыту, клинике важно быстро начать запись. Когда запуск?'
+    const once = stubGateway([
+      answer(bad),
+      answer('Клинике важно быстро начать запись. Когда запуск?'),
+    ])
+    const d1 = await write(once.gw, await order(), { voice: VOICE })
+    expect(d1).toMatchObject({ attempts: 2 })
+    expect((d1 as { styleNote?: string }).styleNote).toBeUndefined()
+    expect(once.inputs[1]).toContain('фраза «По опыту»')
+    const twice = stubGateway([answer(bad), answer(bad)])
+    const d2 = await write(twice.gw, await order(), { voice: VOICE })
+    expect(d2.text).toContain('По опыту')
+    expect((d2 as { styleNote?: string }).styleNote).toContain('«По опыту»')
+    // Without the voice the same text is no fault: the banned phrases are the trial portrait's.
+    const real = stubGateway([answer(bad)])
+    expect(await write(real.gw, await order())).toMatchObject({ attempts: 1 })
+  })
+
+  it('FR-LEAD-6: the series is held to the voice too, and stays when the phrase does', async () => {
+    const bad = 'Как вам такое?)'
+    const withFollow = (): AnalystOutput => ({
+      ...answer(BODY),
+      follow_ups: [{ text: bad, case_id: null }],
+    })
+    const { gw, inputs } = stubGateway([withFollow(), withFollow()])
+    const d = await write(gw, await order(), { voice: VOICE })
+    expect(inputs[1]).toContain('фраза «Как вам такое»')
+    expect((d as { styleNote?: string }).styleNote).toContain('«Как вам такое»')
+    expect((d as { followUps?: string[] }).followUps).toEqual([bad])
+  })
+
+  it('FR-LEAD-6: a «не X, а Y» and a banned phrase together are named both, and both on the card', async () => {
+    const bad =
+      'По опыту, нужен не подрядчик на разовые задачи, а человек, который ведет задачи. Когда запуск?'
+    const { gw, inputs } = stubGateway([answer(bad), answer(bad)])
+    const d = await write(gw, await order(), { voice: VOICE })
+    expect(inputs[1]).toContain('так пишет нейросеть')
+    expect(inputs[1]).toContain('фраза «По опыту»')
+    expect((d as { styleNote?: string }).styleNote).toContain('не X, а Y')
+    expect((d as { styleNote?: string }).styleNote).toContain('«По опыту»')
   })
 })
