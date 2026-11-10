@@ -225,6 +225,21 @@ describe('which waiting cards are looked at (FR-LEAD-5)', () => {
     expect(reads).not.toContain(oldNoFee.id)
   })
 
+  it('FR-LEAD-5: a fresh card without the fee goes first, before cards overdue since the night (10.11.2026)', async () => {
+    // 10.11 at 09:11 a card went out without the fee; the passes after it took last night's cards, the most overdue,
+    // and the fresh card waited behind them while its order could be taken by others.
+    const nightly = [
+      await card({ sent: 600, seen: 20 * 60 }),
+      await card({ sent: 590, seen: 19 * 60 }),
+      await card({ sent: 580, seen: 18 * 60 }),
+      await card({ sent: 570, seen: 17 * 60 }),
+    ]
+    const noFee = await card({ sent: 3, seen: 5, fee: 0 })
+    expect((await recheck().tick(AT)).checked).toBe(4)
+    expect(reads[0]).toBe(noFee.id)
+    expect(reads.slice(1)).toEqual([nightly[0]?.id, nightly[1]?.id, nightly[2]?.id])
+  })
+
   it('FR-LEAD-5: a card of an order older than a day is looked at every 3 hours', async () => {
     const due = await card({ sent: 181, seen: 25 * 60 })
     const notYet = await card({ sent: 170, seen: 25 * 60 })

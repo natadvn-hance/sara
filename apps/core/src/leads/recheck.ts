@@ -87,7 +87,8 @@ export function startCardRecheck(d: {
   const perPass = d.perPass ?? 3
 
   /**
-   * Open decision tasks whose card went out and whose look is due: gone from the feed first, then the most overdue.
+   * Open decision tasks whose card went out and whose look is due: a fresh one without the fee first, then gone from
+   * the feed, then the most overdue.
    * The last look is the later of the card going out and the last read of its page.
    */
   async function due(at: Date): Promise<Due[]> {
@@ -125,7 +126,10 @@ export function startCardRecheck(d: {
       where t.kind = 'lead_decision' and t.state = 'open' and t.entity_kind = 'lead'
         and (s.at is not null or t.telegram_message_id is not null)
         and (look.at < k.before or x.gone)
-      order by x.gone desc, look.at - k.before, t.created_at, t.id
+      -- A fresh card that does not know its fee first (10.11.2026: one waited behind last night's cards), then an
+      -- order gone from the feed, then the most overdue.
+      order by (l.seen_at > ${ago(at, FRESH_MS)}::timestamptz and l.bid_price_rub = 0) desc,
+        x.gone desc, look.at - k.before, t.created_at, t.id
       limit ${perPass}`)
     return rows.rows
   }
