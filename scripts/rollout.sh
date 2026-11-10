@@ -18,6 +18,10 @@ STATE="${SARA_DEPLOY_STATE:-$HOME/.sara-deployed}"
 # Services this deploy leaves as they run, by the operator's word (SARA_DEPLOY_SKIP="profi-node"): for a change the
 # service does not use when the disk has no room to rebuild it. Their record stays, so the next deploy still sees it.
 SKIP=" ${SARA_DEPLOY_SKIP:-} "
+# Services that may stop while their own image is built when the disk has no room for two (default the voice; the
+# Profi node only by the operator's word, SARA_DEPLOY_STOP_FIRST="voice profi-node": Sara does not see Profi.ru for
+# the minutes of its build, 10.11.2026). Never the core or the base.
+STOP_FIRST=" ${SARA_DEPLOY_STOP_FIRST:-voice} "
 HEAD=$(git rev-parse HEAD)
 mkdir -p "$STATE"
 
@@ -83,16 +87,24 @@ for s in $($C config --services); do
     continue
   fi
   need=$(need_gb "$s")
-  # The voice can wait: short of room, it stops and drops its image before its build, never Sara or the base.
-  if [ "$(free_gb)" -lt "$need" ] && [ "$s" = voice ]; then
-    echo "== voice: мало места, останавливаю голос на время сборки"
-    $C stop voice >/dev/null 2>&1; $C rm -f voice >/dev/null 2>&1
+  stopped=false
+  # A service named in STOP_FIRST can wait: short of room, it stops and drops its image before its build.
+  stoppable=false
+  case "$STOP_FIRST" in *" $s "*) stoppable=true ;; esac
+  [ "$s" = core ] || [ "$s" = postgres ] && stoppable=false
+  if [ "$(free_gb)" -lt "$need" ] && [ "$stoppable" = true ]; then
+    echo "== ${s}: мало места, останавливаю ${s} на время сборки"
+    $C stop "$s" >/dev/null 2>&1; $C rm -f "$s" >/dev/null 2>&1
+    stopped=true
     docker image prune -af >/dev/null 2>&1; docker builder prune -af >/dev/null 2>&1
   fi
   free=$(free_gb)
   [ "$free" -ge "$need" ] || fail "Мало места на диске: ${free} ГБ, для ${s} нужно ${need}. Выкладка остановлена перед ${s}: службы до неё уже на новой версии, ${s} и следующие работают на прошлой"
   echo "== ${s} (свободно ${free} ГБ)"
-  $C build "$s" || fail "Сборка ${s} не прошла, работающая версия ${s} не тронута"
+  if ! $C build "$s"; then
+    [ "${stopped:-false}" = true ] && fail "Сборка ${s} не прошла, а ${s} остановлена на время сборки: нужна ручная помощь"
+    fail "Сборка ${s} не прошла, работающая версия ${s} не тронута"
+  fi
   $C up -d --no-deps "$s" || fail "${s} не запустилась"
   echo "$HEAD" > "$STATE/$s"
   # The old image of this service is now unused: dropped before the next build.
