@@ -456,7 +456,7 @@ describe('a bid that ended ORDER_CLOSED (FR-LEAD-5)', () => {
   }, 60000)
 })
 
-describe('a fee the first look missed (07.11.2026)', () => {
+describe('a fee the first look missed (07.11.2026), and a fee the site changed (10.11.2026)', () => {
   it('FR-LEAD-5: a later look that finds the fee writes it to the lead and draws the waiting card again', async () => {
     const id = orderId()
     const before = leadCards().length
@@ -475,10 +475,19 @@ describe('a fee the first look missed (07.11.2026)', () => {
     await until(() => edits().length > 0)
     expect(edits().at(-1)?.text).not.toContain('цена отклика пока неизвестна')
     expect((await taskOf(id))?.state).toBe('open')
-    // A fee already known is kept: a later page with another one does not overwrite it.
+    // The site lowers the fee as the order ages (10.11.2026: 110, 55, then 1 ₽ on one order): the card follows it.
     fake.setOrderPage(id, { bid_price_rub: 999 })
+    const editsBefore = edits().length
     await app.recheck.tick(plus(first(), 16))
+    await until(async () => (await leadOf(id))?.bidPriceRub === 999)
+    await until(() => edits().length > editsBefore)
+    expect(edits().at(-1)?.text).toContain('999')
+    expect(JSON.stringify(edits().at(-1)?.reply_markup)).toContain('Откликнуться за 999')
+    // The same fee again draws nothing.
+    const editsSame = edits().length
+    await app.recheck.tick(plus(first(), 32))
     await settle()
-    expect((await leadOf(id))?.bidPriceRub).toBe(1250)
+    expect((await leadOf(id))?.bidPriceRub).toBe(999)
+    expect(edits()).toHaveLength(editsSame)
   }, 60000)
 })

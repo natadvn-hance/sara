@@ -142,7 +142,8 @@ export type LeadPipeline = {
   restoreCard(taskId: string, messageId: number): Promise<boolean>
   /**
    * A later look at the order page found the bid's fee that the first one missed (the tariff renders late): the lead
-   * gets it, and a card still waiting is drawn again with it. A known fee is never overwritten here.
+   * gets it, and a card still waiting is drawn again with it. A fee the site changed since replaces the known one
+   * (10.11.2026: the site lowers it as the order ages); the same fee changes nothing.
    */
   feeFound(taskId: string, rub: number): Promise<boolean>
   /**
@@ -1997,7 +1998,9 @@ export function createLeadPipeline(dp: LeadPipelineDeps): LeadPipeline {
       const set = await d()
         .db.update(lead)
         .set({ bidPriceRub: rub })
-        .where(and(eq(lead.id, found.lead.id), eq(lead.bidPriceRub, 0)))
+        // Any fee the page shows now, not only a first one: the site lowers it as the order ages (10.11.2026: 110, 55,
+        // then 1 ₽ on one order), and the card shows what a press would cost. The same fee changes nothing.
+        .where(and(eq(lead.id, found.lead.id), ne(lead.bidPriceRub, rub)))
         .returning({ id: lead.id })
       if (set.length === 0) return false
       const [t] = await d()
