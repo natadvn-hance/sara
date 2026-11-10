@@ -535,6 +535,59 @@ describe('insurance and the account tab', () => {
     expect(order.indexOf('press')).toBeLessThan(lastChat)
   }, 90000)
 
+  it('FR-LEAD-5: an order page the core waits for goes before the waiting work, a running check gives way, and slow work is logged (10.11.2026)', async () => {
+    await loginStandIn(ab.page, site)
+    for (const id of ['c-q1', 'c-q2', 'c-q3']) site.addMessage(id, 'client', 'Здравствуйте')
+    const eyes = createEyes({ accountId: 'hance-marketing', db, parsers: standInParsers })
+    const logged: string[] = []
+    const log = console.log
+    console.log = (...a: unknown[]) => void logged.push(a.join(' '))
+    const ins = startInsurance({
+      eyes,
+      ab,
+      baseUrl: site.url,
+      parsers: standInParsers,
+      feedEveryMs: 3_600_000,
+      chatsEveryMs: 3_600_000,
+      chatPauseMs: 500,
+      slowMs: { wait: 0, run: 0 },
+    })
+    const order: string[] = []
+    const onNav = (f: { url(): string }) => {
+      const p = new URL(f.url()).pathname
+      if (/\/c-q\d$/.test(p)) order.push(p)
+    }
+    ab.page.on('framenavigated', onNav)
+    try {
+      const check = ins.chatsOnce(false)
+      await expect.poll(() => order.length, { timeout: 20000 }).toBeGreaterThan(0)
+      const normal = ins.inTab(async () => void order.push('normal'))
+      const page = ins.inTab(async () => void order.push('order page'), {
+        soon: true,
+        what: 'страница заказа',
+      })
+      await Promise.all([check, normal, page])
+      await expect
+        .poll(() => new Set(order.filter((x) => x.startsWith('/'))).size, { timeout: 30000 })
+        .toBe(3)
+    } finally {
+      ab.page.off('framenavigated', onNav)
+      ins.stop()
+      console.log = log
+    }
+    expect(order.indexOf('order page')).toBeLessThan(order.indexOf('normal'))
+    // The chat check gave way at its next page instead of finishing first.
+    const lastChat = Math.max(
+      ...['/chats/c-q1', '/chats/c-q2', '/chats/c-q3'].map((p) => order.lastIndexOf(p)),
+    )
+    expect(order.indexOf('order page')).toBeLessThan(lastChat)
+    // Every piece of work says in the log what it was and how long it waited and ran.
+    expect(
+      logged.some((l) => /^Вкладка: страница заказа ждала \d+ с, работала \d+ с$/.test(l)),
+    ).toBe(true)
+    expect(logged.some((l) => l.startsWith('Вкладка: чаты '))).toBe(true)
+  }, 90000)
+
   it('FR-LEAD-1: a page that asks before it is left is left, and the guard stays online', async () => {
     await loginStandIn(ab.page, site)
     const { g, reports, ins } = guarded()

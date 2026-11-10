@@ -738,42 +738,46 @@ export function createBidTools(o: {
     async getOrder({ account_id, order_id }): Promise<GetOrderOutput> {
       const r = runtime(account_id)
       requireAlive(r.watch)
-      const read = await r.inTab(async ({ go, can, later }) => {
-        if (!can()) return null
-        const page = r.page()
-        const opened = await openOrder(page, go, order_id, true)
-        if (!opened.ok) return null
-        const known = await storedOrder(o.db, account_id, order_id).then(
-          (x) => x,
-          () => null,
-        )
-        // Closed only on the site's own word: a disabled bid block in the order answer, the bare answer of an order
-        // the client closed (no form, tariff or price, and no bid of ours), or, when the page gave no answer, a
-        // notice on the page. A missing form alone can be a changed layout or a bid already made.
-        const closed = opened.screen
-          ? opened.screen.disabled || opened.screen.bare
-          : await closedNotice(page)
-        const read = opened.screen !== null || closed
-        // The page text is read for what the board did not show (a card without the text, or without any client
-        // name), and for an order the eyes never stored; the client answer already carries a name.
-        let fromPage: ProfiOrder | null = null
-        if (
-          o.parsers.fromOrderDom &&
-          (!known || !known.text || (!known.client_name && !opened.client?.name))
-        ) {
-          const parsed = await o.parsers.fromOrderDom(page, order_id)
-          if (!known) await r.eyes.onParsed(parsed, 'dom')
-          const sig = parsed.signals.find((x) => x.t === 'order')
-          fromPage = sig?.t === 'order' ? sig.order : null
-        }
-        if (opened.screen?.hasBid) await markOrderBid(o.db, account_id, order_id)
-        // The form map and the calibration need this page, but not the caller's wait.
-        later(async () => {
-          await keepFormMap(r, page)
-          if (r.afterOrderPage && can()) await r.afterOrderPage(order_id, can)
-        })
-        return { screen: opened.screen, closed, read, client: opened.client, fromPage }
-      })
+      const read = await r.inTab(
+        async ({ go, can, later }) => {
+          if (!can()) return null
+          const page = r.page()
+          const opened = await openOrder(page, go, order_id, true)
+          if (!opened.ok) return null
+          const known = await storedOrder(o.db, account_id, order_id).then(
+            (x) => x,
+            () => null,
+          )
+          // Closed only on the site's own word: a disabled bid block in the order answer, the bare answer of an order
+          // the client closed (no form, tariff or price, and no bid of ours), or, when the page gave no answer, a
+          // notice on the page. A missing form alone can be a changed layout or a bid already made.
+          const closed = opened.screen
+            ? opened.screen.disabled || opened.screen.bare
+            : await closedNotice(page)
+          const read = opened.screen !== null || closed
+          // The page text is read for what the board did not show (a card without the text, or without any client
+          // name), and for an order the eyes never stored; the client answer already carries a name.
+          let fromPage: ProfiOrder | null = null
+          if (
+            o.parsers.fromOrderDom &&
+            (!known || !known.text || (!known.client_name && !opened.client?.name))
+          ) {
+            const parsed = await o.parsers.fromOrderDom(page, order_id)
+            if (!known) await r.eyes.onParsed(parsed, 'dom')
+            const sig = parsed.signals.find((x) => x.t === 'order')
+            fromPage = sig?.t === 'order' ? sig.order : null
+          }
+          if (opened.screen?.hasBid) await markOrderBid(o.db, account_id, order_id)
+          // The form map and the calibration need this page, but not the caller's wait.
+          later(async () => {
+            await keepFormMap(r, page)
+            if (r.afterOrderPage && can()) await r.afterOrderPage(order_id, can)
+          })
+          return { screen: opened.screen, closed, read, client: opened.client, fromPage }
+          // The core waits for this page (its fee and whether the order is open go on the card): before the checks.
+        },
+        { soon: true, what: 'страница заказа' },
+      )
       const stored = await storedOrder(o.db, account_id, order_id)
       if (!read) return stored
       const { screen, closed, client, fromPage } = read
