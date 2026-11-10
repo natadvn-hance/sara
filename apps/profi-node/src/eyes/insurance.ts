@@ -31,7 +31,13 @@ export type Insurance = {
       can(): boolean
       later(errand: () => Promise<void>): void
     }) => Promise<T>,
-    o?: { urgent?: boolean },
+    /**
+     * `soon`: an order page the core waits for (get_order, 10.11.2026: a page read waited behind a 2-minute board pass
+     * and the core's 90 s ran out, so the card went without the bid's fee): it goes before the checks waiting for the
+     * tab, and a running check gives way at its next page, as for a chat the stream named. `what` names the work in the
+     * tab's log of slow work.
+     */
+    o?: { urgent?: boolean; soon?: boolean; what?: string },
   ): Promise<T>
 }
 
@@ -115,6 +121,8 @@ export function startInsurance(o: {
   afterOrderPage?: (orderId: string, may: () => boolean) => Promise<void>
   /** How the feed pass scrolls the board for its next pages (see scrollBoard); all of it has a default. */
   board?: BoardScroll
+  /** Work that waited for the tab or held it longer than this goes into the node's log with its name. */
+  slowMs?: { wait: number; run: number }
 }): Insurance {
   const can = o.canNavigate ?? (() => true)
   const pause = o.chatPauseMs ?? 2000
@@ -127,7 +135,8 @@ export function startInsurance(o: {
   // minutes behind the chat check, the feed and another order's page), then a chat the event stream named, then the rest.
   const PRESS = 2
   const NEWS = 1
-  const queue: { prio: number; run: () => Promise<void> }[] = []
+  const queue: { prio: number; what: string; at: number; run: () => Promise<void> }[] = []
+  const slow = o.slowMs ?? { wait: 30000, run: 60000 }
   let pumping = false
   async function pump() {
     if (pumping) return
@@ -137,18 +146,28 @@ export function startInsurance(o: {
       for (let k = 1; k < queue.length; k++)
         if ((queue[k]?.prio ?? 0) > (queue[i]?.prio ?? 0)) i = k
       const [job] = queue.splice(i, 1)
-      await job?.run()
+      if (!job) continue
+      const started = Date.now()
+      await job.run()
+      // What held the tab, and what waited for it (10.11.2026: an order page waited past the core's 90 s, and the
+      // log could not say behind what).
+      const waited = started - job.at
+      const ran = Date.now() - started
+      if (waited >= slow.wait || ran >= slow.run)
+        console.log(
+          `Вкладка: ${job.what} ждала ${Math.round(waited / 1000)} с, работала ${Math.round(ran / 1000)} с`,
+        )
     }
     pumping = false
   }
-  const serial = <T>(f: () => Promise<T>, prio = 0): Promise<T> =>
+  const serial = <T>(f: () => Promise<T>, prio = 0, what = 'работа'): Promise<T> =>
     new Promise<T>((resolve, reject) => {
-      queue.push({ prio, run: () => f().then(resolve, reject) })
+      queue.push({ prio, what, at: Date.now(), run: () => f().then(resolve, reject) })
       void pump()
     })
   /**
-   * A press or a chat the stream named waits for the tab: a running check stops at its next page and leaves the rest to
-   * its next turn.
+   * A press, a chat the stream named or an order page the core waits for is waiting for the tab: a running check stops
+   * at its next page and leaves the rest to its next turn.
    */
   const pressWaits = () => queue.some((j) => j.prio > 0)
   async function go(path: string, opt?: { quick?: boolean }): Promise<boolean> {
@@ -501,23 +520,27 @@ export function startInsurance(o: {
   }
 
   async function feedOnce(opt?: { deep?: boolean }) {
-    await serial(async () => {
-      if (!can()) return
-      o.eyes.boardPassStart()
-      if (!(await go(o.parsers.paths.feed))) return
-      await readNewOrders()
-      // Only on the feed page itself (the page links fallback leaves it) and only a board the eyes know.
-      if (onFeed && can() && !pressWaits() && o.eyes.boardWorks() && o.eyes.board()?.more)
-        await readBoard(opt?.deep === true)
-      // Before the chats: the way back to the feed brings its first page again, which is not this pass's.
-      await o.eyes.boardPassEnd()
-      await readTouchedChats()
-      if (o.parsers.paths.feed && can() && !pressWaits()) await maybeBackToFeed()
-      await o.eyes.onParsed(
-        { recognized: false, signals: await o.parsers.fromHeaderDom(o.ab.page) },
-        'dom',
-      )
-    })
+    await serial(
+      async () => {
+        if (!can()) return
+        o.eyes.boardPassStart()
+        if (!(await go(o.parsers.paths.feed))) return
+        await readNewOrders()
+        // Only on the feed page itself (the page links fallback leaves it) and only a board the eyes know.
+        if (onFeed && can() && !pressWaits() && o.eyes.boardWorks() && o.eyes.board()?.more)
+          await readBoard(opt?.deep === true)
+        // Before the chats: the way back to the feed brings its first page again, which is not this pass's.
+        await o.eyes.boardPassEnd()
+        await readTouchedChats()
+        if (o.parsers.paths.feed && can() && !pressWaits()) await maybeBackToFeed()
+        await o.eyes.onParsed(
+          { recognized: false, signals: await o.parsers.fromHeaderDom(o.ab.page) },
+          'dom',
+        )
+      },
+      0,
+      opt?.deep ? 'вся лента' : 'лента',
+    )
   }
 
   // The chats list of the real site draws neither links nor marks (its answer has them): its addresses and the outline
@@ -587,25 +610,29 @@ export function startInsurance(o: {
   }
 
   async function chats(pick: (c: ChatListItem) => boolean) {
-    await serial(async () => {
-      if (!can()) return
-      const list = await openList()
-      if (!list) return
-      await keepList()
-      for (const c of (await listOrKnown(list)).filter(pick)) {
+    await serial(
+      async () => {
         if (!can()) return
-        // A press goes first; the check starts again behind it, so no chat waits for the next 10 minutes.
-        if (pressWaits()) {
-          void chats(pick).catch(() => {})
-          return
+        const list = await openList()
+        if (!list) return
+        await keepList()
+        for (const c of (await listOrKnown(list)).filter(pick)) {
+          if (!can()) return
+          // A press goes first; the check starts again behind it, so no chat waits for the next 10 minutes.
+          if (pressWaits()) {
+            void chats(pick).catch(() => {})
+            return
+          }
+          await sleep(pause)
+          if (!(await go(o.parsers.paths.chat(c.chatId)))) return
+          await readChat(c.chatId)
         }
-        await sleep(pause)
-        if (!(await go(o.parsers.paths.chat(c.chatId)))) return
-        await readChat(c.chatId)
-      }
-      // Back to the feed, where the event stream lives.
-      if (can()) await go(o.parsers.paths.feed)
-    })
+        // Back to the feed, where the event stream lives.
+        if (can()) await go(o.parsers.paths.feed)
+      },
+      0,
+      'чаты',
+    )
   }
 
   // The chat check every 2 minutes (Boris, 31.10.2026: «чаще просматривать страницы»): the list page, and only the
@@ -615,57 +642,65 @@ export function startInsurance(o: {
   let blindAt = Number.NEGATIVE_INFINITY
   async function newsCheck() {
     if (Date.now() - blindAt < BLIND_EVERY_MS) return
-    await serial(async () => {
-      if (!can()) return
-      const list = await openList()
-      if (!list) return
-      if (!list.marks) {
-        blindAt = Date.now()
-        await keepList()
-      }
-      const named = new Set(o.eyes.chatsTouched())
-      const held = list.marks
-        ? await o.eyes.lastStored(list.items.map((c) => c.chatId))
-        : new Map<string, number>()
-      const news = (await listOrKnown(list)).filter((c) => {
-        // A chat the stream named is read by the news job right away.
-        if (named.has(c.chatId)) return false
-        if (!list.marks) return c.unread > 0
-        if (handled.has(c.chatId) && handled.get(c.chatId) === c.lastAt) return false
-        const mine = held.get(c.chatId)
-        const at = c.lastAt === null ? Number.NaN : Date.parse(c.lastAt)
-        return c.unread > 0 || (mine !== undefined && at > mine)
-      })
-      let opened = 0
-      for (const c of news.slice(0, NEWS_MAX)) {
-        if (!can() || pressWaits()) break
-        await sleep(pause)
-        if (!(await go(o.parsers.paths.chat(c.chatId)))) break
-        opened++
-        await readChat(c.chatId)
-        handled.delete(c.chatId)
-        if (handled.size >= 500) handled.delete(handled.keys().next().value ?? '')
-        handled.set(c.chatId, c.lastAt)
-      }
-      // How the check went, without a chat's words: what the list gave and how many pages it cost.
-      await keep({
-        what: 'chat_check',
-        from: list.marks ? 'answer' : 'page',
-        chats: list.items.length,
-        news: news.length,
-        opened,
-      })
-    })
+    await serial(
+      async () => {
+        if (!can()) return
+        const list = await openList()
+        if (!list) return
+        if (!list.marks) {
+          blindAt = Date.now()
+          await keepList()
+        }
+        const named = new Set(o.eyes.chatsTouched())
+        const held = list.marks
+          ? await o.eyes.lastStored(list.items.map((c) => c.chatId))
+          : new Map<string, number>()
+        const news = (await listOrKnown(list)).filter((c) => {
+          // A chat the stream named is read by the news job right away.
+          if (named.has(c.chatId)) return false
+          if (!list.marks) return c.unread > 0
+          if (handled.has(c.chatId) && handled.get(c.chatId) === c.lastAt) return false
+          const mine = held.get(c.chatId)
+          const at = c.lastAt === null ? Number.NaN : Date.parse(c.lastAt)
+          return c.unread > 0 || (mine !== undefined && at > mine)
+        })
+        let opened = 0
+        for (const c of news.slice(0, NEWS_MAX)) {
+          if (!can() || pressWaits()) break
+          await sleep(pause)
+          if (!(await go(o.parsers.paths.chat(c.chatId)))) break
+          opened++
+          await readChat(c.chatId)
+          handled.delete(c.chatId)
+          if (handled.size >= 500) handled.delete(handled.keys().next().value ?? '')
+          handled.set(c.chatId, c.lastAt)
+        }
+        // How the check went, without a chat's words: what the list gave and how many pages it cost.
+        await keep({
+          what: 'chat_check',
+          from: list.marks ? 'answer' : 'page',
+          chats: list.items.length,
+          news: news.length,
+          opened,
+        })
+      },
+      0,
+      'список чатов',
+    )
   }
 
   // A chat the event stream named is read at once, not at the next pass over the feed: the stream names only the chat,
   // its words are on the chat page (FR-CONV-1).
   async function readNews() {
     if (o.eyes.chatsTouched().length === 0) return
-    await serial(async () => {
-      await readTouchedChats()
-      if (can() && !pressWaits()) await maybeBackToFeed()
-    }, NEWS)
+    await serial(
+      async () => {
+        await readTouchedChats()
+        if (can() && !pressWaits()) await maybeBackToFeed()
+      },
+      NEWS,
+      'новые сообщения',
+    )
   }
 
   // A check still waiting or running is not queued again: a whole-board pass (up to 50 s) would otherwise stack the
@@ -717,7 +752,7 @@ export function startInsurance(o: {
         can(): boolean
         later(errand: () => Promise<void>): void
       }) => Promise<T>,
-      opt?: { urgent?: boolean },
+      opt?: { urgent?: boolean; soon?: boolean; what?: string },
     ): Promise<T> {
       return new Promise<T>((resolve, reject) => {
         void serial(
@@ -743,7 +778,8 @@ export function startInsurance(o: {
             for (const errand of errands) if (!pressWaits()) await errand().catch(() => {})
             if (can() && !pressWaits()) await maybeBackToFeed()
           },
-          opt?.urgent === true ? PRESS : 0,
+          opt?.urgent === true ? PRESS : opt?.soon === true ? NEWS : 0,
+          opt?.what ?? (opt?.urgent === true ? 'нажатие' : 'работа'),
         ).catch(() => {})
       })
     },
