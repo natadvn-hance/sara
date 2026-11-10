@@ -67,8 +67,9 @@ export function scorerInput(
   o: ProfiOrder,
   rules: DirectionRules,
   precedents: Precedent[] = [],
+  minSimilar?: number,
 ): string {
-  const past = precedentsText(precedents)
+  const past = precedentsText(precedents, minSimilar)
   return `${rulesText(rules, o.category)}\n\nЗаказ\n\n${sorterInput(o)}${past ? `\n\n${past}` : ''}`
 }
 
@@ -111,10 +112,12 @@ export async function scoreOrder(
     onFailure?: (errorClass: string) => void
     /** Boris's decisions on similar orders; a backtest and a trial leave them out, they compare rules alone. */
     precedents?: Precedent[]
+    /** From how many similar decisions their share counts (`autobid.min_similar`), as on the card. */
+    minSimilar?: number
   } = {},
 ): Promise<Scored | null> {
   const precedents = opts.precedents ?? []
-  const input = scorerInput(o, rules, precedents)
+  const input = scorerInput(o, rules, precedents, opts.minSimilar)
   const once = async (model: 'haiku' | 'sonnet'): Promise<Scored | null> => {
     const r = await gw.call('scorer', input, ScorerOutput, {
       model,

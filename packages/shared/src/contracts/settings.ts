@@ -59,6 +59,21 @@ export const SETTINGS = {
     schema: z.number().int().nonnegative().nullable(),
     default: null as number | null,
   },
+  /**
+   * The shadow of the auto-bid (Boris, 10.11.2026): a card is marked «🤖 откликнулась бы сама» when he bid on more than
+   * this share (%) of the similar orders he decided...
+   */
+  'autobid.min_share_pct': { schema: z.number().int().min(0).max(99), default: 80 },
+  /** ...of at least this many of them (below it the card says that there are too few to count; 15 are looked at)... */
+  'autobid.min_similar': { schema: z.number().int().min(1).max(15), default: 10 },
+  /**
+   * ...and the bid, its price read from the order page, costs no more than this; null, no ceiling. Only a mark: no
+   * setting makes Sara bid by herself.
+   */
+  'autobid.max_fee_rub': {
+    schema: z.number().int().nonnegative().nullable(),
+    default: 200 as number | null,
+  },
   /** FR-NOTIF-3: lead cards a Moscow day; the rest wait for the 19:00 summary. */
   'cards.max_per_day': { schema: z.number().int().positive(), default: 10 },
   /**

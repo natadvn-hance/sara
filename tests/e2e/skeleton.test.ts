@@ -142,6 +142,8 @@ describe('walking skeleton', () => {
       'lead.drafted',
       'lead.sorted',
       'task.created',
+      // The shadow of the auto-bid, on every card (10.11.2026): only a mark, nothing sent.
+      'lead.autobid_shadow',
       'card.sent',
     ])
   })

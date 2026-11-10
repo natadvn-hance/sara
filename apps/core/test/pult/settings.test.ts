@@ -100,6 +100,30 @@ describe('the switches of «Настройки» (pult v2 design 8)', () => {
   })
 })
 
+describe('the shadow of the auto-bid in the settings (10.11.2026)', () => {
+  it('FR-LEAD-9: Boris changes the share, the minimum of similar orders and the price ceiling; none of them sends a bid', async () => {
+    const v = SettingsView.parse((await get('/api/settings')).body)
+    const group = v.groups.find((g) => g.id === 'autobid')
+    expect(group?.rows.map((r) => [r.key, r.value, r.edit])).toEqual([
+      ['autobid.min_share_pct', 80, 'free'],
+      ['autobid.min_similar', 10, 'free'],
+      ['autobid.max_fee_rub', 200, 'free'],
+    ])
+    expect(group?.rows[0]?.hint).toContain('сама Сара не откликается')
+    expect((await post('/api/settings/autobid.min_share_pct', { value: 70 })).status).toBe(200)
+    expect((await post('/api/settings/autobid.min_similar', { value: 12 })).status).toBe(200)
+    expect((await post('/api/settings/autobid.max_fee_rub', { value: null })).status).toBe(200)
+    expect(await getSetting(db, 'autobid.min_share_pct')).toBe(70)
+    expect(await getSetting(db, 'autobid.min_similar')).toBe(12)
+    expect(await getSetting(db, 'autobid.max_fee_rub')).toBeNull()
+    // More than the 15 similar orders looked at, or a share of 100% and more, can never be met.
+    expect((await post('/api/settings/autobid.min_similar', { value: 16 })).status).toBe(400)
+    expect((await post('/api/settings/autobid.min_share_pct', { value: 100 })).status).toBe(400)
+    // The money switch is untouched by them.
+    expect(await getSetting(db, 'outbound.bids')).toBe(false)
+  })
+})
+
 describe('the pult\u2019s own choices in the settings (Boris\u2019s open questions, the proposals kept changeable)', () => {
   it('FR-UI-4: the four tabs are a setting the frame reads; a section stands in one place only', async () => {
     expect((await get('/api/prefs')).body).toEqual({ tabs: ['inbox', 'leads', 'clients', 'today'] })

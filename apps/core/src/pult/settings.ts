@@ -67,6 +67,24 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     kind: 'rub',
   },
   'cards.max_per_day': { title: 'Карточек заявок в день', edit: 'free', kind: 'count' },
+  'autobid.min_share_pct': {
+    title: 'На похожие откликался больше, %',
+    hint: 'Пока только пометка «🤖 откликнулась бы сама» на карточке: сама Сара не откликается, деньги не тратит.',
+    edit: 'free',
+    kind: 'count',
+  },
+  'autobid.min_similar': {
+    title: 'Похожих решений не меньше',
+    hint: 'Меньше: на карточке «похожих пока мало», процент не считается. Сара смотрит до 15 самых похожих.',
+    edit: 'free',
+    kind: 'count',
+  },
+  'autobid.max_fee_rub': {
+    title: 'Отклик не дороже',
+    hint: 'Цена со страницы заявки, прочитанная перед карточкой. Пусто: без ограничения.',
+    edit: 'free',
+    kind: 'rub',
+  },
   'screen.stops': {
     title: 'Отсев останавливает заявки',
     hint: 'Выключен: отсев только отмечает заявки, карточки идут как раньше. Аккаунт, созданный в день заявки, отсекается всегда.',
@@ -201,6 +219,11 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
     id: 'money',
     title: 'Деньги',
     keys: ['money.daily_bids', 'money.daily_budget_rub', 'money.max_fee_rub'],
+  },
+  {
+    id: 'autobid',
+    title: 'Автоотклик, пока пометка',
+    keys: ['autobid.min_share_pct', 'autobid.min_similar', 'autobid.max_fee_rub'],
   },
   {
     id: 'screen',

@@ -14,6 +14,7 @@ import {
   priceRange,
   SCREEN_RU,
   type ScreenMark,
+  SETTINGS,
   type SorterOutput,
   type TaskAction,
   thresholdFor,
@@ -54,6 +55,7 @@ import { leadSiteOf, studyLeadSite } from '../site'
 import type { Fetched } from '../site/fetch'
 import { seriesWithoutBlocked } from '../text/blockedLinks'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
+import { type AutobidShadowPayload, autobidRule, type Fee, shadowPayload } from './autobidShadow'
 import { casesForBid } from './bidCases'
 import { callOfferTemplate } from './callSlots'
 import { CARD_FLOW_TEXTS, cardsToday, isStale, lockCards, quietNow } from './cardFlow'
@@ -198,6 +200,7 @@ const ev = (
     | 'lead.closed_on_site'
     | 'lead.held'
     | 'lead.drafted'
+    | 'lead.autobid_shadow'
     | 'draft.edited'
     | 'draft.priced'
     | 'task.created'
@@ -284,6 +287,24 @@ function fuller<T extends Pick<ProfiOrder, 'bid_price_rub' | 'client_name' | 'te
  */
 const pageVerdict = (r: PageRead): 'go' | 'closed' | 'bid_already' =>
   !r.ok ? 'go' : r.page.has_bid === true ? 'bid_already' : !r.page.open ? 'closed' : 'go'
+
+/**
+ * The shadow of the auto-bid for a card about to go out (Boris, 10.11.2026): his rule on the similar decisions the
+ * Scorer saw and on the bid's price, journaled as numbers and flags (ADR-016). Nothing is sent and nothing spent.
+ */
+async function autobidShadow(
+  l: { id: string; correlationId: string },
+  precedents: unknown,
+  fee: Fee,
+): Promise<AutobidShadowPayload> {
+  const rule = await autobidRule(d().db)
+  const payload = shadowPayload(similarOnCard(precedents, rule.minSimilar), fee, rule)
+  await appendEvent(
+    d().db,
+    ev('lead.autobid_shadow', { kind: 'lead', id: l.id }, l.correlationId, 'sara', payload),
+  )
+  return payload
+}
 
 /**
  * The page's findings go on the lead, and into the journal as numbers and flags, never as the client's words
@@ -760,6 +781,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
           correlationId,
           causationId: e.id,
           precedents,
+          // The Scorer is told the share as the card says it: too few similar decisions say nothing yet.
+          minSimilar: await getSetting(d().db, 'autobid.min_similar'),
         })
         if (!found) return null
         const s = { ...found, precedents: storePrecedents(precedents) }
@@ -865,6 +888,8 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     client_info: ClientInfo | null
     attachments: OrderAttachment[]
   } = { ...order, client_info: null, attachments: [] }
+  // The bid's price was read from the order page just now (the shadow of the auto-bid trusts only such a price).
+  let feeFromPage = false
   if (await DBOS.patch('order-page')) {
     // An order the day's cap will hold waits for the summary: no visit of the tab for it now, «Показать» reads its page
     // (with its draft, draftThenCard).
@@ -876,6 +901,7 @@ async function processOrder(e: EventEnvelope): Promise<void> {
         name: 'orderPage',
       })
       withPage = fuller(order, read)
+      feeFromPage = read.ok && read.page.bid_price_rub > 0
       const verdict = await DBOS.runStep(
         () => storePage({ id: order.order_id, correlationId }, withPage, read, sorted),
         { name: 'orderPageStored', ...DB_STEP },
@@ -989,6 +1015,19 @@ async function processOrder(e: EventEnvelope): Promise<void> {
   )
   if (taskId === null) return
 
+  // The shadow of the auto-bid (Boris, 10.11.2026): his rule is checked and journaled, the card marked; no bid is sent
+  // and no money spent here, whatever the settings. A run recorded before this step resumes without it.
+  const shadow = (await DBOS.patch('autobid-shadow'))
+    ? await DBOS.runStep(
+        () =>
+          autobidShadow({ id: order.order_id, correlationId }, scored?.precedents, {
+            rub: withPage.bid_price_rub,
+            fromPage: feeFromPage,
+          }),
+        { name: 'autobidShadow', ...DB_STEP },
+      )
+    : null
+
   // The wait starts before the card goes out, so an instant press always finds it.
   const remindAfter = await DBOS.runStep(() => d().remindAfterMs(), { name: 'remindAfter' })
   await startDecisionWait(taskId, remindAfter)
@@ -1007,7 +1046,11 @@ async function processOrder(e: EventEnvelope): Promise<void> {
     reason: sorted.reason,
     bidPriceRub: withPage.bid_price_rub,
     score: scored ? { value: scored.score, version: scored.version, reason: scored.reason } : null,
-    similar: similarOnCard(scored?.precedents),
+    similar: similarOnCard(
+      scored?.precedents,
+      shadow?.min_similar ?? SETTINGS['autobid.min_similar'].default,
+    ),
+    autobid: shadow?.would === true,
     unscored: !scored,
     // The same text as every later card and as the bid: the greeting of this hour, the voice rules applied (the case
     // lines the program put in are tidied too), so Boris never approves a text that is not the one to be sent.
@@ -1103,6 +1146,14 @@ async function cardOfFound(
     .where(and(eq(leadScore.leadId, l.id), eq(leadScore.backtest, false)))
     .orderBy(desc(leadScore.createdAt))
     .limit(1)
+  // The shadow of the auto-bid as it was when the card first went out; a card from before it has none.
+  const [shadowed] = await d()
+    .db.select({ payload: event.payload })
+    .from(event)
+    .where(and(eq(event.correlationId, l.correlationId), eq(event.type, 'lead.autobid_shadow')))
+    .orderBy(desc(event.id))
+    .limit(1)
+  const shadow = (shadowed?.payload ?? null) as Partial<AutobidShadowPayload> | null
   return {
     taskId: t.id,
     orderId: l.id,
@@ -1116,7 +1167,11 @@ async function cardOfFound(
     reason: s.reason ?? null,
     bidPriceRub: l.bidPriceRub,
     score: sc ? { value: sc.score, version: sc.version, reason: sc.reason } : null,
-    similar: similarOnCard(sc?.precedents),
+    similar: similarOnCard(
+      sc?.precedents,
+      shadow?.min_similar ?? (await getSetting(d().db, 'autobid.min_similar')),
+    ),
+    autobid: shadow?.would === true,
     reminder,
     // The card shows the bid as it would go out now: the greeting of this hour, the voice rules applied. Nothing says
     // that the greeting may change; it is built again when the bid is sent.

@@ -38,6 +38,11 @@ export const EVENT_TYPES = [
   /** Too many waiting cards looked closed at once: none was closed, Boris was told (closed, checked). */
   'lead.recheck_doubt',
   'lead.held',
+  /**
+   * The shadow of the auto-bid on a card that went out (10.11.2026): whether Sara would bid by herself, why not (codes),
+   * the similar decisions, the price and the thresholds. Nothing is sent.
+   */
+  'lead.autobid_shadow',
   'lead.drafted',
   'draft.edited',
   /** Boris set the «Стоимость услуги» after «Изменить» or the price question (before, after). */
