@@ -158,6 +158,9 @@ beforeEach(async () => {
   tg.sent.length = 0
   tg.edited.length = 0
   tg.answers.length = 0
+  tg.photos.length = 0
+  tg.mediaEdits.length = 0
+  tg.setPhotoRefused(null)
   fake.bids.length = 0
   fake.setFee(null)
   fake.refuseNext('INTERNAL', 0)
@@ -353,6 +356,72 @@ describe('the card folds itself (Boris, 03.11.2026)', () => {
     await until(() => tg.shown('✅ Отклик отправлен'))
     expect(fake.bids).toHaveLength(1)
     expect(tg.sent.some((m) => plain(m.text).startsWith('⏳ Отправляю отклик'))).toBe(true)
+  })
+})
+
+describe('the card as a picture (FR-NOTIF-6, 11.11.2026)', () => {
+  /** What the picture card's own row in the core says it shows now, in the order of its changes. */
+  const stages = async (ref: number) => {
+    const r = await db.execute<{ s: string }>(
+      sql`select state->>'s' as s from core.telegram_card where ref = ${ref}`,
+    )
+    return r.rows[0]?.s
+  }
+  async function pictureFor(): Promise<{
+    id: string
+    messageId: number
+    data: (a: string) => string
+  }> {
+    await setSetting(db, 'cards.picture', true, 'boris')
+    const id = orderId()
+    await fake.emitOrder({ order_id: id })
+    await until(() => tg.photos.length === 1)
+    const t = await taskOf(id)
+    return {
+      id,
+      messageId: tg.photos[0]?.message_id ?? -1,
+      data: (a: string) => `t:${t?.id}:${a}`,
+    }
+  }
+
+  it('FR-NOTIF-6: one picture goes new, sending, sent in its own message: its button bids, nothing else is sent', async () => {
+    const p = await pictureFor()
+    tg.pushPress(111, p.data('bid'), p.messageId)
+    await until(async () => (await stages(p.messageId)) === 'sent')
+    expect(fake.bids).toHaveLength(1)
+    expect(tg.answers.at(-1)?.text).toBe(TEXTS.bidQueued)
+    expect(tg.mediaEdits.length).toBeGreaterThanOrEqual(2)
+    // One card: no text card and no message of its own about the bid; only the greeting of /start.
+    expect(cards()).toHaveLength(0)
+    expect(tg.sent).toHaveLength(1)
+    expect(tg.photos).toHaveLength(1)
+  })
+
+  it('FR-NOTIF-6: a refused bid puts the picture back as new, and the refusal is told', async () => {
+    const p = await pictureFor()
+    fake.refuseNext('NO_MONEY')
+    tg.pushPress(111, p.data('bid'), p.messageId)
+    await until(() => said(TEXTS.bidRefused(TITLE, 'NO_MONEY')))
+    await until(async () => (await stages(p.messageId)) === 'new' && tg.mediaEdits.length >= 2)
+    expect(tg.photos).toHaveLength(1)
+  })
+
+  it('FR-NOTIF-6: a press that ended ORDER_CLOSED closes the picture in place', async () => {
+    const p = await pictureFor()
+    fake.refuseNext('ORDER_CLOSED')
+    tg.pushPress(111, p.data('bid'), p.messageId)
+    await until(async () => (await stages(p.messageId)) === 'closed')
+    expect(tg.photos).toHaveLength(1)
+  })
+
+  it('FR-NOTIF-6: a picture Telegram refuses leaves the text card once, and the bid folds that card as before', async () => {
+    await setSetting(db, 'cards.picture', true, 'boris')
+    tg.setPhotoRefused('Bad Request: PHOTO_INVALID_DIMENSIONS')
+    await cardFor()
+    expect(tg.photos).toHaveLength(0)
+    press()
+    await until(() => foldedSent(210))
+    expect(cards()).toHaveLength(1)
   })
 })
 

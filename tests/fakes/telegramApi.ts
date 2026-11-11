@@ -24,6 +24,19 @@ export type EditedMessage = {
   reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] }
 }
 
+/** A photo the bot sent (sendPhoto), with what it shows now: editMessageMedia changes it. */
+export type SentPhoto = {
+  message_id: number
+  chat_id: number
+  message_thread_id?: number
+  caption?: string
+  parse_mode?: string
+  reply_markup?: { inline_keyboard: Record<string, unknown>[][] }
+  disable_notification?: boolean
+  /** The picture's bytes. */
+  photo: Buffer
+}
+
 /** A topic of a forum group, as the fake keeps it. */
 export type FakeTopic = {
   chat_id: number
@@ -63,7 +76,8 @@ export type FakeTelegram = {
   /** sendChatAction calls («печатает…»), in order. */
   actions: string[]
   pushStart(chatId: number): void
-  pushPress(chatId: number, data: string): string
+  /** A press on a button of message `messageId` (1 when left out). */
+  pushPress(chatId: number, data: string, messageId?: number): string
   /** A text message from Boris, optionally a reply to one of the bot's messages. */
   pushText(chatId: number, text: string, replyTo?: number): void
   /** A voice message; its file is served by the fake file endpoint. */
@@ -78,6 +92,12 @@ export type FakeTelegram = {
   setEditError(messageId: number, description: string | null): void
   /** sendMessage answers this many ms late: the message is in `sent` at once, the caller waits (a slow Telegram). */
   setSendDelay(ms: number): void
+  /** Photos the bot sent, each as it shows now. */
+  photos: SentPhoto[]
+  /** Every photo Telegram let the bot change (editMessageMedia), in order. */
+  mediaEdits: Omit<SentPhoto, 'message_thread_id' | 'disable_notification'>[]
+  /** sendPhoto answers this error like Telegram; null clears it. */
+  setPhotoRefused(description: string | null): void
   /** Forum topics made by the bot, with their names and whether they are closed. */
   topics: FakeTopic[]
   /** Calls the fake answers with a plain `true` (setMyCommands, setChatMenuButton...), in order. */
@@ -152,6 +172,47 @@ export function htmlProblem(html: string): string | null {
   return null
 }
 
+/** A caption Telegram would refuse: bad markup, or over 1024 characters once the tags are parsed. */
+function captionProblem(html: string): string | null {
+  const markup = htmlProblem(html)
+  if (markup && markup !== 'message text is empty') return markup
+  const visible = html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);/gi, '.')
+  return visible.length > 1024 ? 'message caption is too long' : null
+}
+
+/** A multipart/form-data body (grammY sends files this way): its text fields, JSON ones parsed, and its files. */
+function multipart(
+  raw: Buffer,
+  type: string,
+): { fields: Record<string, unknown>; files: Map<string, Buffer> } {
+  const boundary = /boundary=(?:"([^"]+)"|([^;]+))/.exec(type)
+  const mark = `--${boundary?.[1] ?? boundary?.[2] ?? ''}`
+  const fields: Record<string, unknown> = {}
+  const files = new Map<string, Buffer>()
+  const text = raw.toString('latin1')
+  for (const part of text.split(mark).slice(1)) {
+    if (part.startsWith('--')) break
+    const split = part.indexOf('\r\n\r\n')
+    if (split < 0) continue
+    const head = part.slice(0, split)
+    const value = part.slice(split + 4).replace(/\r\n$/, '')
+    const name = /name="([^"]*)"/.exec(head)?.[1] ?? ''
+    if (/filename=/.test(head)) {
+      files.set(name, Buffer.from(value, 'latin1'))
+      continue
+    }
+    const v = Buffer.from(value, 'latin1').toString('utf8')
+    try {
+      fields[name] = /^[[{]|^(true|false|-?\d+)$/.test(v) ? JSON.parse(v) : v
+    } catch {
+      fields[name] = v
+    }
+  }
+  return { fields, files }
+}
+
 export const FAKE_TOKEN = '123456789:AAFakeTokenForTestsOnly_abcdefghijklmnop'
 
 export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
@@ -190,14 +251,21 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
   const deleted: FakeTelegram['deleted'] = []
   let rejectHtml = false
   let sendDelayMs = 0
+  const photos: SentPhoto[] = []
+  const mediaEdits: FakeTelegram['mediaEdits'] = []
+  let photoRefused: string | null = null
   const now = () => Math.floor(Date.now() / 1000)
 
   const server = createServer((req, res) => {
-    let body = ''
-    req.on('data', (c) => {
-      body += c
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => {
+      chunks.push(c)
     })
     req.on('end', async () => {
+      const raw = Buffer.concat(chunks)
+      const type = req.headers['content-type'] ?? ''
+      const form = /multipart\/form-data/.test(type) ? multipart(raw, type) : null
+      const body = form ? '' : raw.toString('utf8')
       // Files, like Telegram: GET /file/bot<token>/<file_path>.
       if ((req.url ?? '').startsWith(`/file/bot${FAKE_TOKEN}/`)) {
         return res.writeHead(200, { 'content-type': 'audio/ogg' }).end('OggS fake voice')
@@ -214,8 +282,74 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           .writeHead(401, { 'content-type': 'application/json' })
           .end(JSON.stringify({ ok: false, error_code: 401, description: 'Unauthorized' }))
       }
-      const params = body ? JSON.parse(body) : {}
+      const params = form ? form.fields : body ? JSON.parse(body) : {}
+      /** The file a multipart field points at («attach://name»), or the field's own file. */
+      const fileOf = (ref: unknown): Buffer => {
+        const name = typeof ref === 'string' ? ref.replace(/^attach:\/\//, '') : ''
+        return form?.files.get(name) ?? Buffer.alloc(0)
+      }
       switch (method) {
+        case 'sendPhoto': {
+          if (photoRefused) return refuse(res, 400, photoRefused)
+          if (goneChat !== null && Number(params.chat_id) === goneChat)
+            return refuse(res, 400, 'Forbidden: bot was kicked from the supergroup chat')
+          const problem =
+            params.parse_mode === 'HTML' ? captionProblem(String(params.caption ?? '')) : null
+          if (problem) return refuse(res, 400, `Bad Request: ${problem}`)
+          const id = nextId(Number(params.chat_id))
+          photos.push({
+            message_id: id,
+            chat_id: Number(params.chat_id),
+            ...(params.message_thread_id !== undefined && {
+              message_thread_id: Number(params.message_thread_id),
+            }),
+            caption: params.caption,
+            parse_mode: params.parse_mode,
+            reply_markup: params.reply_markup,
+            disable_notification: params.disable_notification === true,
+            photo: form?.files.get('photo') ?? fileOf(params.photo),
+          })
+          return reply({
+            message_id: id,
+            date: now(),
+            chat: { id: Number(params.chat_id), type: 'private' },
+            photo: [
+              {
+                file_id: `photo-${id}`,
+                file_unique_id: `u-photo-${id}`,
+                width: 1080,
+                height: 1080,
+              },
+            ],
+            caption: params.caption,
+          })
+        }
+        case 'editMessageMedia': {
+          const id = Number(params.message_id)
+          const p = photos.find((x) => x.chat_id === Number(params.chat_id) && x.message_id === id)
+          if (!p) return refuse(res, 400, 'Bad Request: message to edit not found')
+          const media = params.media as { caption?: string; parse_mode?: string; media?: string }
+          const problem =
+            media.parse_mode === 'HTML' ? captionProblem(String(media.caption ?? '')) : null
+          if (problem) return refuse(res, 400, `Bad Request: ${problem}`)
+          const photo = fileOf(media.media)
+          if (
+            p.caption === media.caption &&
+            p.photo.equals(photo) &&
+            JSON.stringify(p.reply_markup ?? null) === JSON.stringify(params.reply_markup ?? null)
+          )
+            return refuse(res, 400, 'Bad Request: message is not modified')
+          Object.assign(p, { caption: media.caption, reply_markup: params.reply_markup, photo })
+          mediaEdits.push({
+            message_id: id,
+            chat_id: p.chat_id,
+            caption: media.caption,
+            parse_mode: media.parse_mode,
+            reply_markup: params.reply_markup,
+            photo,
+          })
+          return reply({ message_id: id, date: now(), chat: { id: p.chat_id, type: 'private' } })
+        }
         case 'getMe':
           return reply({ id: 1, is_bot: true, first_name: 'Сара', username: 'sara_dev_bot' })
         case 'getUpdates': {
@@ -420,7 +554,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
         },
       })
     },
-    pushPress(chatId, data) {
+    pushPress(chatId, data, messageId = 1) {
       const id = String(nextCallback++)
       updates.push({
         update_id: nextUpdate++,
@@ -430,7 +564,7 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
           chat_instance: 'fake',
           data,
           message: {
-            message_id: 1,
+            message_id: messageId,
             date: now(),
             chat: { id: chatId, type: 'private' },
             text: 'card',
@@ -518,6 +652,11 @@ export async function createFakeTelegram(port = 0): Promise<FakeTelegram> {
     },
     topics,
     calls,
+    photos,
+    mediaEdits,
+    setPhotoRefused(description) {
+      photoRefused = description
+    },
     pushGroupVoice(m) {
       const chat = {
         id: m.chatId,

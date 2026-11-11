@@ -176,6 +176,10 @@ export const TEXTS = {
   leadsTopic: 'Заявки',
   analyticsTopic: '📊 Аналитика',
   commandFailed: 'Не получилось ответить на команду. Попробуй ещё раз чуть позже.',
+  /** An older picture card of a lead that came again (after «Правка»): the live one is the newer (FR-NOTIF-6). */
+  cardMoved: 'Карточка обновлена, новая ниже',
+  /** A view of the picture card that could not be drawn (FR-NOTIF-6). */
+  viewFailed: 'Не получилось показать, нажми ещё раз',
   alreadyDone: 'Уже сделано',
   skipped: 'Заявка закрыта',
   bidQueued: 'Отправляю отклик',
@@ -398,7 +402,7 @@ function sliceWhole(s: string, n: number): string {
 const clean = (s: string | null | undefined, max: number) => esc(clip((s ?? '').trim(), max))
 const noPeriod = (s: string) => s.replace(/[.\s]+$/, '')
 
-const orderUrl = (orderId: string) =>
+export const orderUrl = (orderId: string) =>
   `https://profi.ru/backoffice/n.php?o=${encodeURIComponent(orderId)}`
 const linkLine = (orderId: string) =>
   isTestOrder(orderId)
@@ -455,7 +459,7 @@ function similarLines(c: LeadCard): string[] {
 }
 
 /** «На Профи.ру с 7 сентября 2020» as the site writes it; a bare date gets the beginning. */
-const sinceText = (s: string) =>
+export const sinceText = (s: string) =>
   /^на\s+профи\.ру/i.test(s) ? s : `на Профи.ру с ${s.replace(/^с\s+/i, '')}`
 
 /** The client in one line (Boris, sample 3, 27.10.2026): name, the site's lines, since when, the phone, the reviews. */
@@ -529,7 +533,7 @@ const line = (s: string | null | undefined, max: number = CAP.line) => {
 }
 
 /** The Scorer's reason as a plus and a minus: it often reads «Заказ подходит: … Минусы: …». */
-function plusMinus(reason: string): { plus: string; minus: string | null } {
+export function plusMinus(reason: string): { plus: string; minus: string | null } {
   const r = reason.trim().replace(/^(заказ\s+)?(подходит|возможно)\s*:\s*/i, '')
   const [plus = '', ...rest] = r.split(/\s*Минус(?:ы)?\s*:\s*/i)
   return { plus, minus: rest.length > 0 ? rest.join(' ') : null }
@@ -681,7 +685,7 @@ const mskClock = (iso: string) =>
   })
 
 /** How long the order was open, as honestly as the journal knows it. */
-function closedWhenText(w: ClosedWhen): string {
+export function closedWhenText(w: ClosedWhen): string {
   const ms = (a: string, b: string) => Date.parse(b) - Date.parse(a)
   if (w.exact) return TEXTS.closedAfter(spanText(ms(w.since, w.at)), w.published)
   const openFor =

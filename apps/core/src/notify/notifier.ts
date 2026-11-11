@@ -1,3 +1,4 @@
+import type { CardState } from './cardState'
 import type { LeadCard } from './cards'
 import type { NoticeHint } from './center'
 
@@ -56,12 +57,15 @@ export type Notifier = {
    * on a decided task. It never throws: a message Telegram will not edit is only logged.
    */
   markDone?(messageId: number, note: string): Promise<void>
-  /** Changes a sent message without a sound (M4: the shadow card gets the real reply); rows keep its buttons. */
+  /**
+   * Changes a sent message without a sound (M4: the shadow card gets the real reply); rows keep its buttons. A lead
+   * card sent as a picture (FR-NOTIF-6) is drawn again in `state`, or, without one, with `text` as its note.
+   */
   editText?(
     messageId: number,
     text: string,
     rows?: { text: string; callbackData: string }[][],
-    o?: { html?: boolean },
+    o?: { html?: boolean; state?: CardState },
   ): Promise<void>
   /** The link to the client's topic in the forum; null without a forum or before the topic exists. It never throws. */
   topicLink?(place: { conversation: string } | { order: string }): Promise<string | null>

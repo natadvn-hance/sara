@@ -304,6 +304,19 @@ export const telegramPost = core.table(
   (t) => [uniqueIndex('telegram_post_message').on(t.chatId, t.messageId)],
 )
 
+/**
+ * A lead card sent as a picture (FR-NOTIF-6), by the message's reference (a forum post's is negative): the task, the
+ * card it was drawn from and the state it shows now. An edit of the card draws it again from here.
+ */
+export const telegramCard = core.table('telegram_card', {
+  ref: bigint('ref', { mode: 'number' }).primaryKey(),
+  taskId: uuid('task_id'),
+  card: jsonb('card').notNull(),
+  state: jsonb('state').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+
 /** Versions of an account's direction rules (FR-ACC-2); exactly one is active per account. */
 export const directionVersion = core.table(
   'direction_version',

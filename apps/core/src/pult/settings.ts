@@ -163,6 +163,12 @@ export const SETTING_META: Partial<Record<SettingKey, Meta>> = {
     edit: 'free',
     kind: 'flag',
   },
+  'cards.picture': {
+    title: 'Карточка заявки картинкой',
+    hint: 'Карточка в стиле Hance: картинка с баллом, клиентом и риском, под ней текст отклика и заявки. Одно сообщение меняется на месте, от новой до закрытой. Если картинка не получится, придёт обычная карточка.',
+    edit: 'free',
+    kind: 'flag',
+  },
   'calls.offer': {
     title: 'Предлагает созвон после отклика',
     hint: 'Последнее сообщение серии: созвониться на полчаса, три времени на выбор.',
@@ -234,6 +240,7 @@ const GROUPS: { id: string; title: string; keys: SettingKey[] }[] = [
     id: 'cards',
     title: 'Уведомления',
     keys: [
+      'cards.picture',
       'cards.max_per_day',
       'conv.cards_per_day',
       'reminder.decision_after_min',
