@@ -95,9 +95,11 @@ export function reminderFallback(
   clientName: string | null,
   tone: ReminderTone,
   variant: 0 | 1 = 0,
+  /** The greeting chosen for this chat (11.11.2026: a different one each time); none: «Имя, здравствуйте.». */
+  hello?: string,
 ): string {
   const first = clientName ? firstName(clientName) : null
-  const greeting = first ? `${first}, здравствуйте.` : 'Здравствуйте.'
+  const greeting = hello ?? (first ? `${first}, здравствуйте.` : 'Здравствуйте.')
   if (tone === 'friendly')
     return variant === 0
       ? `${greeting} Если вопрос ещё открыт, пишите в любой момент: помогу разобраться, с чего начать. Хорошего дня!`
@@ -154,8 +156,12 @@ export function pingFallback(
   sc: PingScenario | null,
   tone: ReminderTone,
   variant: 0 | 1 = 0,
+  /** The greeting chosen for this chat (11.11.2026: a different one each time); none: «Имя, добрый день!». */
+  hello?: string,
 ): string {
   const first = clientName ? firstName(clientName) : null
-  const own = sc ? scenarioTexts(first ? `${first}, добрый день!` : 'Добрый день!', sc) : null
-  return own ? own[variant] : reminderFallback(clientName, tone, variant)
+  const own = sc
+    ? scenarioTexts(hello ?? (first ? `${first}, добрый день!` : 'Добрый день!'), sc)
+    : null
+  return own ? own[variant] : reminderFallback(clientName, tone, variant, hello)
 }

@@ -1,5 +1,5 @@
 import { isTestOrder } from '@sara/shared'
-import { type ProfiClient, ProfiError } from '../profi/client'
+import { forClient, type ProfiClient, ProfiError } from '../profi/client'
 
 /**
  * The node's client that never takes a test order (docs/ops/test-leads.md): the core's own lock, before the live node
@@ -46,9 +46,16 @@ export function routeTestOrders(live: ProfiClient, test: () => ProfiClient | nul
   return {
     sessionHealth: (a) => node.sessionHealth(a),
     getOrder: async (a, id) => (isTestOrder(id) ? made() : node).getOrder(a, id),
-    submitBid: async (i) => (isTestOrder(i.order_id) ? made() : node).submitBid(i),
+    // A test chat gets the text a real client would: the node's client makes it so for a real one (11.11.2026).
+    submitBid: async (i) =>
+      isTestOrder(i.order_id)
+        ? made().submitBid({ ...i, text: forClient(i.text) })
+        : node.submitBid(i),
     readChat: async (a, c) => (isTestOrder(c) ? made() : node).readChat(a, c),
-    sendMessage: async (i) => (isTestOrder(i.chat_id) ? made() : node).sendMessage(i),
+    sendMessage: async (i) =>
+      isTestOrder(i.chat_id)
+        ? made().sendMessage({ ...i, text: forClient(i.text, { asWritten: i.asWritten }) })
+        : node.sendMessage(i),
     async listChats(a) {
       const live = await node.listChats(a)
       const t = test()

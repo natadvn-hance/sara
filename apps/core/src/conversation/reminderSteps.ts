@@ -15,6 +15,7 @@ import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { greetingFor, greetingShape, pickGreetingForm } from '../text/clientText'
 import { clientTurnBefore, isRefusal } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
@@ -622,17 +623,13 @@ export async function fallbackStep(
 ): Promise<{ text: string; why: string }> {
   const conv = await getConversation(d.db, conversationId)
   const names = conv ? await clientNames(d.db, conv) : []
-  const variants = ([0, 1] as const).map((v) =>
-    pingFallback(names[0] ?? null, p.scenario, p.tone, v),
-  )
-  const used = conv ? await ladderTexts(d.db, conv.id) : new Set<string>()
-  if (conv) {
-    const ours = await d.db
-      .select({ text: chatMessage.text })
-      .from(chatMessage)
-      .where(and(eq(chatMessage.conversationId, conv.id), eq(chatMessage.side, 'specialist')))
-    for (const m of ours) used.add(normalizeText(m.text))
-  }
+  const ours = conv
+    ? await d.db
+        .select({ text: chatMessage.text })
+        .from(chatMessage)
+        .where(and(eq(chatMessage.conversationId, conv.id), eq(chatMessage.side, 'specialist')))
+        .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+    : []
   const [last] = conv
     ? await d.db
         .select({ text: convTurn.text })
@@ -647,9 +644,31 @@ export async function fallbackStep(
         .orderBy(desc(convTurn.createdAt))
         .limit(1)
     : []
+  const used = conv ? await ladderTexts(d.db, conv.id) : new Set<string>()
+  // The greeting in another form than our latest ones (11.11.2026): the last reminder sent, which the chat may not show
+  // yet, then our messages in the chat, newest first. Chosen by the chat and the number of our messages and reminders,
+  // so the step run again chooses the same.
+  const name = names[0] ?? null
+  const before = [
+    ...(last?.text ? [last.text] : []),
+    ...ours
+      .map((m) => m.text)
+      .filter((t) => greetingShape(t) !== null)
+      .reverse(),
+  ]
+  const hello = greetingFor(
+    new Date(),
+    name,
+    pickGreetingForm(`${conversationId}:${ours.length}:${used.size}`, name, before),
+  )
+  const variants = ([0, 1] as const).map((v) => pingFallback(name, p.scenario, p.tone, v, hello))
+  for (const m of ours) used.add(normalizeText(m.text))
+  // A wording is told apart by what follows the greeting: the greeting itself changes from message to message.
+  const body = (v: string) => normalizeText(v.slice(hello.length))
+  const has = (t: string, v: string) => t.endsWith(body(v))
   const text =
-    variants.find((v) => !used.has(normalizeText(v))) ??
-    variants.find((v) => normalizeText(v) !== normalizeText(last?.text ?? '')) ??
+    variants.find((v) => ![...used].some((u) => has(u, v))) ??
+    variants.find((v) => !has(normalizeText(last?.text ?? ''), v)) ??
     (variants[0] as string)
   await d.db
     .update(convTurn)

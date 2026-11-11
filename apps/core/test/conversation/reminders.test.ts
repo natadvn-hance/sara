@@ -29,6 +29,7 @@ import {
 } from '../../src/db/schema'
 import { type ProfiClient, ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
+import { greetingShape, leadingGreeting } from '../../src/text/clientText'
 import { launchDbos, shutdownDbos } from '../../src/workflows/dbos'
 import { chatMsg, fakeMind, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
@@ -466,7 +467,10 @@ describe('a reminder after the switch', () => {
     // Short in the test: the model is asked again and again until the time is over, then the ready text goes.
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1400)
     expect((await fake.calls()).length).toBeGreaterThan(2)
-    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in')])
+    // The ready text opens with the greeting chosen for the chat (11.11.2026), the words after it are old Sara's.
+    const hello = leadingGreeting(sends[0]?.text ?? '') ?? ''
+    expect(hello).toMatch(/Анна/)
+    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in', 0, hello)])
     const [r] = await rows()
     expect(r?.outcome).toBe('sent')
     expect(r?.checks).toMatchObject({ fallback: true })
@@ -481,7 +485,8 @@ describe('a reminder after the switch', () => {
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
     await until(done(1))
-    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in')])
+    const hello = leadingGreeting(sends[0]?.text ?? '') ?? ''
+    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in', 0, hello)])
     // Two calls of the model (the text and its rewrite), no more, and no waiting for the 3 hours to pass.
     expect((await fake.calls()).length).toBe(2)
     expect(Date.now() - startedAt).toBeLessThan(6000)
@@ -500,9 +505,13 @@ describe('a reminder after the switch', () => {
     await startReminder(conv.id, 'm-1')
     await until(done(2), 30000)
     expect(sends).toHaveLength(2)
-    expect(sends[0]?.text).toBe(reminderFallback('Анна', 'check_in', 0))
-    expect(sends[1]?.text).toBe(reminderFallback('Анна', 'check_in', 1))
-    expect(sends[1]?.text).not.toBe(sends[0]?.text)
+    const first = leadingGreeting(sends[0]?.text ?? '') ?? ''
+    const second = leadingGreeting(sends[1]?.text ?? '') ?? ''
+    expect(sends[0]?.text).toBe(reminderFallback('Анна', 'check_in', 0, first))
+    expect(sends[1]?.text).toBe(reminderFallback('Анна', 'check_in', 1, second))
+    // The words differ, and two messages in a row do not open alike (11.11.2026).
+    expect(sends[1]?.text.slice(second.length)).not.toBe(sends[0]?.text.slice(first.length))
+    expect(greetingShape(second)).not.toBe(greetingShape(first))
   })
 
   it('FR-OPS-1: with the «Пишет клиентам» pause on nothing is sent and the step is skipped', async () => {

@@ -134,13 +134,13 @@ describe('bidTextAt: the text of a bid at the moment it is sent (FR-LEAD-6, rule
     )
   })
 
-  it("FR-LEAD-6: Boris's own «Здравствуйте» or «Добрый день, Имя» as the whole first sentence is the greeting of the moment too", () => {
+  it("FR-LEAD-6: «Здравствуйте» or «Добрый день, Имя» as the whole first sentence keeps its form, the part of the day is the moment's (11.11.2026)", () => {
     expect(bidTextAt('Здравствуйте, Ирина! Текст', 'Ирина', M_1800)).toBe(
-      'Ирина, добрый вечер!\n\nТекст',
+      'Здравствуйте, Ирина!\n\nТекст',
     )
     expect(bidTextAt('Привет!\n\nТекст', '', M_1159)).toBe('Доброе утро!\n\nТекст')
     expect(bidTextAt('Добрый день, Ирина!\n\nТекст', 'Ирина', M_1159)).toBe(
-      'Ирина, доброе утро!\n\nТекст',
+      'Доброе утро, Ирина!\n\nТекст',
     )
   })
 
@@ -174,7 +174,7 @@ describe('bidTextAt: the text of a bid at the moment it is sent (FR-LEAD-6, rule
       'Ирина, добрый вечер!\n\nТекст',
     )
     expect(bidTextAt('Добрый день, ИРИНА!\n\nТекст', 'Ирина', M_1159)).toBe(
-      'Ирина, доброе утро!\n\nТекст',
+      'Доброе утро, Ирина!\n\nТекст',
     )
   })
 
@@ -192,9 +192,9 @@ describe('bidTextAt: the text of a bid at the moment it is sent (FR-LEAD-6, rule
     expect(bidTextAt('Спасибо, здравствуйте!\n\nТекст', 'Ирина', M_1800)).toBe(
       'Спасибо, здравствуйте!\n\nТекст',
     )
-    // The board's own name before «здравствуйте» is the greeting of the moment.
+    // The board's own name before «здравствуйте» is our greeting, and keeps its form (11.11.2026).
     expect(bidTextAt('Ирина, здравствуйте!\n\nТекст', 'Ирина', M_1800)).toBe(
-      'Ирина, добрый вечер!\n\nТекст',
+      'Ирина, здравствуйте!\n\nТекст',
     )
   })
 

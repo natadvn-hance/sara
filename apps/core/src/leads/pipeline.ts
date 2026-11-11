@@ -54,6 +54,7 @@ import { SHEET_TASK_ID } from '../sheet/sync'
 import { leadSiteOf, studyLeadSite } from '../site'
 import type { Fetched } from '../site/fetch'
 import { seriesWithoutBlocked } from '../text/blockedLinks'
+import { pickGreetingForm } from '../text/clientText'
 import { deliverDecision, startDecisionWait } from '../workflows/decisionWait'
 import { type AutobidShadowPayload, autobidRule, type Fee, shadowPayload } from './autobidShadow'
 import { casesForBid } from './bidCases'
@@ -399,11 +400,16 @@ async function draftFor(
     })
     const { accountId: _account, site: _site, orderId: _order, ...rest } = opts
     const blocked = await getSetting(d().db, 'links.blocked')
+    const recent = await recentBids(opts.accountId)
+    // A greeting in another form than the latest bids to other clients (Boris, 11.11.2026: «Все время разный как у
+    // человека»), chosen by the order: the step run again chooses the same.
+    const greetingForm = pickGreetingForm(opts.orderId, o.client_name, recent)
     const dr = await writeDraft(d().gateway, o, {
       ...rest,
       ...(profile ? { profile } : {}),
       mindCases,
-      recentBids: await recentBids(opts.accountId),
+      recentBids: recent,
+      greetingForm,
       sites: await sitesForBid(d().mind, o, blocked),
       blockedLinks: blocked,
       site: opts.site ?? null,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { neuroSpeech } from '../../src/text/neuroSpeech'
+import { neuroSpeech, neuroSpeechReason } from '../../src/text/neuroSpeech'
 
 describe('FR-CONV-15: the «не X, а Y» turn is found', () => {
   it('finds the words of Boris and their kin', () => {
@@ -46,5 +46,39 @@ describe('FR-CONV-15: the «не X, а Y» turn is found', () => {
       'Не знаю, а что вы хотели бы?',
     ])
       expect(neuroSpeech(text), text).toBeNull()
+  })
+})
+
+describe('FR-CONV-15: an opening frame with a colon is found (Boris, 11.11.2026)', () => {
+  it('finds a frame that announces what comes, at the start of a text or of a sentence', () => {
+    for (const text of [
+      'Хочу уточнить одну вещь по брендбуку: цвета оставляем прежние?',
+      'По опыту: такие сайты делаются за две недели',
+      'Хочу предупредить: сроки зависят от материалов',
+      'Понял задачу. Сразу предупрежу: без текстов сайт не запустить',
+      'Спасибо за ответ!\nИтого: начинаем с анализа',
+      'Хотел бы уточнить: вам удобнее созвон или переписка?',
+      'Если коротко: нужен лендинг и реклама',
+      'Есть предложение: начнем с аудита',
+    ])
+      expect(neuroSpeech(text)?.kind, text).toBe('рамка')
+  })
+
+  it('leaves a colon inside a living phrase, his own «А давайте так:» and «Возник вопрос:», prices and times', () => {
+    for (const text of [
+      'А давайте так: если берем тильду, первый год оплачиваем мы',
+      'Возник вопрос: а основной поток идет из блогов?',
+      'Нужно две вещи: сайт и понятная заявка',
+      'Стоимость: 35 000, сроки: две недели',
+      'Удобно завтра в 16:00?',
+      'Например: школа танцев в Краснодаре',
+    ])
+      expect(neuroSpeech(text), text).toBeNull()
+  })
+
+  it('tells the rewrite what the frame is and how to say it', () => {
+    const hit = neuroSpeech('Хочу уточнить одну вещь по брендбуку: цвета оставляем?')
+    expect(hit?.quote).toBe('хочу уточнить одну вещь по брендбуку:')
+    expect(neuroSpeechReason(hit as NonNullable<typeof hit>)).toMatch(/рамк[^\n]*двоеточ/)
   })
 })

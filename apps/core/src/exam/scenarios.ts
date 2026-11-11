@@ -8,6 +8,7 @@ import { NOT_NAMES } from '../conversation/check/phrases'
 import { turnMessageIds } from '../conversation/dossier'
 import { inMoscowHours } from '../conversation/time'
 import type { CaseHit, Dossier, DossierMessage } from '../conversation/types'
+import { greetedName } from '../text/clientText'
 
 /** The night of the exam: the hours the live rules call night (setting `conv.night`, default 23:00-8:00). */
 const EXAM_NIGHT = { from: 23, to: 8 }
@@ -214,7 +215,10 @@ const IS_TAG = /^\[[^\]]+\]$/
  */
 export function examNames(s: ExamScenario): string[] {
   const first = s.messages.find((m) => sideOf(m.author) === 'specialist')
-  const greeted = /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
+  // Before the greeting as old Sara wrote, or after it: «Добрый день, Ирина!» (greetings vary since 11.11.2026).
+  const greeted =
+    greetedName(first?.text ?? '') ??
+    /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
   const folded = greeted?.toLowerCase().replace(/ё/g, 'е') ?? ''
   const names = [s.client_name, greeted && !NOT_NAMES.has(folded) ? greeted : null]
   return [

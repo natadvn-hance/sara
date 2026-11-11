@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nextReminder, reminderFallback } from '../../src/conversation/reminders'
+import { nextReminder, pingFallback, reminderFallback } from '../../src/conversation/reminders'
 
 const HOUR = 3600_000
 const DAY = 24 * HOUR
@@ -187,5 +187,20 @@ describe('the ready texts of old Sara', () => {
       expect(b).not.toMatch(/\d/)
       expect(b).not.toMatch(/перезвон|наберу|позвоню/i)
     }
+  })
+})
+
+describe('the ready ping greets in the form it is given (Boris, 11.11.2026)', () => {
+  it('FR-CONV-4: a ready text opens with the greeting chosen for the chat, and without one as before', () => {
+    const sc = { kind: 'awaiting', item: 'tz' } as Parameters<typeof pingFallback>[1]
+    expect(pingFallback('Ольга', sc, 'check_in', 0, 'Здравствуйте, Ольга!')).toMatch(
+      /^Здравствуйте, Ольга! Как у вас с ТЗ\?/,
+    )
+    expect(pingFallback('Ольга', sc, 'check_in', 0)).toMatch(
+      /^Ольга, добрый день! Как у вас с ТЗ\?/,
+    )
+    expect(pingFallback('Ольга', null, 'check_in', 0, 'Добрый день, Ольга!')).toMatch(
+      /^Добрый день, Ольга! /,
+    )
   })
 })

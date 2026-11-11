@@ -12,6 +12,7 @@ import {
   bidTextAt,
   draftOf,
   editOf,
+  FRAME_NOTE,
   greetingOf,
   priceOf,
   priceWithin,
@@ -698,5 +699,68 @@ describe("the Analyst writes in Boris's voice where it is on (10.11.2026)", () =
     expect(inputs[1]).toContain('фраза «По опыту»')
     expect((d as { styleNote?: string }).styleNote).toContain('не X, а Y')
     expect((d as { styleNote?: string }).styleNote).toContain('«По опыту»')
+  })
+})
+
+describe('an opening frame with a colon in a bid (Boris, 11.11.2026)', () => {
+  it('FR-CONV-15: is asked once more with the reason; kept after two tries, the card names the frame, not «не X, а Y»', async () => {
+    const bad = 'Хочу предупредить: запуск записи займет две недели. Когда хотите начать?'
+    const once = stubGateway([
+      answer(bad),
+      answer('Запуск записи займет две недели. Когда хотите начать?'),
+    ])
+    const d1 = await write(once.gw, await order())
+    expect(d1).toMatchObject({ attempts: 2 })
+    expect((d1 as { styleNote?: string }).styleNote).toBeUndefined()
+    expect(once.inputs[1]).toMatch(/рамк[^\n]*двоеточ/)
+    const twice = stubGateway([answer(bad), answer(bad)])
+    const d2 = await write(twice.gw, await order())
+    expect(d2.text).toContain('Хочу предупредить:')
+    expect((d2 as { styleNote?: string }).styleNote).toBe(FRAME_NOTE)
+  })
+
+  it('FR-CONV-15: a frame in the series is asked away too, and the series stays', async () => {
+    const bad = 'По опыту: такие сайты окупаются за сезон)'
+    const withFollow = (): AnalystOutput => ({
+      ...answer(BODY),
+      follow_ups: [{ text: bad, case_id: null }],
+    })
+    const { gw, inputs } = stubGateway([withFollow(), withFollow()])
+    const d = await write(gw, await order())
+    expect(inputs[1]).toMatch(/рамк[^\n]*двоеточ/)
+    expect((d as { styleNote?: string }).styleNote).toBe(FRAME_NOTE)
+    expect((d as { followUps?: string[] }).followUps).toEqual([bad])
+  })
+})
+
+describe('the greeting of a bid in more than one form (Boris, 11.11.2026)', () => {
+  const EVENING = new Date('2026-10-26T16:00:00Z')
+
+  it('FR-LEAD-6: the draft opens with the form it was given, and with none the one it always had', async () => {
+    const given = stubGateway([answer(BODY)])
+    const d = await write(given.gw, await order(), { greetingForm: 'name_after' })
+    expect(d.text).toBe(`Добрый день, Ирина!\n\n${CLEAN}`)
+    const none = stubGateway([answer(BODY)])
+    expect((await write(none.gw, await order())).text).toBe(`Ирина, добрый день!\n\n${CLEAN}`)
+    // The room kept for the greeting is the same whatever the form: the longest of them is as long.
+    expect(given.inputs[0]).toBe(none.inputs[0])
+  })
+
+  it('FR-LEAD-6: at the moment of sending the stored form stays and only the part of the day follows the hour', () => {
+    expect(bidTextAt('Добрый день, Ирина!\n\nПонял задачу', 'Ирина', EVENING)).toBe(
+      'Добрый вечер, Ирина!\n\nПонял задачу',
+    )
+    expect(bidTextAt('Здравствуйте, Ирина!\n\nПонял задачу', 'Ирина', EVENING)).toBe(
+      'Здравствуйте, Ирина!\n\nПонял задачу',
+    )
+    expect(bidTextAt('Ирина, здравствуйте!\n\nПонял задачу', 'Ирина', EVENING)).toBe(
+      'Ирина, здравствуйте!\n\nПонял задачу',
+    )
+    expect(bidTextAt('Ирина, добрый день!\n\nПонял задачу', 'Ирина', EVENING)).toBe(
+      'Ирина, добрый вечер!\n\nПонял задачу',
+    )
+    expect(bidTextAt('Здравствуйте!\n\nПонял задачу', '', EVENING)).toBe(
+      'Здравствуйте!\n\nПонял задачу',
+    )
   })
 })
