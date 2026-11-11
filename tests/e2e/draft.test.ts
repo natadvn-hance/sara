@@ -815,8 +815,14 @@ describe('the laid-out card', () => {
     expect(cards()[0]?.text).toContain('<b>✍️ Отклик</b>')
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
-    const all = tg.sent.filter((m) => !m.reply_markup && m.text.includes('<blockquote expandable>'))
-    expect(all.map((m) => m.text).join('\n')).toContain('Конец заявки.')
+    // A long order comes in several messages one after another: the last piece may follow the «Разбор» a moment later.
+    const whole = () =>
+      tg.sent
+        .filter((m) => !m.reply_markup && m.text.includes('<blockquote expandable>'))
+        .map((m) => m.text)
+        .join('\n')
+    await until(() => whole().includes('Конец заявки.'))
+    expect(whole()).toContain('Начало заявки.')
   })
 
   it('FR-LEAD-7: an order the Analyst did not answer on still has «Разбор»: it says there is none', async () => {
