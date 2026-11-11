@@ -388,54 +388,150 @@ function nameOf(name: string | null): string | null {
 }
 
 /**
- * The greeting of a message built at send time: «Имя, добрый день!» with a name, «Добрый день!» without one, by the
- * hour in Moscow («Доброе утро», «Добрый день», «Добрый вечер»). The model never writes it.
+ * The forms a greeting of ours takes (Boris, 11.11.2026: «Все время разный как у человека»): «Алексей, добрый день!»,
+ * «Добрый день, Алексей!», «Здравствуйте, Алексей!», «Алексей, здравствуйте!». Without a name «Добрый день!» or
+ * «Здравствуйте!». The first is the one Sara always opened with.
  */
-export function greetingFor(now: Date, name: string | null): string {
-  const word = NOMINATIVE[moscowPartOfDay(now)]
+export const GREETING_FORMS = ['name_first', 'name_after', 'hello_after', 'hello_first'] as const
+export type GreetingForm = (typeof GREETING_FORMS)[number]
+
+const capital = (w: string) => `${w.charAt(0).toUpperCase()}${w.slice(1)}`
+
+/**
+ * The greeting of a message built at send time, in its form: the part of the day by the hour in Moscow («Доброе утро»,
+ * «Добрый день», «Добрый вечер»), «Здравствуйте» at any hour. The model never writes it.
+ */
+export function greetingFor(
+  now: Date,
+  name: string | null,
+  form: GreetingForm = 'name_first',
+): string {
+  const hello = form === 'hello_after' || form === 'hello_first'
+  const word = hello ? 'здравствуйте' : NOMINATIVE[moscowPartOfDay(now)]
   const known = nameOf(name)
-  return known ? `${known}, ${word}!` : `${word.charAt(0).toUpperCase()}${word.slice(1)}!`
+  if (!known) return `${capital(word)}!`
+  return form === 'name_first' || form === 'hello_first'
+    ? `${known}, ${word}!`
+    : `${capital(word)}, ${known}!`
 }
 
 // A name before or after the greeting: a capitalized word, or the tag of ADR-016 the model is given.
 const GREETING_NAME = String.raw`(\p{Lu}[\p{L}-]*|\[имя \d+\])`
-const GREETING_NOM = String.raw`([Дд]обр(?:ое\s+утро|ый\s+день|ый\s+вечер))`
-const GREETING_GEN = String.raw`([Дд]оброго\s+(?:дня|утра|вечера))`
+const GREETING_WORD = String.raw`([Дд]обр(?:ое\s+утро|ый\s+день|ый\s+вечер)|[Дд]оброго\s+(?:дня|утра|вечера)|[Зз]дравствуй(?:те)?|[Пп]риветствую|[Пп]ривет)`
 const GREETING_END = String.raw`\s*[!.]?$`
-const GREETING_FORMS = [
-  // «Анна, добрый день!»
-  new RegExp(String.raw`^${GREETING_NAME},\s*${GREETING_NOM}${GREETING_END}`, 'u'),
-  // «Добрый день!»
-  new RegExp(`^${GREETING_NOM}${GREETING_END}`, 'u'),
-  // «Доброго дня, Анна!» and «Доброго дня!»
-  new RegExp(String.raw`^${GREETING_GEN}(?:,\s*${GREETING_NAME})?${GREETING_END}`, 'u'),
-]
+/** «Анна, добрый день!», «Анна, здравствуйте!». */
+const NAME_THEN_WORD = new RegExp(
+  String.raw`^${GREETING_NAME},\s*${GREETING_WORD}${GREETING_END}`,
+  'u',
+)
+/** «Добрый день!», «Добрый день, Анна!», «Здравствуйте, Анна!», «Доброго дня, Анна!». */
+const WORD_THEN_NAME = new RegExp(
+  String.raw`^${GREETING_WORD}(?:,\s*${GREETING_NAME})?${GREETING_END}`,
+  'u',
+)
 
 const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е')
 
-/** The part of the day a text greets for when the whole text is one greeting in an allowed form, else null. */
-function greetingPart(text: string): PartOfDay | null {
+/** The word of a greeting as its kind: a part of the day, the genitive, «здравствуйте», «приветствую», «привет». */
+function wordKind(word: string): string {
+  const w = fold(word)
+  return w.startsWith('доброго')
+    ? 'gen'
+    : w.startsWith('добр')
+      ? 'day'
+      : w.startsWith('здравств')
+        ? 'hello'
+        : w.startsWith('приветств')
+          ? 'greet'
+          : 'hi'
+}
+
+/** A greeting taken apart: its word, the name and where it stands; null when the text is not one greeting. */
+function greetingParts(
+  text: string,
+): { word: string; name: string | null; where: 'before' | 'after' | 'none' } | null {
   const t = text.trim()
-  for (const form of GREETING_FORMS) {
-    const groups = form.exec(t)?.slice(1)
-    if (!groups) continue
-    const word = fold(groups.find((g) => g !== undefined && /^доб/iu.test(g)) ?? '')
-    const name = groups.find((g) => g !== undefined && !/^доб/iu.test(g))
+  const before = NAME_THEN_WORD.exec(t)
+  if (before) {
+    const [, name = '', word = ''] = before
     // «Понимаю, добрый день!» opens with a word that is no name.
-    if (name && NOT_NAMES.has(fold(name))) return null
-    return word.includes('утр') ? 'morning' : word.includes('веч') ? 'evening' : 'day'
+    return NOT_NAMES.has(fold(name)) ? null : { word, name, where: 'before' }
   }
-  return null
+  const after = WORD_THEN_NAME.exec(t)
+  if (!after) return null
+  const [, word = '', name] = after
+  return name ? { word, name, where: 'after' } : { word, name: null, where: 'none' }
+}
+
+/** The first sentence of a text, up to its «!», «.», «?» or the end of its line. */
+const firstSentence = (text: string): string =>
+  /^[^\n!.?]*[!.?]?/.exec(text.trimStart())?.[0].trim() ?? ''
+
+/**
+ * The shape of the greeting a text opens with: its kind of word and where the name stands («day:before» for «Анна, добрый
+ * день!» at any hour, «hello:after» for «Здравствуйте, Анна!»); null when its first sentence is no greeting.
+ */
+export function greetingShape(text: string): string | null {
+  const p = greetingParts(firstSentence(text))
+  return p ? `${wordKind(p.word)}:${p.where}` : null
+}
+
+/** The client's name a message of ours greeted with, before or after the greeting; null for none or a tag. */
+export function greetedName(text: string): string | null {
+  const name = greetingParts(firstSentence(text))?.name ?? null
+  return name && !name.startsWith('[') ? name : null
+}
+
+/** A stable number of a seed (FNV-1a): the same order or message always gets the same form, never chance. */
+function seedNumber(seed: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 0x01000193) >>> 0
+  return h
+}
+
+const ANY_HOUR = new Date('2026-01-15T10:00:00Z')
+
+/**
+ * The form of the next greeting of ours: not the shape of the latest greetings (`before`, newest first: a chat's
+ * messages, or the latest bids to other clients), two of them while a form is left, else the latest one. Among the forms
+ * left the seed (the order, the chat and the number of its message) chooses, so a repeat of the step chooses the same.
+ * With no greeting before, the one Sara always opened with.
+ */
+export function pickGreetingForm(
+  seed: string,
+  name: string | null,
+  before: readonly string[],
+): GreetingForm {
+  const shapes = before.map(greetingShape).filter((s): s is string => s !== null)
+  if (shapes.length === 0) return 'name_first'
+  const shapeOf = (f: GreetingForm) => greetingShape(greetingFor(ANY_HOUR, name, f))
+  for (const n of [2, 1]) {
+    const avoid = new Set(shapes.slice(0, n))
+    const left = GREETING_FORMS.filter((f) => !avoid.has(shapeOf(f) ?? ''))
+    if (left.length > 0) return left[seedNumber(seed) % left.length] as GreetingForm
+  }
+  return 'name_first'
+}
+
+/** The part of the day a text greets for when the whole text is one greeting in an allowed form, else null. */
+function greetingPart(text: string): PartOfDay | 'any' | null {
+  const p = greetingParts(text)
+  if (!p) return null
+  const kind = wordKind(p.word)
+  if (kind === 'hello') return 'any'
+  if (kind !== 'day' && kind !== 'gen') return null
+  const word = fold(p.word)
+  return word.includes('утр') ? 'morning' : word.includes('веч') ? 'evening' : 'day'
 }
 
 /**
- * Whether a text is one greeting in a form Boris allows: «Добрый день!», «Анна, доброе утро!», «Доброго дня, Анна!».
- * Not «Здравствуйте!», not «Добрый день, Анна!» (the name goes before the nominative and after the genitive).
- * With `now` the part of the day must also be the one of that moment in Moscow.
+ * Whether a text is one greeting in a form Boris allows: «Добрый день!», «Анна, доброе утро!», «Добрый день, Анна!»,
+ * «Доброго дня, Анна!», «Здравствуйте!», «Здравствуйте, Анна!», «Анна, здравствуйте!» (11.11.2026). Not «Привет!».
+ * With `now` the part of the day must also be the one of that moment in Moscow («Здравствуйте» fits any).
  */
 export function isGreetingForm(text: string, now?: Date): boolean {
   const part = greetingPart(text)
-  return part !== null && (now === undefined || part === moscowPartOfDay(now))
+  return part !== null && (now === undefined || part === 'any' || part === moscowPartOfDay(now))
 }
 
 /** The greeting a text opens with, when its first sentence is one in an allowed form (else null). */

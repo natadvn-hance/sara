@@ -231,6 +231,8 @@ export async function deliverMessage(
         ...(p.afterOwn && { after_own: true }),
         ...(p.quick && { quick: true }),
         idempotency_key: row.idempotencyKey,
+        // Boris's own words keep his quotes; Sara's go with plain ones (11.11.2026).
+        ...(p.author === 'boris' && { asWritten: true }),
       })
       await mark('confirmed', null)
       await event(d.db, 'outbox.confirmed', outboxId, p, {

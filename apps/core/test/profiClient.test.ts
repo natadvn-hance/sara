@@ -123,6 +123,40 @@ describe('profi client and event intake', () => {
     ).rejects.toMatchObject({ errorClass: 'CHAT_CHANGED' })
   })
 
+  it('NFR-UX-1: Sara’s message and every bid reach the node with plain quotes and no «ё», Boris’s own words keep his quotes (11.11.2026)', async () => {
+    const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
+    const m = {
+      account_id: 'hance-marketing',
+      chat_id: '95147897',
+      expect_last_message_id: null,
+    }
+    await client.sendMessage({
+      ...m,
+      text: 'Ещё вопрос: «разъезжается» у вас „шапка“ или “подвал”?',
+      idempotency_key: 'msg:q:1',
+    })
+    await client.sendMessage({
+      ...m,
+      chat_id: '95147896',
+      text: 'Ещё скажу «спасибо» сам',
+      idempotency_key: 'msg:q:2',
+      asWritten: true,
+    })
+    await client.submitBid({
+      ...bid,
+      order_id: '2',
+      text: 'Понял, «лендинг» нужен',
+      idempotency_key: 'bid:2',
+    })
+    expect(fake.messages.map((x) => x.text)).toEqual([
+      'Еще вопрос: "разъезжается" у вас "шапка" или "подвал"?',
+      'Еще скажу «спасибо» сам',
+    ])
+    // The mark of Boris’s own words stays in the core: the node gets the contract and nothing more.
+    expect(fake.messages.every((x) => !('asWritten' in x))).toBe(true)
+    expect(fake.bids.at(-1)?.text).toBe('Понял, "лендинг" нужен')
+  })
+
   it('FR-CONV-1: the client reads chats through the node', async () => {
     const client = createProfiClient({ url: fake.url, permitSecret: 'permit' })
     expect(await client.listChats('hance-marketing')).toEqual({ chats: [] })

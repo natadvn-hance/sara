@@ -57,10 +57,35 @@ const STAMPS = [
 /** «Без X. Без Y. Только Z.»: chopped drama. */
 const CHOPPED = /(?:^|[.!?]\s)без [^.!?]{2,30}[.!?]\s+без [^.!?]{2,30}[.!?]/u
 
+/**
+ * An opening frame with a colon (Boris, 11.11.2026, after «Хочу уточнить одну вещь по брендбуку: …» in a ping; his skill
+ * «Голос Бориса»: «По опыту:», «Хочу предупредить:» are what gives a model away). A short lead-in at the start of a
+ * sentence that only announces what follows, then the colon. A colon inside a living phrase stays: his own «А давайте
+ * так: …» and «Возник вопрос: …», «Нужно две вещи: …», «Стоимость: …», a time «16:00».
+ */
+const SPEAK =
+  '(?:уточнить|спросить|предупредить|сказать|отметить|предложить|поделиться|обратить внимание|напомнить|добавить|пояснить|подсказать|подчеркнуть|оговориться|признаться|заметить)'
+const SPEAK_NOW =
+  '(?:уточню|спрошу|предупрежу|скажу|отмечу|предложу|поделюсь|напомню|добавлю|поясню|подскажу|подчеркну|оговорюсь|признаюсь|замечу)'
+const FRAMES = [
+  // «Хочу уточнить одну вещь по брендбуку:», «Хотел бы предупредить:», «Должен сказать:».
+  `(?:хочу|хотел(?: бы)?|хотелось бы|должен|могу|позвольте|разрешите|давайте я)(?: сразу| заранее| еще| также| честно)? ${SPEAK}(?: [^\\s.!?:;,]+){0,6}`,
+  // «Сразу предупрежу:», «Уточню один момент:». His own hedge «честно скажу» is no frame (his skill, 07.11.2026).
+  `(?:(?:сразу|заранее|еще|также|коротко|кратко) )?${SPEAK_NOW}(?: [^\\s.!?:;,]+){0,4}`,
+  // A lead-in that is a frame all by itself.
+  '(?:по (?:моему |нашему )?опыту|из (?:моего |нашего )?опыта|по сути|(?:если )?коротко|кратко|итого|итог|в итоге|вывод|главное|важно|важный момент|суть|мой совет|совет|есть (?:предложение|идея|мысль)|кстати|на практике|для понимания|что важно|обратите внимание|резюмирую)',
+]
+const FRAME = new RegExp(
+  `(?:^|(?<=[.!?…]\\s+)|(?<=\\n\\s*))((?:${FRAMES.join('|')}):)(?=\\s)`,
+  'mu',
+)
+
 export type NeuroHit = { kind: string; quote: string }
 
 export function neuroSpeech(text: string): NeuroHit | null {
   const chopped = CHOPPED.exec(fold(text))
+  const frame = FRAME.exec(fold(text))
+  if (frame) return { kind: 'рамка', quote: (frame[1] ?? '').trim() }
   for (const sentence of fold(text).split(/(?<=[.!?\n])/u)) {
     const stamp = STAMPS.map((re) => re.exec(sentence)).find((m) => m !== null)
     if (stamp) return { kind: 'штамп', quote: stamp[0].trim().slice(0, 100) }
@@ -77,6 +102,8 @@ export function neuroSpeech(text: string): NeuroHit | null {
 
 /** What a rewrite is told about it. */
 export function neuroSpeechReason(hit: NeuroHit): string {
+  if (hit.kind === 'рамка')
+    return `вводная рамка с двоеточием «${hit.quote}»: так пишет модель, Борис так не начинает. Скажи то же живой фразой, сразу по сути, без рамки и двоеточия`
   if (hit.kind === 'штамп')
     return `фраза «${hit.quote}»: так пишет чат-бот, человек так не говорит. Убери ее и начни с сути`
   return `оборот «${hit.kind}» («${hit.quote}»): так пишет нейросеть, человек так не говорит. Скажи про то, что есть, одной фразой, без противопоставления: не «нужен не подрядчик, а человек», а «нужен человек, который…»`

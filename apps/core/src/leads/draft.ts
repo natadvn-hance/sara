@@ -18,7 +18,14 @@ import {
 } from '../direction/reply'
 import type { Gateway } from '../gateway/gateway'
 import { siteSection } from '../site/view'
-import { fixClientText, greetingFor, moscowPartOfDay } from '../text/clientText'
+import {
+  fixClientText,
+  GREETING_FORMS,
+  type GreetingForm,
+  greetingFor,
+  greetingShape,
+  moscowPartOfDay,
+} from '../text/clientText'
 import { neuroSpeech, neuroSpeechReason } from '../text/neuroSpeech'
 import { bidCaseProblems, bidCasesText, chosenCase } from './bidCases'
 import { type BidVoice, bannedIn, bidVoiceText } from './bidVoice'
@@ -69,6 +76,9 @@ export type Draft = {
 }
 /** What the card says about a bid that kept a «не X, а Y» turn. */
 export const NEURO_NOTE = '⚠️ В тексте остался оборот «не X, а Y». Поправьте перед отправкой.'
+/** What the card says about a bid that kept an opening frame with a colon (Boris, 11.11.2026). */
+export const FRAME_NOTE =
+  '⚠️ В тексте осталась вводная рамка с двоеточием («Хочу уточнить: …»). Поправьте перед отправкой.'
 /** What the card says about a bid with the voice on that kept a phrase Boris never says (10.11.2026). */
 export const bannedNote = (phrase: string): string =>
   `⚠️ В тексте осталась фраза «${phrase}», Борис так не говорит. Поправьте перед отправкой.`
@@ -108,20 +118,39 @@ const BRACKETED = /\[[^\]\n]{1,40}\]/u
  * rude, Boris 20.10). Without a moment it is the greeting of now. A bid is greeted at the moment it is SENT
  * (`bidTextAt`); this is the greeting a draft and the card are built with, and it changes with the hour.
  */
-export function greetingOf(clientName: string, now: Date = new Date()): string {
-  return greetingFor(now, clientName)
+export function greetingOf(
+  clientName: string,
+  now: Date = new Date(),
+  form: GreetingForm = 'name_first',
+): string {
+  return greetingFor(now, clientName, form)
 }
+
+/** The form a stored greeting sentence has, so the greeting of the moment of sending keeps it (11.11.2026). */
+const FORM_OF_SHAPE: Record<string, GreetingForm> = {
+  'day:before': 'name_first',
+  'day:after': 'name_after',
+  'hello:before': 'hello_first',
+  'hello:after': 'hello_after',
+  'hello:none': 'hello_after',
+}
+const formOf = (sentence: string): GreetingForm =>
+  FORM_OF_SHAPE[greetingShape(sentence) ?? ''] ?? 'name_first'
 
 /** One moment in each part of the Moscow day (UTC+3 all year): 09:00, 13:00 and 20:00. */
 const PARTS_OF_DAY = ['2026-01-15T06:00:00Z', '2026-01-15T10:00:00Z', '2026-01-15T17:00:00Z'].map(
   (iso) => new Date(iso),
 )
 
-/** The longest greeting of the day for this client, «Ирина, добрый вечер!»: the room a bid keeps for its greeting. */
+/**
+ * The longest greeting of the day for this client in any form, «Ирина, добрый вечер!» (as long as «Здравствуйте,
+ * Ирина!»): the room a bid keeps for its greeting.
+ */
 export function longestGreeting(clientName: string): string {
-  return PARTS_OF_DAY.map((t) => greetingOf(clientName, t)).reduce((a, b) =>
-    b.length > a.length ? b : a,
-  )
+  // The forms in their order: of greetings as long, the one Sara always opened with is the one named.
+  return GREETING_FORMS.flatMap((f) =>
+    PARTS_OF_DAY.map((t) => greetingOf(clientName, t, f)),
+  ).reduce((a, b) => (b.length > a.length ? b : a))
 }
 
 /**
@@ -186,8 +215,13 @@ const plain = (s: string) => fixClientText(removeEmoji(s))
 export const bidBodyOf = (text: string): string => bodyOf(plain(text))
 
 /** The model's body behind the code's greeting; a greeting the model wrote anyway goes, it never knows the name. */
-export function draftOf(body: string, clientName: string, now: Date = new Date()): string {
-  return `${greetingOf(clientName, now)}\n\n${bodyOf(plain(body))}`
+export function draftOf(
+  body: string,
+  clientName: string,
+  now: Date = new Date(),
+  form: GreetingForm = 'name_first',
+): string {
+  return `${greetingOf(clientName, now, form)}\n\n${bodyOf(plain(body))}`
 }
 
 /** Boris's own text: his greeting stays; without one ours goes first (a bare «Ирина,» at the start joins it). */
@@ -277,11 +311,11 @@ export function bidTextDetail(
       ? { text, fallback: null }
       : { text: p.kept, fallback: 'greeting_kept' }
   }
-  const fresh = greeted(p.rest, p.name, now)
+  const fresh = greeted(p.rest, p.name, now, p.form)
   if (fresh.length <= BID_TEXT_MAX) return { text: fresh, fallback: null }
   // Only a draft of before this rule can be here (500 characters with «добрый день», 501 with «добрый вечер»): the name
   // goes before the part of the day does, and the draft as it was before anything else.
-  const nameless = greeted(p.rest, null, now)
+  const nameless = greeted(p.rest, null, now, p.form)
   return nameless.length <= BID_TEXT_MAX
     ? { text: nameless, fallback: 'name_dropped' }
     : { text: p.kept, fallback: 'greeting_kept' }
@@ -296,7 +330,7 @@ function split(
   clientName: string,
 ):
   | { own: true; at: (now: Date) => string; kept: string }
-  | { own: false; name: string | null; rest: string; kept: string } {
+  | { own: false; name: string | null; rest: string; kept: string; form: GreetingForm } {
   const text = stored.replace(/\r\n?/g, '\n').trim()
   const first = FIRST_SENTENCE.exec(text)?.[0] ?? ''
   const bare = bareGreeting(first, clientName)
@@ -307,11 +341,18 @@ function split(
     name: bare ? bare.name : clientName,
     rest: plain(bare ? text.slice(first.length) : text),
     kept,
+    // The stored greeting's own form stays at the moment of sending: only its part of the day follows the hour.
+    form: bare ? formOf(first) : 'name_first',
   }
 }
 
-const greeted = (rest: string, name: string | null, now: Date): string => {
-  const hello = greetingOf(name ?? '', now)
+const greeted = (
+  rest: string,
+  name: string | null,
+  now: Date,
+  form: GreetingForm = 'name_first',
+): string => {
+  const hello = greetingOf(name ?? '', now, form)
   return rest ? `${hello}\n\n${rest}` : hello
 }
 
@@ -323,8 +364,8 @@ const greeted = (rest: string, name: string | null, now: Date): string => {
 export function bidLengthMax(stored: string, clientName: string): number {
   const p = split(stored, clientName)
   if (p.own) return Math.max(...PARTS_OF_DAY.map((t) => p.at(t).length))
-  const { rest, name } = p
-  return Math.max(...PARTS_OF_DAY.map((t) => greeted(rest, name, t).length))
+  const { rest, name, form } = p
+  return Math.max(...PARTS_OF_DAY.map((t) => greeted(rest, name, t, form).length))
 }
 
 /** The «Стоимость услуги»: never 0 and never above the client's budget (then the field stays empty). */
@@ -581,6 +622,8 @@ export async function writeDraft(
     site?: LeadSite | null
     /** Boris's voice where it is on for the order (10.11.2026); none: the Analyst is told what it always was. */
     voice?: BidVoice | null
+    /** The form of the greeting (11.11.2026: a different one each time, as a person writes); none: «Имя, добрый день!». */
+    greetingForm?: GreetingForm
     now?: Date
   } = {},
 ): Promise<Draft | DraftMiss> {
@@ -588,6 +631,7 @@ export async function writeDraft(
   const profile: ReplyProfile = opts.profile ?? { reply_format: null, cases: [] }
   const ceiling = bidCeiling(profile)
   const now = opts.now ?? new Date()
+  const form = opts.greetingForm ?? 'name_first'
   const longest = longestGreeting(o.client_name)
   // The model is told a shorter limit by the room the cases may take, but never under what a bid needs; a text
   // that fits the ceiling stays whole and the cases that do not fit are the ones left out.
@@ -616,7 +660,7 @@ export async function writeDraft(
     attempts: number,
     styleNote?: string,
   ): Draft => {
-    const hello = greetingOf(o.client_name, now)
+    const hello = greetingOf(o.client_name, now, form)
     // A case of the mind is told in the text itself, with no link: only its id is kept.
     const told = chosenCase(mindCases, out.case_ids)
     const placed = placeCases(`${longest}${text.slice(hello.length)}`, profile, out.case_ids ?? [])
@@ -654,13 +698,14 @@ export async function writeDraft(
       blockedLinks: _blocked,
       site: _site,
       voice: _voice,
+      greetingForm: _form,
       ...callOpts
     } = opts
     const r = await gw.call('analyst', input, AnalystOutput, { ...callOpts, redact })
     if (!r.ok) return { text: null, reason: 'no_answer', attempts, analysis }
     analysis = analysisOf(r.output)
     const body = bodyOf(plain(r.output.text))
-    const text = draftOf(r.output.text, o.client_name, now)
+    const text = draftOf(r.output.text, o.client_name, now, form)
     const longestLength = bidLengthMax(text, o.client_name)
     // Only a bid offered the mind's cases is checked for them; one without stays as it always was.
     const caseProblem =
@@ -697,7 +742,12 @@ export async function writeDraft(
           r.output,
           text,
           attempts,
-          [neuro && NEURO_NOTE, banned && bannedNote(banned)].filter(Boolean).join('\n'),
+          [
+            neuro && (neuro.kind === 'рамка' ? FRAME_NOTE : NEURO_NOTE),
+            banned && bannedNote(banned),
+          ]
+            .filter(Boolean)
+            .join('\n'),
         )
       const why = [
         neuro && neuroSpeechReason(neuro),

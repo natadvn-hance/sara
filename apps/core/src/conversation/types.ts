@@ -153,6 +153,11 @@ export type Dossier = {
   owner: ConversationRow['owner']
   ownerReason: ConversationRow['ownerReason']
   newDay: boolean
+  /**
+   * The greeting a message of a new day opens with (11.11.2026): its form other than our latest greetings in this chat,
+   * the part of the day of the moment. Left out (a dossier made by hand): the role chooses, as before.
+   */
+  greeting?: string
   night: boolean
   lastOursAt: string | null
   remindersSent: number

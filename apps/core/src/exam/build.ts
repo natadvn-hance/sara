@@ -6,6 +6,7 @@ import type { Db } from '../db/client'
 import { chatMessage, lead, mindProposal } from '../db/schema'
 import { redact } from '../gateway/redact'
 import { proposeMind } from '../mind/proposals'
+import { greetedName } from '../text/clientText'
 
 /**
  * Exam scenarios from the history of the chats (FR-TRAIN-8, M4 design 5.13): each answer of Boris, with proof, to a
@@ -166,6 +167,9 @@ function namesOf(rows: Row[], leadName: string | undefined): string[] {
     if (m.side === 'specialist') {
       const word = LEADING_NAME.exec(m.text)?.[1]
       if (word && !NOT_A_NAME.has(fold(word))) add(word)
+      // The name after the greeting: «Добрый день, Ирина!», «Здравствуйте, Ирина!» (greetings vary since 11.11.2026).
+      const after = greetedName(m.text)
+      if (after && !NOT_A_NAME.has(fold(after))) add(after)
     }
     if (m.side === 'client') for (const x of m.text.matchAll(SELF_NAME)) add(x[1])
   }
@@ -176,8 +180,8 @@ function namesOf(rows: Row[], leadName: string | undefined): string[] {
 function unknownOpener(texts: string[], names: string[]): string | null {
   const known = new Set(names.flatMap((n) => n.split(/\s+/)).map(fold))
   for (const t of texts) {
-    const word = /^\s*(\p{Lu}[\p{L}-]*)\s*,/u.exec(t)?.[1]
-    if (word && !NOT_A_NAME.has(fold(word)) && !known.has(fold(word))) return word
+    for (const word of [/^\s*(\p{Lu}[\p{L}-]*)\s*,/u.exec(t)?.[1], greetedName(t)])
+      if (word && !NOT_A_NAME.has(fold(word)) && !known.has(fold(word))) return word
   }
   return null
 }
