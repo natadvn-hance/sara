@@ -18,16 +18,17 @@ import { type LeadCard, orderUrl, plusMinus, TEXTS } from './cards'
 const C = {
   bg: '#F3F2EF',
   ink: '#1A1A1A',
-  ink2: '#55514D',
-  muted: '#8B857F',
+  ink2: '#4A4844',
+  muted: '#6B6A65',
+  muted2: '#9D978F',
   line: '#DCD9D3',
   cell: '#E4E1DB',
   accent: '#FF3D00',
-  accentMid: '#FF8A66',
-  accentLight: '#FFC3AE',
+  accentMid: '#FF8A62',
+  accentLight: '#FFD9C9',
   accentInk: '#C93000',
   green: '#005A52',
-  lcd: '#191816',
+  lcd: '#201F1D',
   lcdLine: '#383633',
   lcdText: '#F3F2EF',
   white: '#FFFFFF',
@@ -196,7 +197,7 @@ function headline(title: string, quiet: boolean, compact: boolean): Node {
 
 /** The colour of a lit square at `t` along the bar: pale orange at the start, Hance's orange at the end. */
 function ramp(t: number): string {
-  const from = [0xff, 0xd2, 0xc2]
+  const from = [0xff, 0xd9, 0xc9]
   const to = [0xff, 0x3d, 0x00]
   const ch = (i: number) =>
     Math.round((from[i] ?? 0) + ((to[i] ?? 0) - (from[i] ?? 0)) * Math.max(0, Math.min(1, t)))
@@ -243,7 +244,7 @@ function scorePanel(c: LeadCard, fee: string): Node {
     {
       flexDirection: 'column',
       backgroundColor: C.lcd,
-      borderRadius: 20,
+      borderRadius: 22,
       padding: '18px 18px 20px',
       marginTop: 24,
     },
@@ -251,7 +252,7 @@ function scorePanel(c: LeadCard, fee: string): Node {
       { justifyContent: 'space-between' },
       box(
         { flexDirection: 'column', width: 112 },
-        mono(9, C.muted, 'Балл'),
+        mono(9, C.muted2, 'Балл'),
         box(
           { alignItems: 'flex-end', marginTop: 4 },
           score === null
@@ -267,7 +268,7 @@ function scorePanel(c: LeadCard, fee: string): Node {
                 },
                 String(score),
               ),
-          score === null ? null : mono(11, C.muted, '/100', { marginLeft: 5, marginBottom: 5 }),
+          score === null ? null : mono(11, C.muted2, '/100', { marginLeft: 5, marginBottom: 5 }),
         ),
       ),
       box(
@@ -281,7 +282,7 @@ function scorePanel(c: LeadCard, fee: string): Node {
               marginTop: i === 0 ? 0 : 8,
               borderTop: i === 0 ? 'none' : `1px solid ${C.lcdLine}`,
             },
-            mono(9, C.muted, label),
+            mono(9, C.muted2, label),
             txt({ fontFamily: MONO, fontWeight: 500, fontSize: 12, color: C.lcdText }, value),
           ),
         ),
@@ -321,7 +322,7 @@ function clientRow(c: LeadCard): Node {
       {
         width: 38,
         height: 38,
-        borderRadius: 10,
+        borderRadius: 12,
         backgroundColor: C.ink,
         alignItems: 'center',
         justifyContent: 'center',
