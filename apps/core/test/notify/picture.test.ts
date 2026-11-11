@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { closedCardState, foldedCardState, newState } from '../../src/notify/cardState'
 import type { LeadCard } from '../../src/notify/cards'
-import {
-  PICTURE_WIDTH,
-  parseViewCallback,
-  pictureKeyboard,
-  renderCardPicture,
-  viewCallback,
-} from '../../src/notify/picture'
+import { PICTURE_WIDTH, pictureKeyboard, renderCardPicture } from '../../src/notify/picture'
 
 // FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: the lead card as a picture in Hance's look.
 
@@ -61,13 +55,13 @@ const CARD: LeadCard = {
 const pngSize = (png: Buffer) => ({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) })
 
 describe('the lead card as a picture', () => {
-  it("FR-NOTIF-6: a new card is one PNG 1080 pixels wide, from the title down to the client's words", async () => {
+  it('FR-NOTIF-6: a new card is one long PNG 1080 pixels wide, from the title down to the bid and its series', async () => {
     const { png, width, height } = await renderCardPicture(CARD, newState(CARD), NOW)
     expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
     expect(pngSize(png)).toEqual({ width, height })
     expect(width).toBe(PICTURE_WIDTH)
     expect(height).toBeGreaterThan(width)
-    expect(height).toBeLessThan(width * 2.3)
+    expect(height).toBeLessThan(width * 4)
   })
 
   it('FR-NOTIF-6: the longest order, title and bid keep the card in shape, only their words cut', async () => {
@@ -86,9 +80,9 @@ describe('the lead card as a picture', () => {
       },
     }
     const card = await renderCardPicture(long, newState(long), NOW)
-    const bid = await renderCardPicture(long, { ...newState(long), v: 'bid' }, NOW)
-    expect(card.height).toBeLessThan(PICTURE_WIDTH * 2.4)
-    expect(bid.height).toBeLessThan(PICTURE_WIDTH * 2.2)
+    // Telegram takes a photo whose sides add up to at most 10000 pixels.
+    expect(card.width + card.height).toBeLessThan(10000)
+    expect(card.height).toBeLessThan(PICTURE_WIDTH * 4.5)
   })
 
   it('FR-NOTIF-6: a card without score, analysis, client info, budget or text still draws', async () => {
@@ -109,7 +103,6 @@ describe('the lead card as a picture', () => {
   it('FR-NOTIF-6: every state draws its own picture, a later one is a short card', async () => {
     const states = [
       newState(CARD),
-      { ...newState(CARD), v: 'bid' as const },
       foldedCardState({ state: 'sending' }),
       foldedCardState({ state: 'sent', at: '2026-11-11T11:17:00.000Z', feeRub: 54 }),
       closedCardState({ ...CARD, closedByBoris: true }, NOW),
@@ -117,12 +110,7 @@ describe('the lead card as a picture', () => {
     const pictures = await Promise.all(states.map((st) => renderCardPicture(CARD, st, NOW)))
     expect(new Set(pictures.map((p) => p.png.toString('base64'))).size).toBe(states.length)
     const full = pictures[0]?.height ?? 0
-    for (const p of pictures.slice(2)) expect(p.height).toBeLessThan(full * 0.5)
-    // A later state has one look: the view is only for a new card.
-    const sent = foldedCardState({ state: 'sent', at: NOW.toISOString() })
-    const a = await renderCardPicture(CARD, sent, NOW)
-    const b = await renderCardPicture(CARD, { ...sent, v: 'bid' }, NOW)
-    expect(a.png.equals(b.png)).toBe(true)
+    for (const p of pictures.slice(1)) expect(p.height).toBeLessThan(full * 0.4)
   })
 
   it('NFR-UX-1: a long dash from the order or the model is drawn as a hyphen, not refused', async () => {
@@ -131,25 +119,18 @@ describe('the lead card as a picture', () => {
     expect(p.width).toBe(PICTURE_WIDTH)
   })
 
-  it('FR-NOTIF-6: a new card has the bid with its fee as the main button, the other view, then «Правка», «Разбор», «Пропустить»', () => {
+  it('FR-NOTIF-6: a new card has the bid with its fee as the main button, then «Правка», «Разбор», «Пропустить»', () => {
     const kb = pictureKeyboard(CARD, newState(CARD))
     expect(kb.map((r) => r.map((b) => sp(b.text)))).toEqual([
       ['Отправить отклик · 55 ₽'],
-      ['Текст отклика'],
       ['Правка', 'Разбор', 'Пропустить'],
     ])
     expect(kb[0]?.[0]).toMatchObject({ callback_data: `t:${taskId}:bid`, style: 'primary' })
-    expect(kb[1]?.[0]?.callback_data).toBe(`v:${taskId}:bid`)
-    expect(kb[2]?.map((b) => b.callback_data)).toEqual([
+    expect(kb[1]?.map((b) => b.callback_data)).toEqual([
       `t:${taskId}:edit`,
       `t:${taskId}:razbor`,
       `t:${taskId}:skip`,
     ])
-    expect(pictureKeyboard(CARD, { ...newState(CARD), v: 'bid' })[1]?.map((b) => b.text)).toEqual([
-      'Карточка',
-    ])
-    expect(parseViewCallback(viewCallback(taskId, 'bid'))).toEqual({ taskId, view: 'bid' })
-    expect(parseViewCallback(`t:${taskId}:bid`)).toBeNull()
   })
 
   it('FR-NOTIF-6: a short card keeps only links, and the reasons under a skipped one', () => {

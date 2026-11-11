@@ -101,11 +101,7 @@ describe('the lead card as a picture', () => {
     expect(p).toMatchObject({ chat_id: BORIS, message_id: messageId })
     expect(isPng(p?.photo)).toBe(true)
     expect(p?.caption).toBeUndefined()
-    expect(texts()).toEqual([
-      ['Отправить отклик · 210 ₽'],
-      ['Текст отклика'],
-      ['Правка', 'Разбор', 'Пропустить'],
-    ])
+    expect(texts()).toEqual([['Отправить отклик · 210 ₽'], ['Правка', 'Разбор', 'Пропустить']])
     expect(tg.sent).toHaveLength(1)
     const [row] = await db.select().from(telegramCard).where(eq(telegramCard.ref, messageId))
     expect(row).toMatchObject({ taskId, state: { s: 'new' } })
@@ -168,20 +164,6 @@ describe('the lead card as a picture', () => {
     expect(tg.photos).toHaveLength(1)
     expect(tg.sent).toHaveLength(1)
     expect(tg.edited).toHaveLength(0)
-  })
-
-  it('FR-NOTIF-6: «Текст отклика» and «Карточка» switch the picture in place and decide nothing', async () => {
-    await bindChat()
-    await setSetting(db, 'cards.picture', true, 'boris')
-    const { messageId } = await bot.notifier.sendLeadCard(CARD)
-    tg.pushPress(BORIS, `v:${taskId}:bid`, messageId)
-    await until(() => tg.mediaEdits.length === 1)
-    expect(texts()[1]).toEqual(['Карточка'])
-    expect(await stateOf(messageId)).toMatchObject({ s: 'new', v: 'bid' })
-    tg.pushPress(BORIS, `v:${taskId}:card`, messageId)
-    await until(() => tg.mediaEdits.length === 2)
-    expect(texts()[1]).toEqual(['Текст отклика'])
-    expect(onPress).not.toHaveBeenCalled()
   })
 
   it('FR-NOTIF-6: a bid that did not go puts the card back as new, with the fee the site shows now', async () => {

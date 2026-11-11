@@ -32,13 +32,7 @@ export type CardState = {
   n?: string
   /** The client's chat (his forum topic). */
   u?: string
-  /** A new card's view: the text of the bid instead of the card itself (Boris's buttons). */
-  v?: CardView
 }
-
-/** The views of a new card that its buttons switch between in place. */
-export const CARD_VIEWS = ['card', 'bid'] as const
-export type CardView = (typeof CARD_VIEWS)[number]
 
 const clock = (d: Date) =>
   d.toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' })

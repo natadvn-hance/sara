@@ -178,8 +178,6 @@ export const TEXTS = {
   commandFailed: 'Не получилось ответить на команду. Попробуй ещё раз чуть позже.',
   /** An older picture card of a lead that came again (after «Правка»): the live one is the newer (FR-NOTIF-6). */
   cardMoved: 'Карточка обновлена, новая ниже',
-  /** A view of the picture card that could not be drawn (FR-NOTIF-6). */
-  viewFailed: 'Не получилось показать, нажми ещё раз',
   alreadyDone: 'Уже сделано',
   skipped: 'Заявка закрыта',
   bidQueued: 'Отправляю отклик',

@@ -5,14 +5,14 @@ import satori from 'satori'
 import { isCallOffer, SLOTS_MARK } from '../leads/callSlots'
 import { firstName } from '../leads/clientName'
 import { isTelegramLine } from '../leads/telegramLine'
-import type { CardStage, CardState, CardView } from './cardState'
+import type { CardStage, CardState } from './cardState'
 import { type LeadCard, orderUrl, plusMinus, TEXTS } from './cards'
 
 /**
  * The lead card as a picture in Hance's own look (Boris, 11.11.2026): the logo of hance.pro, Involve for words and
  * Martian Mono for labels and figures, after the voice app's screen («[01]» labels, squares of a score, a green pill) and the
- * proposal for ARTEQON IQ (a big orange title, a black panel of figures). One card from the title to the client's
- * words; the bid text is a view of the same picture, switched by its buttons; no Telegram text under it.
+ * proposal for ARTEQON IQ (a big orange title, a black panel of figures). One long card (Boris, 11.11.2026): the title,
+ * the figures, the client, the reasons, the client's words and then the bid with its series; no Telegram text under it.
  */
 
 const C = {
@@ -442,8 +442,8 @@ function labelRows(rows: [string, string][]): Node | null {
   )
 }
 
-/** The view «Текст отклика»: the bid as it will go, its price, and what follows it into the chat. */
-function bidView(c: LeadCard): Node[] {
+/** The bid under the client's words: its price, the text as it will go, and what follows it into the chat. */
+function bidSection(c: LeadCard): Node[] {
   const d = c.draft
   const price = d?.priceRub
     ? (() => {
@@ -453,15 +453,13 @@ function bidView(c: LeadCard): Node[] {
     : null
   const follow = (d?.followUps ?? []).map((t): [string, string] => [
     isCallOffer(t) ? 'Созвон' : isTelegramLine(t) ? 'Телеграм' : 'Вдогонку',
-    clip(t.split(SLOTS_MARK).join('три времени по рабочим часам'), 80),
+    clip(t.split(SLOTS_MARK).join('три времени по рабочим часам'), 110),
   ])
   return [
-    numbered('01', ['Отклик', price].filter(Boolean).join(' · ')),
-    headline(clip(c.title, 70), false, true),
     ...passage(
-      '02',
-      'Текст отклика',
-      d ? clipKeep(d.text, 600) : 'Черновика нет: нажми «Правка» и пришли текст отклика.',
+      '03',
+      ['Текст отклика', price].filter(Boolean).join(' · '),
+      d ? clipKeep(d.text, 700) : 'Черновика нет: нажми «Правка» и пришли текст отклика.',
       null,
     ),
     labelRows(follow),
@@ -568,8 +566,6 @@ const frame = (...children: (Node | null)[]): Node =>
   )
 
 function cardTree(c: LeadCard, st: CardState, now: Date): Node {
-  const view: CardView = st.s === 'new' ? (st.v ?? 'card') : 'card'
-  if (view === 'bid') return frame(topBar(st.s), ...bidView(c))
   if (st.s !== 'new')
     return frame(topBar(st.s), headline(c.title, QUIET.includes(st.s), true), ...stateBlock(c, st))
   const fee = st.f ?? (c.bidPriceRub > 0 ? formatRub(c.bidPriceRub) : '?')
@@ -586,12 +582,13 @@ function cardTree(c: LeadCard, st: CardState, now: Date): Node {
     clientRow(c),
     whyRows(c),
     ...clientWords(c),
+    ...bidSection(c),
   )
 }
 
 /**
- * The picture of a lead card in state `st`: PNG, 1080 pixels wide. A new card is the full poster (or its bid view); any
- * later state is a short card with the title and what happened.
+ * The picture of a lead card in state `st`: PNG, 1080 pixels wide. A new card is the whole long card; any later state
+ * is a short card with the title and what happened.
  */
 export async function renderCardPicture(
   c: LeadCard,
@@ -610,23 +607,11 @@ export async function renderCardPicture(
   return { png: Buffer.from(r.asPng()), width: r.width, height: r.height }
 }
 
-const VIEW_BUTTON: Record<CardView, string> = {
-  card: 'Карточка',
-  bid: 'Текст отклика',
-}
-
 type Key = { text: string; callback_data?: string; url?: string; style?: 'primary' }
 
-/** The data of a button that switches a new card's view in place («v:<task>:bid»): no press of the task, only a look. */
-export const viewCallback = (taskId: string, v: CardView) => `v:${taskId}:${v}`
-export function parseViewCallback(data: string): { taskId: string; view: CardView } | null {
-  const m = /^v:([0-9a-f-]{36}):(card|bid)$/i.exec(data)
-  return m?.[1] && m[2] ? { taskId: m[1], view: m[2] as CardView } : null
-}
-
 /**
- * The buttons under the picture. A new card: the bid with its fee (the main one); the view it is not showing («Текст
- * отклика» or «Карточка»); «Правка», «Разбор», «Пропустить», the same presses as the text card's.
+ * The buttons under the picture. A new card: the bid with its fee (the main one), then «Правка», «Разбор»,
+ * «Пропустить», the same presses as the text card's.
  * A short card: `rows` (the reasons under a closed one), the client's chat and the order on Profi.ru as links.
  */
 export function pictureKeyboard(
@@ -644,9 +629,6 @@ export function pictureKeyboard(
           style: 'primary',
         },
       ],
-      (['card', 'bid'] as const)
-        .filter((v) => v !== (st.v ?? 'card'))
-        .map((v) => ({ text: VIEW_BUTTON[v], callback_data: viewCallback(c.taskId, v) })),
       [
         { text: 'Правка', callback_data: formatCallback(c.taskId, 'edit') },
         { text: TEXTS.analysisButton, callback_data: formatCallback(c.taskId, 'razbor') },

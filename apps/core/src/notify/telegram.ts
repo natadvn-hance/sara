@@ -13,7 +13,7 @@ import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { getSetting } from '../settings/store'
 import { bindChat, boundChat, boundUser } from './binding'
 import { COMMANDS, type CommandReply } from './botCommands'
-import { asState, type CardState, type CardView, closedCardState, newState } from './cardState'
+import { asState, type CardState, closedCardState, newState } from './cardState'
 import {
   closedLeadCardText,
   htmlToPlain,
@@ -46,7 +46,7 @@ import {
   withoutDot,
 } from './forum'
 import type { Notifier, Place } from './notifier'
-import { parseViewCallback, pictureKeyboard, renderCardPicture } from './picture'
+import { pictureKeyboard, renderCardPicture } from './picture'
 
 type SendOptions = NonNullable<Parameters<Bot['api']['sendMessage']>[2]>
 
@@ -404,8 +404,6 @@ export function createTelegramRuntime(d: {
   })
 
   bot.on('callback_query:data', async (ctx) => {
-    const view = parseViewCallback(ctx.callbackQuery.data)
-    if (view) return void (await switchView(ctx, view))
     const parsed = parseCallback(ctx.callbackQuery.data)
     if (!parsed) return ctx.answerCallbackQuery()
     const text = await d.onPress(parsed)
@@ -655,32 +653,6 @@ export function createTelegramRuntime(d: {
 
   /** FR-NOTIF-2: without sound at the quiet hours, unless the message is urgent. */
   const silentNow = async (loud?: boolean) => !loud && (await quietNow(d.db, new Date()))
-
-  /**
-   * «Текст отклика» and «Карточка» under a new picture card: the same message shows that view now. Only a look:
-   * nothing is decided, and a card past «new» keeps what it shows.
-   */
-  async function switchView(ctx: Context, v: { taskId: string; view: CardView }): Promise<void> {
-    const m = ctx.callbackQuery?.message
-    let text: string | undefined
-    try {
-      const ref =
-        !m || m.chat.type === 'private'
-          ? (m?.message_id ?? 0)
-          : await postRef(d.db, m.chat.id, m.message_id, m.message_thread_id ?? null)
-      const p = await pictureAt(ref)
-      if (!p || p.card.taskId !== v.taskId || p.state.s !== 'new') text = TEXTS.alreadyDone
-      else
-        await showPicture(p, {
-          ...p.state,
-          ...(v.view === 'card' ? { v: undefined } : { v: v.view }),
-        })
-    } catch (e) {
-      console.error('card view not switched', short(e))
-      text = TEXTS.viewFailed
-    }
-    await ctx.answerCallbackQuery(text ? { text } : undefined).catch(() => {})
-  }
 
   /** Lead cards are pictures (FR-NOTIF-6): Boris turned it on. It never throws. */
   const pictureOn = () => getSetting(d.db, 'cards.picture').catch(() => false)
