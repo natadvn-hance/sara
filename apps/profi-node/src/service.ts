@@ -263,7 +263,11 @@ export async function startProfiService(
     pollMs: timing.shipPollMs,
   })
   shipper.start()
-  const purge = setInterval(() => void purgeOld(db, new Date()).catch(() => {}), 24 * 3600 * 1000)
+  // Every 6 hours and once 10 minutes after the start: with a timer of 24 hours only, a node restarted by every update
+  // never purged anything (11.11.2026, the site's answers had grown to 3.5 GB).
+  const runPurge = () => void purgeOld(db, new Date()).catch(() => {})
+  const purgeFirst = setTimeout(runPurge, 10 * 60_000)
+  const purge = setInterval(runPurge, 6 * 3600 * 1000)
 
   const readTools = createReadTools({ db, accounts: runtimes })
   const tools = {
@@ -305,6 +309,7 @@ export async function startProfiService(
     health: (id) => readTools.sessionHealth({ account_id: id }),
     async close() {
       closing = true
+      clearTimeout(purgeFirst)
       clearInterval(purge)
       for (const a of accounts.values()) await a.stop()
       await shipper.stop()

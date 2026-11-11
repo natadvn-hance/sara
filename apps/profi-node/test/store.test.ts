@@ -73,6 +73,22 @@ describe('node store', () => {
     expect(await purgeOld(db, now)).toEqual({ raw: 1, outbox: 1 })
   })
 
+  it('data-dictionary: the site answers are kept 10 days, other raw records 30 (11.11.2026)', async () => {
+    const row = (n: number, kind: string, days: number) => ({
+      id: `01a16700-0000-7000-8000-00000000001${n}`,
+      accountId: 'a',
+      kind,
+      receivedAt: ago(days),
+      body: {},
+    })
+    await db
+      .insert(rawEvent)
+      .values([row(1, 'response', 11), row(2, 'response', 9), row(3, 'rtp', 11), row(4, 'dom', 11)])
+    expect(await purgeOld(db, now)).toEqual({ raw: 1, outbox: 0 })
+    const left = await db.select({ kind: rawEvent.kind }).from(rawEvent)
+    expect(left.map((r) => r.kind).sort()).toEqual(['dom', 'response', 'rtp'])
+  })
+
   it('data-dictionary: presses of the send button are kept 30 days', async () => {
     const press = (key: string, days: number) => ({
       idempotencyKey: key,
