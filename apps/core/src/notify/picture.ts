@@ -409,17 +409,44 @@ function passage(n: string, label: string, text: string, more: string | null): N
   ].filter((x): x is Node => Boolean(x))
 }
 
-/** The client's own words under the reasons: about five lines on the card, the rest in «Разбор». */
-function clientWords(c: LeadCard): Node[] {
-  const flat = c.text.replace(/\s*\n+\s*/g, ' ').trim()
+/**
+ * The client's own words under the reasons, set as a quotation (Boris, 11.11.2026: «выделить органично»): a large
+ * orange guillemet hangs in the margin, the words a size larger; no plate, no frame. The whole of them, paragraphs
+ * kept (Boris: a tap opens the picture in full, not «Разбор»); only an order past `WORDS_MAX` is cut, so the picture
+ * stays within what Telegram takes.
+ */
+function clientWords(c: LeadCard, max: number): Node[] {
+  const flat = c.text.trim()
   if (!flat) return []
-  const max = 170
-  return passage(
-    '02',
-    'Сообщение клиента',
-    clipKeep(flat, max),
-    flat.length > max ? 'Целиком в «Разборе»' : null,
-  )
+  const name = firstName(c.clientInfo?.name?.trim() || c.clientName.trim() || '') ?? null
+  return [
+    box({ height: 1, backgroundColor: C.line, marginTop: 26 }),
+    numbered('02', name ? `Сообщение клиента · ${clip(name, 20)}` : 'Сообщение клиента', 20),
+    box(
+      { marginTop: 10, alignItems: 'flex-start' },
+      txt(
+        {
+          fontFamily: SANS,
+          fontWeight: 600,
+          fontSize: 44,
+          lineHeight: 1,
+          color: C.accent,
+          width: 30,
+          marginTop: -2,
+        },
+        '«',
+      ),
+      words(16.5, C.ink, `${clipKeep(flat, max)}»`, {
+        lineHeight: 1.45,
+        flex: 1,
+        minWidth: 0,
+        whiteSpace: 'pre-wrap',
+      }),
+    ),
+    ...(flat.length > max
+      ? [mono(9, C.muted, 'Целиком в «Разборе»', { marginTop: 12, marginLeft: 30 })]
+      : []),
+  ]
 }
 
 /** Rows of a label and a text on one grid, hairlines between them: the series under the bid. */
@@ -550,6 +577,13 @@ function stateBlock(c: LeadCard, st: CardState): Node[] {
   ].filter((x): x is Node => Boolean(x))
 }
 
+/**
+ * How much of the client's words the card tries to hold, longest first: Telegram takes a photo whose sides add up to at
+ * most 10000 pixels, so a card past `SIDES_MAX` is drawn again with fewer of them.
+ */
+const WORDS_MAX = [2600, 1800, 1200, 700] as const
+const SIDES_MAX = 9600
+
 const QUIET: CardStage[] = ['closed', 'skipped', 'stale', 'done', 'note']
 
 const frame = (...children: (Node | null)[]): Node =>
@@ -565,7 +599,7 @@ const frame = (...children: (Node | null)[]): Node =>
     ...children,
   )
 
-function cardTree(c: LeadCard, st: CardState, now: Date): Node {
+function cardTree(c: LeadCard, st: CardState, now: Date, wordsMax: number): Node {
   if (st.s !== 'new')
     return frame(topBar(st.s), headline(c.title, QUIET.includes(st.s), true), ...stateBlock(c, st))
   const fee = st.f ?? (c.bidPriceRub > 0 ? formatRub(c.bidPriceRub) : '?')
@@ -581,7 +615,7 @@ function cardTree(c: LeadCard, st: CardState, now: Date): Node {
     scorePanel(c, fee),
     clientRow(c),
     whyRows(c),
-    ...clientWords(c),
+    ...clientWords(c, wordsMax),
     ...bidSection(c),
   )
 }
@@ -595,19 +629,26 @@ export async function renderCardPicture(
   st: CardState,
   now: Date = new Date(),
 ): Promise<{ png: Buffer; width: number; height: number }> {
-  const svg = await satori(cardTree(c, st, now) as unknown as Parameters<typeof satori>[0], {
-    width: W,
-    fonts: loadFonts(),
-  })
-  const r = new Resvg(svg, {
-    fitTo: { mode: 'width', value: PICTURE_WIDTH },
-    background: C.bg,
-    font: { loadSystemFonts: false },
-  }).render()
-  return { png: Buffer.from(r.asPng()), width: r.width, height: r.height }
+  let drawn: { png: Buffer; width: number; height: number } | null = null
+  for (const wordsMax of st.s === 'new' ? WORDS_MAX : WORDS_MAX.slice(0, 1)) {
+    const svg = await satori(
+      cardTree(c, st, now, wordsMax) as unknown as Parameters<typeof satori>[0],
+      { width: W, fonts: loadFonts() },
+    )
+    const r = new Resvg(svg, {
+      fitTo: { mode: 'width', value: PICTURE_WIDTH },
+      background: C.bg,
+      font: { loadSystemFonts: false },
+    }).render()
+    drawn = { png: Buffer.from(r.asPng()), width: r.width, height: r.height }
+    if (r.width + r.height <= SIDES_MAX) break
+  }
+  if (!drawn) throw new Error('the card was not drawn')
+  return drawn
 }
 
-type Key = { text: string; callback_data?: string; url?: string; style?: 'primary' }
+/** Telegram draws the buttons: of its three colours, red is the nearest to Hance's orange (Boris, 11.11.2026). */
+type Key = { text: string; callback_data?: string; url?: string; style?: 'danger' }
 
 /**
  * The buttons under the picture. A new card: the bid with its fee (the main one), then «Правка», «Разбор»,
@@ -626,7 +667,7 @@ export function pictureKeyboard(
         {
           text: fee ? `Отправить отклик · ${fee}` : 'Отправить отклик',
           callback_data: formatCallback(c.taskId, 'bid'),
-          style: 'primary',
+          style: 'danger',
         },
       ],
       [

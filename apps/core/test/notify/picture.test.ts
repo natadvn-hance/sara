@@ -64,7 +64,7 @@ describe('the lead card as a picture', () => {
     expect(height).toBeLessThan(width * 4)
   })
 
-  it('FR-NOTIF-6: the longest order, title and bid keep the card in shape, only their words cut', async () => {
+  it("FR-NOTIF-6: the longest order still makes a photo Telegram takes, the client's words cut only then", async () => {
     const long: LeadCard = {
       ...CARD,
       title: 'Очень длинный заголовок заявки про маркетинг, '.repeat(6),
@@ -80,9 +80,9 @@ describe('the lead card as a picture', () => {
       },
     }
     const card = await renderCardPicture(long, newState(long), NOW)
-    // Telegram takes a photo whose sides add up to at most 10000 pixels.
-    expect(card.width + card.height).toBeLessThan(10000)
-    expect(card.height).toBeLessThan(PICTURE_WIDTH * 4.5)
+    // Telegram takes a photo whose sides add up to at most 10000 pixels: the client's words give way, the card stays.
+    expect(card.width + card.height).toBeLessThanOrEqual(9600)
+    expect(card.width).toBe(PICTURE_WIDTH)
   })
 
   it('FR-NOTIF-6: a card without score, analysis, client info, budget or text still draws', async () => {
@@ -125,7 +125,7 @@ describe('the lead card as a picture', () => {
       ['Отправить отклик · 55 ₽'],
       ['Правка', 'Разбор', 'Пропустить'],
     ])
-    expect(kb[0]?.[0]).toMatchObject({ callback_data: `t:${taskId}:bid`, style: 'primary' })
+    expect(kb[0]?.[0]).toMatchObject({ callback_data: `t:${taskId}:bid`, style: 'danger' })
     expect(kb[1]?.map((b) => b.callback_data)).toEqual([
       `t:${taskId}:edit`,
       `t:${taskId}:razbor`,
