@@ -91,7 +91,9 @@ final class CoreClient: @unchecked Sendable {
     /// At the start of listening: the way to the core must answer within 2,5 s, or a new one is opened at once, while
     /// he still speaks (12.11: the open connection died as he began, and the words waited 10 s on it, then 4 s more
     /// for a new one). Then her voice is woken on the way that answers.
-    func prepare(for agent: HanceAgent) {
+    /// `unreachable` is called when even a new way does not answer in 8 s: the phone does not reach the core at all
+    /// (12.11 19:42, through his VPN), so he learns it at once instead of after the 40 s of a request.
+    func prepare(for agent: HanceAgent, unreachable: @escaping @MainActor @Sendable () -> Void = {}) {
         var r = request("/talk", method: "HEAD", timeout: 2.5)
         r.setValue(nil, forHTTPHeaderField: "Cookie")
         let s = session
@@ -108,9 +110,15 @@ final class CoreClient: @unchecked Sendable {
                     return o
                 }
                 old.finishTasksAndInvalidate()
-                var p = self.request("/talk", method: "HEAD", timeout: 20)
+                var p = self.request("/talk", method: "HEAD", timeout: 8)
                 p.setValue(nil, forHTTPHeaderField: "Cookie")
-                _ = try? await fresh.data(for: p)
+                do {
+                    _ = try await fresh.data(for: p)
+                } catch {
+                    log.notice("the core is not reachable from the phone")
+                    await unreachable()
+                    return
+                }
             }
             self?.warm(agent)
         }
