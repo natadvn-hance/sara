@@ -83,13 +83,16 @@ final class TalkEngine: ObservableObject {
         NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { if self?.signedIn == true { self?.client.warm() } }
+            MainActor.assumeIsolated {
+                guard let self, self.signedIn else { return }
+                self.client.warm(self.agent)
+            }
         }
         keepAlive = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(20))
                 guard let self else { return }
-                if self.signedIn && (self.onScreen || self.phase.isBusy) { self.client.warm() }
+                if self.signedIn && (self.onScreen || self.phase.isBusy) { self.client.ping() }
             }
         }
         loadGreetings()
@@ -255,7 +258,7 @@ final class TalkEngine: ObservableObject {
         guard mine == turn else { return }
         if onScreen { await Ears.askOnce() }
         guard mine == turn else { return }
-        client.warm()
+        client.warm(agent)
         note = nil
         if !followUp { card = nil }
         clock = TurnClock()

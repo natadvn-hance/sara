@@ -177,8 +177,17 @@ final class CoreClient: @unchecked Sendable {
     }
 
     /// The voice service loads its model while Boris speaks (ADR-028, point 4).
-    func warm() {
-        let r = request("/api/talk/warm", method: "POST", timeout: 10)
+    /// Wakes her voice on the server (after PR #291 a short real synthesis): for the one who answers now only.
+    func warm(_ agent: HanceAgent) {
+        let r = request("/api/talk/warm?agent=\(agent.rawValue)", method: "POST", timeout: 10)
+        let s = session
+        Task.detached { _ = try? await s.data(for: r) }
+    }
+
+    /// Keeps the connection to the core open: the talk page's headers through Caddy, no work on the core at all.
+    func ping() {
+        var r = request("/talk", method: "HEAD", timeout: 10)
+        r.setValue(nil, forHTTPHeaderField: "Cookie")
         let s = session
         Task.detached { _ = try? await s.data(for: r) }
     }
