@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test'
+import { URLS } from './ports'
 
 const FAKE_TOKEN = '123456789:AAFakeTokenForTestsOnly_abcdefghijklmnop'
 
 async function controlStart(chatId: number) {
-  await fetch('http://127.0.0.1:18082/_control/start', {
+  await fetch(`${URLS.telegramControl}/start`, {
     method: 'POST',
     body: JSON.stringify({ chatId }),
   })
@@ -49,7 +50,7 @@ test('FR-UI-3: wizard fits a 360 px screen without horizontal scroll', async ({ 
   expect(overflow).toBeLessThanOrEqual(0)
 })
 
-const CONTROL = 'http://127.0.0.1:18083/_control'
+const CONTROL = URLS.standControl
 
 async function tapOn(page: import('@playwright/test').Page, selector: string) {
   const box = (await (

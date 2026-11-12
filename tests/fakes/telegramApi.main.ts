@@ -1,9 +1,17 @@
-// Fake Telegram on a fixed port for Playwright: POST /_control/start {"chatId": 111} simulates /start.
+// Fake Telegram for Playwright: POST /_control/start {"chatId": 111} simulates /start. The ports come from the e2e
+// config (apps/web/e2e/ports.ts), never from a default here: a fixed port is how two runs collided.
 import { createServer } from 'node:http'
 import { createFakeTelegram } from './telegramApi'
 
-const port = Number(process.env.FAKE_TELEGRAM_PORT ?? 18081)
-const controlPort = Number(process.env.FAKE_TELEGRAM_CONTROL_PORT ?? 18082)
+function portFrom(name: string): number {
+  const port = Number(process.env[name])
+  if (!Number.isInteger(port) || port <= 0)
+    throw new Error(`${name} не задана: порты фальшивого Telegram даёт конфиг e2e пульта.`)
+  return port
+}
+
+const port = portFrom('FAKE_TELEGRAM_PORT')
+const controlPort = portFrom('FAKE_TELEGRAM_CONTROL_PORT')
 const tg = await createFakeTelegram(port)
 createServer((req, res) => {
   let body = ''
