@@ -14,7 +14,7 @@ final class MacTalk: ObservableObject {
         failed: "Не получилось. Попробуй ещё раз.",
         late: "Ответа нет шесть минут. Спроси ещё раз.",
         noMic: "Нужен доступ к микрофону и распознаванию речи: Системные настройки → Конфиденциальность.",
-        signIn: "Войди паролем пульта: значок Hance в строке меню."
+        signIn: "Войди паролем пульта: нажми ъ + ё, поле для пароля в этой плашке."
     )
 
     @Published private(set) var agent: HanceAgent = .lora
@@ -54,7 +54,10 @@ final class MacTalk: ObservableObject {
         switch phase {
         case .idle, .done, .failed:
             guard signedIn else {
-                show(Self.notes.signIn)
+                // The password field is in the panel itself; the same keys again put it away.
+                hide?.cancel()
+                note = nil
+                shown.toggle()
                 return
             }
             listen(followUp: false)
@@ -80,7 +83,9 @@ final class MacTalk: ObservableObject {
     func login(password: String) async throws {
         try await client.login(password: password)
         signedIn = true
+        note = "Готово. Нажми ъ + ё и говори."
         _ = await MacMic.allowed()
+        goAway(after: 3)
     }
 
     func signOut() {

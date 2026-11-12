@@ -11,7 +11,7 @@ final class IslandPanel {
     private var bag: Set<AnyCancellable> = []
 
     init(talk: MacTalk) {
-        panel = NSPanel(
+        panel = KeyPanel(
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 120),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -24,6 +24,13 @@ final class IslandPanel {
         panel.contentView = NSHostingView(rootView: IslandView(talk: talk))
         talk.$shown.removeDuplicates().sink { [weak self] on in
             DispatchQueue.main.async { on ? self?.show() : self?.hide() }
+        }.store(in: &bag)
+        // Not signed in: the panel takes the keyboard for the password, without bringing Hance to the front.
+        talk.$signedIn.combineLatest(talk.$shown).sink { [weak self] signedIn, shown in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if shown && !signedIn { self.panel.makeKey() } else if self.panel.isKeyWindow { self.panel.resignKey() }
+            }
         }.store(in: &bag)
         // His words or her answer make it taller: it grows downwards from under the menu bar.
         talk.objectWillChange.sink { [weak self] _ in
@@ -65,6 +72,11 @@ final class IslandPanel {
     }
 }
 
+/// A panel that can take typing (the password) while the app he works in stays in front.
+final class KeyPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 struct IslandView: View {
     @ObservedObject var talk: MacTalk
 
@@ -97,7 +109,9 @@ struct IslandView: View {
                 MacPixels(talk: talk, palette: p)
                     .frame(width: 150, height: 34)
             }
-            if let note = talk.note {
+            if !talk.signedIn {
+                SignInRow(talk: talk, palette: p)
+            } else if let note = talk.note {
                 Text(note)
                     .font(HanceFont.text(14))
                     .foregroundStyle(p.accentInk)
@@ -184,6 +198,64 @@ struct MacPixels: View {
                     dot((c + 1) % cols, r, palette.accent)
                 }
             }
+        }
+    }
+}
+
+/// The pult's password right in the panel, as the first sign-in on the iPhone: Enter signs in, and the next ъ+ё talks.
+struct SignInRow: View {
+    @ObservedObject var talk: MacTalk
+    let palette: Palette
+    @State private var password = ""
+    @State private var error: String?
+    @State private var busy = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Войди паролем пульта, тем же, что в приложении на iPhone")
+                .font(HanceFont.text(13))
+                .foregroundStyle(.white.opacity(0.7))
+            HStack(spacing: 8) {
+                SecureField("Пароль пульта", text: $password)
+                    .textFieldStyle(.plain)
+                    .font(HanceFont.text(15))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.1)))
+                    .focused($focused)
+                    .onSubmit { signIn() }
+                Button(action: signIn) {
+                    Text(busy ? "Вхожу…" : "Войти")
+                        .font(HanceFont.text(14, .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .frame(height: 36)
+                        .background(Capsule().fill(palette.accent))
+                }
+                .buttonStyle(.plain)
+                .disabled(password.isEmpty || busy)
+            }
+            if let error {
+                Text(error).font(HanceFont.text(13)).foregroundStyle(palette.accentInk)
+            }
+        }
+        .onAppear { focused = true }
+    }
+
+    private func signIn() {
+        guard !password.isEmpty, !busy else { return }
+        busy = true
+        error = nil
+        Task {
+            do {
+                try await talk.login(password: password)
+                password = ""
+            } catch {
+                self.error = (error as? LocalizedError)?.errorDescription ?? "Не вышло войти."
+            }
+            busy = false
         }
     }
 }
