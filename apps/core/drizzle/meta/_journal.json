@@ -260,6 +260,13 @@
       "when": 1794415023529,
       "tag": "0037_lead_card",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794503546936,
+      "tag": "0038_card_image",
+      "breakpoints": true
     }
   ]
 }

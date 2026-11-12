@@ -313,8 +313,25 @@ export const telegramCard = core.table('telegram_card', {
   taskId: uuid('task_id'),
   card: jsonb('card').notNull(),
   state: jsonb('state').notNull(),
+  /**
+   * How the card was sent: `photo` (the long picture of 11.11, changed by editMessageMedia) or `text` (12.11: a message
+   * with the picture as its large link preview above the text, changed by editMessageText).
+   */
+  kind: text('kind').notNull().default('photo'),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+
+const bytea = customType<{ data: Buffer }>({ dataType: () => 'bytea' })
+
+/**
+ * The picture of a card's state, served at its unguessable token for Telegram's link preview (FR-NOTIF-6). Every
+ * state gets a new token, so Telegram never shows a preview from its cache; old ones are dropped after a few days.
+ */
+export const cardImage = core.table('card_image', {
+  token: text('token').primaryKey(),
+  png: bytea('png').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
 })
 
 /** Versions of an account's direction rules (FR-ACC-2); exactly one is active per account. */
