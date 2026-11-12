@@ -69,6 +69,7 @@ struct MenuView: View {
                     Label("Позвать \(talk.agent.other.accusative)", systemImage: "person.wave.2")
                 }
                 .disabled(talk.phase.isBusy)
+                SoundPicker()
                 Divider()
                 Button("Выйти из пульта") { talk.signOut() }
             } else {
@@ -104,6 +105,33 @@ struct MenuView: View {
                 self.error = (error as? LocalizedError)?.errorDescription ?? "Не вышло войти."
             }
             busy = false
+        }
+    }
+}
+
+/// The sound of the knocks, one of three (12.11): a tap picks it and plays it at once.
+struct SoundPicker: View {
+    @State private var style = Earcon.style
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Звук").monoLabel(9).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                ForEach(EarconStyle.allCases, id: \.self) { s in
+                    Button {
+                        style = s
+                        Earcon.style = s
+                        Earcon.listening()
+                    } label: {
+                        Text(s.name)
+                            .font(HanceFont.text(13, style == s ? .semibold : .regular))
+                            .padding(.horizontal, 10)
+                            .frame(height: 26)
+                            .background(
+                                Capsule().fill(style == s ? Color.primary.opacity(0.12) : Color.primary.opacity(0.04)))
+                    }
+                }
+            }
         }
     }
 }
