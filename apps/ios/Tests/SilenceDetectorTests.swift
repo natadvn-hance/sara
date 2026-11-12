@@ -95,4 +95,21 @@ final class SilenceDetectorTests: XCTestCase {
         XCTAssertEqual(s.feed(db: -70, at: t + 700), .listen)
         XCTAssertEqual(s.feed(db: -70, at: t + 760), .stop)
     }
+
+    func test_the_knocks_at_the_start_are_not_heard_as_speech() {
+        var s = SilenceDetector(startWaitMs: 1500, ignoreMs: 350)
+        var t = 0.0
+        var step = SilenceDetector.Step.listen
+        while t <= 300 {
+            step = s.feed(db: -10, at: t)
+            t += 20
+        }
+        XCTAssertEqual(step, .listen)
+        while t < 1600 {
+            step = s.feed(db: -70, at: t)
+            t += 20
+        }
+        XCTAssertEqual(step, .nothing)
+        XCTAssertFalse(s.spoke)
+    }
 }

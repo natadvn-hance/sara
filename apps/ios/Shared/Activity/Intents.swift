@@ -104,7 +104,7 @@ struct StopTalkIntent: LiveActivityIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         #if HANCE_APP
-            TalkEngine.shared.stop()
+            TalkEngine.shared.turnOff()
         #endif
         return .result()
     }

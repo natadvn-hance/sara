@@ -1,14 +1,15 @@
 import AVFoundation
 
-/// Hance starts to listen: two dull, crisp knocks, «тук-тук», the first a little higher, like a Volvo's indicator; it
-/// heard the end: the same two the other way round (Boris, 09.11). With the phone in the pocket and the side button
-/// pressed, they say what the screen cannot.
+/// Dull, crisp knocks like a Volvo's indicator (Boris, 09.11). On: two going up, «тук-тук», low then high, which sounds
+/// like something switching on (Boris, 12.11: falling ones sounded like off). His words sent: the same two going down.
+/// Off: one low knock. With the phone in the pocket and the side button pressed, they say what the screen cannot.
 @MainActor
 enum Earcon {
     private static var players: [AVAudioPlayer] = []
 
-    static func listening() { play(knocks([230, 190]), volume: 0.85) }
-    static func heard() { play(knocks([190, 230]), volume: 0.85) }
+    static func listening() { play(knocks([190, 230]), volume: 0.85) }
+    static func heard() { play(knocks([230, 190]), volume: 0.85) }
+    static func off() { play(knocks([160]), volume: 0.8) }
 
     private static func play(_ wav: Data, volume: Float) {
         guard let p = try? AVAudioPlayer(data: wav) else { return }

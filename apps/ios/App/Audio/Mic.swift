@@ -275,12 +275,18 @@ final class Ears: @unchecked Sendable {
         answer()
     }
 
+    /// The phone heard sound but no speech at all (kAFAssistantErrorDomain 1110): noise, her echo, the knocks.
+    var heardNoSpeech: Bool { lock.withLock { noSpeech } }
+    private var noSpeech = false
+
     private func heard(_ result: SFSpeechRecognitionResult?, _ error: Error?) {
         if let error { log.notice("ears: \(String(describing: error), privacy: .public)") }
         let last = result?.isFinal == true || error != nil
+        let none = (error as NSError?).map { $0.domain == "kAFAssistantErrorDomain" && $0.code == 1110 } ?? false
         lock.withLock {
             if let result { best = result.bestTranscription.formattedString }
             if last { over = true }
+            if none { noSpeech = true }
         }
         if last { answer() }
     }

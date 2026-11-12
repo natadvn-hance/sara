@@ -16,6 +16,9 @@ struct TalkScreen: View {
     @State private var wipeColor: Color = .clear
     @State private var wipeSeed = 1
     @State private var typing = false
+    /// The finger is on her photo.
+    @State private var holding = false
+    @State private var offTaps = 0
     @State private var showTimings = false
 
     private var agent: HanceAgent { Demo.agent ?? shown }
@@ -33,15 +36,24 @@ struct TalkScreen: View {
                     topBar
                     Spacer(minLength: 10)
                     ZStack(alignment: .topTrailing) {
-                        Button {
-                            engine.press()
-                        } label: {
-                            HeroCard(
-                                agent: agent, phase: phase, palette: palette,
-                                size: CGSize(width: width, height: cardHeight), arming: engine.arming)
-                        }
-                        .buttonStyle(CardPress())
-                        .disabled(phase == .sending || phase == .thinking)
+                        // Her photo is the button: a tap talks (or sends, or stops her voice); held, it switches
+                        // her off at any moment, even while she thinks (Boris, 12.11).
+                        HeroCard(
+                            agent: agent, phase: phase, palette: palette,
+                            size: CGSize(width: width, height: cardHeight), arming: engine.arming
+                        )
+                        .scaleEffect(holding ? 0.975 : 1)
+                        .animation(Motion.spring(0.35), value: holding)
+                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .onTapGesture { engine.press() }
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            offTaps += 1
+                            engine.turnOff()
+                        } onPressingChanged: { holding = $0 }
+                        .sensoryFeedback(.impact(weight: .medium), trigger: offTaps)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityHint("Нажми, чтобы говорить. Удержи, чтобы выключить")
+                        .accessibilityAction(named: "Выключить") { engine.turnOff() }
                         HUDPlate(agent: agent, phase: phase, meter: engine.meter, since: engine.since, palette: palette)
                             .padding(12)
                             .onLongPressGesture { showTimings = true }
@@ -177,9 +189,9 @@ struct TalkScreen: View {
 
     private var hint: String {
         switch phase {
-        case .listening: return "Говори. Пауза закончит запись"
-        case .sending: return "Отправляю"
-        case .thinking: return "\(agent.name) думает"
+        case .listening: return "Говори. Пауза закончит запись · удержи фото, чтобы выключить"
+        case .sending: return "Отправляю · удержи фото, чтобы выключить"
+        case .thinking: return "\(agent.name) думает · удержи фото, чтобы выключить"
         case .speaking: return "Нажми на фото, чтобы остановить"
         default: return "Нажми на фото и говори"
         }

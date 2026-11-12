@@ -15,6 +15,8 @@ struct SilenceDetector {
     let maxMs: Double
     /// Loud this long before it counts as speech: a tap on the phone or a click does not.
     let minSpeechMs: Double
+    /// The first moments are not listened to: the knocks that say «I listen» play then, into the microphone too.
+    let ignoreMs: Double
 
     /// Speech is at least this loud whatever the room.
     static let quietBar: Double = -42
@@ -29,11 +31,15 @@ struct SilenceDetector {
     /// The room's noise in dB, followed slowly.
     private(set) var room: Double = -55
 
-    init(pauseMs: Double = 750, startWaitMs: Double = 10_000, maxMs: Double = 90_000, minSpeechMs: Double = 200) {
+    init(
+        pauseMs: Double = 750, startWaitMs: Double = 10_000, maxMs: Double = 90_000, minSpeechMs: Double = 200,
+        ignoreMs: Double = 0
+    ) {
         self.pauseMs = pauseMs
         self.startWaitMs = startWaitMs
         self.maxMs = maxMs
         self.minSpeechMs = minSpeechMs
+        self.ignoreMs = ignoreMs
     }
 
     var threshold: Double { max(Self.quietBar, room + Self.aboveRoom) }
@@ -50,6 +56,7 @@ struct SilenceDetector {
         start = begun
         let dt = min(100, max(0, at - (lastAt ?? at)))
         lastAt = at
+        if at - begun < ignoreMs { return .listen }
         if at - begun >= maxMs { return spoke ? .stop : .nothing }
 
         let loud = db >= threshold

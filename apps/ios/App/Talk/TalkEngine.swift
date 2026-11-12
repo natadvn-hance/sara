@@ -84,8 +84,10 @@ final class TalkEngine: ObservableObject {
     func press() {
         switch phase {
         case .idle, .done, .failed: listen()
-        case .listening: finishListening()
-        case .speaking: stop()
+        // Listening: once he has spoken a tap sends his words; before that (waiting for him, or for his next words
+        // after her answer) the same tap switches her off (Boris, 12.11).
+        case .listening: detector.spoke ? finishListening() : turnOff()
+        case .speaking: turnOff()
         // His habit is a tap to end his words; the pause may have ended them a moment before. That tap must not
         // throw his question away (Boris, 12.11): while it goes up and she thinks, a tap does nothing.
         case .sending, .thinking: break
@@ -148,7 +150,7 @@ final class TalkEngine: ObservableObject {
             return
         }
         if phase.isBusy {
-            stop()
+            turnOff()
             return
         }
         if who != agent { become(who) }
@@ -180,6 +182,13 @@ final class TalkEngine: ObservableObject {
         turn += 1
         let mine = turn
         flow = Task { await self.say(c.text, cards: c.cards, followUp: false, turn: mine, show: false) }
+    }
+
+    /// He switches her off (a long press on her photo at any time, a tap while she waits for him): the low knock, and
+    /// all stops.
+    func turnOff() {
+        if phase.isBusy { Earcon.off() }
+        stop()
     }
 
     /// No more listening, no more voice; the island goes.
@@ -235,7 +244,7 @@ final class TalkEngine: ObservableObject {
         clock = TurnClock()
         clock.voice = true
         // After her answer the talk waits 1,5 s for his next words, then goes out (Boris, 12.11).
-        detector = SilenceDetector(startWaitMs: followUp ? 1500 : 10_000)
+        detector = SilenceDetector(startWaitMs: followUp ? 1500 : 10_000, ignoreMs: 350)
         let up = VoiceUpload(client: client, agent: agent)
         upload = up
         // The phone hears the words itself as he speaks; the recording goes up too, for when it cannot.
@@ -266,6 +275,7 @@ final class TalkEngine: ObservableObject {
             // He said nothing after her answer: the answer stays on the Lock Screen a while, as after any answer.
             if followUp, let last = card {
                 line = last.text
+                Earcon.off()
                 return endTalk(final: .done)
             }
             // Pressed and nothing heard: said so, not a silent stop.
@@ -282,6 +292,18 @@ final class TalkEngine: ObservableObject {
                 up.cancel()
                 log.notice("heard on the phone, \(words.count) chars")
                 sent = try await client.sendText(words, agent: agent)
+            } else if ears?.heardNoSpeech == true {
+                // Sound but no speech (noise, her echo): no question to anyone, no «не разобрала» from the server.
+                up.cancel()
+                upload = nil
+                log.notice("the phone heard no speech, nothing is sent")
+                if followUp, let last = card {
+                    line = last.text
+                    Earcon.off()
+                    return endTalk(final: .done)
+                }
+                show(Self.notes.notHeardTry)
+                return endTalk(final: nil)
             } else {
                 log.notice("the phone heard no words, the recording goes to the server")
                 sent = try await up.finish()
