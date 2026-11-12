@@ -130,6 +130,8 @@ targets:
       - path: App/Audio/Speaker.swift
       - path: App/Audio/SpeechChunker.swift
       - path: App/Audio/SilenceDetector.swift
+      - path: App/Audio/Sounds
+        buildPhase: resources
       - path: Fonts
         buildPhase: resources
     info:

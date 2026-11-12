@@ -9,15 +9,30 @@ enum Earcon {
     private static var players: [AVAudioPlayer] = []
     static let styleKey = "hance.earcon.style"
 
-    /// The style he picked; «Реле» until he picks.
+    /// The style he picked; «Дерево 05» (his choice, 12.11) until he picks another.
     static var style: EarconStyle {
-        get { UserDefaults.standard.string(forKey: styleKey).flatMap(EarconStyle.init(rawValue:)) ?? .relay }
+        get { UserDefaults.standard.string(forKey: styleKey).flatMap(EarconStyle.init(rawValue:)) ?? .box }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: styleKey) }
     }
 
-    static func listening() { play(knocks(style, up: true), volume: 0.9) }
-    static func heard() { play(knocks(style, up: false), volume: 0.9) }
-    static func off() { play(knocks(style, single: true), volume: 0.85) }
+    static func listening() { style == .box ? playFile("earcon-on") : play(knocks(style, up: true), volume: 0.9) }
+    static func heard() { style == .box ? playFile("earcon-sent") : play(knocks(style, up: false), volume: 0.9) }
+    static func off() { style == .box ? playFile("earcon-off") : play(knocks(style, single: true), volume: 0.85) }
+
+    /// «Дерево 05» from Lora's set 01-06 (Boris's choice, 12.11), as made there: on, two knocks going up (A3 to C#4);
+    /// sent, one low knock (E3); off, two going down. He asked «sent» and «off» of that set swapped, and so they are.
+    private static var files: [String: Data] = [:]
+
+    private static func playFile(_ name: String) {
+        if files[name] == nil, let url = Bundle.main.url(forResource: name, withExtension: "wav") {
+            files[name] = try? Data(contentsOf: url)
+        }
+        guard let data = files[name] else {
+            // Not in the bundle (a test): the synthesized wood says it instead.
+            return play(knocks(.wood, up: name != "earcon-sent", single: name == "earcon-sent"), volume: 0.9)
+        }
+        play(data, volume: 1)
+    }
 
     private static func play(_ wav: Data, volume: Float) {
         guard let p = try? AVAudioPlayer(data: wav) else { return }
@@ -120,6 +135,8 @@ struct EarconRecipe: Sendable {
 
 /// The three sounds Boris chooses from (12.11): all low and dull, none sharp.
 enum EarconStyle: String, CaseIterable, Sendable {
+    /// «Дерево 05», a dry wooden box, from Lora's set (Boris's choice, 12.11): three recorded sounds in the bundle.
+    case box
     /// A low dull «тук» with a barely heard relay click: the Volvo's indicator.
     case relay
     /// Lower still, a soft wooden knock without any click.
@@ -129,6 +146,7 @@ enum EarconStyle: String, CaseIterable, Sendable {
 
     var name: String {
         switch self {
+        case .box: return "Дерево 05"
         case .relay: return "Реле"
         case .wood: return "Дерево"
         case .drop: return "Капля"
@@ -137,7 +155,7 @@ enum EarconStyle: String, CaseIterable, Sendable {
 
     var recipe: EarconRecipe {
         switch self {
-        case .relay:
+        case .box, .relay:
             return EarconRecipe(
                 low: 165, high: 200, drop: 0.25, dropTime: 0.003, attack: 0.001, body: 0.02, weight: 0.5, click: 0.35,
                 lowpass: 1300, passes: 2, apart: 0.13)

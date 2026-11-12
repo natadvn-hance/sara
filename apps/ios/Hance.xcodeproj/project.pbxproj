@@ -11,11 +11,13 @@
 		0129F9707A92FF2780CB686E /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
 		0867A51A5AED2FA7C2B6F979 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
 		08C3BE05CC41C0BF9FA447F6 /* HanceWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B7455A5F0D11201F6030750 /* HanceWidgets.swift */; };
+		0A7F40CE21E5076ED728AE8D /* earcon-off.wav in Resources */ = {isa = PBXBuildFile; fileRef = D01FA91E31365212928EF34E /* earcon-off.wav */; };
 		0B942927E854A1010F4A2E63 /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
 		0D71C81B83CAC857A7E1FA16 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494752230CCEB0631BD6FEAB /* Intents.swift */; };
 		0D83C536C3994B5DE8127ED3 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		0EC7E0C460E3AD2D7E587F9A /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */; };
 		122513EC9DE3AFE92AD99501 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
+		125AE59BD5087CC98C9966B3 /* earcon-sent.wav in Resources */ = {isa = PBXBuildFile; fileRef = BFE768F969A05C7648861E62 /* earcon-sent.wav */; };
 		180F0A05D2ABA03161FAEC44 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
 		1988482C2A8CFD0F796A5279 /* MacLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07D191671C8149B3CD3EC901 /* MacLog.swift */; };
 		1A91D5B2AA5DED69ECC1A3CF /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
@@ -28,6 +30,7 @@
 		28431E50ECF2ACD05E026330 /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */; };
 		2870AE5F46BDD5BDFE28BC78 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E739C8A762606790E910E1D /* CoreClient.swift */; };
 		28B1D13675F13C437C27A41B /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10F5CB2A1C23B9077847A235 /* HotKey.swift */; };
+		295B2440BE43895C39C785A1 /* earcon-on.wav in Resources */ = {isa = PBXBuildFile; fileRef = DED5A956BE224D11FBDCBA1A /* earcon-on.wav */; };
 		2AB64EFACA136350BB875290 /* Earcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E267B5B1FD895845A8D23FF /* Earcon.swift */; };
 		339234649382555EBAD59985 /* HanceNotification.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FCC37739D929CD8374A64D5 /* HanceNotification.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		3670D6E81558A84147316D4F /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
@@ -35,6 +38,7 @@
 		37BEEB1F876440F4F6B3D8A8 /* MacPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C52B7D26BD1159962EA3228 /* MacPanel.swift */; };
 		37BF84676C1EC1879668E160 /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
 		38EDAA680B4699CE24B55262 /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
+		3B4E83177AF62C62878BFA67 /* earcon-sent.wav in Resources */ = {isa = PBXBuildFile; fileRef = BFE768F969A05C7648861E62 /* earcon-sent.wav */; };
 		3B7DECECCD969C9A04432B41 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */; };
 		3E578EE23A41137D925C205B /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
 		408D75E123918542D895024F /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
@@ -89,7 +93,9 @@
 		DAAFF017E33D0481706CDD12 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		E32BD04277A9637AD41063B0 /* AnswerWaitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */; };
 		E7DD18D64126389FB07D22F4 /* Mic.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06640BE7BA84F21BC840DB /* Mic.swift */; };
+		EADEA171E37B7714C650E292 /* earcon-on.wav in Resources */ = {isa = PBXBuildFile; fileRef = DED5A956BE224D11FBDCBA1A /* earcon-on.wav */; };
 		EBE3E6EBF5D9EC5063115B21 /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
+		F030F4D5CDCC3E76F36119A0 /* earcon-off.wav in Resources */ = {isa = PBXBuildFile; fileRef = D01FA91E31365212928EF34E /* earcon-off.wav */; };
 		F176537965628CB78E16E7B8 /* Earcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E267B5B1FD895845A8D23FF /* Earcon.swift */; };
 		F26993DFFCDED49C88102C91 /* AvatarStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 665CD155617AC12938D9EF66 /* AvatarStage.swift */; };
 		F2C64B5ADDB27F89F417DF3B /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
@@ -186,10 +192,13 @@
 		AD06640BE7BA84F21BC840DB /* Mic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mic.swift; sourceTree = "<group>"; };
 		AD469B3E40120589311F2517 /* Involve-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Involve-Regular.ttf"; sourceTree = "<group>"; };
 		B93B76D253F76B4F1BFC2E64 /* TalkEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkEngine.swift; sourceTree = "<group>"; };
+		BFE768F969A05C7648861E62 /* earcon-sent.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "earcon-sent.wav"; sourceTree = "<group>"; };
 		C695714E5A7578DFE49B7298 /* SilenceDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilenceDetector.swift; sourceTree = "<group>"; };
 		CEA60CF2214FE0D810C7EB59 /* HanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceApp.swift; sourceTree = "<group>"; };
+		D01FA91E31365212928EF34E /* earcon-off.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "earcon-off.wav"; sourceTree = "<group>"; };
 		D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Involve-SemiBold.ttf"; sourceTree = "<group>"; };
 		DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "MartianMono-Regular.ttf"; sourceTree = "<group>"; };
+		DED5A956BE224D11FBDCBA1A /* earcon-on.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "earcon-on.wav"; sourceTree = "<group>"; };
 		EEA23B0D7058A41AF35B6217 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		F4209E24635DB2A603522BF6 /* SpeechChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunker.swift; sourceTree = "<group>"; };
 		F9EF12B146DC66D45B44B10E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -227,6 +236,16 @@
 				0E1EB685F919B66DF14B35A3 /* Brand */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		45E0676EC742D2F0D3F3A375 /* Sounds */ = {
+			isa = PBXGroup;
+			children = (
+				D01FA91E31365212928EF34E /* earcon-off.wav */,
+				DED5A956BE224D11FBDCBA1A /* earcon-on.wav */,
+				BFE768F969A05C7648861E62 /* earcon-sent.wav */,
+			);
+			path = Sounds;
 			sourceTree = "<group>";
 		};
 		5070DAC66ABF5CAE36CF4B02 /* Mac */ = {
@@ -299,6 +318,7 @@
 		CA43F817AFFD57B75B7A1F14 /* Audio */ = {
 			isa = PBXGroup;
 			children = (
+				45E0676EC742D2F0D3F3A375 /* Sounds */,
 				3E267B5B1FD895845A8D23FF /* Earcon.swift */,
 				AD06640BE7BA84F21BC840DB /* Mic.swift */,
 				C695714E5A7578DFE49B7298 /* SilenceDetector.swift */,
@@ -556,6 +576,9 @@
 				810381AF0F22B124A6B3761E /* Involve-Regular.ttf in Resources */,
 				DAAFF017E33D0481706CDD12 /* Involve-SemiBold.ttf in Resources */,
 				0129F9707A92FF2780CB686E /* MartianMono-Regular.ttf in Resources */,
+				F030F4D5CDCC3E76F36119A0 /* earcon-off.wav in Resources */,
+				EADEA171E37B7714C650E292 /* earcon-on.wav in Resources */,
+				125AE59BD5087CC98C9966B3 /* earcon-sent.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -567,6 +590,9 @@
 				CC10DDB8FE16831B3376343A /* Involve-Regular.ttf in Resources */,
 				D96DF9D55DAAE158291A0F02 /* Involve-SemiBold.ttf in Resources */,
 				AC5E92BCF881640A636CFF3E /* MartianMono-Regular.ttf in Resources */,
+				0A7F40CE21E5076ED728AE8D /* earcon-off.wav in Resources */,
+				295B2440BE43895C39C785A1 /* earcon-on.wav in Resources */,
+				3B4E83177AF62C62878BFA67 /* earcon-sent.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
