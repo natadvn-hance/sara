@@ -105,6 +105,9 @@ final class CoreClient: @unchecked Sendable {
         r.timeoutInterval = timeout
         r.httpShouldHandleCookies = false
         r.cachePolicy = .reloadIgnoringLocalCacheData
+        // HTTP/3 (QUIC) is tried too: where a VPN or a network drags out the TLS handshake over TCP (16 s on 12.11),
+        // QUIC often gets through at once; the log says which one each request took.
+        r.assumesHTTP3Capable = true
         if let type { r.setValue(type, forHTTPHeaderField: "Content-Type") }
         if let c = lock.withLock({ cookieValue }) {
             r.setValue("\(SessionStore.cookieName)=\(c)", forHTTPHeaderField: "Cookie")

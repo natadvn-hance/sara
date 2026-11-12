@@ -55,6 +55,8 @@ final class TalkEngine: ObservableObject {
     private var greetings: [String: Data] = [:]
     private var noteTimer: Task<Void, Never>?
 
+    private var keepAlive: Task<Void, Never>?
+
     init() {
         client = CoreClient()
         signedIn = client.signedIn
@@ -74,6 +76,21 @@ final class TalkEngine: ObservableObject {
         ) { [weak self] n in
             let began = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
             if began { MainActor.assumeIsolated { self?.stop() } }
+        }
+        // The way to the core is set up as soon as Hance comes on screen, and kept open while it is there or a talk
+        // goes on: on Boris's phone a new secure connection takes up to 16 s through his VPN (12.11), an open one
+        // answers in a fraction of a second.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.signedIn == true { self?.client.warm() } }
+        }
+        keepAlive = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                guard let self else { return }
+                if self.signedIn && (self.onScreen || self.phase.isBusy) { self.client.warm() }
+            }
         }
         loadGreetings()
     }

@@ -262,7 +262,15 @@ final class Ears: @unchecked Sendable {
                 return nil
             }
             if let now { c.resume(returning: now) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { [weak self] in self?.answer() }
+            // No words yet at the deadline: a little longer, the phone's recognizer is sometimes late (12.11).
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { [weak self] in
+                guard let self else { return }
+                if self.lock.withLock({ self.best.isEmpty }) {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.9) { [weak self] in self?.answer() }
+                } else {
+                    self.answer()
+                }
+            }
         }
         task?.cancel()
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
