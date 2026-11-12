@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, max, sql } from 'drizzle-orm'
 import type { NodeDb } from '../db/client'
 import { bidAttempt, clientSawBid, rawMessage, rawOrder } from '../db/schema'
 import { queueEvent } from '../ship/outbox'
-import { saveRaw, upsertMessage, upsertOrder } from '../store/raw'
+import { KNOWN_CHAT, markReadByClient, saveRaw, upsertMessage, upsertOrder } from '../store/raw'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 import type { RawRecord } from './recorder'
 
@@ -111,9 +111,10 @@ export function createEyes(o: {
   const sawNoted = new Set<string>()
 
   /**
-   * The client of this chat has seen our bid, by the chats list: one profi.client_read a chat. Only for a bid Sara made
-   * (a press in node.bid_attempt): the list also names dozens of older chats, for which the core would make an empty
-   * conversation and which have no topic to mark. Those are written down without an event.
+   * The client of this chat has seen our bid, by the chats list: one profi.client_read a chat. Only for a chat the core
+   * knows: a bid Sara made (a press in node.bid_attempt) or a chat the node told the core of (a bid Boris sent himself,
+   * 10.11.2026: 41 of 62 seen chats had no press). The list also names dozens of older chats, for which the core would
+   * make an empty conversation and which have no topic to mark. Those are written down without an event.
    */
   async function noteClientSaw(chatId: string) {
     if (sawNoted.has(chatId)) return
@@ -131,7 +132,12 @@ export function createEyes(o: {
           .from(bidAttempt)
           .where(and(eq(bidAttempt.accountId, o.accountId), eq(bidAttempt.orderId, chatId)))
           .limit(1)
-        if (ours.length === 0) return
+        if (ours.length === 0) {
+          const [known] = await tx
+            .execute<{ known: boolean }>(sql`select ${KNOWN_CHAT(o.accountId, chatId)} as known`)
+            .then((r) => r.rows)
+          if (!known?.known) return
+        }
         await queueEvent(tx, {
           type: 'profi.client_read',
           accountId: o.accountId,
@@ -144,6 +150,41 @@ export function createEyes(o: {
       .catch((err) =>
         console.error(
           'client saw bid not noted',
+          err instanceof Error ? err.message.slice(0, 120) : err,
+        ),
+      )
+  }
+
+  // The messages the chat answers said the client read, newest last: the answer of a chat page may come before the
+  // page's bubbles are stored, so a message stored later is looked up here once it is (onChatRead).
+  const readIds = new Set<string>()
+  const READ_IDS_MAX = 500
+
+  /**
+   * The client read these messages: ours the node held unread become read, and the core hears it once a chat, with the
+   * last of them (it marks ours up to that one). A chat the core never heard of gets no event (an old chat).
+   */
+  async function clientRead(messageIds: string[]) {
+    await o.db
+      .transaction(async (tx) => {
+        for (const r of await markReadByClient(tx, o.accountId, messageIds)) {
+          if (!r.known) continue
+          await queueEvent(tx, {
+            type: 'profi.client_read',
+            accountId: o.accountId,
+            entity: { kind: 'chat', id: r.chatId },
+            payload: {
+              chat_id: r.chatId,
+              order_id: r.orderId,
+              platform_message_id: r.platformMessageId,
+              at: new Date().toISOString(),
+            },
+          })
+        }
+      })
+      .catch((err) =>
+        console.error(
+          'client read not noted',
           err instanceof Error ? err.message.slice(0, 120) : err,
         ),
       )
@@ -191,6 +232,15 @@ export function createEyes(o: {
       }
       if (s.t === 'client_saw_bid') {
         await noteClientSaw(s.chatId)
+        continue
+      }
+      if (s.t === 'read_by_client') {
+        for (const id of s.messageIds) {
+          readIds.delete(id)
+          readIds.add(id)
+        }
+        while (readIds.size > READ_IDS_MAX) readIds.delete(readIds.values().next().value ?? '')
+        await clientRead(s.messageIds)
         continue
       }
       // One broken signal (an odd date, a missing field) must not stop the rest of the batch; its raw record stays.
@@ -418,6 +468,9 @@ export function createEyes(o: {
       })
       // A chat the stream never named was found by a sweep.
       await onSignals(signals, undefined, quiet, touch ? 'stream' : 'sweep')
+      // The chat's answer may have said the client read a message stored only now: its read goes after its own event.
+      const read = msgs.map((x) => x.message.platform_message_id).filter((id) => readIds.has(id))
+      if (read.length > 0) await clientRead(read)
     },
     boardWorks: (now = Date.now()) => now - boardAt < 600000,
     board: () => board,

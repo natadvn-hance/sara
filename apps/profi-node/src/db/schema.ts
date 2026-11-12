@@ -48,6 +48,7 @@ export const rawMessage = node.table('raw_message', {
   author: text('author').notNull(),
   sentAt: ts('sent_at').notNull(),
   text: text('text').notNull(),
+  /** On ours: the client read it, by the chat's own answer (whoRead); the page never tells. On the client's: we did. */
   read: boolean('read').notNull().default(false),
   /** Came before Sara watched this chat (its first reading): kept, never sent as news. */
   history: boolean('history').notNull().default(false),
