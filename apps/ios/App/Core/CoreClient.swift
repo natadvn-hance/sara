@@ -78,7 +78,7 @@ final class CoreClient: @unchecked Sendable {
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.timeoutIntervalForRequest = 40
         c.timeoutIntervalForResource = 300
-        session = URLSession(configuration: c)
+        session = URLSession(configuration: c, delegate: NetLog.shared, delegateQueue: nil)
         cookieValue = SessionStore.load()
     }
 
@@ -192,6 +192,28 @@ extension Error {
             return true
         default:
             return false
+        }
+    }
+}
+
+/// Where each request's time goes on the way, in the log (Boris, 12.11: the core answered in 8 ms, the phone waited
+/// 4,6 s): a new or a reused connection, the protocol, DNS, connect, TLS, the wait for the answer, the network. The
+/// path only, never what was said.
+final class NetLog: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = NetLog()
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        let path = task.originalRequest?.url?.path ?? "?"
+        let total = Int(metrics.taskInterval.duration * 1000)
+        func ms(_ a: Date?, _ b: Date?) -> String {
+            guard let a, let b else { return "-" }
+            return "\(Int(b.timeIntervalSince(a) * 1000))"
+        }
+        for t in metrics.transactionMetrics where t.resourceFetchType == .networkLoad {
+            let net = t.isCellular ? "cell" : "wifi"
+            log.notice(
+                "net \(path, privacy: .public) \(total) ms: \(t.networkProtocolName ?? "?", privacy: .public) \(t.isReusedConnection ? "reused" : "new", privacy: .public), dns \(ms(t.domainLookupStartDate, t.domainLookupEndDate), privacy: .public) connect \(ms(t.connectStartDate, t.connectEndDate), privacy: .public) tls \(ms(t.secureConnectionStartDate, t.secureConnectionEndDate), privacy: .public) wait \(ms(t.requestEndDate, t.responseStartDate), privacy: .public) body \(ms(t.responseStartDate, t.responseEndDate), privacy: .public), \(net, privacy: .public)\(t.isExpensive ? " expensive" : "", privacy: .public)\(t.isConstrained ? " constrained" : "", privacy: .public)\(t.isProxyConnection ? " proxy" : "", privacy: .public)"
+            )
         }
     }
 }
