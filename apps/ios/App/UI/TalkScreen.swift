@@ -41,6 +41,7 @@ struct TalkScreen: View {
                                 size: CGSize(width: width, height: cardHeight), arming: engine.arming)
                         }
                         .buttonStyle(CardPress())
+                        .disabled(phase == .sending || phase == .thinking)
                         HUDPlate(agent: agent, phase: phase, meter: engine.meter, since: engine.since, palette: palette)
                             .padding(12)
                             .onLongPressGesture { showTimings = true }
@@ -177,8 +178,8 @@ struct TalkScreen: View {
     private var hint: String {
         switch phase {
         case .listening: return "Говори. Пауза закончит запись"
-        case .sending: return "Отправляю. Нажми, чтобы отменить"
-        case .thinking: return "\(agent.name) думает. Нажми, чтобы отменить"
+        case .sending: return "Отправляю"
+        case .thinking: return "\(agent.name) думает"
         case .speaking: return "Нажми на фото, чтобы остановить"
         default: return "Нажми на фото и говори"
         }

@@ -12,6 +12,7 @@ final class TalkEngine: ObservableObject {
 
     static let notes = (
         notHeard: "Не разобрала",
+        notHeardTry: "Не услышала. Нажми и скажи ещё раз.",
         noMic: "Нет доступа к микрофону. Разреши его для Hance в Настройках.",
         late: "Ответа нет шесть минут. Спроси ещё раз.",
         gone: "Ответ потерялся: сервер перезапускался. Скажи ещё раз.",
@@ -84,7 +85,10 @@ final class TalkEngine: ObservableObject {
         switch phase {
         case .idle, .done, .failed: listen()
         case .listening: finishListening()
-        case .speaking, .sending, .thinking: stop()
+        case .speaking: stop()
+        // His habit is a tap to end his words; the pause may have ended them a moment before. That tap must not
+        // throw his question away (Boris, 12.11): while it goes up and she thinks, a tap does nothing.
+        case .sending, .thinking: break
         }
     }
 
@@ -264,6 +268,8 @@ final class TalkEngine: ObservableObject {
                 line = last.text
                 return endTalk(final: .done)
             }
+            // Pressed and nothing heard: said so, not a silent stop.
+            show(Self.notes.notHeardTry)
             return endTalk(final: nil)
         }
         Earcon.heard()
