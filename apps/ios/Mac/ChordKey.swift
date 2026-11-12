@@ -28,6 +28,9 @@ final class ChordKey {
     private var digits: Set<CGKeyCode> = []
     /// A 1 or 2 pressed while one key of the pair was held back: it decides who answers if the partner comes.
     private var heldDigit: CGEvent?
+    /// The digits his fingers hold now, from the keys seen here: the system's own key state cannot be trusted, since
+    /// this class swallows some key-ups (12.11: a swallowed 2 stayed «down» and every chord after it called Sara).
+    private var downDigits: Set<CGKeyCode> = []
     private let action: (HanceAgent) -> Void
 
     init(action: @escaping (HanceAgent) -> Void) {
@@ -93,6 +96,9 @@ final class ChordKey {
         let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         // 1 or 2 while the chord waits: who answers. The digit is not typed.
         if code == Self.one || code == Self.two {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                if type == .keyDown { downDigits.insert(code) } else if type == .keyUp { downDigits.remove(code) }
+            }
             if type == .keyDown, choosing != nil {
                 digits.insert(code)
                 fire(code == Self.two ? .sara : .lora)
@@ -157,7 +163,7 @@ final class ChordKey {
                 fire(dc == Self.two ? .sara : .lora)
                 return nil
             }
-            if CGEventSource.keyState(.combinedSessionState, key: Self.two) {
+            if downDigits.contains(Self.two) {
                 digits.insert(Self.two)
                 fire(.sara)
                 return nil
