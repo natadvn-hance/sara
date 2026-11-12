@@ -6,6 +6,7 @@ import { lead, outbox, task } from '../db/schema'
 import { lostRoute } from '../direction/router'
 import { createDeal } from '../domain/deal'
 import { appendEvent } from '../journal/journal'
+import { foldedCardState } from '../notify/cardState'
 import { foldedBidCard, TEXTS } from '../notify/cards'
 import { markShown } from '../notify/forum'
 import type { Notifier } from '../notify/notifier'
@@ -317,7 +318,10 @@ async function tellFolded(
   const st = await statusOf(p.leadId)
   if (!st?.html) return tell(fallback, p, o)
   try {
-    await setStatus(p.leadId, foldedBidCard({ ...bidCard(p), ...view }), { html: true })
+    await setStatus(p.leadId, foldedBidCard({ ...bidCard(p), ...view }), {
+      html: true,
+      state: foldedCardState(view),
+    })
   } catch (err) {
     await appendEvent(d().db, {
       ...ev('notify.failed', p, { kind: 'lead', id: p.leadId }, { channel: 'telegram' }),
@@ -651,6 +655,7 @@ async function deliver(outboxId: string): Promise<void> {
       () =>
         openStatus(p.leadId, foldedBidCard({ ...bidCard(p), state: 'sending' }), {
           fold: true,
+          state: foldedCardState({ state: 'sending' }),
         }).catch(() => {}),
       { name: 'openStatus' },
     )

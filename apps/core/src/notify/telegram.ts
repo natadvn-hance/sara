@@ -2,15 +2,27 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { newEventId, parseCallback, type TaskAction } from '@sara/shared'
-import { Bot, type Context, GrammyError } from 'grammy'
-import type { Message } from 'grammy/types'
+import { eq } from 'drizzle-orm'
+import { Bot, type Context, GrammyError, InputFile } from 'grammy'
+import type { InlineKeyboardButton, Message } from 'grammy/types'
 import type { Db } from '../db/client'
+import { telegramCard } from '../db/schema'
 import { appendEvent } from '../journal/journal'
 import { quietNow } from '../leads/cardFlow'
 import type { BorisMessage, BorisReply } from '../learning/inbox'
+import { getSetting } from '../settings/store'
 import { bindChat, boundChat, boundUser } from './binding'
 import { COMMANDS, type CommandReply } from './botCommands'
-import { closedLeadCardText, leadCardKeyboard, leadCardText, plainFallback, TEXTS } from './cards'
+import { asState, type CardState, closedCardState, newState } from './cardState'
+import {
+  closedLeadCardText,
+  htmlToPlain,
+  type LeadCard,
+  leadCardKeyboard,
+  leadCardText,
+  plainFallback,
+  TEXTS,
+} from './cards'
 import {
   bindForum,
   CLOSED_MARK,
@@ -34,6 +46,7 @@ import {
   withoutDot,
 } from './forum'
 import type { Notifier, Place } from './notifier'
+import { pictureKeyboard, renderCardPicture } from './picture'
 
 type SendOptions = NonNullable<Parameters<Bot['api']['sendMessage']>[2]>
 
@@ -641,6 +654,107 @@ export function createTelegramRuntime(d: {
   /** FR-NOTIF-2: without sound at the quiet hours, unless the message is urgent. */
   const silentNow = async (loud?: boolean) => !loud && (await quietNow(d.db, new Date()))
 
+  /** Lead cards are pictures (FR-NOTIF-6): Boris turned it on. It never throws. */
+  const pictureOn = () => getSetting(d.db, 'cards.picture').catch(() => false)
+
+  type Row = { text: string; callbackData: string }
+  type Picture = { ref: number; card: LeadCard; state: CardState }
+  const buttons = (rows: ReturnType<typeof pictureKeyboard>) => rows as InlineKeyboardButton[][]
+
+  /** The picture card behind a message Sara knows by `ref`; null for any other message. */
+  async function pictureAt(ref: number): Promise<Picture | null> {
+    const [row] = await d.db
+      .select({ card: telegramCard.card, state: telegramCard.state })
+      .from(telegramCard)
+      .where(eq(telegramCard.ref, ref))
+    return row ? { ref, card: row.card as LeadCard, state: asState(row.state) } : null
+  }
+
+  /**
+   * The picture card drawn again in `state` (from `card` when the caller has a fresher one), with the buttons of that
+   * state; `rows` go under a short card (the reasons under a closed one). Throws when it cannot be drawn or Telegram
+   * refuses; the same picture again is no refusal.
+   */
+  async function showPicture(
+    p: Picture,
+    state: CardState,
+    o: { card?: LeadCard; rows?: Row[][] } = {},
+  ): Promise<void> {
+    const card = o.card ?? p.card
+    const at = await locate(p.ref)
+    if (!at) throw new Error('card unknown')
+    const { png } = await renderCardPicture(card, state)
+    try {
+      await bot.api.editMessageMedia(
+        at.to,
+        at.id,
+        { type: 'photo', media: new InputFile(png, 'card.png') },
+        { reply_markup: { inline_keyboard: buttons(pictureKeyboard(card, state, o.rows)) } },
+      )
+    } catch (e) {
+      if (!/not modified/i.test(short(e))) throw e
+    }
+    await d.db
+      .update(telegramCard)
+      .set({ state, card, updatedAt: new Date().toISOString() })
+      .where(eq(telegramCard.ref, p.ref))
+  }
+
+  /**
+   * The lead card as a picture where the cards go (FR-NOTIF-6): its reference, or null when it cannot be drawn or
+   * Telegram refused it, and then the text card goes instead. A broken connection is thrown, as for the text card:
+   * the step tries again, and the card on the task keeps it from coming twice.
+   */
+  async function sendPictureCard(c: LeadCard, silent: boolean): Promise<number | null> {
+    const state = newState(c)
+    let png: Buffer
+    try {
+      png = (await renderCardPicture(c, state)).png
+    } catch (e) {
+      console.error('the card picture was not drawn, the text card goes', c.taskId, short(e))
+      return null
+    }
+    let ref: number
+    try {
+      ref = await post('leads', (to, where) =>
+        bot.api.sendPhoto(to, new InputFile(png, 'card.png'), {
+          ...where,
+          reply_markup: { inline_keyboard: buttons(pictureKeyboard(c, state)) },
+          ...(silent && { disable_notification: true }),
+        }),
+      )
+    } catch (err) {
+      if (!(err instanceof GrammyError)) throw err
+      console.error('telegram refused the card picture, the text card goes:', err.description)
+      return null
+    }
+    // The card is with Boris: a row that cannot be written only costs its edits (they are logged), never the card.
+    await d.db
+      .insert(telegramCard)
+      .values({ ref, taskId: c.taskId, card: c, state })
+      .onConflictDoUpdate({
+        target: telegramCard.ref,
+        set: { taskId: c.taskId, card: c, state, updatedAt: new Date().toISOString() },
+      })
+      .catch((e: unknown) => console.error('card picture not kept', short(e)))
+    // One live card per lead: an older picture of this task that still offers its buttons (the card came again after
+    // «Правка») says the new one is below.
+    const older = await d.db
+      .select({ ref: telegramCard.ref, card: telegramCard.card, state: telegramCard.state })
+      .from(telegramCard)
+      .where(eq(telegramCard.taskId, c.taskId))
+      .catch(() => [])
+    for (const o of older) {
+      const was = asState(o.state)
+      if (o.ref === ref || was.s !== 'new') continue
+      await showPicture(
+        { ref: o.ref, card: o.card as LeadCard, state: was },
+        { s: 'note', n: TEXTS.cardMoved },
+      ).catch((e: unknown) => console.error('older card picture not folded', short(e)))
+    }
+    return ref
+  }
+
   let running: Promise<void> | null = null
   let lastError: string | null = null
 
@@ -688,6 +802,10 @@ export function createTelegramRuntime(d: {
     notifier: {
       async sendLeadCard(c, o) {
         const silent = o?.silent ?? (await silentNow())
+        if (await pictureOn()) {
+          const ref = await sendPictureCard(c, silent)
+          if (ref !== null) return { messageId: ref }
+        }
         const messageId = await post('leads', (to, where) =>
           sendHtml(to, leadCardText(c), {
             ...where,
@@ -698,6 +816,8 @@ export function createTelegramRuntime(d: {
         return { messageId }
       },
       async restoreLeadCard(messageId, c) {
+        const p = await pictureAt(messageId)
+        if (p) return showPicture(p, newState(c), { card: c })
         const at = await locate(messageId)
         if (!at) throw new Error('card unknown')
         await bot.api
@@ -711,7 +831,14 @@ export function createTelegramRuntime(d: {
           })
       },
       async closeLeadCard(messageId, c) {
-        await closeHtml(messageId, closedLeadCardText(c), c.closeReason?.buttons)
+        const p = await pictureAt(messageId).catch(() => null)
+        if (!p) return closeHtml(messageId, closedLeadCardText(c), c.closeReason?.buttons)
+        await showPicture(p, closedCardState(c), {
+          card: c,
+          rows: [c.closeReason?.buttons ?? []],
+        }).catch((e: unknown) =>
+          console.error('telegram did not close the card picture', messageId, short(e)),
+        )
       },
       async sendText(text, o) {
         const silent = o?.quiet || (await silentNow(o?.loud))
@@ -740,6 +867,15 @@ export function createTelegramRuntime(d: {
         await bot.api.sendChatAction(await chat(), 'typing')
       },
       async markDone(ref, note) {
+        const p = await pictureAt(ref).catch(() => null)
+        if (p) {
+          // A card past «new» already says what happened; only a card still offering its buttons is marked.
+          if (p.state.s !== 'new') return
+          await showPicture(p, { s: 'done', n: note }).catch((e: unknown) =>
+            console.error('card picture not marked', short(e)),
+          )
+          return
+        }
         const at = await locate(ref)
         if (!at) return void console.error('card not marked: unknown', ref)
         // One button that decides nothing: its press gets an empty answer (no task in its data).
@@ -760,6 +896,11 @@ export function createTelegramRuntime(d: {
         }
       },
       async editText(ref, text, rows, o) {
+        const p = await pictureAt(ref)
+        if (p)
+          return showPicture(p, o?.state ?? { s: 'note', n: o?.html ? htmlToPlain(text) : text }, {
+            rows,
+          })
         const at = await locate(ref)
         if (!at) return void console.error('message not edited: unknown', ref)
         await bot.api

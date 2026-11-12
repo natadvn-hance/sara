@@ -77,6 +77,12 @@ export const SETTINGS = {
   /** FR-NOTIF-3: lead cards a Moscow day; the rest wait for the 19:00 summary. */
   'cards.max_per_day': { schema: z.number().int().positive(), default: 10 },
   /**
+   * FR-NOTIF-6 (Boris, 11.11.2026): the lead card is a picture in Hance's look (Onest, Martian Mono) with the bid and the
+   * order text as text under it, one message that changes in place from new to closed. A picture that cannot be drawn
+   * or that Telegram refuses goes as the text card. Off: the text card, as before.
+   */
+  'cards.picture': { schema: z.boolean(), default: false },
+  /**
    * The screen (docs/product/lead-analysis.md): true, a criterion that fired stops the order (no card, seen in the
    * pult and the summary); false, the shadow: the order is only marked and goes on as before.
    */

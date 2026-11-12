@@ -253,6 +253,13 @@
       "when": 1794057083565,
       "tag": "0036_topic_discussion",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794415023529,
+      "tag": "0037_lead_card",
+      "breakpoints": true
     }
   ]
 }

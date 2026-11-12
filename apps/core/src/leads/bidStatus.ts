@@ -2,6 +2,7 @@ import { plural } from '@sara/shared'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { outbox, task } from '../db/schema'
+import type { CardState } from '../notify/cardState'
 import type { Notifier } from '../notify/notifier'
 
 /**
@@ -17,6 +18,8 @@ export type BidStatus = {
   html?: boolean
   /** The message is the order's own card, folded in place (Boris, 03.11), not a message of its own. */
   card?: boolean
+  /** What the card shows when it is a picture (FR-NOTIF-6): the same news as `text`, as its state. */
+  state?: CardState
 }
 
 type StatusDeps = { db: Db; notifier: Pick<Notifier, 'sendText' | 'editText'> }
@@ -67,7 +70,7 @@ async function store(id: string, status: BidStatus): Promise<void> {
 export async function openStatus(
   leadId: string,
   text: string,
-  o: { fold?: boolean } = {},
+  o: { fold?: boolean; state?: CardState } = {},
 ): Promise<void> {
   const row = await rowOf(leadId)
   if (!row || row.status) return
@@ -79,10 +82,17 @@ export async function openStatus(
       .where(eq(task.id, row.taskId))
     if (t?.messageId != null) {
       const folded = await edit
-        .call(d().notifier, t.messageId, text, [], { html: true })
+        .call(d().notifier, t.messageId, text, [], { html: true, state: o.state })
         .then(() => true)
         .catch(() => false)
-      if (folded) return store(row.id, { messageId: t.messageId, text, html: true, card: true })
+      if (folded)
+        return store(row.id, {
+          messageId: t.messageId,
+          text,
+          html: true,
+          card: true,
+          ...(o.state && { state: o.state }),
+        })
     }
   }
   const { messageId } = await d().notifier.sendText(text, {
@@ -100,7 +110,7 @@ export async function openStatus(
 export async function setStatus(
   leadId: string,
   text: string,
-  o: { html?: boolean } = {},
+  o: { html?: boolean; state?: CardState } = {},
 ): Promise<boolean> {
   const row = await rowOf(leadId)
   const edit = d().notifier.editText
@@ -109,8 +119,10 @@ export async function setStatus(
   try {
     await edit.call(d().notifier, row.status.messageId, text, row.status.card ? [] : undefined, {
       html,
+      state: o.state,
     })
-    await store(row.id, { ...row.status, text, html })
+    // A text without a state is the picture's note now, so a line added later goes under that text.
+    await store(row.id, { ...row.status, text, html, state: o.state })
   } catch {
     const { messageId } = await d().notifier.sendText(text, {
       place: 'leads',
@@ -125,11 +137,11 @@ export async function setStatus(
 export async function addStatusLine(leadId: string, line: string): Promise<void> {
   const row = await rowOf(leadId)
   if (!row?.status) return
-  await setStatus(
-    leadId,
-    `${row.status.text}\n${row.status.html ? esc(line) : line}`,
-    row.status.html ? { html: true } : {},
-  )
+  const w = row.status.state
+  await setStatus(leadId, `${row.status.text}\n${row.status.html ? esc(line) : line}`, {
+    ...(row.status.html && { html: true }),
+    ...(w && { state: { ...w, n: w.n ? `${w.n}\n${line}` : line } }),
+  })
 }
 
 const STOPPED: Record<string, string> = {
