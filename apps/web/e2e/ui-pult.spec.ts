@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 import pg from 'pg'
 import { dbUrl } from './dbUrl'
+import { PORTS, URLS } from './ports'
 
 const PASSWORD = 'длинныйпароль1'
 const LEAD = '990101'
@@ -17,7 +18,7 @@ const NOTICE = '1d2c3b4a-0000-4000-8000-000000000103'
  * the API, and its buttons reach the same functions as the Telegram buttons (bids and messages stay paused, so a
  * press spends and sends nothing). The rows are removed afterwards, so the other specs see the database as before.
  */
-const STATE = join(tmpdir(), 'sara-e2e-pult-m7-state.json')
+const STATE = join(tmpdir(), `sara-e2e-pult-m7-state-${PORTS.core}.json`)
 test.use({ storageState: STATE })
 
 async function sql(text: string, values: unknown[] = []) {
@@ -50,7 +51,7 @@ async function clean() {
 
 test.beforeAll(async ({ playwright }) => {
   const api = await playwright.request.newContext({
-    baseURL: 'http://127.0.0.1:5174',
+    baseURL: URLS.web,
     storageState: { cookies: [], origins: [] },
   })
   const first = await api.post('/api/setup/password', { data: { password: PASSWORD } })

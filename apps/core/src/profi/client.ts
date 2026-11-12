@@ -33,8 +33,14 @@ export type ProfiClient = {
   submitBid(i: Omit<SubmitBidInput, 'permit' | 'not_after'>): Promise<SubmitBidOutput>
   readChat(accountId: string, chatId: string): Promise<ReadChatOutput>
   listChats(accountId: string): Promise<ListChatsOutput>
-  sendMessage(i: Omit<SendMessageInput, 'permit'>): Promise<SendMessageOutput>
+  sendMessage(i: MessageToSend): Promise<SendMessageOutput>
 }
+
+/**
+ * A message as the core hands it over. `asWritten`: Boris's own words (his «say»), whose quotes stay his; the mark
+ * never leaves the core, the node gets the contract only.
+ */
+export type MessageToSend = Omit<SendMessageInput, 'permit'> & { asWritten?: boolean }
 
 /**
  * How long a tool that works in the account tab is waited for: the tab may first finish the feed check and the chat
@@ -44,6 +50,16 @@ export type ProfiClient = {
  */
 /** Whatever reaches a client has no «ё» (Boris, 31.10.2026): the last point before the node, whoever wrote the text. */
 const withoutYo = (text: string) => text.replace(/ё/g, 'е').replace(/Ё/g, 'Е')
+
+/**
+ * Sara's text reaches a client with plain quotes (Boris, 11.11.2026; his skill «Голос Бориса»: «ёлочки» are what gives a
+ * model away): «», „“ and “” become ". Boris's own words keep his. The chat and the outbox compare texts through
+ * `normalizeText`, which drops every kind of quote, so a sent text is still found as ours.
+ */
+export function forClient(text: string, o: { asWritten?: boolean } = {}): string {
+  const plain = withoutYo(text)
+  return o.asWritten ? plain : plain.replace(/[«»„“”]/g, '"')
+}
 
 const TAB_TIMEOUT_MS = 4 * 60_000
 /** The node presses nothing in the last half minute of the wait: its answer could no longer arrive in time. */
@@ -119,7 +135,7 @@ export function createProfiClient(o: {
     submitBid: (i) => {
       const unsigned = {
         ...i,
-        text: withoutYo(i.text),
+        text: forClient(i.text),
         not_after: new Date(
           Date.now() + tabMs - Math.min(PRESS_MARGIN_MS, tabMs / 4),
         ).toISOString(),
@@ -134,21 +150,23 @@ export function createProfiClient(o: {
     readChat: (accountId, chatId) =>
       call('profi.read_chat', { account_id: accountId, chat_id: chatId }, ReadChatOutput),
     listChats: (accountId) => call('profi.list_chats', { account_id: accountId }, ListChatsOutput),
-    sendMessage: (i) =>
-      call(
+    sendMessage: ({ asWritten, ...i }) => {
+      const text = forClient(i.text, { asWritten })
+      return call(
         'profi.send_message',
         {
           ...i,
-          text: withoutYo(i.text),
+          text,
           permit: signMessagePermit(o.permitSecret, {
             accountId: i.account_id,
             chatId: i.chat_id,
-            text: withoutYo(i.text),
+            text,
             key: i.idempotency_key,
           }),
         },
         SendMessageOutput,
         tabMs,
-      ),
+      )
+    },
   }
 }

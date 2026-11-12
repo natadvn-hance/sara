@@ -37,6 +37,23 @@ const client = (id: string, ms: number, text = 'Спасибо, посмотрю
   at: ago(ms),
 })
 
+/** Boris's own message from the page after the switch (FR-CONV-10). */
+const boris = (id: string, ms: number, text: string): SeedMessage => ({
+  id,
+  side: 'specialist',
+  text,
+  at: ago(ms),
+  author: 'boris',
+  basis: 'after_cutover',
+})
+/** What the owner rule makes of the conversation once Boris wrote himself (FR-CONV-10). */
+const wrote = async (conv: ConversationRow) => {
+  await db
+    .update(conversation)
+    .set({ owner: 'boris', ownerReason: 'wrote' })
+    .where(eq(conversation.id, conv.id))
+}
+
 const statusOf = async (id: string) => (await DBOS.getWorkflowStatus(id))?.status ?? null
 const stored = async (id: string) =>
   (
@@ -150,6 +167,43 @@ describe('what the chat as read says about reminders', () => {
     await addMessages(db, conv.id, CHAT, [ours('m-2', HOUR, 'Анна, я на связи')])
     await sync(conv)
     expect(await statusOf(wf(conv, 'm-2'))).toBeNull()
+  })
+
+  it('FR-CONV-12: a client Boris wrote to himself gets the ladder of his message (12.11.2026)', async () => {
+    const conv = await seedChat(db, CHAT, [
+      ours('m-1', 50 * HOUR),
+      boris('m-2', 26 * HOUR, 'Анна, добрый день! Это Борис, посмотрел вашу задачу.'),
+    ])
+    await wrote(conv)
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-2'))).toBe('PENDING')
+    expect(await statusOf(wf(conv, 'm-1'))).toBeNull()
+  })
+
+  it('FR-CONV-12: Boris writing himself ends Sara’s ladder and starts the one of his message', async () => {
+    const conv = await seedChat(db, CHAT, [ours('m-1', 3 * HOUR)])
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-1'))).toBe('PENDING')
+    await addMessages(db, conv.id, CHAT, [boris('m-2', HOUR, 'Анна, это Борис, я на связи')])
+    await wrote(conv)
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-1'))).toBe('CANCELLED')
+    expect(await statusOf(wf(conv, 'm-2'))).toBe('PENDING')
+    // His next message starts the ladder again, from that message.
+    await addMessages(db, conv.id, CHAT, [boris('m-3', 1000, 'Анна, добавлю пару слов')])
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-2'))).toBe('CANCELLED')
+    expect(await statusOf(wf(conv, 'm-3'))).toBe('PENDING')
+  })
+
+  it('FR-CONV-12: a client Boris took («беру сам») gets no ladder, even after his own message', async () => {
+    const conv = await seedChat(db, CHAT, [boris('m-1', 26 * HOUR, 'Анна, это Борис')])
+    await db
+      .update(conversation)
+      .set({ owner: 'boris', ownerReason: 'take' })
+      .where(eq(conversation.id, conv.id))
+    await sync(conv)
+    expect(await statusOf(wf(conv, 'm-1'))).toBeNull()
   })
 
   it('FR-CONV-12: while conversations are off nothing starts', async () => {

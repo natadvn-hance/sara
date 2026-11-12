@@ -29,6 +29,7 @@ import {
 } from '../../src/db/schema'
 import { type ProfiClient, ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
+import { greetingShape, leadingGreeting } from '../../src/text/clientText'
 import { launchDbos, shutdownDbos } from '../../src/workflows/dbos'
 import { chatMsg, fakeMind, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb, testDatabaseUrl } from '../helpers/db'
@@ -466,7 +467,10 @@ describe('a reminder after the switch', () => {
     // Short in the test: the model is asked again and again until the time is over, then the ready text goes.
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1400)
     expect((await fake.calls()).length).toBeGreaterThan(2)
-    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in')])
+    // The ready text opens with the greeting chosen for the chat (11.11.2026), the words after it are old Sara's.
+    const hello = leadingGreeting(sends[0]?.text ?? '') ?? ''
+    expect(hello).toMatch(/Анна/)
+    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in', 0, hello)])
     const [r] = await rows()
     expect(r?.outcome).toBe('sent')
     expect(r?.checks).toMatchObject({ fallback: true })
@@ -481,7 +485,8 @@ describe('a reminder after the switch', () => {
     const conv = await scene(quiet(25 * HOUR))
     await startReminder(conv.id, 'm-1')
     await until(done(1))
-    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in')])
+    const hello = leadingGreeting(sends[0]?.text ?? '') ?? ''
+    expect(sends.map((s) => s.text)).toEqual([reminderFallback('Анна', 'check_in', 0, hello)])
     // Two calls of the model (the text and its rewrite), no more, and no waiting for the 3 hours to pass.
     expect((await fake.calls()).length).toBe(2)
     expect(Date.now() - startedAt).toBeLessThan(6000)
@@ -500,9 +505,13 @@ describe('a reminder after the switch', () => {
     await startReminder(conv.id, 'm-1')
     await until(done(2), 30000)
     expect(sends).toHaveLength(2)
-    expect(sends[0]?.text).toBe(reminderFallback('Анна', 'check_in', 0))
-    expect(sends[1]?.text).toBe(reminderFallback('Анна', 'check_in', 1))
-    expect(sends[1]?.text).not.toBe(sends[0]?.text)
+    const first = leadingGreeting(sends[0]?.text ?? '') ?? ''
+    const second = leadingGreeting(sends[1]?.text ?? '') ?? ''
+    expect(sends[0]?.text).toBe(reminderFallback('Анна', 'check_in', 0, first))
+    expect(sends[1]?.text).toBe(reminderFallback('Анна', 'check_in', 1, second))
+    // The words differ, and two messages in a row do not open alike (11.11.2026).
+    expect(sends[1]?.text.slice(second.length)).not.toBe(sends[0]?.text.slice(first.length))
+    expect(greetingShape(second)).not.toBe(greetingShape(first))
   })
 
   it('FR-OPS-1: with the «Пишет клиентам» pause on nothing is sent and the step is skipped', async () => {
@@ -673,6 +682,111 @@ describe('a reminder in drafts mode', () => {
   })
 })
 
+describe('a client Boris wrote to himself (12.11.2026)', () => {
+  const BORIS_TEXT =
+    'Анна, добрый день! Это Борис. Посмотрел вашу задачу, начнём с короткого созвона?'
+  /** Boris's own message from the page 25 hours ago, the client silent since: the owner rule made her his. */
+  const hisClient = async () => {
+    const conv = await scene([
+      {
+        id: 'm-1',
+        side: 'specialist',
+        text: BORIS_TEXT,
+        at: ago(25 * HOUR),
+        author: 'boris',
+        basis: 'after_cutover',
+      },
+    ])
+    await db
+      .update(conversation)
+      .set({ owner: 'boris', ownerReason: 'wrote' })
+      .where(eq(conversation.id, conv.id))
+    return conv
+  }
+  const draftsMode = async () => {
+    await setSetting(db, 'conv.v1_writes', false, 'system')
+    await setSetting(db, 'outbound.messages', true, 'system')
+  }
+  const press = (taskId: string) =>
+    onConvPress(
+      {
+        db,
+        notifier: { sendText: async () => ({ messageId: 1 }) },
+        sendText: (c, text, author, o) =>
+          sendTextNow(
+            { db, profi, ground: (cv, a) => checkGround(deps, cv, a, { dormant: false }) },
+            c,
+            text,
+            author,
+            o,
+          ),
+      },
+      { taskId, action: 'send' },
+    )
+
+  it('FR-CONV-12: the ping comes to Boris as a card «Напомнить клиенту?», written after his own message', async () => {
+    await draftsMode()
+    const conv = await hisClient()
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=carded'])
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]?.text).toContain('Напомнить клиенту?')
+    expect(buttons[0]?.rows.flat().map((b) => b.text)).toEqual(['Отправить', 'Изменить', 'Не надо'])
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+    // The Pinger reads his message as our side's last one (the client's name only as a label): the ping goes on from
+    // what he wrote.
+    const [call] = await fake.calls()
+    expect(call?.stdin).toMatch(
+      /## Наше последнее сообщение\n[^\n]*Это Борис\. Посмотрел вашу задачу, начнём с короткого созвона\?/,
+    )
+  })
+
+  it('FR-CONV-12: with the autopilot and «conv.pings_auto» on his client still gets a card, never a send', async () => {
+    await live()
+    await setSetting(db, 'conv.pings_auto', true, 'system')
+    const conv = await hisClient()
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    expect(await outcomes()).toEqual(['1=carded'])
+    expect(buttons).toHaveLength(1)
+    expect(sends).toHaveLength(0)
+    expect(await messageOutbox()).toHaveLength(0)
+  })
+
+  it('FR-CONV-12: «Отправить» on the card of his client sends the ping once', async () => {
+    await draftsMode()
+    const conv = await hisClient()
+    await startReminder(conv.id, 'm-1')
+    await until(done(1))
+    const [t] = await db.select().from(task)
+    expect(await press(t?.id ?? '')).toBe('Отправила напоминание клиенту.')
+    expect(sends).toEqual([
+      { key: `msg:send:${t?.id}`, text: GOOD_TEXT, expectLast: 'm-1', chatId: CHAT },
+    ])
+    expect((await rows())[0]?.outcome).toBe('sent')
+    // The owner stays Boris: Sara's ping sent on his press is no message of his own.
+    expect((await db.select().from(conversation))[0]?.owner).toBe('boris')
+  })
+
+  it('FR-CONV-12: his client gets the whole ladder: three cards, then the silence task', async () => {
+    await draftsMode()
+    instant()
+    const conv = await hisClient()
+    await startReminder(conv.id, 'm-1')
+    await until(done(4))
+    expect(await outcomes()).toEqual(['1=expired', '2=expired', '3=expired', 'dormant=dormant'])
+    expect(
+      buttons
+        .at(-1)
+        ?.rows.flat()
+        .map((x) => x.text),
+    ).toEqual(['Закрыть'])
+    expect(sends).toHaveLength(0)
+  })
+})
+
 describe('the silence task', () => {
   /** The ladder that reaches the silence task at once: the waits are nothing, short waits for the retries. */
   const dormantScene = async () => {
@@ -822,18 +936,11 @@ describe('when a reminder must not go', () => {
     })
   })
 
-  it('FR-CONV-12: a client Boris leads gets none, taken or written to by him', async () => {
+  it('FR-CONV-12: a client Boris took («беру сам») gets none', async () => {
     await none(/Борис/, async (id) => {
       await db
         .update(conversation)
         .set({ owner: 'boris', ownerReason: 'take' })
-        .where(eq(conversation.id, id))
-    })
-    await again()
-    await none(/Борис/, async (id) => {
-      await db
-        .update(conversation)
-        .set({ owner: 'boris', ownerReason: 'wrote' })
         .where(eq(conversation.id, id))
     })
   })

@@ -81,10 +81,16 @@ export async function catchUpMissedTurns(
  * The catch-up when the node answers, not before (Boris, 01.11: the core starts together with the node, the first turn met
  * a chat it could not read and the draft was lost): it waits for `ready` (every `everyMs`, up to `tries` times), runs
  * the pass, and then again every `repeatMs`, each time only when the node answers, so a turn cut short by a restart of the
- * node is taken again.
+ * node is taken again. The same pass starts the ladders the silent clients Boris wrote to himself lack (`ladders`,
+ * 12.11.2026); a failure of the one never costs the other its pass.
  */
 export function startCatchUp(
-  d: { db: Db; ready: () => Promise<boolean>; start?: (conv: ConversationRow) => Promise<void> },
+  d: {
+    db: Db
+    ready: () => Promise<boolean>
+    start?: (conv: ConversationRow) => Promise<void>
+    ladders?: () => Promise<number>
+  },
   o: { tries?: number; everyMs?: number; repeatMs?: number } = {},
 ): { stop(): void } {
   let stopped = false
@@ -93,9 +99,15 @@ export function startCatchUp(
     if (running || stopped) return
     running = true
     try {
-      if (await d.ready().catch(() => false)) await catchUpMissedTurns(d)
-    } catch (e) {
-      console.error('catch-up of missed turns failed', e instanceof Error ? e.message : e)
+      if (!(await d.ready().catch(() => false))) return
+      await catchUpMissedTurns(d).catch((e) =>
+        console.error('catch-up of missed turns failed', e instanceof Error ? e.message : e),
+      )
+      await d
+        .ladders?.()
+        .catch((e) =>
+          console.error('catch-up of ladders failed', e instanceof Error ? e.message : e),
+        )
     } finally {
       running = false
     }

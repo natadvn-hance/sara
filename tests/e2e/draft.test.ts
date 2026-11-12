@@ -13,6 +13,7 @@ import { askWhy } from '../../apps/core/src/learning/questions'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { ensureMindIndex } from '../../apps/core/src/mind/indexer'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { greetingShape } from '../../apps/core/src/text/clientText'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { summaryTime } from '../../apps/core/test/helpers/learning'
@@ -280,8 +281,13 @@ describe('the draft on the card', () => {
     expect(stdin).toContain('[s-portrait] Портрет речи Бориса')
     expect(stdin).toContain('[j-voice] Голос Бориса')
     expect(stdin).toContain('Никогда не пиши: «По опыту»')
-    // The form of the bid is the code's, whatever the voice: the greeting, no final period.
-    expect((await leadOf(voiced))?.draftText).toBe(DRAFT)
+    // The form of the bid is the code's, whatever the voice: the greeting, no final period. The first bid opens as Sara
+    // always did; the next one to another client in another form (Boris, 11.11.2026: «Все время разный как у человека»).
+    expect((await leadOf(real))?.draftText).toBe(DRAFT)
+    const second = (await leadOf(voiced))?.draftText ?? ''
+    expect(second.endsWith(`\n\n${CLEAN}`)).toBe(true)
+    expect(greetingShape(second)).not.toBeNull()
+    expect(greetingShape(second)).not.toBe(greetingShape(DRAFT))
   })
 
   it('FR-LEAD-6: a shown order comes as a card with the Analyst draft and the price', async () => {
@@ -809,8 +815,14 @@ describe('the laid-out card', () => {
     expect(cards()[0]?.text).toContain('<b>✍️ Отклик</b>')
     tg.pushPress(111, button(cards()[0], 'razbor'))
     await until(() => razbor().length === 1)
-    const all = tg.sent.filter((m) => !m.reply_markup && m.text.includes('<blockquote expandable>'))
-    expect(all.map((m) => m.text).join('\n')).toContain('Конец заявки.')
+    // A long order comes in several messages one after another: the last piece may follow the «Разбор» a moment later.
+    const whole = () =>
+      tg.sent
+        .filter((m) => !m.reply_markup && m.text.includes('<blockquote expandable>'))
+        .map((m) => m.text)
+        .join('\n')
+    await until(() => whole().includes('Конец заявки.'))
+    expect(whole()).toContain('Начало заявки.')
   })
 
   it('FR-LEAD-7: an order the Analyst did not answer on still has «Разбор»: it says there is none', async () => {

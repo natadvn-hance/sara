@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
+import { PORTS, URLS } from './ports'
 
 const PASSWORD = 'длинныйпароль1'
 const ACCOUNT = 'hance-marketing'
@@ -10,12 +11,12 @@ const DIRECTION = `/accounts/${ACCOUNT}/direction`
  * One sign-in for the whole file, kept as a storage state: the core allows 5 logins a minute from one address,
  * and the pages are all behind the session. The first spec to run sets the password (the specs share a database).
  */
-const STATE = join(tmpdir(), 'sara-e2e-pult-state.json')
+const STATE = join(tmpdir(), `sara-e2e-pult-state-${PORTS.core}.json`)
 test.use({ storageState: STATE })
 test.beforeAll(async ({ playwright }) => {
   // An empty state of its own: the file `test.use` names does not exist before this hook has made it.
   const api = await playwright.request.newContext({
-    baseURL: 'http://127.0.0.1:5174',
+    baseURL: URLS.web,
     storageState: { cookies: [], origins: [] },
   })
   const first = await api.post('/api/setup/password', { data: { password: PASSWORD } })

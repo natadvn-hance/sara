@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { nextReminder, reminderFallback } from '../../src/conversation/reminders'
+import {
+  nextReminder,
+  pingFallback,
+  reminderFallback,
+  spreadStarts,
+} from '../../src/conversation/reminders'
 
 const HOUR = 3600_000
 const DAY = 24 * HOUR
@@ -187,5 +192,60 @@ describe('the ready texts of old Sara', () => {
       expect(b).not.toMatch(/\d/)
       expect(b).not.toMatch(/перезвон|наберу|позвоню/i)
     }
+  })
+})
+
+describe('the ready ping greets in the form it is given (Boris, 11.11.2026)', () => {
+  it('FR-CONV-4: a ready text opens with the greeting chosen for the chat, and without one as before', () => {
+    const sc = { kind: 'awaiting', item: 'tz' } as Parameters<typeof pingFallback>[1]
+    expect(pingFallback('Ольга', sc, 'check_in', 0, 'Здравствуйте, Ольга!')).toMatch(
+      /^Здравствуйте, Ольга! Как у вас с ТЗ\?/,
+    )
+    expect(pingFallback('Ольга', sc, 'check_in', 0)).toMatch(
+      /^Ольга, добрый день! Как у вас с ТЗ\?/,
+    )
+    expect(pingFallback('Ольга', null, 'check_in', 0, 'Добрый день, Ольга!')).toMatch(
+      /^Добрый день, Ольга! /,
+    )
+  })
+})
+
+describe('the catch-up of ladders after a deploy (12.11.2026)', () => {
+  const QUIET = { from: 23, to: 9 }
+  const msk = (s: string) => new Date(`${s}+03:00`)
+  const spread = (times: Date[], perDay = 10) =>
+    spreadStarts(times, { gapMs: HOUR, perDay, quiet: QUIET }).map((d) => d.toISOString())
+
+  it('FR-CONV-12: steps due at once come one at a time, an hour apart', () => {
+    const t = msk('2026-11-13T10:00:00')
+    expect(spread([t, t, t])).toEqual(
+      [msk('2026-11-13T10:00:00'), msk('2026-11-13T11:00:00'), msk('2026-11-13T12:00:00')].map(
+        (d) => d.toISOString(),
+      ),
+    )
+  })
+
+  it('FR-CONV-12: a step later than the one before plus the gap keeps its own time', () => {
+    const a = msk('2026-11-13T10:00:00')
+    const b = msk('2026-11-13T15:00:00')
+    expect(spread([a, b])).toEqual([a.toISOString(), b.toISOString()])
+  })
+
+  it('FR-CONV-12: none comes in the quiet hours, it waits for the morning', () => {
+    const t = msk('2026-11-13T22:30:00')
+    expect(spread([t, t, t])).toEqual(
+      [msk('2026-11-13T22:30:00'), msk('2026-11-14T09:00:00'), msk('2026-11-14T10:00:00')].map(
+        (d) => d.toISOString(),
+      ),
+    )
+  })
+
+  it('FR-CONV-12: no more than conv.cards_per_day a Moscow day, the rest come the next morning', () => {
+    const t = msk('2026-11-13T10:00:00')
+    expect(spread([t, t, t], 2)).toEqual(
+      [msk('2026-11-13T10:00:00'), msk('2026-11-13T11:00:00'), msk('2026-11-14T09:00:00')].map(
+        (d) => d.toISOString(),
+      ),
+    )
   })
 })

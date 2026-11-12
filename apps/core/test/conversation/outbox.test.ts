@@ -1,11 +1,11 @@
-import { newEventId, type SendMessageInput } from '@sara/shared'
+import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { deliverMessage, queueMessage, sendTurnReply } from '../../src/conversation/outbox'
 import { ensureConversation } from '../../src/conversation/store'
 import { syncChat } from '../../src/conversation/sync'
 import { conversation, convTurn, outbox, task } from '../../src/db/schema'
-import { ProfiError } from '../../src/profi/client'
+import { type ProfiClient, ProfiError } from '../../src/profi/client'
 import { setSetting } from '../../src/settings/store'
 import { chatMsg, stubProfi } from '../helpers/conversation'
 import { openTestDb, resetDb } from '../helpers/db'
@@ -16,7 +16,7 @@ afterAll(close)
 const CHAT = '95147898'
 let convId: string
 let profi: ReturnType<typeof stubProfi>
-let sendCalls: Omit<SendMessageInput, 'permit'>[]
+let sendCalls: Parameters<ProfiClient['sendMessage']>[0][]
 let behaviour: 'ok' | 'lost' | 'changed' | 'fail'
 
 beforeEach(async () => {
@@ -278,6 +278,15 @@ describe('sending to a client', () => {
       expect(await q('boris', 'say:abc')).not.toBeNull()
     })
 
+    it('NFR-UX-1: Boris’s own text goes marked as his, so its quotes stay; Sara’s goes unmarked (11.11.2026)', async () => {
+      const own = await q('boris', 'say:tg:79', 'Скажу «спасибо» сам')
+      await setSetting(db, 'conv.autopilot', true, 'system')
+      const hers = await q('sara', 'conv-remind:c-1:m-1:2', 'Начнём с короткого созвона.')
+      expect(await deliverMessage({ db, profi }, own ?? '')).toBe('confirmed')
+      expect(await deliverMessage({ db, profi }, hers ?? '')).toBe('confirmed')
+      expect(sendCalls.map((c) => c.asWritten === true)).toEqual([true, false])
+    })
+
     it('FR-CONV-5: the shadow and the «Пишет клиентам» pause still hold a press', async () => {
       const card = await pressed()
       await setSetting(db, 'outbound.messages', false, 'system')
@@ -291,6 +300,36 @@ describe('sending to a client', () => {
     it('FR-CONV-5: with the autopilot on Sara’s own message goes with any key', async () => {
       await setSetting(db, 'conv.autopilot', true, 'system')
       expect(await q('sara', 'conv-remind:c-1:m-1:1')).not.toBeNull()
+    })
+
+    it('FR-CONV-12: a ping to a client Boris leads never goes by itself, the autopilot and «conv.pings_auto» on (12.11.2026)', async () => {
+      await setSetting(db, 'conv.autopilot', true, 'system')
+      await setSetting(db, 'conv.pings_auto', true, 'system')
+      for (const ownerReason of ['wrote', 'take'] as const) {
+        await db.update(conversation).set({ owner: 'boris', ownerReason })
+        expect(await q('sara', `conv-remind:${convId}:m-1:1`), ownerReason).toBeNull()
+      }
+      expect(await db.select().from(outbox)).toHaveLength(0)
+      // Boris's press on the card of the ping is his yes: that still goes.
+      const [conv] = await db.select().from(conversation)
+      await db.insert(convTurn).values({
+        id: `conv-remind:${convId}:m-1:1`,
+        conversationId: conv?.id ?? '',
+        kind: 'reminder',
+        anchorMessageId: 'm-1',
+        text: 'Анна, здравствуйте! Как у вас дела?',
+      })
+      const card = newEventId()
+      await db.insert(task).values({
+        id: card,
+        kind: 'conv_draft',
+        entityKind: 'conv_turn',
+        entityId: `conv-remind:${convId}:m-1:1`,
+        state: 'resolved',
+        resolution: 'send',
+      })
+      await setSetting(db, 'conv.autopilot', false, 'system')
+      expect(await q('sara', `send:${card}`, 'Анна, здравствуйте! Как у вас дела?')).not.toBeNull()
     })
   })
 

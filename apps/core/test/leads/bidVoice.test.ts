@@ -124,9 +124,27 @@ describe('the voice section the Analyst reads', () => {
     expect(text).toMatch(/[Пп]риветствие[^\n]*программа/)
     // The series is written by the same call and in the same voice.
     expect(text).toMatch(/[Сс]ери[яю][^\n]*голос/)
-    // The rules of the role on the form of a bid stay: the open decisions 3 and 4 are not the skill's to change.
-    expect(text).toMatch(/без дефисов[^\n]*без точки в конце абзаца/)
     expect(text).not.toContain(DASH)
+  })
+
+  it('FR-LEAD-6: the voice leads the template (11.11.2026): the opening, the length and the rhythm are its, only the frames stay', async () => {
+    const text = bidVoiceText(await voice())
+    // On 11.11 the bid on a test order still opened «Уловил, о чем вы» at the template's length: the role won.
+    expect(text).not.toContain('правила роли главнее')
+    expect(text).toMatch(/[Гг]олос главнее/)
+    expect(text).toContain('20')
+    expect(text).toContain('60 слов')
+    expect(text).toMatch(/[Сс]писок начал/)
+    // The frames that stay: the program's greeting, no dash, no «не X, а Y», no «ё», a question at the end, a case only where it fits.
+    for (const frame of [
+      'без тире',
+      '«не X, а Y»',
+      'без буквы «ё»',
+      'вопрос',
+      'ейс только к месту',
+    ])
+      expect(text).toContain(frame)
+    expect(text).toMatch(/рамк[^\n]*двоеточ/)
   })
 
   it('FR-LEAD-6: it holds the records whole, the samples as client and Boris, and the phrases he never says', async () => {

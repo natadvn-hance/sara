@@ -459,6 +459,11 @@ describe('isGreetingForm and leadingGreeting (FR-SPEECH-3, rule 5)', () => {
       'Анна-Мария, добрый день!',
       'Доброго дня!',
       '[имя 1], добрый день!',
+      // Boris, 11.11.2026: «Все время разный как у человека».
+      'Добрый день, Анна!',
+      'Здравствуйте!',
+      'Здравствуйте, Анна!',
+      'Анна, здравствуйте!',
       '  Добрый день!  ',
       'Добрый день',
     ])
@@ -482,10 +487,7 @@ describe('isGreetingForm and leadingGreeting (FR-SPEECH-3, rule 5)', () => {
   it('FR-SPEECH-3: other openers and greetings with something after them are not a form', () => {
     for (const text of [
       '',
-      'Здравствуйте!',
-      'Анна, здравствуйте!',
       'Привет!',
-      'Добрый день, Анна!',
       'Добрый день! Посмотрел задачу',
       'Добрый день, посмотрел задачу',
       'Анна, посмотрел задачу',
@@ -527,7 +529,9 @@ describe('isGreetingForm and leadingGreeting (FR-SPEECH-3, rule 5)', () => {
     expect(leadingGreeting('Добрый день! Посмотрел задачу')).toBe('Добрый день!')
     expect(leadingGreeting('Доброго дня, Анна! Смотрю')).toBe('Доброго дня, Анна!')
     expect(leadingGreeting('Посмотрел задачу')).toBeNull()
-    expect(leadingGreeting('Здравствуйте! Посмотрел задачу')).toBeNull()
+    expect(leadingGreeting('Здравствуйте! Посмотрел задачу')).toBe('Здравствуйте!')
+    expect(leadingGreeting('Добрый день, Анна! Посмотрел задачу')).toBe('Добрый день, Анна!')
+    expect(leadingGreeting('Привет! Посмотрел задачу')).toBeNull()
     expect(leadingGreeting('Добрый день, посмотрел задачу')).toBeNull()
     expect(leadingGreeting('')).toBeNull()
   })

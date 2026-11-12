@@ -127,17 +127,22 @@ jobs:
             -p "$port:5432" pgvector/pgvector:pg16
           for i in $(seq 1 30); do docker exec "$name" pg_isready -U sara >/dev/null 2>&1 && exit 0; sleep 2; done
           exit 1
+      # The pult e2e starts six servers. Each runner has its own block of ports (the base and five after it), apart from
+      # the other runner, from a dev session's default (28120) and from the Mac's other projects (3000, 3100, 5173 ...).
+      - name: Pick e2e ports
+        run: |
+          case "$RUNNER_NAME" in sara-mac-2) base=28110 ;; *) base=28100 ;; esac
+          echo "E2E_PORT_BASE=$base" >> "$GITHUB_ENV"
       # Chromium first: the Profi-MCP tests drive a real browser too.
       - run: pnpm --filter @sara/web exec playwright install chromium
       # caffeinate keeps the Mac from idle sleep while the tests run (a closed lid still stops it).
       # A PR or a push runs the tests its changed files reach (vitest --changed); the nightly run, all of them.
       - run: caffeinate -i pnpm test ${{ needs.changes.outputs.base && format('--changed {0}', needs.changes.outputs.base) || '' }}
-      # The pult e2e uses fixed ports: the two runners take turns through a lock, and a dev session holding the ports
-      # gets one more try after a minute.
+      # The pult e2e takes its ports from E2E_PORT_BASE (above), so another project's server on the Mac or the other
+      # runner cannot collide with it, and a port that is taken stops the run at once with its name («порт N занят»).
+      # The lock stays only so the two runners do not run two browser suites at once (the Mac could not keep up).
       - if: needs.changes.outputs.web == 'true'
-        run: |
-          e2e='caffeinate -i pnpm --filter @sara/web e2e'
-          lockf -t 1800 /tmp/sara-ci-web-e2e.lock sh -c "$e2e || (sleep 60 && $e2e)"
+        run: lockf -t 1800 /tmp/sara-ci-web-e2e.lock caffeinate -i pnpm --filter @sara/web e2e
       - run: pnpm --filter @sara/web build
       - name: Stop Postgres
         if: always()

@@ -15,6 +15,7 @@ import { appendEvent } from '../journal/journal'
 import type { Notifier } from '../notify/notifier'
 import type { ProfiClient } from '../profi/client'
 import { getSetting } from '../settings/store'
+import { greetingFor, greetingShape, pickGreetingForm } from '../text/clientText'
 import { clientTurnBefore, isRefusal } from './clientCues'
 import { clientNames } from './dossier'
 import { deliverMessage, queueMessage } from './outbox'
@@ -110,6 +111,21 @@ export const REFUSED = 'клиент отказался'
 /** Why nothing more is written on Profi.ru to a client who went over to a messenger. */
 export const MESSENGER = 'клиент ушел в мессенджер'
 
+/**
+ * Whose ladder a conversation has (Boris, 12.11.2026). Sara's client gets it as always. A client Boris wrote to himself
+ * on the page (FR-CONV-10) gets it too, from his own message, but every step only as a card for his press: nothing goes
+ * by itself, whatever the autopilot or `conv.pings_auto` say. A client he took («беру сам»), a paused or a closed
+ * conversation gets none.
+ */
+export function ladderOf(
+  conv: Pick<ConversationRow, 'owner' | 'ownerReason' | 'closedAt'>,
+): 'sara' | 'cards' | null {
+  if (conv.closedAt) return null
+  if (conv.owner === 'sara') return 'sara'
+  if (conv.owner === 'boris' && conv.ownerReason === 'wrote') return 'cards'
+  return null
+}
+
 const STOP = (why: string): Ground => ({ go: false, end: true, why })
 const SKIP = (why: string): Ground => ({ go: false, end: false, why })
 
@@ -192,6 +208,8 @@ export async function planNext(
     sent: number
     /** When the step before went, or was due if it was only skipped: the next wait counts from there. */
     prevAt: string | null
+    /** The first step not before this: the slot the catch-up gave the ladder (spreadStarts). */
+    notBefore?: string | null
   },
 ): Promise<Planned | null> {
   const conv = await getConversation(d.db, conversationId)
@@ -207,6 +225,8 @@ export async function planNext(
   const sc = await scenarioOf(d.db, conversationId, anchor)
   if (sc.kind === 'messenger') return null
   const w = pingWaits(sc)
+  const slot = st.notBefore ? Date.parse(st.notBefore) : Number.NaN
+  const notBefore = Math.max(w.notBefore?.getTime() ?? 0, Number.isNaN(slot) ? 0 : slot)
   const r = nextReminder({
     lastOursAt: m.sentAt,
     sent: st.sent,
@@ -220,7 +240,7 @@ export async function planNext(
       silent: d.waitsMs?.silent,
     },
     firstAfterMs: w.first,
-    firstNotBefore: w.notBefore,
+    firstNotBefore: notBefore > 0 ? new Date(notBefore) : null,
   })
   if (!r) return null
   const latest = new Date(r.at.getTime() + (d.laterWindowMs ?? LATER_WINDOW_MS))
@@ -421,7 +441,7 @@ async function readGround(
 
 /**
  * Whether a reminder may go now: the last word before it is spoken, at the wake-up and again right before sending
- * (FR-CONV-12, FR-CONV-6). Nothing goes for a conversation that is closed, Boris's or booked, to a client who wrote
+ * (FR-CONV-12, FR-CONV-6). Nothing goes for a conversation that is closed, taken by Boris (`ladderOf`) or booked, to a client who wrote
  * or when our side wrote since the anchor, while a turn runs, and (after the switch) while the «Пишет клиентам»
  * pause or the account's pause holds. The chat is read again here; an unreadable chat skips the step.
  */
@@ -438,7 +458,7 @@ export async function checkGround(
   if (!(await getSetting(db, 'pipeline.conversations'))) return SKIP('разговоры выключены')
   if (!(await getSetting(db, 'conv.reminders'))) return SKIP('напоминания выключены')
   if (conv.closedAt) return STOP('разговор закрыт')
-  if (conv.owner !== 'sara') return STOP('клиента ведёт Борис')
+  if (!ladderOf(conv)) return STOP('клиента ведёт Борис')
   try {
     if (await d.isBooked?.(conv.id)) return STOP('назначена встреча')
   } catch (e) {
@@ -622,17 +642,13 @@ export async function fallbackStep(
 ): Promise<{ text: string; why: string }> {
   const conv = await getConversation(d.db, conversationId)
   const names = conv ? await clientNames(d.db, conv) : []
-  const variants = ([0, 1] as const).map((v) =>
-    pingFallback(names[0] ?? null, p.scenario, p.tone, v),
-  )
-  const used = conv ? await ladderTexts(d.db, conv.id) : new Set<string>()
-  if (conv) {
-    const ours = await d.db
-      .select({ text: chatMessage.text })
-      .from(chatMessage)
-      .where(and(eq(chatMessage.conversationId, conv.id), eq(chatMessage.side, 'specialist')))
-    for (const m of ours) used.add(normalizeText(m.text))
-  }
+  const ours = conv
+    ? await d.db
+        .select({ text: chatMessage.text })
+        .from(chatMessage)
+        .where(and(eq(chatMessage.conversationId, conv.id), eq(chatMessage.side, 'specialist')))
+        .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+    : []
   const [last] = conv
     ? await d.db
         .select({ text: convTurn.text })
@@ -647,9 +663,31 @@ export async function fallbackStep(
         .orderBy(desc(convTurn.createdAt))
         .limit(1)
     : []
+  const used = conv ? await ladderTexts(d.db, conv.id) : new Set<string>()
+  // The greeting in another form than our latest ones (11.11.2026): the last reminder sent, which the chat may not show
+  // yet, then our messages in the chat, newest first. Chosen by the chat and the number of our messages and reminders,
+  // so the step run again chooses the same.
+  const name = names[0] ?? null
+  const before = [
+    ...(last?.text ? [last.text] : []),
+    ...ours
+      .map((m) => m.text)
+      .filter((t) => greetingShape(t) !== null)
+      .reverse(),
+  ]
+  const hello = greetingFor(
+    new Date(),
+    name,
+    pickGreetingForm(`${conversationId}:${ours.length}:${used.size}`, name, before),
+  )
+  const variants = ([0, 1] as const).map((v) => pingFallback(name, p.scenario, p.tone, v, hello))
+  for (const m of ours) used.add(normalizeText(m.text))
+  // A wording is told apart by what follows the greeting: the greeting itself changes from message to message.
+  const body = (v: string) => normalizeText(v.slice(hello.length))
+  const has = (t: string, v: string) => t.endsWith(body(v))
   const text =
-    variants.find((v) => !used.has(normalizeText(v))) ??
-    variants.find((v) => normalizeText(v) !== normalizeText(last?.text ?? '')) ??
+    variants.find((v) => ![...used].some((u) => has(u, v))) ??
+    variants.find((v) => !has(normalizeText(last?.text ?? ''), v)) ??
     (variants[0] as string)
   await d.db
     .update(convTurn)
@@ -816,9 +854,11 @@ export async function sendStep(
     return { outcome: 'drafted', end: false }
   }
   // Drafts mode (FR-CONV-5): Sara sends nothing by herself, Boris gets the card and his press sends the text. Pings
-  // alone may go by themselves when Boris switched `conv.pings_auto` on (default off).
+  // alone may go by themselves when Boris switched `conv.pings_auto` on (default off), but never to a client Boris
+  // wrote to himself: his client gets the card whatever the switches say (12.11.2026).
   const auto =
-    (await getSetting(d.db, 'conv.autopilot')) || (await getSetting(d.db, 'conv.pings_auto'))
+    ladderOf(conv) === 'sara' &&
+    ((await getSetting(d.db, 'conv.autopilot')) || (await getSetting(d.db, 'conv.pings_auto')))
   if (!auto) {
     try {
       await sendReminderCard(d, rowId, conv, p.step as 1 | 2 | 3, text, card)

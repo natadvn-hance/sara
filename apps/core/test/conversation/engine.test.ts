@@ -14,6 +14,7 @@ import { convTurn, lead } from '../../src/db/schema'
 import { createGateway } from '../../src/gateway/gateway'
 import { SITES_RECORD } from '../../src/leads/siteOrder'
 import { createSecretStore } from '../../src/secrets/store'
+import { greetingShape } from '../../src/text/clientText'
 import {
   caseOf,
   chatMsg,
@@ -225,6 +226,28 @@ describe('names to hide', () => {
   it('ADR-016: the names are those of the lead and of the greeting, once each', async () => {
     const conv = await store('Ольга, здравствуйте! Понимаю задачу.', true)
     expect(await clientNames(db, conv)).toEqual(['Ольга Петрова', 'Ольга'])
+  })
+
+  it('ADR-016: a name after the greeting is found too, as greetings now vary (11.11.2026)', async () => {
+    expect(await clientNames(db, await store('Добрый день, Анна! Понимаю задачу.', false))).toEqual(
+      ['Анна'],
+    )
+  })
+
+  it('FR-CONV-4: the dossier names the greeting of a new day in another form than our last one, the same on a repeat', async () => {
+    const conv = await store('Ольга, добрый день! Понимаю задачу.', true)
+    const at = new Date()
+    const d = await buildDossier(db, conv.id, at, { night: settings.night })
+    expect(greetingShape(d.greeting ?? '')).not.toBeNull()
+    expect(greetingShape(d.greeting ?? '')).not.toBe(greetingShape('Ольга, добрый день!'))
+    expect(d.greeting).toMatch(/Ольга/)
+    const again = await buildDossier(db, conv.id, at, { night: settings.night })
+    expect(again.greeting).toBe(d.greeting)
+    const flags = formatInterlocutorInput({ ...d, newDay: true }, await recall(fakeMind(), d), [])
+    expect(flags).toContain(`Новый день: да, начни с приветствия «${d.greeting}»`)
+    expect(
+      formatInterlocutorInput({ ...d, newDay: false }, await recall(fakeMind(), d), []),
+    ).toContain('Новый день: нет, не здоровайся заново')
   })
 })
 

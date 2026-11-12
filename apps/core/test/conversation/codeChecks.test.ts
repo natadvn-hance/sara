@@ -943,3 +943,12 @@ describe('cases in a reply', () => {
     expect(ids({ text: 'Сайт делаем за 2-3 недели.' })).toEqual([])
   })
 })
+
+describe('an opening frame with a colon in a reply or a ping (Boris, 11.11.2026)', () => {
+  it('FR-CONV-15: goes back for a rewrite like «не X, а Y», his own «А давайте так:» does not', () => {
+    expect(ids({ text: 'Хочу уточнить одну вещь по брендбуку: цвета оставляем?' })).toEqual([
+      'style.neuro',
+    ])
+    expect(ids({ text: 'А давайте так: начнем с анализа?' })).toEqual([])
+  })
+})

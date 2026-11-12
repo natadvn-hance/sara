@@ -75,3 +75,23 @@ describe('the Analyst role writes the text of a bid in the voice of Boris (26.10
     expect(meta.version).toBeGreaterThanOrEqual(5)
   })
 })
+
+describe("the Analyst role in Boris's voice (11.11.2026)", () => {
+  const role = () => readFile(join(ROLE, 'role.md'), 'utf8')
+
+  it('FR-LEAD-6: with the section «Голос Бориса» the voice leads the rules above, and the role says which frames stay', async () => {
+    const text = await role()
+    const section = text.slice(text.indexOf('Голос Бориса.'))
+    expect(text).toContain('Голос Бориса.')
+    expect(section).toMatch(/главнее/)
+    expect(section).toMatch(/начал/)
+    expect(section).toContain('20')
+    expect(section).toContain('60 слов')
+    for (const frame of ['приветствие', 'тире', '«не X, а Y»', '«ё»', 'вопрос', 'кейс'])
+      expect(section).toContain(frame)
+    // What the client must not learn and the facts stay whatever the voice: they are no part of the template.
+    expect(section).toMatch(/факт/)
+    const meta = JSON.parse(await readFile(join(ROLE, 'meta.json'), 'utf8')) as { version: number }
+    expect(meta.version).toBeGreaterThanOrEqual(18)
+  })
+})

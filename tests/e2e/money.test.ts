@@ -11,6 +11,7 @@ import { loadConfig } from '../../apps/core/src/config'
 import { event, lead, outbox, task } from '../../apps/core/src/db/schema'
 import { dailySummary } from '../../apps/core/src/learning/summary'
 import { setSetting } from '../../apps/core/src/settings/store'
+import { isGreetingForm } from '../../apps/core/src/text/clientText'
 import { analystAnswer } from '../../apps/core/test/helpers/analyst'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
 import { createFakeTelegram, type FakeTelegram } from '../fakes/telegramApi'
@@ -287,9 +288,10 @@ describe('held orders in the summary', () => {
     expect(await analystCalls(held)).toBe(1)
     const card = tg.sent.at(-1)
     expect(card?.reply_markup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/:bid$/)
-    expect(card?.text).toContain(
-      '<blockquote>Ирина, добрый день!\n\nПонимаю задачу\n\nКогда запуск?',
-    )
+    // A greeting of Ирина in one of its forms: after the first order's bid the next opens in another (11.11.2026).
+    const quote = /<blockquote>([^\n]*)\n\nПонимаю задачу\n\nКогда запуск\?/u.exec(card?.text ?? '')
+    expect(isGreetingForm(quote?.[1] ?? '')).toBe(true)
+    expect(quote?.[1]).toContain('Ирина')
     const [l] = await db.select().from(lead).where(eq(lead.id, held))
     expect(l?.status).toBe('queued')
     const decisions = await db.select().from(task).where(eq(task.entityId, held))

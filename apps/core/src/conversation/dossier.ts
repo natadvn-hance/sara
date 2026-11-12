@@ -4,6 +4,7 @@ import type { Db } from '../db/client'
 import { chatMessage, convTurn, deal, lead } from '../db/schema'
 import type { ProfiClient } from '../profi/client'
 import { leadSiteOf } from '../site'
+import { greetedName, greetingFor, greetingShape, pickGreetingForm } from '../text/clientText'
 import { isNewMoscowDay } from './check/codeChecks'
 import { NOT_NAMES } from './check/phrases'
 import { getConversation } from './store'
@@ -65,7 +66,10 @@ export async function clientNames(
     .where(and(eq(chatMessage.conversationId, conv.id), eq(chatMessage.side, 'specialist')))
     .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
     .limit(1)
-  const greeted = /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
+  // «Анна, добрый день!» as old Sara wrote, or the name after the greeting: «Добрый день, Анна!» (11.11.2026).
+  const greeted =
+    greetedName(first?.text ?? '') ??
+    /^\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s*,/u.exec(first?.text ?? '')?.[1]
   const folded = greeted?.toLowerCase().replace(/ё/g, 'е') ?? ''
   const names = [known, greeted && !NOT_NAMES.has(folded) ? greeted : null]
   return [...new Map(names.flatMap((n) => (n ? [[n.toLowerCase(), n] as const] : []))).values()]
@@ -145,6 +149,19 @@ export async function buildDossier(
     ? await db.select({ stage: deal.stage }).from(deal).where(eq(deal.id, conv.dealId))
     : []
   const lastOurs = messages.findLast((m) => m.side === 'specialist')
+  // The greeting of a new day, in another form than our latest ones in this chat (Boris, 11.11.2026: «Все время разный
+  // как у человека»); chosen by the chat and the number of our message, so a turn planned again chooses the same.
+  const ours = messages.filter((m) => m.side === 'specialist')
+  const name = clientName ?? greetedName(ours[0]?.text ?? '')
+  const greetedBefore = ours
+    .map((m) => m.text)
+    .filter((t) => greetingShape(t) !== null)
+    .reverse()
+  const greeting = greetingFor(
+    now,
+    name,
+    pickGreetingForm(`${conversationId}:${ours.length}`, name, greetedBefore),
+  )
   return {
     conversationId,
     accountId: conv.accountId,
@@ -162,6 +179,7 @@ export async function buildDossier(
     owner: conv.owner,
     ownerReason: conv.ownerReason,
     newDay: isNewMoscowDay(lastOurs?.sentAt ?? null, now),
+    greeting,
     night: inMoscowHours(now, o.night),
     lastOursAt: lastOurs?.sentAt ?? null,
     remindersSent: 0,
