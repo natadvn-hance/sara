@@ -89,34 +89,32 @@ final class Notch: ObservableObject {
     }
 }
 
-/// The outline of the notch grown big: square to the top edge, concave shoulders into the menu bar, round below.
+/// The outline of the notch grown big: a straight band as tall as the menu bar (it merges with the dark bar and the
+/// notch), then, where its sides meet the bottom of the menu bar, a soft concave fillet into the island's sides (Boris,
+/// 12.11: «обратное скругление, где край касается верха»), and round corners below.
 struct NotchShape: Shape {
-    /// The concave shoulder into the menu bar: big and soft, no sharp tip where it meets the top (Boris, 12.11).
-    var shoulder: CGFloat = 16
+    /// The menu bar's height: the band above the fillets.
+    var band: CGFloat
+    var fillet: CGFloat = 10
     var corner: CGFloat = 26
 
     func path(in r: CGRect) -> Path {
-        let t = min(shoulder, r.width / 4, r.height / 3)
-        let b = min(corner, r.height / 2, r.width / 4)
-        // 0,55 of the radius as handles: a smooth quarter, as Apple draws the notch's own corners.
-        let k: CGFloat = 0.55
+        let f = min(fillet, r.width / 4)
+        // Folded into the notch: no room below the band, a plain block.
+        guard r.height > band + f + 2 else { return Path(r) }
+        let b = min(corner, (r.height - band - f) / 2, r.width / 4)
+        let top = r.minY + band
         var p = Path()
         p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addCurve(
-            to: CGPoint(x: r.minX + t, y: r.minY + t),
-            control1: CGPoint(x: r.minX + t * k, y: r.minY), control2: CGPoint(x: r.minX + t, y: r.minY + t * (1 - k)))
-        p.addLine(to: CGPoint(x: r.minX + t, y: r.maxY - b))
-        p.addCurve(
-            to: CGPoint(x: r.minX + t + b, y: r.maxY),
-            control1: CGPoint(x: r.minX + t, y: r.maxY - b * (1 - k)), control2: CGPoint(x: r.minX + t + b * (1 - k), y: r.maxY))
-        p.addLine(to: CGPoint(x: r.maxX - t - b, y: r.maxY))
-        p.addCurve(
-            to: CGPoint(x: r.maxX - t, y: r.maxY - b),
-            control1: CGPoint(x: r.maxX - t - b * (1 - k), y: r.maxY), control2: CGPoint(x: r.maxX - t, y: r.maxY - b * (1 - k)))
-        p.addLine(to: CGPoint(x: r.maxX - t, y: r.minY + t))
-        p.addCurve(
-            to: CGPoint(x: r.maxX, y: r.minY),
-            control1: CGPoint(x: r.maxX - t, y: r.minY + t * (1 - k)), control2: CGPoint(x: r.maxX - t * k, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: top))
+        p.addQuadCurve(to: CGPoint(x: r.maxX - f, y: top + f), control: CGPoint(x: r.maxX - f, y: top))
+        p.addLine(to: CGPoint(x: r.maxX - f, y: r.maxY - b))
+        p.addQuadCurve(to: CGPoint(x: r.maxX - f - b, y: r.maxY), control: CGPoint(x: r.maxX - f, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX + f + b, y: r.maxY))
+        p.addQuadCurve(to: CGPoint(x: r.minX + f, y: r.maxY - b), control: CGPoint(x: r.minX + f, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX + f, y: top + f))
+        p.addQuadCurve(to: CGPoint(x: r.minX, y: top), control: CGPoint(x: r.minX + f, y: top))
         p.closeSubpath()
         return p
     }
@@ -180,13 +178,13 @@ struct IslandView: View {
         .opacity(open ? 1 : 0)
         // Below the camera: the top strip is the notch itself.
         .padding(.top, notch.height + 10)
-        .padding(.horizontal, 32)
+        .padding(.horizontal, 26)
         .padding(.bottom, 18)
-        .frame(width: 512, alignment: .leading)
+        .frame(width: 500, alignment: .leading)
         .background(Color.black)
         .mask {
-            NotchShape()
-                .frame(width: open ? nil : notch.width + 32, height: open ? nil : notch.height)
+            NotchShape(band: notch.height)
+                .frame(width: open ? nil : notch.width, height: open ? nil : notch.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onChange(of: talk.shown) { _, on in unfold(on) }

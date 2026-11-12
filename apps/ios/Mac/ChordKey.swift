@@ -3,12 +3,16 @@ import Carbon
 import CoreGraphics
 
 /// Two plain keys pressed together, ] and \ (ъ and ё in Boris's Russian layout, the same keys whatever the layout), call
-/// Lora from any app (Boris, 12.11). A key of the pair is held back a moment: if its partner comes within 90 ms, both
-/// are swallowed and Lora comes; if not, the key goes on as typed. Watching the keyboard needs the Accessibility
-/// permission, asked for once.
+/// Lora from any app (Boris, 12.11); with 1 pressed while they are held it is Lora too, with 2 it is Sara. A key of the
+/// pair is held back a moment: if its partner comes within 90 ms, both are swallowed; if not, the key goes on as typed.
+/// Watching the keyboard needs the Accessibility permission, asked for once.
 final class ChordKey {
     static let first = CGKeyCode(kVK_ANSI_RightBracket)
     static let second = CGKeyCode(kVK_ANSI_Backslash)
+    static let one = CGKeyCode(kVK_ANSI_1)
+    static let two = CGKeyCode(kVK_ANSI_2)
+    /// How long the chord waits for a 1 or a 2 before it calls Lora, if the keys are still held.
+    static let digitWait = 0.35
     /// Marks the keys this class lets go later, so it does not catch them again.
     private static let replayMark: Int64 = 0x4841_4E43
 
@@ -18,9 +22,13 @@ final class ChordKey {
     private var release: DispatchWorkItem?
     /// Both keys of a chord are down: their key-ups are swallowed too.
     private var inChord: Set<CGKeyCode> = []
-    private let action: () -> Void
+    /// The chord is down and waits for 1 or 2 (or the keys going up) to know who answers.
+    private var choosing: DispatchWorkItem?
+    /// Digits pressed as part of the chord: their key-ups are swallowed too.
+    private var digits: Set<CGKeyCode> = []
+    private let action: (HanceAgent) -> Void
 
-    init(action: @escaping () -> Void) {
+    init(action: @escaping (HanceAgent) -> Void) {
         self.action = action
         arm()
     }
@@ -81,6 +89,18 @@ final class ChordKey {
         }
         if event.getIntegerValueField(.eventSourceUserData) == Self.replayMark { return Unmanaged.passUnretained(event) }
         let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        // 1 or 2 while the chord waits: who answers. The digit is not typed.
+        if code == Self.one || code == Self.two {
+            if type == .keyDown, choosing != nil {
+                digits.insert(code)
+                fire(code == Self.two ? .sara : .lora)
+                return nil
+            }
+            if type == .keyUp, digits.contains(code) {
+                digits.remove(code)
+                return nil
+            }
+        }
         guard code == Self.first || code == Self.second else {
             // Another key while one of the pair is held back: both go on, in the order he typed them.
             if type == .keyDown, held != nil {
@@ -97,6 +117,8 @@ final class ChordKey {
         if type == .keyUp {
             if inChord.contains(code) {
                 inChord.remove(code)
+                // The chord let go without a digit: Lora.
+                if choosing != nil { fire(.lora) }
                 return nil
             }
             if let h = held, h.code == code {
@@ -113,12 +135,14 @@ final class ChordKey {
             return inChord.contains(code) ? nil : Unmanaged.passUnretained(event)
         }
         if let h = held, h.code != code {
-            // Its partner within 90 ms: the chord. Neither key is typed.
+            // Its partner within 90 ms: the chord. Neither key is typed. Now 1, 2 or nothing says who answers.
             release?.cancel()
             release = nil
             held = nil
             inChord = [h.code, code]
-            DispatchQueue.main.async { self.action() }
+            let wait = DispatchWorkItem { [weak self] in self?.fire(.lora) }
+            choosing = wait
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.digitWait, execute: wait)
             return nil
         }
         if held != nil { letGo() }
@@ -128,6 +152,14 @@ final class ChordKey {
         release = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.09, execute: work)
         return nil
+    }
+
+    /// Once per chord: the one who answers comes.
+    private func fire(_ who: HanceAgent) {
+        guard let c = choosing else { return }
+        c.cancel()
+        choosing = nil
+        DispatchQueue.main.async { self.action(who) }
     }
 
     /// The held key was not a chord after all: it is typed now.

@@ -27,7 +27,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             panel = IslandPanel(talk: .shared)
             // ъ+ё (] and \ together) is the main way (Boris, 12.11); ⌥Space stays as the spare one.
-            chord = ChordKey { MacTalk.shared.press() }
+            chord = ChordKey { who in MacTalk.shared.press(as: who) }
             hotKey = HotKey { MacTalk.shared.press() }
         }
     }
@@ -55,7 +55,7 @@ struct MenuView: View {
             HStack {
                 HanceLogo(height: 18, mark: p.accent, word: .primary)
                 Spacer()
-                Text("ъ + ё").monoLabel(10).foregroundStyle(.secondary)
+                Text("ъ+ё · +1 Лора · +2 Сара").monoLabel(9).foregroundStyle(.secondary)
             }
             if talk.signedIn {
                 Button {

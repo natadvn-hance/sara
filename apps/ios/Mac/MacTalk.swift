@@ -49,6 +49,12 @@ final class MacTalk: ObservableObject {
 
     // MARK: What Boris does
 
+    /// The chord with a digit: that one answers. Busy, it works as the plain chord (sends, or stops her).
+    func press(as who: HanceAgent) {
+        if !phase.isBusy, who != agent { agent = who }
+        press()
+    }
+
     /// The shortcut: comes out and listens; listening, sends what he said; while she thinks or speaks, stops her.
     func press() {
         switch phase {
