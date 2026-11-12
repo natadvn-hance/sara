@@ -5,7 +5,7 @@ import {
   newEventId,
   normalizeText,
 } from '@sara/shared'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { chatMessage, outbox } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -46,6 +46,16 @@ export function storedOf(r: typeof chatMessage.$inferSelect): StoredMessage {
     conversationId: r.conversationId,
     heardAt: r.heardAt,
   }
+}
+
+/** The stored messages of a conversation, in the chat's order. */
+export async function storedMessages(db: Db, conversationId: string): Promise<StoredMessage[]> {
+  const rows = await db
+    .select()
+    .from(chatMessage)
+    .where(eq(chatMessage.conversationId, conversationId))
+    .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
+  return rows.map(storedOf)
 }
 
 /** The texts the new Sara sent to this chat, with whose words they were: her own, or Boris's dictated (ADR-024). */

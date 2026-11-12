@@ -142,11 +142,30 @@ async function pingAllowed(tx: DbOrTx, key: string): Promise<boolean> {
 }
 
 /**
+ * A ping by itself (its key is the step of a reminder process) only to a client Sara leads (Boris, 12.11.2026): to a
+ * client Boris wrote to himself, or any other of his, it goes only with his press on the card, which has a key of its
+ * own. Neither the autopilot nor `conv.pings_auto` writes over him.
+ */
+async function pingOverBoris(
+  tx: DbOrTx,
+  key: string,
+  m: { accountId: string; chatId: string },
+): Promise<boolean> {
+  if (!key.startsWith('conv-remind:')) return false
+  const [c] = await tx
+    .select({ owner: conversation.owner })
+    .from(conversation)
+    .where(and(eq(conversation.accountId, m.accountId), eq(conversation.chatId, m.chatId)))
+  return c?.owner !== 'sara'
+}
+
+/**
  * A message to a client enters the outbox once per key (FR-CONV-9). Nothing is queued in shadow, not even Boris's
  * own text (ADR-024); Sara's own text also waits out the «Пишет клиентам» pause, Boris's text passes it (as v1).
  * In drafts mode (`conv.autopilot` off) the one line nothing crosses: a message of author sara goes only with Boris's
  * press on «Отправить», or for the series after a bid with his press on «Откликнуться»; his own text is his press
- * already (FR-CONV-5, FR-CONV-11). Null when it may not go now.
+ * already (FR-CONV-5, FR-CONV-11). A ping by itself goes only to a client Sara leads, whatever the switches say
+ * (12.11.2026). Null when it may not go now.
  */
 export async function queueMessage(
   tx: DbOrTx,
@@ -159,6 +178,7 @@ export async function queueMessage(
   // Boris's own words are his; Sara's never carry a link a client is not to be given (links.blocked, 30.10.2026).
   if (i.author === 'sara' && hasBlockedLink(i.text, await getSetting(tx, 'links.blocked')))
     return null
+  if (i.author === 'sara' && (await pingOverBoris(tx, i.key, i))) return null
   if (
     i.author === 'sara' &&
     !(await getSetting(tx, 'conv.autopilot')) &&

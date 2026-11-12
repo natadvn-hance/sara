@@ -2,11 +2,13 @@ import { cp, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createFakeProfi, type FakeProfi } from '@sara/profi-node/fake'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type RunningApp, startApp } from '../../apps/core/src/app'
 import { loadConfig } from '../../apps/core/src/config'
+import { catchUpLadders } from '../../apps/core/src/conversation/reminders'
 import { moscowHour } from '../../apps/core/src/conversation/time'
-import { convTurn } from '../../apps/core/src/db/schema'
+import { chatMessage, conversation, convTurn, setting } from '../../apps/core/src/db/schema'
 import { forumOf } from '../../apps/core/src/notify/forum'
 import { setSetting } from '../../apps/core/src/settings/store'
 import { openTestDb, resetDb, testDatabaseUrl } from '../../apps/core/test/helpers/db'
@@ -168,6 +170,96 @@ describe('an organic ping in the client’s topic', () => {
     )
     const [row] = await db.select().from(convTurn)
     expect((row?.checks as { fallback?: boolean } | null)?.fallback).toBe(true)
+    expect(fake.messages).toHaveLength(0)
+  }, 60000)
+})
+
+// 12.11.2026: a client Boris wrote to himself on the page got no reminder at all (FR-CONV-10 made him Boris's, and
+// that stopped the ladder). Now the ladder runs from his own message, every step a card for his press, the autopilot
+// or not; a silent one from before the change gets it from the catch-up, without a new message.
+describe('a client Boris wrote to himself', () => {
+  const HIS =
+    'Анна, добрый день! Это Борис. Посмотрел вашу задачу, давайте начнём с короткого созвона?'
+
+  /**
+   * The bid the core already knows, then Boris's own message from the page 26 hours ago, after the switch from old
+   * Sara: the owner rule makes the client his. The ladder of his message starts only if reminders are on by then.
+   */
+  async function hisSilentClient(o: {
+    remindersOnForHis: boolean
+    took?: boolean
+  }): Promise<string> {
+    await setSetting(db, 'conv.reminders', false, 'boris')
+    const id = chatId()
+    await fake.addChatMessage({
+      chatId: id,
+      orderId: id,
+      author: 'specialist',
+      text: 'Анна, добрый день! Понимаю задачу, сделаем сайт для клиники за три недели.',
+      read: true,
+      sentAt: new Date(Date.now() - 50 * 3600_000).toISOString(),
+    })
+    await until(async () => (await db.select().from(conversation)).length === 1)
+    if (o.took) await db.update(conversation).set({ owner: 'boris', ownerReason: 'take' })
+    // Old Sara stopped writing three days ago: a message of our side after that is Boris's own (ADR-024).
+    await db
+      .update(setting)
+      .set({ changedAt: new Date(Date.now() - 3 * 24 * 3600_000).toISOString() })
+      .where(eq(setting.key, 'conv.v1_writes'))
+    if (o.remindersOnForHis) await setSetting(db, 'conv.reminders', true, 'boris')
+    await fake.addChatMessage({
+      chatId: id,
+      orderId: id,
+      author: 'specialist',
+      text: HIS,
+      read: true,
+      sentAt: new Date(Date.now() - 26 * 3600_000).toISOString(),
+    })
+    await until(async () => (await db.select().from(chatMessage)).length === 2)
+    return id
+  }
+
+  it('FR-CONV-12: his silent client gets a ping card, never a send, with the autopilot on; «Отправить» sends it', async () => {
+    await setSetting(db, 'conv.autopilot', true, 'boris')
+    await setSetting(db, 'conv.pings_auto', true, 'boris')
+    await hisSilentClient({ remindersOnForHis: true })
+    await until(() => pingCards().length === 1, 40000)
+    // The owner rule made the client his; the ladder ran all the same.
+    expect((await db.select().from(conversation))[0]).toMatchObject({
+      owner: 'boris',
+      ownerReason: 'wrote',
+    })
+    await settle()
+    expect(fake.messages).toHaveLength(0)
+    const card = pingCards()[0]
+    expect(card?.text).toContain(PING.text)
+    const send =
+      card?.reply_markup?.inline_keyboard.flat().find((b) => b.callback_data.endsWith(':send'))
+        ?.callback_data ?? ''
+    tg.pushGroupPress(FORUM, BORIS, send, clientTopic()?.message_thread_id)
+    await until(() => fake.messages.length === 1)
+    expect(fake.messages[0]?.text).toBe(PING.text)
+  }, 60000)
+
+  it('FR-CONV-12: one silent from before the change gets no card until the catch-up, then one', async () => {
+    await hisSilentClient({ remindersOnForHis: false })
+    await setSetting(db, 'conv.reminders', true, 'boris')
+    await settle()
+    expect(pingCards()).toHaveLength(0)
+    expect(await catchUpLadders()).toBe(1)
+    await until(() => pingCards().length === 1, 40000)
+    expect(await catchUpLadders()).toBe(0)
+    await settle()
+    expect(pingCards()).toHaveLength(1)
+    expect(fake.messages).toHaveLength(0)
+  }, 60000)
+
+  it('FR-CONV-12: a client Boris took («беру сам») gets no card after his message, nor from the catch-up', async () => {
+    await hisSilentClient({ remindersOnForHis: true, took: true })
+    expect((await db.select().from(conversation))[0]?.ownerReason).toBe('take')
+    expect(await catchUpLadders()).toBe(0)
+    await settle(3000)
+    expect(pingCards()).toHaveLength(0)
     expect(fake.messages).toHaveLength(0)
   }, 60000)
 })

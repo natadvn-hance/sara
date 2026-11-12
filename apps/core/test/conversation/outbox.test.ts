@@ -301,6 +301,36 @@ describe('sending to a client', () => {
       await setSetting(db, 'conv.autopilot', true, 'system')
       expect(await q('sara', 'conv-remind:c-1:m-1:1')).not.toBeNull()
     })
+
+    it('FR-CONV-12: a ping to a client Boris leads never goes by itself, the autopilot and «conv.pings_auto» on (12.11.2026)', async () => {
+      await setSetting(db, 'conv.autopilot', true, 'system')
+      await setSetting(db, 'conv.pings_auto', true, 'system')
+      for (const ownerReason of ['wrote', 'take'] as const) {
+        await db.update(conversation).set({ owner: 'boris', ownerReason })
+        expect(await q('sara', `conv-remind:${convId}:m-1:1`), ownerReason).toBeNull()
+      }
+      expect(await db.select().from(outbox)).toHaveLength(0)
+      // Boris's press on the card of the ping is his yes: that still goes.
+      const [conv] = await db.select().from(conversation)
+      await db.insert(convTurn).values({
+        id: `conv-remind:${convId}:m-1:1`,
+        conversationId: conv?.id ?? '',
+        kind: 'reminder',
+        anchorMessageId: 'm-1',
+        text: 'Анна, здравствуйте! Как у вас дела?',
+      })
+      const card = newEventId()
+      await db.insert(task).values({
+        id: card,
+        kind: 'conv_draft',
+        entityKind: 'conv_turn',
+        entityId: `conv-remind:${convId}:m-1:1`,
+        state: 'resolved',
+        resolution: 'send',
+      })
+      await setSetting(db, 'conv.autopilot', false, 'system')
+      expect(await q('sara', `send:${card}`, 'Анна, здравствуйте! Как у вас дела?')).not.toBeNull()
+    })
   })
 
   it('NFR-REL-4: a failed delivery is not retried blindly', async () => {

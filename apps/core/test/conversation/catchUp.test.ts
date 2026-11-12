@@ -187,4 +187,23 @@ describe('a turn cut short by plumbing', () => {
     expect(started.length).toBeGreaterThanOrEqual(1)
     expect(new Set(started)).toEqual(new Set(['6001']))
   })
+
+  it('FR-CONV-12: the same pass, at start and every time again, starts the missing ladders of Boris’s silent clients (12.11.2026)', async () => {
+    let ladders = 0
+    const c = startCatchUp(
+      {
+        db,
+        ready: async () => true,
+        start,
+        ladders: async () => {
+          ladders++
+          return 0
+        },
+      },
+      { tries: 1, everyMs: 20, repeatMs: 60 },
+    )
+    await new Promise((r) => setTimeout(r, 300))
+    c.stop()
+    expect(ladders).toBeGreaterThanOrEqual(2)
+  })
 })
