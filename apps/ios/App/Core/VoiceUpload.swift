@@ -19,7 +19,10 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     /// Seconds of voice recorded so far.
     var seconds: Double { queue.sync { Wav.seconds(pcmBytes: pcm.count) } }
 
-    init(client: CoreClient, agent: HanceAgent) {
+    /// `streaming: false` (the default since the phone hears the words itself, 12.11) only keeps the recording: nothing
+    /// goes up while he speaks, and the whole file goes in `finish` only when the phone heard no words. A long upload
+    /// at the start of every talk broke the way to the core through Boris's VPN.
+    init(client: CoreClient, agent: HanceAgent, streaming: Bool = false) {
         self.client = client
         self.agent = agent
         var i: InputStream?
@@ -27,6 +30,10 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         Stream.getBoundStreams(withBufferSize: 1 << 16, inputStream: &i, outputStream: &o)
         output = o!
         super.init()
+        guard streaming else {
+            closed = true
+            return
+        }
         output.open()
         pending = Wav.header(dataBytes: nil)
         var r = client.request("/api/talk?agent=\(agent.rawValue)", method: "POST", type: "audio/wav", timeout: 45)
@@ -41,6 +48,7 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         queue.async {
             guard !self.finished else { return }
             self.pcm.append(data)
+            guard !self.closed else { return }
             self.pending.append(data)
             self.pump()
         }
@@ -60,9 +68,10 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             }
         #endif
         let all = queue.sync { pcm }
+        // Not streamed: the whole recording, with exact sizes.
+        guard let task else { return try await client.sendVoice(wav: Wav.file(pcm: all), agent: agent) }
         let sent: Sent
         do {
-            guard let task else { throw URLError(.cancelled) }
             let res = try await task.value
             guard res.1.statusCode == 200 else { throw CoreError.http(res.1.statusCode, CoreClient.errorText(res.0)) }
             sent = try client.decodeSent(res)

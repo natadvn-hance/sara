@@ -64,12 +64,19 @@ final class CoreClient: @unchecked Sendable {
     static let production = URL(string: "https://sara.hance.pro")!
 
     let base: URL
-    let session: URLSession
     private let lock = NSLock()
     private var cookieValue: String?
+    private var current: URLSession
+    /// The session of the requests: a new one when the old way to the core stopped answering (`prepare`).
+    var session: URLSession { lock.withLock { current } }
 
     init(base: URL = CoreClient.configuredBase()) {
         self.base = base
+        current = Self.makeSession()
+        cookieValue = SessionStore.load()
+    }
+
+    private static func makeSession() -> URLSession {
         let c = URLSessionConfiguration.default
         c.httpCookieAcceptPolicy = .never
         c.httpShouldSetCookies = false
@@ -78,8 +85,35 @@ final class CoreClient: @unchecked Sendable {
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.timeoutIntervalForRequest = 40
         c.timeoutIntervalForResource = 300
-        session = URLSession(configuration: c, delegate: NetLog.shared, delegateQueue: nil)
-        cookieValue = SessionStore.load()
+        return URLSession(configuration: c, delegate: NetLog.shared, delegateQueue: nil)
+    }
+
+    /// At the start of listening: the way to the core must answer within 2,5 s, or a new one is opened at once, while
+    /// he still speaks (12.11: the open connection died as he began, and the words waited 10 s on it, then 4 s more
+    /// for a new one). Then her voice is woken on the way that answers.
+    func prepare(for agent: HanceAgent) {
+        var r = request("/talk", method: "HEAD", timeout: 2.5)
+        r.setValue(nil, forHTTPHeaderField: "Cookie")
+        let s = session
+        Task.detached { [weak self] in
+            do {
+                _ = try await s.data(for: r)
+            } catch {
+                guard let self else { return }
+                log.notice("the way to the core did not answer in 2.5 s: a new one")
+                let fresh = Self.makeSession()
+                let old: URLSession = self.lock.withLock {
+                    let o = self.current
+                    self.current = fresh
+                    return o
+                }
+                old.finishTasksAndInvalidate()
+                var p = self.request("/talk", method: "HEAD", timeout: 20)
+                p.setValue(nil, forHTTPHeaderField: "Cookie")
+                _ = try? await fresh.data(for: p)
+            }
+            self?.warm(agent)
+        }
     }
 
     /// `-HanceServer http://localhost:8787` at launch points the app at a test core (tools/mock-core.mjs).

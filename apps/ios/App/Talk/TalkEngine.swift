@@ -258,7 +258,7 @@ final class TalkEngine: ObservableObject {
         guard mine == turn else { return }
         if onScreen { await Ears.askOnce() }
         guard mine == turn else { return }
-        client.warm(agent)
+        client.prepare(for: agent)
         note = nil
         if !followUp { card = nil }
         clock = TurnClock()
