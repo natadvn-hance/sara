@@ -1,4 +1,4 @@
-// Test-only Profi-MCP for the panel tests: the stand-in site in one account tab, MCP on 7171, controls on 18083.
+// Test-only Profi-MCP for the panel tests: the stand-in site in one account tab, MCP and controls on the ports of ports.ts.
 
 import { mkdtemp } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -10,6 +10,7 @@ import { serveMcp } from '../../profi-node/src/mcp/http'
 import { createProfiMcpServer } from '../../profi-node/src/mcp/server'
 import { registerScreenRoute } from '../../profi-node/src/screen/screenRoute'
 import { dbUrl } from './dbUrl'
+import { HOST, PORTS } from './ports'
 
 const site = await startProfiSite()
 const ab = await openAccountBrowser({
@@ -36,7 +37,7 @@ const svc = await serveMcp(
       submitBid: no,
       sendMessage: no,
     }),
-  7171,
+  PORTS.profiMcp,
 )
 registerScreenRoute(svc.http, {
   nodeToken: 'dev-node-token',
@@ -75,5 +76,5 @@ createServer(async (req, res) => {
     )
   }
   res.writeHead(404).end()
-}).listen(18083, '127.0.0.1')
+}).listen(PORTS.standControl, HOST)
 console.log('Подставной Профи-MCP для пульта готов')
