@@ -13,6 +13,7 @@ import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { getSetting } from '../settings/store'
 import { bindChat, boundChat, boundUser } from './binding'
 import { COMMANDS, type CommandReply } from './botCommands'
+import { cardImageUrl, keepCardImage } from './cardImages'
 import { asState, type CardState, closedCardState, newState } from './cardState'
 import {
   closedLeadCardText,
@@ -23,6 +24,7 @@ import {
   plainFallback,
   TEXTS,
 } from './cards'
+import { pictureText } from './cardText'
 import {
   bindForum,
   CLOSED_MARK,
@@ -658,16 +660,32 @@ export function createTelegramRuntime(d: {
   const pictureOn = () => getSetting(d.db, 'cards.picture').catch(() => false)
 
   type Row = { text: string; callbackData: string }
-  type Picture = { ref: number; card: LeadCard; state: CardState }
+  type Picture = { ref: number; card: LeadCard; state: CardState; kind: string }
+
+  /**
+   * Telegram makes a link preview only from a public https address: the card's picture is served by the core behind the
+   * pult's domain. Without one (development, a misconfigured server) there is no picture card; the text card goes.
+   */
+  const previewBase = (): string | null =>
+    d.publicUrl && /^https:\/\//.test(d.publicUrl) ? d.publicUrl : null
+
+  /** The large picture above the text, from a new address for every state, so Telegram never shows a cached one. */
+  const preview = (base: string, token: string) => ({
+    url: cardImageUrl(base, token),
+    prefer_large_media: true,
+    show_above_text: true,
+  })
   const buttons = (rows: ReturnType<typeof pictureKeyboard>) => rows as InlineKeyboardButton[][]
 
   /** The picture card behind a message Sara knows by `ref`; null for any other message. */
   async function pictureAt(ref: number): Promise<Picture | null> {
     const [row] = await d.db
-      .select({ card: telegramCard.card, state: telegramCard.state })
+      .select({ card: telegramCard.card, state: telegramCard.state, kind: telegramCard.kind })
       .from(telegramCard)
       .where(eq(telegramCard.ref, ref))
-    return row ? { ref, card: row.card as LeadCard, state: asState(row.state) } : null
+    return row
+      ? { ref, card: row.card as LeadCard, state: asState(row.state), kind: row.kind }
+      : null
   }
 
   /**
@@ -684,13 +702,25 @@ export function createTelegramRuntime(d: {
     const at = await locate(p.ref)
     if (!at) throw new Error('card unknown')
     const { png } = await renderCardPicture(card, state)
+    const markup = { inline_keyboard: buttons(pictureKeyboard(card, state, o.rows)) }
+    const base = previewBase()
     try {
-      await bot.api.editMessageMedia(
-        at.to,
-        at.id,
-        { type: 'photo', media: new InputFile(png, 'card.png') },
-        { reply_markup: { inline_keyboard: buttons(pictureKeyboard(card, state, o.rows)) } },
-      )
+      if (p.kind === 'text' && base) {
+        const token = await keepCardImage(d.db, png)
+        await bot.api.editMessageText(at.to, at.id, pictureText(card, state), {
+          parse_mode: 'HTML',
+          link_preview_options: preview(base, token),
+          reply_markup: markup,
+        })
+      }
+      // A card of 11.11 is a photo: it keeps being one.
+      else
+        await bot.api.editMessageMedia(
+          at.to,
+          at.id,
+          { type: 'photo', media: new InputFile(png, 'card.png') },
+          { reply_markup: markup },
+        )
     } catch (e) {
       if (!/not modified/i.test(short(e))) throw e
     }
@@ -706,10 +736,13 @@ export function createTelegramRuntime(d: {
    * the step tries again, and the card on the task keeps it from coming twice.
    */
   async function sendPictureCard(c: LeadCard, silent: boolean): Promise<number | null> {
+    const base = previewBase()
+    if (!base) return null
     const state = newState(c)
-    let png: Buffer
+    let token: string
     try {
-      png = (await renderCardPicture(c, state)).png
+      // The picture is kept before the message goes: Telegram fetches it while it makes the message.
+      token = await keepCardImage(d.db, (await renderCardPicture(c, state)).png)
     } catch (e) {
       console.error('the card picture was not drawn, the text card goes', c.taskId, short(e))
       return null
@@ -717,8 +750,10 @@ export function createTelegramRuntime(d: {
     let ref: number
     try {
       ref = await post('leads', (to, where) =>
-        bot.api.sendPhoto(to, new InputFile(png, 'card.png'), {
+        bot.api.sendMessage(to, pictureText(c, state), {
           ...where,
+          parse_mode: 'HTML',
+          link_preview_options: preview(base, token),
           reply_markup: { inline_keyboard: buttons(pictureKeyboard(c, state)) },
           ...(silent && { disable_notification: true }),
         }),
@@ -731,16 +766,27 @@ export function createTelegramRuntime(d: {
     // The card is with Boris: a row that cannot be written only costs its edits (they are logged), never the card.
     await d.db
       .insert(telegramCard)
-      .values({ ref, taskId: c.taskId, card: c, state })
+      .values({ ref, taskId: c.taskId, card: c, state, kind: 'text' })
       .onConflictDoUpdate({
         target: telegramCard.ref,
-        set: { taskId: c.taskId, card: c, state, updatedAt: new Date().toISOString() },
+        set: {
+          taskId: c.taskId,
+          card: c,
+          state,
+          kind: 'text',
+          updatedAt: new Date().toISOString(),
+        },
       })
       .catch((e: unknown) => console.error('card picture not kept', short(e)))
     // One live card per lead: an older picture of this task that still offers its buttons (the card came again after
     // «Правка») says the new one is below.
     const older = await d.db
-      .select({ ref: telegramCard.ref, card: telegramCard.card, state: telegramCard.state })
+      .select({
+        ref: telegramCard.ref,
+        card: telegramCard.card,
+        state: telegramCard.state,
+        kind: telegramCard.kind,
+      })
       .from(telegramCard)
       .where(eq(telegramCard.taskId, c.taskId))
       .catch(() => [])
@@ -748,7 +794,7 @@ export function createTelegramRuntime(d: {
       const was = asState(o.state)
       if (o.ref === ref || was.s !== 'new') continue
       await showPicture(
-        { ref: o.ref, card: o.card as LeadCard, state: was },
+        { ref: o.ref, card: o.card as LeadCard, state: was, kind: o.kind },
         { s: 'note', n: TEXTS.cardMoved },
       ).catch((e: unknown) => console.error('older card picture not folded', short(e)))
     }

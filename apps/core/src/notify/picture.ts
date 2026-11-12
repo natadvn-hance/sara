@@ -37,9 +37,9 @@ const C = {
 const SANS = 'Involve'
 const MONO = 'Martian Mono'
 /** The width the card is laid out at, and the width of the picture Telegram gets (sharp on a phone). */
-const W = 380
+const W = 330
 export const PICTURE_WIDTH = 1080
-const PAD = 26
+const PAD = 18
 const INNER = W - 2 * PAD
 
 const asset = (name: string) => readFileSync(new URL(`../../assets/${name}`, import.meta.url))
@@ -108,11 +108,21 @@ function clipKeep(s: string, max: number): string {
     .trim()
   return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`
 }
-/** The first sentence of a text, without the final period. */
+/** The first sentence of a text, without the final period, cut after a whole word to at most `max` characters. */
 function thought(s: string | null | undefined, max: number): string {
-  const t = (s ?? '').trim()
-  const first = t.split(/(?<=[.!?])\s+(?=[А-ЯЁA-Z«])/)[0] ?? t
-  return clip(first.replace(/[.\s]+$/, ''), max)
+  const t = (s ?? '').replace(DASHES, '-').replace(/\s+/g, ' ').trim()
+  const first = (t.split(/(?<=[.!?])\s+(?=[А-ЯЁA-Z«])/)[0] ?? t).replace(/[.\s]+$/, '')
+  if (first.length <= max) return first
+  const cut = first.slice(0, max - 1)
+  const space = cut.lastIndexOf(' ')
+  let head = (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:]+$/, '')
+  // A line never ends on a word that leads somewhere: «а», «и», «не», «для»…
+  for (let i = 0; i < 3; i++)
+    head = head.replace(
+      /[\s,]+(а|и|но|не|ни|в|во|на|с|со|к|по|за|для|без|из|от|до|о|об|что|как)$/i,
+      '',
+    )
+  return `${head}…`
 }
 
 const LABEL: Record<CardStage, { text: string; tone: 'green' | 'accent' | 'ink' | 'quiet' }> = {
@@ -157,7 +167,7 @@ function topBar(stage: CardStage): Node {
 }
 
 /** «[01] НОВАЯ ЗАЯВКА»: the voice app's numbered label, its number in orange. */
-function numbered(n: string, label: string, marginTop = 26): Node {
+function numbered(n: string, label: string, marginTop = 16): Node {
   return box(
     { alignItems: 'center', marginTop },
     mono(10, C.accent, `[${n}]`, { marginRight: 9 }),
@@ -167,20 +177,20 @@ function numbered(n: string, label: string, marginTop = 26): Node {
 
 /** The order's title, large in Involve; smaller as it grows. */
 function headline(title: string, quiet: boolean, compact: boolean): Node {
-  const t = clip(title, compact ? 90 : 110)
+  const t = clip(title, compact ? 80 : 70)
   const size = compact
     ? t.length <= 40
       ? 25
       : t.length <= 70
         ? 21
         : 19
-    : t.length <= 24
-      ? 34
-      : t.length <= 52
-        ? 27
-        : t.length <= 80
-          ? 23
-          : 21
+    : t.length <= 26
+      ? 30
+      : t.length <= 48
+        ? 26
+        : t.length <= 75
+          ? 22
+          : 20
   return txt(
     {
       fontFamily: SANS,
@@ -215,7 +225,7 @@ function scoreSquares(c: LeadCard): Node {
   const score = c.score?.value ?? 0
   const lit = Math.round((score / 100) * n)
   return box(
-    { justifyContent: 'space-between', marginTop: 20 },
+    { justifyContent: 'space-between', marginTop: 16 },
     ...Array.from({ length: n }, (_, i) =>
       box({
         width: 9,
@@ -238,15 +248,14 @@ function scorePanel(c: LeadCard, fee: string): Node {
     ['Бюджет', clip(c.budgetText?.trim() ? c.budgetText : 'не указан', 20)],
     ['Отклик', fee],
   ]
-  if (s && s.n > 0) rows.push(['Похожие', s.enough ? `${s.bid} из ${s.n}` : `${s.n}, мало`])
   if (c.autobid) rows.push(['Сама', 'откликнулась бы'])
   return box(
     {
       flexDirection: 'column',
       backgroundColor: C.lcd,
       borderRadius: 22,
-      padding: '18px 18px 20px',
-      marginTop: 24,
+      padding: '15px 16px 16px',
+      marginTop: 16,
     },
     box(
       { justifyContent: 'space-between' },
@@ -292,6 +301,24 @@ function scorePanel(c: LeadCard, fee: string): Node {
   )
 }
 
+/** The client in the card's label line: the name, since when, the reviews (Boris: «клиент, всё коротко»). */
+function clientLine(c: LeadCard): string {
+  if (isTestOrder(c.orderId)) return 'Тест · понарошку'
+  const info = c.clientInfo ?? null
+  const raw = info?.name?.trim() || c.clientName.trim()
+  const name = raw ? (firstName(raw) ?? raw) : 'Клиент'
+  const since = info?.on_profi_since?.match(/(19|20)\d\d/)?.[0]
+  const reviews = info?.reviews
+    ? info.reviews.positive + info.reviews.negative === 0
+      ? 'отзывов нет'
+      : `+${info.reviews.positive}/−${info.reviews.negative}`
+    : null
+  return clip(
+    [clip(name, 14), since ? `с ${since}` : null, reviews].filter(Boolean).join(' · '),
+    28,
+  )
+}
+
 /** The facts under the client's name fit one line of the card at this many characters. */
 const FACTS_MAX = 42
 
@@ -317,7 +344,7 @@ function clientRow(c: LeadCard): Node {
   const facts = said && said.length <= room ? [said, ...base] : base
   const initial = (name || '?').trim().charAt(0).toUpperCase()
   return box(
-    { alignItems: 'center', marginTop: 26 },
+    { alignItems: 'center', marginTop: 16 },
     box(
       {
         width: 38,
@@ -383,114 +410,21 @@ function whyRows(c: LeadCard): Node | null {
     /^[А-ЯЁA-Z][а-яёa-z]/.test(t) ? `${t.charAt(0).toLowerCase()}${t.slice(1)}` : t
   const row = (m: Node, text: string) =>
     box(
-      { alignItems: 'flex-start', marginTop: rows.length === 0 ? 0 : 12 },
+      { alignItems: 'flex-start', marginTop: rows.length === 0 ? 0 : 8 },
       m,
-      words(15, C.ink, lower(text), { lineHeight: 1.3, flex: 1, minWidth: 0 }),
-    )
-  if (pm.plus.trim()) rows.push(row(marker('+', C.accent), thought(pm.plus, 90)))
-  if (pm.minus?.trim()) rows.push(row(marker('−', C.ink), thought(pm.minus, 90)))
-  for (const l of (c.clarify ?? []).slice(0, 1)) rows.push(row(marker('?', C.muted), clip(l, 90)))
-  const risk = c.analysis?.risk?.trim()
-  if (risk) rows.push(row(marker('!', C.ink, C.accent), thought(risk, 100)))
-  if (rows.length === 0) return null
-  return box({ flexDirection: 'column', marginTop: 24 }, ...rows)
-}
-
-/**
- * A text set apart as Hance does it: a hairline, a numbered mono label, then the words themselves, with no plate and
- * no rounded box (Boris, 11.11.2026).
- */
-function passage(n: string, label: string, text: string, more: string | null): Node[] {
-  return [
-    box({ height: 1, backgroundColor: C.line, marginTop: 26 }),
-    numbered(n, label, 20),
-    words(15, C.ink, text, { lineHeight: 1.45, marginTop: 12, whiteSpace: 'pre-wrap' }),
-    more ? mono(9, C.muted, more, { marginTop: 12 }) : null,
-  ].filter((x): x is Node => Boolean(x))
-}
-
-/**
- * The client's own words under the reasons, set as a quotation (Boris, 11.11.2026: «выделить органично»): a large
- * orange guillemet hangs in the margin, the words a size larger; no plate, no frame. The whole of them, paragraphs
- * kept (Boris: a tap opens the picture in full, not «Разбор»); only an order past `WORDS_MAX` is cut, so the picture
- * stays within what Telegram takes.
- */
-function clientWords(c: LeadCard, max: number): Node[] {
-  const flat = c.text.trim()
-  if (!flat) return []
-  const name = firstName(c.clientInfo?.name?.trim() || c.clientName.trim() || '') ?? null
-  return [
-    box({ height: 1, backgroundColor: C.line, marginTop: 26 }),
-    numbered('02', name ? `Сообщение клиента · ${clip(name, 20)}` : 'Сообщение клиента', 20),
-    box(
-      { marginTop: 10, alignItems: 'flex-start' },
-      txt(
-        {
-          fontFamily: SANS,
-          fontWeight: 600,
-          fontSize: 44,
-          lineHeight: 1,
-          color: C.accent,
-          width: 30,
-          marginTop: -2,
-        },
-        '«',
-      ),
-      words(16.5, C.ink, `${clipKeep(flat, max)}»`, {
-        lineHeight: 1.45,
+      words(15, C.ink, lower(text), {
+        lineHeight: 1.3,
         flex: 1,
         minWidth: 0,
-        whiteSpace: 'pre-wrap',
+        whiteSpace: 'nowrap',
       }),
-    ),
-    ...(flat.length > max
-      ? [mono(9, C.muted, 'Целиком в «Разборе»', { marginTop: 12, marginLeft: 30 })]
-      : []),
-  ]
-}
-
-/** Rows of a label and a text on one grid, hairlines between them: the series under the bid. */
-function labelRows(rows: [string, string][]): Node | null {
+    )
+  if (pm.plus.trim()) rows.push(row(marker('+', C.accent), thought(pm.plus, 32)))
+  if (pm.minus?.trim()) rows.push(row(marker('−', C.ink), thought(pm.minus, 32)))
+  const risk = c.analysis?.risk?.trim()
+  if (risk) rows.push(row(marker('!', C.ink, C.accent), thought(risk, 32)))
   if (rows.length === 0) return null
-  return box(
-    { flexDirection: 'column', marginTop: 6 },
-    ...rows.map(([label, text]) =>
-      box(
-        {
-          alignItems: 'flex-start',
-          paddingTop: 10,
-          marginTop: 10,
-          borderTop: `1px solid ${C.line}`,
-        },
-        mono(9, C.muted, label, { width: 78, marginTop: 3 }),
-        words(14, C.ink2, text, { flex: 1, minWidth: 0 }),
-      ),
-    ),
-  )
-}
-
-/** The bid under the client's words: its price, the text as it will go, and what follows it into the chat. */
-function bidSection(c: LeadCard): Node[] {
-  const d = c.draft
-  const price = d?.priceRub
-    ? (() => {
-        const r = priceRange(d.priceRub, d.priceToRub)
-        return `от ${formatRub(r.from)} до ${formatRub(r.to)}`
-      })()
-    : null
-  const follow = (d?.followUps ?? []).map((t): [string, string] => [
-    isCallOffer(t) ? 'Созвон' : isTelegramLine(t) ? 'Телеграм' : 'Вдогонку',
-    clip(t.split(SLOTS_MARK).join('три времени по рабочим часам'), 110),
-  ])
-  return [
-    ...passage(
-      '03',
-      ['Текст отклика', price].filter(Boolean).join(' · '),
-      d ? clipKeep(d.text, 700) : 'Черновика нет: нажми «Правка» и пришли текст отклика.',
-      null,
-    ),
-    labelRows(follow),
-  ].filter((x): x is Node => Boolean(x))
+  return box({ flexDirection: 'column', marginTop: 16 }, ...rows)
 }
 
 const mskClock = (d: Date) =>
@@ -577,13 +511,6 @@ function stateBlock(c: LeadCard, st: CardState): Node[] {
   ].filter((x): x is Node => Boolean(x))
 }
 
-/**
- * How much of the client's words the card tries to hold, longest first: Telegram takes a photo whose sides add up to at
- * most 10000 pixels, so a card past `SIDES_MAX` is drawn again with fewer of them.
- */
-const WORDS_MAX = [2600, 1800, 1200, 700] as const
-const SIDES_MAX = 9600
-
 const QUIET: CardStage[] = ['closed', 'skipped', 'stale', 'done', 'note']
 
 const frame = (...children: (Node | null)[]): Node =>
@@ -599,24 +526,20 @@ const frame = (...children: (Node | null)[]): Node =>
     ...children,
   )
 
-function cardTree(c: LeadCard, st: CardState, now: Date, wordsMax: number): Node {
+function cardTree(c: LeadCard, st: CardState, now: Date): Node {
   if (st.s !== 'new')
     return frame(topBar(st.s), headline(c.title, QUIET.includes(st.s), true), ...stateBlock(c, st))
   const fee = st.f ?? (c.bidPriceRub > 0 ? formatRub(c.bidPriceRub) : '?')
-  const where = isTestOrder(c.orderId) ? 'Тест · понарошку' : 'Профи.ру'
   return frame(
     topBar(st.s),
     box(
       { justifyContent: 'space-between', alignItems: 'center' },
-      numbered('01', isTestOrder(c.orderId) ? where : clip(c.city, 30) || where),
-      mono(10, C.muted, mskClock(now), { marginTop: 26 }),
+      numbered('01', clientLine(c)),
+      mono(10, C.muted, mskClock(now), { marginTop: 16 }),
     ),
     headline(c.title, false, false),
     scorePanel(c, fee),
-    clientRow(c),
     whyRows(c),
-    ...clientWords(c, wordsMax),
-    ...bidSection(c),
   )
 }
 
@@ -629,22 +552,16 @@ export async function renderCardPicture(
   st: CardState,
   now: Date = new Date(),
 ): Promise<{ png: Buffer; width: number; height: number }> {
-  let drawn: { png: Buffer; width: number; height: number } | null = null
-  for (const wordsMax of st.s === 'new' ? WORDS_MAX : WORDS_MAX.slice(0, 1)) {
-    const svg = await satori(
-      cardTree(c, st, now, wordsMax) as unknown as Parameters<typeof satori>[0],
-      { width: W, fonts: loadFonts() },
-    )
-    const r = new Resvg(svg, {
-      fitTo: { mode: 'width', value: PICTURE_WIDTH },
-      background: C.bg,
-      font: { loadSystemFonts: false },
-    }).render()
-    drawn = { png: Buffer.from(r.asPng()), width: r.width, height: r.height }
-    if (r.width + r.height <= SIDES_MAX) break
-  }
-  if (!drawn) throw new Error('the card was not drawn')
-  return drawn
+  const svg = await satori(cardTree(c, st, now) as unknown as Parameters<typeof satori>[0], {
+    width: W,
+    fonts: loadFonts(),
+  })
+  const r = new Resvg(svg, {
+    fitTo: { mode: 'width', value: PICTURE_WIDTH },
+    background: C.bg,
+    font: { loadSystemFonts: false },
+  }).render()
+  return { png: Buffer.from(r.asPng()), width: r.width, height: r.height }
 }
 
 /** Telegram draws the buttons: of its three colours, red is the nearest to Hance's orange (Boris, 11.11.2026). */

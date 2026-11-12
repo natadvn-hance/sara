@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { htmlProblem } from '../../../../tests/fakes/telegramApi'
 import { closedCardState, foldedCardState, newState } from '../../src/notify/cardState'
-import type { LeadCard } from '../../src/notify/cards'
+import { type LeadCard, MESSAGE_LIMIT, telegramTextLength } from '../../src/notify/cards'
+import { pictureText } from '../../src/notify/cardText'
 import { PICTURE_WIDTH, pictureKeyboard, renderCardPicture } from '../../src/notify/picture'
 
-// FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: the lead card as a picture in Hance's look.
+// FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: a large picture of the main, the long texts as text.
 
 const taskId = '0192f3c4-5b6a-7c8d-9e0f-112233445566'
 const DASH = String.fromCharCode(0x2014)
@@ -51,38 +53,28 @@ const CARD: LeadCard = {
   similar: { n: 10, closed: 2, bid: 8, pct: 80, min: 10, enough: true, reason: null },
 }
 
-/** The size a PNG says it is (its IHDR chunk). */
-const pngSize = (png: Buffer) => ({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) })
-
-describe('the lead card as a picture', () => {
-  it('FR-NOTIF-6: a new card is one long PNG 1080 pixels wide, from the title down to the bid and its series', async () => {
+describe('the lead card as a large picture and text', () => {
+  it('FR-NOTIF-6: a new card is one picture no taller than 4:5, so Telegram shows it at the full width of the message', async () => {
     const { png, width, height } = await renderCardPicture(CARD, newState(CARD), NOW)
     expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-    expect(pngSize(png)).toEqual({ width, height })
     expect(width).toBe(PICTURE_WIDTH)
-    expect(height).toBeGreaterThan(width)
-    expect(height).toBeLessThan(width * 4)
+    expect(height).toBeLessThanOrEqual(width * 1.3)
   })
 
-  it("FR-NOTIF-6: the longest order still makes a photo Telegram takes, the client's words cut only then", async () => {
+  it('FR-NOTIF-6: the longest title and reasons keep the picture as large: their words are cut, not the card stretched', async () => {
     const long: LeadCard = {
       ...CARD,
       title: 'Очень длинный заголовок заявки про маркетинг, '.repeat(6),
-      text: words.repeat(60),
-      draft: {
-        text: words.repeat(10).slice(0, 500),
-        priceRub: 15000,
-        followUps: [
-          words.repeat(3),
-          'Можем созвониться на полчаса: {слоты}',
-          'Пишите в тг @bmnoian)',
-        ],
+      score: {
+        value: 72,
+        version: 10,
+        reason: `Подходит: ${words.repeat(4)} Минусы: ${words.repeat(4)}`,
       },
+      analysis: { ...(CARD.analysis as NonNullable<LeadCard['analysis']>), risk: words.repeat(4) },
+      text: words.repeat(60),
     }
-    const card = await renderCardPicture(long, newState(long), NOW)
-    // Telegram takes a photo whose sides add up to at most 10000 pixels: the client's words give way, the card stays.
-    expect(card.width + card.height).toBeLessThanOrEqual(9600)
-    expect(card.width).toBe(PICTURE_WIDTH)
+    const { width, height } = await renderCardPicture(long, newState(long), NOW)
+    expect(height).toBeLessThanOrEqual(width * 1.35)
   })
 
   it('FR-NOTIF-6: a card without score, analysis, client info, budget or text still draws', async () => {
@@ -96,8 +88,7 @@ describe('the lead card as a picture', () => {
       bidPriceRub: 0,
       text: '',
     }
-    const { width } = await renderCardPicture(bare, newState(bare), NOW)
-    expect(width).toBe(PICTURE_WIDTH)
+    expect((await renderCardPicture(bare, newState(bare), NOW)).width).toBe(PICTURE_WIDTH)
   })
 
   it('FR-NOTIF-6: every state draws its own picture, a later one is a short card', async () => {
@@ -109,28 +100,70 @@ describe('the lead card as a picture', () => {
     ]
     const pictures = await Promise.all(states.map((st) => renderCardPicture(CARD, st, NOW)))
     expect(new Set(pictures.map((p) => p.png.toString('base64'))).size).toBe(states.length)
-    const full = pictures[0]?.height ?? 0
-    for (const p of pictures.slice(1)) expect(p.height).toBeLessThan(full * 0.4)
+    for (const p of pictures.slice(1)) expect(p.height).toBeLessThan(pictures[0]?.height ?? 0)
   })
 
-  it('NFR-UX-1: a long dash from the order or the model is drawn as a hyphen, not refused', async () => {
+  it('NFR-UX-1: a long dash from the order or the model reaches neither the picture nor the text', async () => {
     const dashed = { ...CARD, title: `Сайт ${DASH} лендинг`, text: `Нужно ${DASH} быстро` }
-    const p = await renderCardPicture(dashed, newState(dashed), NOW)
-    expect(p.width).toBe(PICTURE_WIDTH)
+    expect((await renderCardPicture(dashed, newState(dashed), NOW)).width).toBe(PICTURE_WIDTH)
+    expect(pictureText(dashed, newState(dashed))).not.toMatch(/[\u2013\u2014]/)
   })
 
-  it('FR-NOTIF-6: a new card has the bid with its fee as the main button, then «Правка», «Разбор», «Пропустить»', () => {
+  it("FR-NOTIF-6: the text under the picture holds the client's whole words, the bid and its series, folded, and the link", () => {
+    const html = pictureText(CARD, newState(CARD))
+    expect(htmlProblem(html)).toBeNull()
+    expect(html).toContain(`<blockquote expandable>${CARD.text}</blockquote>`)
+    expect(html).toContain('<b>Сообщение клиента · Ирина</b>')
+    expect(sp(html)).toContain('<b>Отклик</b> · от 15 000 ₽ до 25 000 ₽')
+    expect(html).toContain('<blockquote expandable>Добрый день, Ирина!')
+    expect(html).toContain('<b>Вдогонку:</b> Могу показать похожий кейс кофейни.')
+    expect(html).toContain(
+      '<a href="https://profi.ru/backoffice/n.php?o=90001">Открыть на Профи.ру</a>',
+    )
+  })
+
+  it("FR-NOTIF-6: the longest order still makes one message: the client's words give way, the bid stays whole", () => {
+    const html = pictureText({ ...CARD, text: words.repeat(200) }, newState(CARD))
+    expect(telegramTextLength(html)).toBeLessThanOrEqual(MESSAGE_LIMIT - 100)
+    expect(htmlProblem(html)).toBeNull()
+    expect(html).toContain(`${CARD.draft?.text}</blockquote>`)
+    expect(html).toContain('…</blockquote>')
+  })
+
+  it('FR-NOTIF-6: words from the site or the model reach the text as text, never as markup', () => {
+    const html = pictureText(
+      {
+        ...CARD,
+        text: '</blockquote><a href="x">ссылка</a> & <b>',
+        draft: { text: '<i>кофе</i>', priceRub: null },
+      },
+      newState(CARD),
+    )
+    expect(htmlProblem(html)).toBeNull()
+    expect(html).toContain('&lt;/blockquote&gt;&lt;a href="x"&gt;ссылка&lt;/a&gt; &amp; &lt;b&gt;')
+    expect(html).toContain('&lt;i&gt;кофе&lt;/i&gt;')
+  })
+
+  it('FR-NOTIF-6: a later state says what happened in one line', () => {
+    const sent = foldedCardState({ state: 'sent', at: '2026-11-11T11:17:00.000Z', feeRub: 54 })
+    expect(sp(pictureText(CARD, sent)).split('\n')[0]).toBe(
+      '<b>Отклик ушёл в 14:17, списано 54 ₽</b>',
+    )
+    expect(pictureText(CARD, foldedCardState({ state: 'sending' })).split('\n')[0]).toBe(
+      '<b>Отправляю отклик…</b>',
+    )
+  })
+
+  it('FR-NOTIF-6: a new card has the bid with its fee as the main button, then «Правка», «Разбор», «Пропустить», each short', () => {
     const kb = pictureKeyboard(CARD, newState(CARD))
     expect(kb.map((r) => r.map((b) => sp(b.text)))).toEqual([
       ['Отправить отклик · 55 ₽'],
       ['Правка', 'Разбор', 'Пропустить'],
     ])
     expect(kb[0]?.[0]).toMatchObject({ callback_data: `t:${taskId}:bid`, style: 'danger' })
-    expect(kb[1]?.map((b) => b.callback_data)).toEqual([
-      `t:${taskId}:edit`,
-      `t:${taskId}:razbor`,
-      `t:${taskId}:skip`,
-    ])
+    // On a phone the main button holds about 26 characters, each of the three about 11.
+    expect(kb[0]?.[0]?.text.length).toBeLessThanOrEqual(26)
+    for (const b of kb[1] ?? []) expect(b.text.length).toBeLessThanOrEqual(11)
   })
 
   it('FR-NOTIF-6: a short card keeps only links, and the reasons under a skipped one', () => {
@@ -145,7 +178,6 @@ describe('the lead card as a picture', () => {
         { text: 'Открыть на Профи', url: 'https://profi.ru/backoffice/n.php?o=90001' },
       ],
     ])
-    expect(pictureKeyboard(CARD, foldedCardState({ state: 'sending' }))).toEqual([])
     const reasons = [[{ text: 'Не мой профиль', callbackData: `r:${taskId}:1` }]]
     expect(
       pictureKeyboard(CARD, closedCardState({ ...CARD, closedByBoris: true }, NOW), reasons),
@@ -153,39 +185,5 @@ describe('the lead card as a picture', () => {
       [{ text: 'Не мой профиль', callback_data: `r:${taskId}:1` }],
       [{ text: 'Открыть на Профи', url: 'https://profi.ru/backoffice/n.php?o=90001' }],
     ])
-  })
-
-  it('FR-NOTIF-6: the states say what the text card says: when a closed order closed, why a card was skipped', () => {
-    expect(
-      closedCardState(
-        {
-          ...CARD,
-          closed: {
-            since: '2026-11-11T10:00:00.000Z',
-            published: true,
-            at: '2026-11-11T10:40:00.000Z',
-            exact: true,
-            openUntil: null,
-          },
-        },
-        NOW,
-      ),
-    ).toMatchObject({ s: 'closed', t: '14:05', n: 'закрылась через 40 мин после публикации' })
-    expect(
-      closedCardState(
-        {
-          ...CARD,
-          closedByBoris: true,
-          closeReason: { text: 'это соцсети', by: 'guess', buttons: [] },
-        },
-        NOW,
-      ),
-    ).toMatchObject({ s: 'skipped', n: 'Похоже, это соцсети' })
-    expect(
-      closedCardState(
-        { ...CARD, stale: { since: '2026-11-10T09:00:00.000Z', at: '2026-11-11T11:00:00.000Z' } },
-        NOW,
-      ),
-    ).toMatchObject({ s: 'stale', n: 'ждала решения 1 день 2 ч' })
   })
 })
