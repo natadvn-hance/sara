@@ -140,9 +140,10 @@ export function registerTalkRoutes(
     )
 
     scoped.post('/api/talk', async (req, reply) => {
-      d.voice.warm()
       const asked = AgentQuery.safeParse(req.query ?? {})
       if (!asked.success) return reply.code(400).send({ error: TALK_TEXTS.empty })
+      // While the voice is recognized the one he talks to gets her voice ready; the agent not named, both of Sara's.
+      d.voice.warm(asked.data.agent && AGENTS[asked.data.agent].speaker)
       let agent: Agent = asked.data.agent ?? 'sara'
       // The phone names the talk itself: when the reply is lost on a bad line, it asks for the answer by this id.
       const talk = d.answers.open(asked.data.talk)
@@ -244,8 +245,10 @@ export function registerTalkRoutes(
       return reply.type('audio/mpeg').header('cache-control', 'no-store').send(audio)
     })
 
-    scoped.post('/api/talk/warm', async (_req, reply) => {
-      d.voice.warm()
+    scoped.post('/api/talk/warm', async (req, reply) => {
+      const asked = AgentQuery.safeParse(req.query ?? {})
+      if (!asked.success) return reply.code(400).send({ error: TALK_TEXTS.empty })
+      d.voice.warm(asked.data.agent && AGENTS[asked.data.agent].speaker)
       return reply.code(204).send()
     })
   })

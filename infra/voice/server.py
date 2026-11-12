@@ -6,7 +6,8 @@ server's memory goes back to the others between talks. Requests go one at a time
 (less than MIN_FREE_MB available) the model is not loaded at all: the app then lets the phone say the answer.
 
     GET  /health           {"ok": true, "loaded": false}
-    POST /warm             starts loading the model, answers at once (202)
+    POST /warm             {"speaker": "baya"} (optional) loads the model and says one short phrase in that voice
+                           (both of Sara's voices, xenia and baya, when none is given); answers at once (202)
     POST /speak            {"text": "...", "speaker": "xenia"} -> audio/wav (48 kHz mono)
 
 The text comes from the core already made speakable (numbers as words, no links); anything outside the Cyrillic
@@ -31,6 +32,10 @@ LOAD_TIMEOUT_S = float(os.environ.get("VOICE_LOAD_TIMEOUT_S", "180"))
 SPEAK_TIMEOUT_S = float(os.environ.get("VOICE_SPEAK_TIMEOUT_S", "120"))
 THREADS = int(os.environ.get("VOICE_THREADS", "2"))
 SPEAKERS = {"xenia", "baya", "kseniya", "aidar", "eugene"}
+# What /warm says: the first phrase of a voice after a load is slow (the model compiles on it, 6 s on 12.11.2026),
+# so it is said here, before Boris's first answer. Both of Sara's voices when the request names none.
+WARM_TEXT = "Да."
+WARM_SPEAKERS = ("xenia", "baya")
 SAMPLE_RATE = 48000
 MAX_TEXT = 2000
 # The model takes a piece of limited length at a time.
@@ -132,6 +137,8 @@ class Voice:
         self.proc = None
         self.conn = None
         self.last = 0.0
+        # The voices that have said something since the worker was loaded: those are not warmed again.
+        self.warmed: set[str] = set()
         self.target = target
         self.args = args if args is not None else (MODEL_PATH, THREADS)
         self.free_mb = free_mb
@@ -164,6 +171,7 @@ class Voice:
             parent.close()
             raise
         self.proc, self.conn = proc, parent
+        self.warmed = set()
 
     def _stop(self) -> None:
         if self.proc is not None:
@@ -172,34 +180,59 @@ class Voice:
         if self.conn is not None:
             self.conn.close()
         self.proc, self.conn = None, None
+        self.warmed = set()
 
-    def warm(self) -> None:
+    def _ask(self, speaker: str, text: str, what: str):
+        """One phrase through the worker, loading it first; the caller holds the lock."""
+        try:
+            self._start()
+            self.conn.send((speaker, text))
+            return answer(self.conn, self.proc, SPEAK_TIMEOUT_S)
+        except (EOFError, OSError, RuntimeError) as e:
+            # Short of memory, or the worker died or hung: the next request starts a new one.
+            print(f"voice: {what} failed: {e}", flush=True)
+            self._stop()
+            raise RuntimeError(str(e)) from e
+
+    def warm(self, speakers=None) -> threading.Thread:
+        """Loads the worker if needed and has each voice say WARM_TEXT once, in the background; never raises.
+
+        The lock is taken once a voice, not once for all: a phrase of Boris that came in meanwhile goes between them.
+        A voice that has already said something since the load is skipped. A failure is only a line in the log: the
+        next real request loads again by itself."""
+        names = tuple(speakers) if speakers else WARM_SPEAKERS
+
         def go() -> None:
-            with self.lock:
-                self.last = time.monotonic()
-                try:
-                    self._start()
-                except Exception as e:
-                    print(f"voice: warm failed: {e}", flush=True)
+            for speaker in names:
+                with self.lock:
+                    if speaker in self.warmed and self.loaded():
+                        continue
+                    self.last = time.monotonic()
+                    try:
+                        kind, value = self._ask(speaker, WARM_TEXT, "warm")
+                        if kind == "ok":
+                            self.warmed.add(speaker)
+                        else:
+                            print(f"voice: warm-up phrase refused: {value}", flush=True)
+                    except Exception:  # _ask has said why; the rest of the voices would fail the same way
+                        return
+                    finally:
+                        self.last = time.monotonic()
 
-        threading.Thread(target=go, daemon=True).start()
+        thread = threading.Thread(target=go, daemon=True)
+        thread.start()
+        return thread
 
     def speak(self, speaker: str, text: str) -> bytes:
         with self.lock:
             self.last = time.monotonic()
             try:
-                self._start()
-                self.conn.send((speaker, text))
-                kind, value = answer(self.conn, self.proc, SPEAK_TIMEOUT_S)
-            except (EOFError, OSError, RuntimeError) as e:
-                # Short of memory, or the worker died or hung: the next request starts a new one.
-                print(f"voice: speak failed: {e}", flush=True)
-                self._stop()
-                raise RuntimeError(str(e)) from e
+                kind, value = self._ask(speaker, text, "speak")
             finally:
                 self.last = time.monotonic()
             if kind != "ok":
                 raise ValueError(value)
+            self.warmed.add(speaker)
             return value
 
     def _reaper(self) -> None:
@@ -235,7 +268,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if self.path == "/warm":
-            VOICE.warm()
+            # An optional {"speaker": "baya"}; anything else (no body, nonsense, an unknown voice) warms both of Sara's.
+            speaker = None
+            try:
+                size = int(self.headers.get("Content-Length") or 0)
+                req = json.loads(self.rfile.read(min(size, 64_000)) or b"{}")
+                if isinstance(req, dict):
+                    speaker = req.get("speaker")
+            except ValueError:
+                pass
+            VOICE.warm([speaker] if isinstance(speaker, str) and speaker in SPEAKERS else None)
             return self._json(202, {"ok": True})
         if self.path != "/speak":
             return self._json(404, {"error": "not found"})
