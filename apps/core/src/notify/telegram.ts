@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { newEventId, parseCallback, type TaskAction } from '@sara/shared'
 import { eq } from 'drizzle-orm'
 import { Bot, type Context, GrammyError, InputFile } from 'grammy'
-import type { InlineKeyboardButton, Message } from 'grammy/types'
+import type { InlineKeyboardButton, LinkPreviewOptions, Message } from 'grammy/types'
 import type { Db } from '../db/client'
 import { telegramCard } from '../db/schema'
 import { appendEvent } from '../journal/journal'
@@ -24,7 +24,6 @@ import {
   plainFallback,
   TEXTS,
 } from './cards'
-import { pictureText } from './cardText'
 import {
   bindForum,
   CLOSED_MARK,
@@ -656,20 +655,20 @@ export function createTelegramRuntime(d: {
   /** FR-NOTIF-2: without sound at the quiet hours, unless the message is urgent. */
   const silentNow = async (loud?: boolean) => !loud && (await quietNow(d.db, new Date()))
 
-  /** Lead cards are pictures (FR-NOTIF-6): Boris turned it on. It never throws. */
+  /** Lead cards come with the picture header (FR-NOTIF-6): Boris turned it on. It never throws. */
   const pictureOn = () => getSetting(d.db, 'cards.picture').catch(() => false)
 
   type Row = { text: string; callbackData: string }
   type Picture = { ref: number; card: LeadCard; state: CardState; kind: string }
 
   /**
-   * Telegram makes a link preview only from a public https address: the card's picture is served by the core behind the
-   * pult's domain. Without one (development, a misconfigured server) there is no picture card; the text card goes.
+   * Telegram makes a link preview only from a public https address: the header picture is served by the core behind the
+   * pult's domain. Without one (development, a misconfigured server) the card goes without its header.
    */
   const previewBase = (): string | null =>
     d.publicUrl && /^https:\/\//.test(d.publicUrl) ? d.publicUrl : null
 
-  /** The large picture above the text, from a new address for every state, so Telegram never shows a cached one. */
+  /** The large picture above the text, from a new address every time, so Telegram never shows a cached one. */
   const preview = (base: string, token: string) => ({
     url: cardImageUrl(base, token),
     prefer_large_media: true,
@@ -677,21 +676,24 @@ export function createTelegramRuntime(d: {
   })
   const buttons = (rows: ReturnType<typeof pictureKeyboard>) => rows as InlineKeyboardButton[][]
 
-  /** The picture card behind a message Sara knows by `ref`; null for any other message. */
+  /**
+   * The photo card of 11 and 12.11 behind a message Sara knows by `ref`: it can only change as a picture. Null for any
+   * other message: a text card, with or without its header, changes the old way.
+   */
   async function pictureAt(ref: number): Promise<Picture | null> {
     const [row] = await d.db
       .select({ card: telegramCard.card, state: telegramCard.state, kind: telegramCard.kind })
       .from(telegramCard)
       .where(eq(telegramCard.ref, ref))
-    return row
+    return row?.kind === 'photo'
       ? { ref, card: row.card as LeadCard, state: asState(row.state), kind: row.kind }
       : null
   }
 
   /**
-   * The picture card drawn again in `state` (from `card` when the caller has a fresher one), with the buttons of that
-   * state; `rows` go under a short card (the reasons under a closed one). Throws when it cannot be drawn or Telegram
-   * refuses; the same picture again is no refusal.
+   * A photo card drawn again in `state` (from `card` when the caller has a fresher one), with the buttons of that state;
+   * `rows` go under a short card (the reasons under a closed one). Throws when it cannot be drawn or Telegram refuses;
+   * the same picture again is no refusal.
    */
   async function showPicture(
     p: Picture,
@@ -703,24 +705,13 @@ export function createTelegramRuntime(d: {
     if (!at) throw new Error('card unknown')
     const { png } = await renderCardPicture(card, state)
     const markup = { inline_keyboard: buttons(pictureKeyboard(card, state, o.rows)) }
-    const base = previewBase()
     try {
-      if (p.kind === 'text' && base) {
-        const token = await keepCardImage(d.db, png)
-        await bot.api.editMessageText(at.to, at.id, pictureText(card, state), {
-          parse_mode: 'HTML',
-          link_preview_options: preview(base, token),
-          reply_markup: markup,
-        })
-      }
-      // A card of 11.11 is a photo: it keeps being one.
-      else
-        await bot.api.editMessageMedia(
-          at.to,
-          at.id,
-          { type: 'photo', media: new InputFile(png, 'card.png') },
-          { reply_markup: markup },
-        )
+      await bot.api.editMessageMedia(
+        at.to,
+        at.id,
+        { type: 'photo', media: new InputFile(png, 'card.png') },
+        { reply_markup: markup },
+      )
     } catch (e) {
       if (!/not modified/i.test(short(e))) throw e
     }
@@ -731,74 +722,21 @@ export function createTelegramRuntime(d: {
   }
 
   /**
-   * The lead card as a picture where the cards go (FR-NOTIF-6): its reference, or null when it cannot be drawn or
-   * Telegram refused it, and then the text card goes instead. A broken connection is thrown, as for the text card:
-   * the step tries again, and the card on the task keeps it from coming twice.
+   * The header above a new card (FR-NOTIF-6, 12.11.2026): its link preview, or null when it is off, there is no public
+   * https address, or it could not be drawn or kept; then the card goes without it.
    */
-  async function sendPictureCard(c: LeadCard, silent: boolean): Promise<number | null> {
+  async function headerPreview(c: LeadCard) {
+    if (!(await pictureOn())) return null
     const base = previewBase()
     if (!base) return null
-    const state = newState(c)
-    let token: string
     try {
       // The picture is kept before the message goes: Telegram fetches it while it makes the message.
-      token = await keepCardImage(d.db, (await renderCardPicture(c, state)).png)
+      const { png } = await renderCardPicture(c, newState(c))
+      return preview(base, await keepCardImage(d.db, png))
     } catch (e) {
-      console.error('the card picture was not drawn, the text card goes', c.taskId, short(e))
+      console.error('the card header was not drawn, the card goes without it', c.taskId, short(e))
       return null
     }
-    let ref: number
-    try {
-      ref = await post('leads', (to, where) =>
-        bot.api.sendMessage(to, pictureText(c, state), {
-          ...where,
-          parse_mode: 'HTML',
-          link_preview_options: preview(base, token),
-          reply_markup: { inline_keyboard: buttons(pictureKeyboard(c, state)) },
-          ...(silent && { disable_notification: true }),
-        }),
-      )
-    } catch (err) {
-      if (!(err instanceof GrammyError)) throw err
-      console.error('telegram refused the card picture, the text card goes:', err.description)
-      return null
-    }
-    // The card is with Boris: a row that cannot be written only costs its edits (they are logged), never the card.
-    await d.db
-      .insert(telegramCard)
-      .values({ ref, taskId: c.taskId, card: c, state, kind: 'text' })
-      .onConflictDoUpdate({
-        target: telegramCard.ref,
-        set: {
-          taskId: c.taskId,
-          card: c,
-          state,
-          kind: 'text',
-          updatedAt: new Date().toISOString(),
-        },
-      })
-      .catch((e: unknown) => console.error('card picture not kept', short(e)))
-    // One live card per lead: an older picture of this task that still offers its buttons (the card came again after
-    // «Правка») says the new one is below.
-    const older = await d.db
-      .select({
-        ref: telegramCard.ref,
-        card: telegramCard.card,
-        state: telegramCard.state,
-        kind: telegramCard.kind,
-      })
-      .from(telegramCard)
-      .where(eq(telegramCard.taskId, c.taskId))
-      .catch(() => [])
-    for (const o of older) {
-      const was = asState(o.state)
-      if (o.ref === ref || was.s !== 'new') continue
-      await showPicture(
-        { ref: o.ref, card: o.card as LeadCard, state: was, kind: o.kind },
-        { s: 'note', n: TEXTS.cardMoved },
-      ).catch((e: unknown) => console.error('older card picture not folded', short(e)))
-    }
-    return ref
   }
 
   let running: Promise<void> | null = null
@@ -848,10 +786,28 @@ export function createTelegramRuntime(d: {
     notifier: {
       async sendLeadCard(c, o) {
         const silent = o?.silent ?? (await silentNow())
-        if (await pictureOn()) {
-          const ref = await sendPictureCard(c, silent)
-          if (ref !== null) return { messageId: ref }
-        }
+        // The working text card with the header picture above it (Boris, 12.11.2026); Telegram refusing the card with
+        // its header sends it without one. A broken connection is thrown: the step tries again.
+        const header = await headerPreview(c)
+        if (header)
+          try {
+            const messageId = await post('leads', (to, where) =>
+              bot.api.sendMessage(to, leadCardText(c), {
+                ...where,
+                parse_mode: 'HTML',
+                link_preview_options: header,
+                reply_markup: leadCardKeyboard(c),
+                ...(silent && { disable_notification: true }),
+              }),
+            )
+            return { messageId }
+          } catch (err) {
+            if (!(err instanceof GrammyError)) throw err
+            console.error(
+              'telegram refused the card with its header, it goes without:',
+              err.description,
+            )
+          }
         const messageId = await post('leads', (to, where) =>
           sendHtml(to, leadCardText(c), {
             ...where,
@@ -866,11 +822,19 @@ export function createTelegramRuntime(d: {
         if (p) return showPicture(p, newState(c), { card: c })
         const at = await locate(messageId)
         if (!at) throw new Error('card unknown')
-        await bot.api
-          .editMessageText(at.to, at.id, leadCardText(c), {
+        // A new card again: with its header, as it came.
+        const header = await headerPreview(c)
+        const edit = (preview: LinkPreviewOptions) =>
+          bot.api.editMessageText(at.to, at.id, leadCardText(c), {
             parse_mode: 'HTML',
-            link_preview_options: { is_disabled: true },
+            link_preview_options: preview,
             reply_markup: leadCardKeyboard(c),
+          })
+        await edit(header ?? { is_disabled: true })
+          .catch((e: unknown) => {
+            if (!header || !(e instanceof GrammyError) || /not modified/i.test(e.description))
+              throw e
+            return edit({ is_disabled: true })
           })
           .catch((e: unknown) => {
             if (!String((e as Error).message).includes('message is not modified')) throw e

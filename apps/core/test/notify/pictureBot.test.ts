@@ -5,13 +5,18 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { createFakeTelegram, type FakeTelegram } from '../../../../tests/fakes/telegramApi'
 import { cardImage, lead, telegramCard } from '../../src/db/schema'
 import { registerCardImageRoutes } from '../../src/notify/cardImages'
-import { type LeadCard, TEXTS } from '../../src/notify/cards'
+import {
+  closedLeadCardText,
+  type LeadCard,
+  leadCardKeyboard,
+  leadCardText,
+} from '../../src/notify/cards'
 import { createTelegramRuntime, type TelegramRuntime } from '../../src/notify/telegram'
 import { setSetting } from '../../src/settings/store'
 import { openTestDb, resetDb } from '../helpers/db'
 
-// FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: one message per lead, a large picture above its
-// text, changed in place.
+// FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: the working text card with the header picture
+// above it as a large link preview (Boris, 12.11.2026); every later state the old way.
 
 const { db, close } = openTestDb()
 afterAll(close)
@@ -46,16 +51,11 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 5000) {
   }
   throw new Error('condition not met in time')
 }
-const nb = (s: string) => s.replace(/[\u00a0\u202f]/g, ' ')
 type Shown = {
   link_preview_options?: { url?: string }
   reply_markup?: { inline_keyboard: { text: string }[][] }
 }
 const previewOf = (m: unknown) => (m as Shown | undefined)?.link_preview_options?.url ?? ''
-const buttons = (m: unknown) =>
-  ((m as Shown | undefined)?.reply_markup?.inline_keyboard ?? []).map((r) =>
-    r.map((b) => nb(b.text)),
-  )
 const stateOf = async (ref: number) =>
   (await db.select().from(telegramCard).where(eq(telegramCard.ref, ref)))[0]?.state as
     | Record<string, unknown>
@@ -91,7 +91,7 @@ afterEach(async () => {
   await tg.close()
 })
 
-describe('the lead card as a large picture above its text', () => {
+describe('the lead card with its header picture', () => {
   it('FR-NOTIF-6: off by default: the text card with its buttons, as before', async () => {
     await start(SITE)
     await bot.notifier.sendLeadCard(CARD)
@@ -99,27 +99,29 @@ describe('the lead card as a large picture above its text', () => {
     expect(tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]?.text).toContain('Откликнуться')
   })
 
-  it('FR-NOTIF-6: on, the card is one message: the picture large above its text, the buttons under it', async () => {
+  it('FR-NOTIF-6: on, the working text card goes with the header picture large above it', async () => {
     await start(SITE)
     await setSetting(db, 'cards.picture', true, 'boris')
     const { messageId } = await bot.notifier.sendLeadCard(CARD)
     expect(tg.sent).toHaveLength(2)
     const m = tg.sent.at(-1)
-    expect(m).toMatchObject({ chat_id: BORIS, message_id: messageId, parse_mode: 'HTML' })
+    expect(m).toMatchObject({
+      chat_id: BORIS,
+      message_id: messageId,
+      parse_mode: 'HTML',
+      text: leadCardText(CARD),
+    })
+    expect(m?.reply_markup).toEqual(JSON.parse(JSON.stringify(leadCardKeyboard(CARD))))
     expect(m?.link_preview_options).toMatchObject({
       prefer_large_media: true,
       show_above_text: true,
     })
     expect(previewOf(m)).toMatch(/^https:\/\/sara\.example\/api\/card\/[A-Za-z0-9_-]{24}\.png$/)
-    expect(m?.text).toContain(
-      '<blockquote expandable>Нужен сайт для салона, с записью онлайн.</blockquote>',
-    )
-    expect(buttons(m)).toEqual([['Отправить отклик · 210 ₽'], ['Правка', 'Разбор', 'Пропустить']])
-    const [row] = await db.select().from(telegramCard).where(eq(telegramCard.ref, messageId))
-    expect(row).toMatchObject({ taskId, kind: 'text', state: { s: 'new' } })
+    expect(tg.photos).toHaveLength(0)
+    expect(await db.select().from(telegramCard)).toHaveLength(0)
   })
 
-  it('FR-NOTIF-6: the picture of the preview is served at its address, nothing at any other', async () => {
+  it('FR-NOTIF-6: the header is served at its address, nothing at any other', async () => {
     await start(SITE)
     await setSetting(db, 'cards.picture', true, 'boris')
     await bot.notifier.sendLeadCard(CARD)
@@ -140,30 +142,28 @@ describe('the lead card as a large picture above its text', () => {
     await app.close()
   })
 
-  it('FR-NOTIF-6: without a public https address there is no picture card: the text card goes', async () => {
+  it('FR-NOTIF-6: without a public https address the card goes without its header', async () => {
     await start('http://localhost:5173')
     await setSetting(db, 'cards.picture', true, 'boris')
     await bot.notifier.sendLeadCard(CARD)
     expect(previewOf(tg.sent.at(-1))).toBe('')
-    expect(tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]?.text).toContain('Откликнуться')
+    expect(tg.sent.at(-1)?.text).toBe(leadCardText(CARD))
   })
 
-  it('FR-NOTIF-6: the card changes in place: sending, sent, closed, each with a picture at a new address', async () => {
+  it('FR-NOTIF-6: a card with its header changes the old way: the status, then the closed card', async () => {
     await start(SITE)
     await setSetting(db, 'cards.picture', true, 'boris')
     const { messageId } = await bot.notifier.sendLeadCard(CARD)
-    const first = previewOf(tg.sent.at(-1))
     await bot.notifier.editText?.(messageId, '⏳ Отправляю отклик', [], {
       html: true,
       state: { s: 'sending' },
     })
-    expect(tg.edited.at(-1)?.text).toContain('Отправляю отклик…')
-    await bot.notifier.editText?.(messageId, '✅ Отклик отправлен', [], {
-      html: true,
-      state: { s: 'sent', f: '210 ₽', t: '14:05', u: 'https://t.me/c/1/2' },
+    expect(tg.edited.at(-1)).toMatchObject({
+      message_id: messageId,
+      text: '⏳ Отправляю отклик',
+      link_preview_options: { is_disabled: true },
     })
-    expect(buttons(tg.edited.at(-1))).toEqual([['Чат с клиентом', 'Открыть на Профи']])
-    await bot.notifier.closeLeadCard(messageId, {
+    const closed: LeadCard = {
       ...CARD,
       closed: {
         since: '2026-11-11T10:00:00.000Z',
@@ -172,60 +172,57 @@ describe('the lead card as a large picture above its text', () => {
         exact: true,
         openUntil: null,
       },
+    }
+    await bot.notifier.closeLeadCard(messageId, closed)
+    expect(tg.edited.at(-1)).toMatchObject({
+      message_id: messageId,
+      text: closedLeadCardText(closed),
     })
-    expect(await stateOf(messageId)).toMatchObject({ s: 'closed' })
-    const urls = [first, ...tg.edited.map((e) => previewOf(e))]
-    expect(new Set(urls).size).toBe(4)
+    expect(tg.mediaEdits).toHaveLength(0)
     expect(tg.sent).toHaveLength(2)
   })
 
-  it('FR-NOTIF-6: a bid that did not go puts the card back as new, with the fee the site shows now', async () => {
+  it('FR-NOTIF-6: a bid that did not go puts the card back as new, with a new header and the fee the site shows now', async () => {
     await start(SITE)
     await setSetting(db, 'cards.picture', true, 'boris')
     const { messageId } = await bot.notifier.sendLeadCard(CARD)
+    const first = previewOf(tg.sent.at(-1))
     await bot.notifier.editText?.(messageId, 'x', [], { state: { s: 'sending' } })
     await bot.notifier.restoreLeadCard?.(messageId, { ...CARD, bidPriceRub: 55 })
-    expect(buttons(tg.edited.at(-1))[0]).toEqual(['Отправить отклик · 55 ₽'])
+    const back = tg.edited.at(-1)
+    expect(back?.text).toBe(leadCardText({ ...CARD, bidPriceRub: 55 }))
+    expect(previewOf(back)).toMatch(/^https:\/\/sara\.example\/api\/card\//)
+    expect(previewOf(back)).not.toBe(first)
   })
 
-  it('FR-NOTIF-6: a card Boris skipped keeps the reason buttons under it', async () => {
+  it('FR-NOTIF-6: a photo card of 11 and 12.11 still changes as a picture, a text one of 12.11 the old way', async () => {
     await start(SITE)
-    await setSetting(db, 'cards.picture', true, 'boris')
-    const { messageId } = await bot.notifier.sendLeadCard(CARD)
-    await bot.notifier.closeLeadCard(messageId, {
-      ...CARD,
-      closedByBoris: true,
-      closeReason: {
-        text: 'не мой профиль',
-        by: 'guess',
-        buttons: [{ text: 'Не мой профиль', callbackData: `r:${taskId}:1` }],
-      },
+    const photo = await bot.notifier.sendLeadCard(CARD)
+    await db
+      .insert(telegramCard)
+      .values({ ref: photo.messageId, taskId, card: CARD, state: { s: 'new' }, kind: 'photo' })
+    // The photo Telegram keeps behind that message (sent as a photo on 12.11).
+    tg.photos.push({ message_id: photo.messageId, chat_id: BORIS, photo: Buffer.from('old') })
+    await bot.notifier.closeLeadCard(photo.messageId, { ...CARD, closedByBoris: true })
+    expect(tg.mediaEdits).toHaveLength(1)
+    expect(await stateOf(photo.messageId)).toMatchObject({ s: 'skipped' })
+    const text = await bot.notifier.sendLeadCard({ ...CARD, taskId: otherTask })
+    await db.insert(telegramCard).values({
+      ref: text.messageId,
+      taskId: otherTask,
+      card: CARD,
+      state: { s: 'new' },
+      kind: 'text',
     })
-    expect(await stateOf(messageId)).toMatchObject({ s: 'skipped', n: 'Похоже, не мой профиль' })
-    expect(buttons(tg.edited.at(-1))).toEqual([['Не мой профиль'], ['Открыть на Профи']])
+    await bot.notifier.closeLeadCard(text.messageId, { ...CARD, closedByBoris: true })
+    expect(tg.mediaEdits).toHaveLength(1)
+    expect(tg.edited.at(-1)).toMatchObject({
+      message_id: text.messageId,
+      text: closedLeadCardText({ ...CARD, closedByBoris: true }),
+    })
   })
 
-  it('FR-NOTIF-6: a card decided in the pult is marked only while it still offers its buttons', async () => {
-    await start(SITE)
-    await setSetting(db, 'cards.picture', true, 'boris')
-    const first = await bot.notifier.sendLeadCard(CARD)
-    await bot.notifier.markDone?.(first.messageId, 'Решено в приложении: отклик')
-    expect(await stateOf(first.messageId)).toMatchObject({ s: 'done' })
-    const second = await bot.notifier.sendLeadCard({ ...CARD, taskId: otherTask })
-    await bot.notifier.editText?.(second.messageId, 'x', [], { state: { s: 'sent' } })
-    await bot.notifier.markDone?.(second.messageId, 'Решено в приложении: отклик')
-    expect(await stateOf(second.messageId)).toMatchObject({ s: 'sent' })
-  })
-
-  it('FR-NOTIF-6: one live card per lead: when it comes again (after «Правка»), the older one says so', async () => {
-    await start(SITE)
-    await setSetting(db, 'cards.picture', true, 'boris')
-    const first = await bot.notifier.sendLeadCard(CARD)
-    await bot.notifier.sendLeadCard({ ...CARD, draft: { text: 'Новый текст', priceRub: 5000 } })
-    expect(await stateOf(first.messageId)).toEqual({ s: 'note', n: TEXTS.cardMoved })
-  })
-
-  it('FR-NOTIF-6: a text card stays a text card: its edits are text edits even with pictures on', async () => {
+  it('FR-NOTIF-6: a text card stays a text card: its edits are text edits even with the header on', async () => {
     await start(SITE)
     const { messageId } = await bot.notifier.sendLeadCard(CARD)
     await setSetting(db, 'cards.picture', true, 'boris')

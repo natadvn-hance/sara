@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { htmlProblem } from '../../../../tests/fakes/telegramApi'
-import { SLOTS_MARK } from '../../src/leads/callSlots'
-import { telegramLineOf } from '../../src/leads/telegramLine'
 import { closedCardState, foldedCardState, newState } from '../../src/notify/cardState'
-import { type LeadCard, MESSAGE_LIMIT, telegramTextLength } from '../../src/notify/cards'
-import { pictureText } from '../../src/notify/cardText'
+import type { LeadCard } from '../../src/notify/cards'
 import { PICTURE_WIDTH, pictureKeyboard, renderCardPicture } from '../../src/notify/picture'
 
 // FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: a large picture of the main, the long texts as text.
@@ -55,15 +51,28 @@ const CARD: LeadCard = {
   similar: { n: 10, closed: 2, bid: 8, pct: 80, min: 10, enough: true, reason: null },
 }
 
-describe('the lead card as a large picture and text', () => {
-  it('FR-NOTIF-6: a new card is one 4:3 picture (the mock of 12.11.2026), so Telegram shows it large, at the full width of the message', async () => {
+describe('the header picture of a lead card', () => {
+  it('FR-NOTIF-6: a new card has a wide 3:2 header (Boris, 12.11.2026: «не выше 3:2»)', async () => {
     const { png, width, height } = await renderCardPicture(CARD, newState(CARD), NOW)
     expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
     expect(width).toBe(PICTURE_WIDTH)
-    expect(height).toBe((width * 3) / 4)
+    expect(height).toBe((width * 2) / 3)
   })
 
-  it('FR-NOTIF-6: the longest title and reasons keep the picture as large: their words are cut, not the card stretched', async () => {
+  it('FR-NOTIF-6: the header has nothing of the text card: not the order, the reasons or the bid', async () => {
+    const other: LeadCard = {
+      ...CARD,
+      text: 'Совсем другой текст заявки.',
+      score: { value: 72, version: 10, reason: 'Подходит: другое. Минусы: другие.' },
+      analysis: null,
+      draft: null,
+    }
+    const a = await renderCardPicture(CARD, newState(CARD), NOW)
+    const b = await renderCardPicture(other, newState(CARD), NOW)
+    expect(a.png.equals(b.png)).toBe(true)
+  })
+
+  it('FR-NOTIF-6: the longest title keeps the header 3:2: its words are cut and get smaller, the header is not stretched', async () => {
     const long: LeadCard = {
       ...CARD,
       title: 'Очень длинный заголовок заявки про маркетинг, '.repeat(6),
@@ -76,7 +85,7 @@ describe('the lead card as a large picture and text', () => {
       text: words.repeat(60),
     }
     const { width, height } = await renderCardPicture(long, newState(long), NOW)
-    expect(height).toBe((width * 3) / 4)
+    expect(height).toBe((width * 2) / 3)
   })
 
   it('FR-NOTIF-6: a card without score, analysis, client info, budget or text still draws', async () => {
@@ -105,73 +114,9 @@ describe('the lead card as a large picture and text', () => {
     for (const p of pictures.slice(1)) expect(p.height).toBeLessThan(pictures[0]?.height ?? 0)
   })
 
-  it('NFR-UX-1: a long dash from the order or the model reaches neither the picture nor the text', async () => {
-    const dashed = { ...CARD, title: `Сайт ${DASH} лендинг`, text: `Нужно ${DASH} быстро` }
+  it('NFR-UX-1: a long dash from the order or the model still draws the header', async () => {
+    const dashed = { ...CARD, title: `Сайт ${DASH} лендинг` }
     expect((await renderCardPicture(dashed, newState(dashed), NOW)).width).toBe(PICTURE_WIDTH)
-    expect(pictureText(dashed, newState(dashed))).not.toMatch(/[\u2013\u2014]/)
-  })
-
-  it("FR-NOTIF-6: the text under the picture, as on the mock: the client's whole words folded, «Отклик · от … до …» with the bid folded, the series, the link", () => {
-    const html = pictureText(CARD, newState(CARD))
-    expect(htmlProblem(html)).toBeNull()
-    expect(html.startsWith(`<blockquote expandable>${CARD.text}</blockquote>`)).toBe(true)
-    expect(sp(html)).toContain('<b>Отклик</b> · от 15 000 до 25 000 ₽')
-    expect(html).toContain('<blockquote expandable>Добрый день, Ирина!')
-    expect(html).toContain(
-      '<b>Вдогонку:</b> сообщение\n<blockquote expandable>Могу показать похожий кейс кофейни.</blockquote>',
-    )
-    expect(html).toContain(
-      '<a href="https://profi.ru/backoffice/n.php?o=90001">Открыть на Профи.ру</a>',
-    )
-  })
-
-  it('FR-NOTIF-6: the call offer and the Telegram line are one line, as on the mock: «Вдогонку: созвон на 30 минут, телеграм»', () => {
-    const card: LeadCard = {
-      ...CARD,
-      draft: {
-        ...(CARD.draft as NonNullable<LeadCard['draft']>),
-        followUps: [
-          `Предлагаю созвониться на 30 минут и обсудить детали. Вам удобно ${SLOTS_MARK}?`,
-          telegramLineOf('@hance_demo') ?? '',
-        ],
-      },
-    }
-    const html = pictureText(card, newState(card))
-    expect(html).toContain('<b>Вдогонку:</b> созвон на 30 минут, телеграм\n\n<a href=')
-    expect(html).not.toContain(SLOTS_MARK)
-    expect(html).not.toContain('@hance_demo')
-  })
-
-  it("FR-NOTIF-6: the longest order still makes one message: the client's words give way, the bid stays whole", () => {
-    const html = pictureText({ ...CARD, text: words.repeat(200) }, newState(CARD))
-    expect(telegramTextLength(html)).toBeLessThanOrEqual(MESSAGE_LIMIT - 100)
-    expect(htmlProblem(html)).toBeNull()
-    expect(html).toContain(`${CARD.draft?.text}</blockquote>`)
-    expect(html).toContain('…</blockquote>')
-  })
-
-  it('FR-NOTIF-6: words from the site or the model reach the text as text, never as markup', () => {
-    const html = pictureText(
-      {
-        ...CARD,
-        text: '</blockquote><a href="x">ссылка</a> & <b>',
-        draft: { text: '<i>кофе</i>', priceRub: null },
-      },
-      newState(CARD),
-    )
-    expect(htmlProblem(html)).toBeNull()
-    expect(html).toContain('&lt;/blockquote&gt;&lt;a href="x"&gt;ссылка&lt;/a&gt; &amp; &lt;b&gt;')
-    expect(html).toContain('&lt;i&gt;кофе&lt;/i&gt;')
-  })
-
-  it('FR-NOTIF-6: a later state says what happened in one line', () => {
-    const sent = foldedCardState({ state: 'sent', at: '2026-11-11T11:17:00.000Z', feeRub: 54 })
-    expect(sp(pictureText(CARD, sent)).split('\n')[0]).toBe(
-      '<b>Отклик ушёл в 14:17, списано 54 ₽</b>',
-    )
-    expect(pictureText(CARD, foldedCardState({ state: 'sending' })).split('\n')[0]).toBe(
-      '<b>Отправляю отклик…</b>',
-    )
   })
 
   it('FR-NOTIF-6: a new card has the bid with its fee as the main button, then «Правка», «Разбор», «Пропустить», each short', () => {

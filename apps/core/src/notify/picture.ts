@@ -4,18 +4,19 @@ import { formatCallback, formatRub, isTestOrder } from '@sara/shared'
 import satori from 'satori'
 import { firstName } from '../leads/clientName'
 import type { CardStage, CardState } from './cardState'
-import { type LeadCard, orderUrl, plusMinus, TEXTS } from './cards'
+import { type LeadCard, orderUrl, TEXTS } from './cards'
 
 /**
- * The lead card as a picture in Hance's own look (Boris, 11.11.2026): the logo of hance.pro, Involve for words and
- * Martian Mono for labels and figures, after the voice app's screen (a green pill, mono labels) and the proposal for
- * ARTEQON IQ (a big orange title, a black panel of figures). Since 12.11.2026 a 4:3 picture of the main only, by the mock
- * Boris approved: the logo and the pill with the time, the title, where and who, a black panel of three figures, one line
- * each for the plus, the minus and the risk. The long texts go as Telegram text under it (cardText.ts).
+ * The header of a lead card in Hance's own look (Boris, 11.11.2026): the logo of hance.pro, Involve for words and Martian
+ * Mono for labels and figures, after the voice app's screen («[01]» labels, squares of a score, a green pill) and the
+ * proposal for ARTEQON IQ (a big orange title, a black panel of figures). Since 12.11.2026 only the top of the first long
+ * card (Boris: «верни как было и просто сверху сделай вот такую штуку… и цвет фона белый чисто»): the logo and the pill,
+ * the client and the time, the title, the black panel with the score, the budget, the fee and the squares. It goes as the
+ * link preview above the working text card; a photo card of 11 и 12.11 is still drawn in its later states.
  */
 
 const C = {
-  bg: '#F3F2EF',
+  bg: '#FFFFFF',
   ink: '#1A1A1A',
   ink2: '#4A4844',
   muted: '#6B6A65',
@@ -35,10 +36,10 @@ const C = {
 
 const SANS = 'Involve'
 const MONO = 'Martian Mono'
-/** The width the card is laid out at (the mock of 12.11.2026) and the width of the picture Telegram gets. */
-const W = 440
-/** 4:3 (12.11.2026): Telegram shows a picture of this shape large, at the full width of the message. */
-const H = (W * 3) / 4
+/** The width the header is laid out at, and the width of the picture Telegram gets (sharp on a phone). */
+const W = 450
+/** 3:2 (12.11.2026): a wide header, never taller. */
+const H = (W * 2) / 3
 export const PICTURE_WIDTH = 1080
 const PAD = 18
 
@@ -108,23 +109,6 @@ function clipWords(s: string, max: number): string {
   const space = head.lastIndexOf(' ')
   return `${(space > max / 2 ? head.slice(0, space) : head).replace(/[\s,.;:·-]+$/u, '')}…`
 }
-/** The first sentence of a text, without the final period, cut after a whole word to at most `max` characters. */
-function thought(s: string | null | undefined, max: number): string {
-  const t = (s ?? '').replace(DASHES, '-').replace(/\s+/g, ' ').trim()
-  const first = (t.split(/(?<=[.!?])\s+(?=[А-ЯЁA-Z«])/)[0] ?? t).replace(/[.\s]+$/, '')
-  if (first.length <= max) return first
-  const cut = first.slice(0, max - 1)
-  const space = cut.lastIndexOf(' ')
-  let head = (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:]+$/, '')
-  // A line never ends on a word that leads somewhere: «а», «и», «не», «для»…
-  for (let i = 0; i < 3; i++)
-    head = head.replace(
-      /[\s,]+(а|и|но|не|ни|в|во|на|с|со|к|по|за|для|без|из|от|до|о|об|что|как)$/i,
-      '',
-    )
-  return `${head}…`
-}
-
 const LABEL: Record<CardStage, { text: string; tone: 'green' | 'accent' | 'ink' | 'quiet' }> = {
   new: { text: 'Новая заявка', tone: 'green' },
   sending: { text: 'Отправляю отклик', tone: 'accent' },
@@ -138,52 +122,70 @@ const LABEL: Record<CardStage, { text: string; tone: 'green' | 'accent' | 'ink' 
   note: { text: 'Статус', tone: 'quiet' },
 }
 
-/** The state as the voice app's pill: a filled capsule with a dot, never an outline; a new card's has its time. */
-function pill(stage: CardStage, time?: string): Node {
+/** The state as the voice app's pill: a filled capsule with a dot, never an outline. */
+function pill(stage: CardStage): Node {
   const { text, tone } = LABEL[stage]
   const bg = { green: C.green, accent: C.accent, ink: C.ink, quiet: C.cell }[tone]
   const color = tone === 'quiet' ? C.ink2 : C.white
   return box(
-    { alignItems: 'center', borderRadius: 999, padding: '6px 14px 6px 12px', backgroundColor: bg },
+    { alignItems: 'center', borderRadius: 999, padding: '7px 15px 7px 13px', backgroundColor: bg },
     box({
-      width: 7,
-      height: 7,
+      width: 8,
+      height: 8,
       borderRadius: 2,
-      marginRight: 8,
+      marginRight: 9,
       backgroundColor: tone === 'quiet' ? C.muted : tone === 'accent' ? C.white : C.accent,
     }),
     // Involve sits high in its line: a little padding on top puts its letters on the dot's axis.
-    txt(
-      { fontFamily: SANS, fontSize: 14, color, lineHeight: 1, paddingTop: 2.5 },
-      time ? `${text} · ${time}` : text,
-    ),
+    txt({ fontFamily: SANS, fontSize: 15, color, lineHeight: 1, paddingTop: 2.5 }, text),
   )
 }
 
 /** The logo of hance.pro on the left, the state's pill on the right. */
-function topBar(stage: CardStage, time?: string): Node {
+function topBar(stage: CardStage): Node {
   return box(
     { justifyContent: 'space-between', alignItems: 'center' },
-    { type: 'img', props: { src: logoSrc(), style: { width: 128, height: 25 } } },
-    pill(stage, time),
+    { type: 'img', props: { src: logoSrc(), style: { width: 132, height: 26 } } },
+    pill(stage),
+  )
+}
+
+/** «[01] НОВАЯ ЗАЯВКА»: the voice app's numbered label, its number in orange. */
+function numbered(n: string, label: string, marginTop = 14): Node {
+  return box(
+    { alignItems: 'center', marginTop },
+    mono(11.5, C.accent, `[${n}]`, { marginRight: 10 }),
+    mono(11.5, C.ink2, label, { whiteSpace: 'nowrap' }),
   )
 }
 
 /**
  * The order's title, large in Involve: one line as large as it fits, a longer one on two lines; `shrink` points smaller
- * when the card would not fit 4:3.
+ * when the header would not fit 3:2.
  */
-function headline(title: string, quiet: boolean, shrink: number): Node {
-  const t = clipWords(title, 60)
-  const base = t.length <= 22 ? 34 : t.length <= 27 ? 28 : t.length <= 48 ? 26 : 22
+function headline(title: string, quiet: boolean, compact: boolean, shrink = 0): Node {
+  const t = clipWords(title, compact ? 80 : 60)
+  const base = compact
+    ? t.length <= 40
+      ? 28
+      : t.length <= 70
+        ? 24
+        : 22
+    : t.length <= 22
+      ? 34
+      : t.length <= 26
+        ? 30
+        : t.length <= 50
+          ? 28
+          : 24
   const size = base - shrink
   return txt(
     {
       fontFamily: SANS,
       fontWeight: 600,
       fontSize: size,
-      lineHeight: 1.06,
-      letterSpacing: -size * 0.03,
+      lineHeight: 1.04,
+      letterSpacing: -size * 0.035,
       color: quiet ? C.ink2 : C.accent,
       marginTop: 12,
     },
@@ -191,33 +193,36 @@ function headline(title: string, quiet: boolean, shrink: number): Node {
   )
 }
 
-/** Who the client is, short: the first name and since when on Profi.ru. */
-function whoLine(c: LeadCard): string {
-  if (isTestOrder(c.orderId)) return 'тест, понарошку'
-  const info = c.clientInfo ?? null
-  const raw = info?.name?.trim() || c.clientName.trim()
-  const name = clip(raw ? (firstName(raw) ?? raw) : 'Клиент', 18)
-  const since = info?.on_profi_since?.match(/(19|20)\d\d/)?.[0]
-  return since ? `${name}, на Профи с ${since}` : name
+/** The colour of a lit square at `t` along the bar: pale orange at the start, Hance's orange at the end. */
+function ramp(t: number): string {
+  const from = [0xff, 0xd9, 0xc9]
+  const to = [0xff, 0x3d, 0x00]
+  const ch = (i: number) =>
+    Math.round((from[i] ?? 0) + ((to[i] ?? 0) - (from[i] ?? 0)) * Math.max(0, Math.min(1, t)))
+      .toString(16)
+      .padStart(2, '0')
+  return `#${ch(0)}${ch(1)}${ch(2)}`
 }
 
-/** The line under the title fits the card at this many characters. */
-const META_MAX = 48
-
-/** Where and who, under the title (the mock of 12.11.2026): «дистанционно · Москва · Артём, на Профи с 2023». */
-function metaLine(c: LeadCard): Node {
-  const who = whoLine(c)
-  // The place gives way first, part by part from its end: who the client is matters more than the city.
-  const parts = clip(c.city, 100)
-    .replace(/^Дистанционно/u, 'дистанционно')
-    .split(' · ')
-    .filter(Boolean)
-  while (parts.length > 0 && [...parts, who].join(' · ').length > META_MAX) parts.pop()
-  return words(14, C.muted, clip([...parts, who].join(' · '), META_MAX), {
-    marginTop: 6,
-    lineHeight: 1.3,
-    whiteSpace: 'nowrap',
-  })
+/**
+ * The score as one row of squares (Boris, 11.11.2026): as many lit as the score, each a little deeper than the one
+ * before, from pale orange to Hance's orange; the rest stay dark. A low score is pale, a high one reaches full orange.
+ */
+function scoreSquares(c: LeadCard): Node {
+  const n = 26
+  const score = c.score?.value ?? 0
+  const lit = Math.round((score / 100) * n)
+  return box(
+    { justifyContent: 'space-between', marginTop: 14 },
+    ...Array.from({ length: n }, (_, i) =>
+      box({
+        width: 10,
+        height: 10,
+        borderRadius: 2,
+        backgroundColor: i < lit ? ramp(i / (n - 1)) : C.lcdLine,
+      }),
+    ),
+  )
 }
 
 const NBSP = String.fromCharCode(0xa0)
@@ -229,122 +234,96 @@ const keepSum = (s: string) =>
     .replace(/\s+₽/g, `${NBSP}₽`)
 
 /**
- * The dark panel of figures in three columns (the mock of 12.11.2026): the score large in orange, the client's budget
- * and the fee for the bid.
+ * The dark panel of figures (Boris, 11.11.2026: the black one holds more than a light plate): the score large in
+ * orange, the budget, the fee and similar decisions on the right, the score's row of squares along the bottom.
  */
 function scorePanel(c: LeadCard, fee: string): Node {
   const score = c.score?.value ?? null
-  const figure = (s: string, more: Style = {}) =>
-    txt(
-      {
-        fontFamily: MONO,
-        fontWeight: 500,
-        fontSize: 14,
-        lineHeight: 1.2,
-        color: C.lcdText,
-        ...more,
-      },
-      s,
-    )
-  const cell = (label: string, style: Style, ...body: (Node | null)[]) =>
-    box(
-      { flexDirection: 'column', justifyContent: 'space-between', minWidth: 0, ...style },
-      mono(9, C.muted2, label),
-      box({ flexDirection: 'column', marginTop: 6 }, ...body),
-    )
-  const next: Style = {
-    flex: 1,
-    paddingLeft: 12,
-    marginLeft: 12,
-    borderLeft: `1px solid ${C.lcdLine}`,
-  }
+  const rows: [string, string][] = [
+    ['Бюджет', keepSum(clip(c.budgetText?.trim() ? c.budgetText : 'не указан', 24))],
+    ['Отклик', fee],
+  ]
+  if (c.autobid) rows.push(['Сама', 'откликнулась бы'])
   return box(
-    { backgroundColor: C.lcd, borderRadius: 20, padding: '12px 16px 13px', marginTop: 12 },
-    cell(
-      'Балл',
-      { flexShrink: 0 },
-      score === null
-        ? figure('нет оценки', { fontSize: 13 })
-        : box(
-            { alignItems: 'flex-end' },
+    {
+      flexDirection: 'column',
+      backgroundColor: C.lcd,
+      borderRadius: 22,
+      padding: '14px 18px 15px',
+      marginTop: 14,
+    },
+    box(
+      { justifyContent: 'space-between' },
+      box(
+        { flexDirection: 'column', width: 132 },
+        mono(10, C.muted2, 'Балл'),
+        box(
+          { alignItems: 'flex-end', marginTop: 4 },
+          score === null
+            ? mono(13, C.lcdText, 'нет оценки', { marginTop: 14 })
+            : txt(
+                {
+                  fontFamily: MONO,
+                  fontWeight: 500,
+                  fontSize: 50,
+                  lineHeight: 1,
+                  color: C.accent,
+                  letterSpacing: -2.5,
+                },
+                String(score),
+              ),
+          score === null ? null : mono(12, C.muted2, '/100', { marginLeft: 5, marginBottom: 5 }),
+        ),
+      ),
+      box(
+        { flexDirection: 'column', flex: 1, marginLeft: 12, justifyContent: 'center' },
+        ...rows.map(([label, value], i) =>
+          box(
+            {
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingTop: i === 0 ? 0 : 8,
+              marginTop: i === 0 ? 0 : 8,
+              borderTop: i === 0 ? 'none' : `1px solid ${C.lcdLine}`,
+            },
+            mono(10, C.muted2, label, { flexShrink: 0, marginRight: 12 }),
             txt(
               {
                 fontFamily: MONO,
                 fontWeight: 500,
-                fontSize: 36,
-                lineHeight: 1,
-                color: C.accent,
-                letterSpacing: -1.8,
+                fontSize: value.length > 14 ? 12 : 14,
+                lineHeight: 1.25,
+                color: C.lcdText,
+                textAlign: 'right',
+                justifyContent: 'flex-end',
+                flexShrink: 1,
               },
-              String(score),
+              value,
             ),
-            mono(11, C.muted2, '/100', { marginLeft: 4, marginBottom: 3 }),
           ),
+        ),
+      ),
     ),
-    cell(
-      'Бюджет',
-      { ...next, flex: 1.3 },
-      figure(keepSum(clip(c.budgetText?.trim() ? c.budgetText : 'не указан', 24))),
-    ),
-    cell(
-      'Отклик',
-      next,
-      figure(fee),
-      c.autobid
-        ? words(11, C.accentMid, 'сама бы откликнулась', { marginTop: 3, lineHeight: 1.15 })
-        : null,
-    ),
+    scoreSquares(c),
   )
 }
 
-/** A filled marker square of the list, its sign in `ink` (white, or orange on the dark for the risk). */
-function marker(sign: string, fill: string, ink: string = C.white): Node {
-  return box(
-    {
-      width: 16,
-      height: 16,
-      borderRadius: 4,
-      backgroundColor: fill,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginRight: 9,
-      flexShrink: 0,
-    },
-    txt({ fontFamily: MONO, fontWeight: 500, fontSize: 11, lineHeight: 1, color: ink }, sign),
+/** The client in the card's label line: the name, since when, the reviews (Boris: «клиент, всё коротко»). */
+function clientLine(c: LeadCard): string {
+  if (isTestOrder(c.orderId)) return 'Тест · понарошку'
+  const info = c.clientInfo ?? null
+  const raw = info?.name?.trim() || c.clientName.trim()
+  const name = raw ? (firstName(raw) ?? raw) : 'Клиент'
+  const since = info?.on_profi_since?.match(/(19|20)\d\d/)?.[0]
+  const reviews = info?.reviews
+    ? info.reviews.positive + info.reviews.negative === 0
+      ? 'отзывов нет'
+      : `+${info.reviews.positive}/−${info.reviews.negative}`
+    : null
+  return clip(
+    [clip(name, 18), since ? `с ${since}` : null, reviews].filter(Boolean).join(' · '),
+    40,
   )
-}
-
-/** A reason fits its one line of the card at this many characters. */
-const WHY_MAX = 46
-
-/**
- * Why the order fits, one line each (the mock of 12.11.2026): the plus, the minus and the risk last, an orange sign on
- * dark (Boris, 11.11.2026: the risk on its own pink plate looked machine-made).
- */
-function whyRows(c: LeadCard): Node | null {
-  const pm = plusMinus(c.score?.reason ?? c.reason ?? '')
-  const rows: Node[] = []
-  // Every item starts the same way, as the plus and the minus do after «Подходит:».
-  const lower = (t: string) =>
-    /^[А-ЯЁA-Z][а-яёa-z]/.test(t) ? `${t.charAt(0).toLowerCase()}${t.slice(1)}` : t
-  const row = (m: Node, text: string) =>
-    box(
-      { alignItems: 'center', marginTop: rows.length === 0 ? 0 : 6 },
-      m,
-      words(14, C.ink, lower(text), {
-        lineHeight: 1.3,
-        flex: 1,
-        minWidth: 0,
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-      }),
-    )
-  if (pm.plus.trim()) rows.push(row(marker('+', C.accent), thought(pm.plus, WHY_MAX)))
-  if (pm.minus?.trim()) rows.push(row(marker('−', C.ink), thought(pm.minus, WHY_MAX)))
-  const risk = c.analysis?.risk?.trim()
-  if (risk) rows.push(row(marker('!', C.ink, C.accent), thought(risk, WHY_MAX)))
-  if (rows.length === 0) return null
-  return box({ flexDirection: 'column', marginTop: 12 }, ...rows)
 }
 
 const mskClock = (d: Date) =>
@@ -433,7 +412,7 @@ function stateBlock(c: LeadCard, st: CardState): Node[] {
 
 const QUIET: CardStage[] = ['closed', 'skipped', 'stale', 'done', 'note']
 
-/** The card's sheet; `fixed`: exactly 4:3 (a new card), its free room between the title and what follows. */
+/** The sheet; `fixed`: exactly 3:2 (the header of a new card), its free room between the title and the panel. */
 const frame = (fixed: boolean, ...children: (Node | null)[]): Node =>
   box(
     {
@@ -447,35 +426,37 @@ const frame = (fixed: boolean, ...children: (Node | null)[]): Node =>
     },
     ...children,
   )
-/** The free room of a 4:3 card: it keeps the figures and the reasons at the bottom. */
+/** The free room of a 3:2 header: it keeps the panel at the bottom. */
 const room = (): Node => box({ flexGrow: 1 })
 
 function cardTree(c: LeadCard, st: CardState, now: Date, shrink: number, fixed: boolean): Node {
   if (st.s !== 'new')
     return frame(
-      fixed,
+      false,
       topBar(st.s),
-      headline(c.title, QUIET.includes(st.s), shrink),
-      room(),
+      headline(c.title, QUIET.includes(st.s), true),
       ...stateBlock(c, st),
     )
   const fee = st.f ?? (c.bidPriceRub > 0 ? formatRub(c.bidPriceRub) : '?')
   return frame(
     fixed,
-    topBar(st.s, mskClock(now)),
-    headline(c.title, false, shrink),
-    metaLine(c),
+    topBar(st.s),
+    box(
+      { justifyContent: 'space-between', alignItems: 'center' },
+      numbered('01', clientLine(c)),
+      mono(11.5, C.muted, mskClock(now), { marginTop: 14 }),
+    ),
+    headline(c.title, false, false, shrink),
     room(),
     scorePanel(c, fee),
-    whyRows(c),
   )
 }
 
 const heightOf = (svg: string) => Number(svg.match(/height="([\d.]+)"/)?.[1] ?? 0)
 
 /**
- * The picture of a lead card in state `st`: PNG, 1080 pixels wide. A new card is 4:3 with the main of the order, and a
- * title too long for it gets smaller until it fits; a later state is a short card, the title and what happened.
+ * The picture of a lead card in state `st`: PNG, 1080 pixels wide. A new card's is the 3:2 header (a title too long for
+ * it gets smaller until it fits); a later state of a photo card of 11 и 12.11 is a short card, the title and what happened.
  */
 export async function renderCardPicture(
   c: LeadCard,

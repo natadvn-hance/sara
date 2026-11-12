@@ -358,55 +358,51 @@ describe('the card folds itself (Boris, 03.11.2026)', () => {
   })
 })
 
-describe('the card as a large picture above its text (FR-NOTIF-6, 12.11.2026)', () => {
-  /** What the card's own row in the core says it shows now. */
-  const stage = async (ref: number) => {
-    const r = await db.execute<{ s: string }>(
-      sql`select state->>'s' as s from core.telegram_card where ref = ${ref}`,
-    )
-    return r.rows[0]?.s
-  }
-  /** The messages that are picture cards: a large preview above the text. */
-  const pictures = () =>
-    tg.sent.filter(
-      (m) => (m as { link_preview_options?: { url?: string } }).link_preview_options?.url,
-    )
-  async function pictureFor(): Promise<{ messageId: number; data: (a: string) => string }> {
+describe('the card with its header picture (FR-NOTIF-6, 12.11.2026)', () => {
+  type Shown = { link_preview_options?: { url?: string; is_disabled?: boolean } }
+  /** The cards that went with the header picture above them, as a large link preview. */
+  const headed = () => tg.sent.filter((m) => (m as Shown).link_preview_options?.url)
+  async function headedCard() {
     await setSetting(db, 'cards.picture', true, 'boris')
-    const id = orderId()
-    await fake.emitOrder({ order_id: id })
-    await until(() => pictures().length === 1)
-    const t = await taskOf(id)
-    return { messageId: pictures()[0]?.message_id ?? -1, data: (a: string) => `t:${t?.id}:${a}` }
+    await fake.emitOrder({ order_id: orderId() })
+    await until(() => headed().length === 1)
   }
 
-  it('FR-NOTIF-6: one card goes new, sending, sent in its own message: its button bids, nothing else is sent', async () => {
-    const p = await pictureFor()
-    tg.pushPress(111, p.data('bid'), p.messageId)
-    await until(async () => (await stage(p.messageId)) === 'sent')
-    expect(fake.bids).toHaveLength(1)
+  it('FR-NOTIF-6: the working card goes with its header above it, and its button bids as before', async () => {
+    await headedCard()
+    expect((headed()[0] as Shown).link_preview_options).toMatchObject({
+      prefer_large_media: true,
+      show_above_text: true,
+    })
+    expect(button('bid')?.text).toContain('Откликнуться')
+    press()
+    await until(() => fake.bids.length === 1)
     expect(tg.answers.at(-1)?.text).toBe(TEXTS.bidQueued)
-    expect(tg.edited.filter((e) => e.message_id === p.messageId).length).toBeGreaterThanOrEqual(2)
-    // One card: no other card and no message of its own about the bid; only the greeting of /start.
-    expect(tg.sent).toHaveLength(2)
-    expect(pictures()).toHaveLength(1)
+    expect(headed()).toHaveLength(1)
   })
 
-  it('FR-NOTIF-6: a refused bid puts the card back as new, and the refusal is told', async () => {
-    const p = await pictureFor()
+  it('FR-NOTIF-6: a refused bid puts the card back as new with its header, and the refusal is told', async () => {
+    await headedCard()
     fake.refuseNext('NO_MONEY')
-    tg.pushPress(111, p.data('bid'), p.messageId)
+    press()
     await until(() => said(TEXTS.bidRefused(TITLE, 'NO_MONEY')))
-    await until(async () => (await stage(p.messageId)) === 'new' && tg.edited.length >= 2)
-    expect(pictures()).toHaveLength(1)
+    await until(() => restored())
+    const back = cardEdits()
+      .filter((e) => (e.reply_markup?.inline_keyboard.flat().length ?? 0) > 0)
+      .at(-1)
+    expect((back as Shown | undefined)?.link_preview_options?.url).toMatch(/\/api\/card\//)
   })
 
-  it('FR-NOTIF-6: a press that ended ORDER_CLOSED closes the card in place', async () => {
-    const p = await pictureFor()
+  it('FR-NOTIF-6: a press that ended ORDER_CLOSED makes the card the short closed card, the old way', async () => {
+    await headedCard()
     fake.refuseNext('ORDER_CLOSED')
-    tg.pushPress(111, p.data('bid'), p.messageId)
-    await until(async () => (await stage(p.messageId)) === 'closed')
-    expect(pictures()).toHaveLength(1)
+    press()
+    await until(() => cardEdits().at(-1)?.text.includes(TEXTS.closedCard) === true)
+    expect(cardEdits().at(-1)).toMatchObject({
+      reply_markup: { inline_keyboard: [] },
+      link_preview_options: { is_disabled: true },
+    })
+    expect(headed()).toHaveLength(1)
   })
 })
 
