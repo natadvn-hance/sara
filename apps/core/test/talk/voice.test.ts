@@ -74,7 +74,29 @@ describe('the voice app: Sara speaks with her own voice', () => {
       workDir: await mkdtemp(join(tmpdir(), 's-')),
     })
     voice.warm()
-    await expect.poll(() => v.asked.map((a) => a.path)).toEqual(['/warm'])
+    // No speaker named: the service warms both of Sara's voices.
+    await expect.poll(() => v.asked).toEqual([{ path: '/warm', body: null }])
+  })
+
+  it('FR-NOTIF-5: the voice of the one who is talking is the one warmed', async () => {
+    const v = await fakeVoice()
+    const voice = createVoice({
+      url: v.url,
+      ffmpegBin: FFMPEG,
+      workDir: await mkdtemp(join(tmpdir(), 's-')),
+    })
+    voice.warm('baya')
+    await expect.poll(() => v.asked).toEqual([{ path: '/warm', body: { speaker: 'baya' } }])
+  })
+
+  it('FR-NOTIF-5: a warm that fails or has no service is silent, and speak is not touched', async () => {
+    const work = await mkdtemp(join(tmpdir(), 's-'))
+    expect(() =>
+      createVoice({ url: null, ffmpegBin: FFMPEG, workDir: work }).warm('baya'),
+    ).not.toThrow()
+    const nowhere = createVoice({ url: 'http://127.0.0.1:9', ffmpegBin: FFMPEG, workDir: work })
+    expect(() => nowhere.warm('baya')).not.toThrow()
+    expect(await nowhere.speak('Привет', 'baya')).toBeNull()
   })
 
   it('FR-NOTIF-5: Lora speaks with baya, and a greeting said again needs no model', async () => {

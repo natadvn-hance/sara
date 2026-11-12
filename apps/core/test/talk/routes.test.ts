@@ -25,6 +25,8 @@ let lora: LoraLink
 /** What went to the chat in Telegram: his words from the app and Sara's immediate answer. */
 let mirrored: { words: string; reply: BorisReply }[]
 let mirrorFails: boolean
+/** The speakers the voice was asked to warm: undefined is «both of Sara's». */
+let warmed: (string | undefined)[]
 
 beforeEach(async () => {
   answers = createTalkAnswers()
@@ -32,6 +34,7 @@ beforeEach(async () => {
   handled = []
   mirrored = []
   mirrorFails = false
+  warmed = []
   heardFiles = []
   heard = 'что в очереди'
   replyOf = () => null
@@ -53,7 +56,9 @@ beforeEach(async () => {
     },
     answers,
     voice: {
-      warm: () => {},
+      warm: (speaker) => {
+        warmed.push(speaker)
+      },
       speak: async (text, speaker) =>
         text.includes('нечего') ? null : Buffer.from(`mp3:${speaker ?? 'xenia'}:${text}`),
     },
@@ -227,6 +232,44 @@ describe('the voice app: Boris speaks, Sara answers', () => {
     expect(h.json()).toEqual({
       lines: [{ author: 'sara', text: 'Привет', at: '2026-11-07T10:00:00.000Z' }],
     })
+  })
+})
+
+describe('the voice app: the voice is warmed before the first phrase', () => {
+  it("FR-NOTIF-5: /api/talk/warm warms the voice of the agent named, and both of Sara's when none is", async () => {
+    const warm = (query: string) =>
+      app.inject({ method: 'POST', url: `/api/talk/warm${query}`, headers: { cookie: session } })
+    expect((await warm('?agent=lora')).statusCode).toBe(204)
+    expect((await warm('?agent=sara')).statusCode).toBe(204)
+    expect((await warm('')).statusCode).toBe(204)
+    expect(warmed).toEqual([AGENTS.lora.speaker, AGENTS.sara.speaker, undefined])
+    expect(warmed).toEqual(['baya', 'xenia', undefined])
+  })
+
+  it('FR-NOTIF-5: an agent nobody knows is refused and warms nothing', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/talk/warm?agent=nobody',
+      headers: { cookie: session },
+    })
+    expect(r.statusCode).toBe(400)
+    expect(warmed).toEqual([])
+  })
+
+  it('FR-NOTIF-5: a voice sent to /api/talk warms the voice of the agent it goes to', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/talk?agent=lora',
+      headers: { cookie: session, 'content-type': 'audio/mp4' },
+      payload: Buffer.from('fake m4a'),
+    })
+    await app.inject({
+      method: 'POST',
+      url: '/api/talk',
+      headers: { cookie: session },
+      payload: { text: 'привет' },
+    })
+    expect(warmed).toEqual(['baya', undefined])
   })
 })
 

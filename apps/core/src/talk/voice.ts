@@ -5,8 +5,12 @@ import { newEventId } from '@sara/shared'
 import { speakableText } from './speech'
 
 export type Voice = {
-  /** Loads the model ahead while Boris speaks and Sara thinks; never throws. */
-  warm(): void
+  /**
+   * Loads the model ahead while Boris speaks and Sara thinks, and has the service say a short phrase in this voice, so
+   * the first real phrase is not the slow one (6 s on 12.11.2026). No speaker: the service warms both of Sara's.
+   * Never throws.
+   */
+  warm(speaker?: string): void
   /** The answer in this voice as MP3 (Sara's xenia by default), or null: no voice service, nothing to say, a failure. */
   speak(text: string, speaker?: string): Promise<Buffer | null>
 }
@@ -45,11 +49,16 @@ export function createVoice(c: {
   const timeoutMs = c.timeoutMs ?? 90_000
   const kept = new Map<string, Buffer>()
   return {
-    warm() {
+    warm(speaker) {
       if (!c.url) return
-      void fetch(`${c.url}/warm`, { method: 'POST', signal: AbortSignal.timeout(5000) }).catch(
-        () => {},
-      )
+      void fetch(`${c.url}/warm`, {
+        method: 'POST',
+        ...(speaker && {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ speaker }),
+        }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {})
     },
     async speak(text, speaker = SPEAKER) {
       const said = speakableText(text)
