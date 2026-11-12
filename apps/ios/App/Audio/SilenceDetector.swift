@@ -32,7 +32,7 @@ struct SilenceDetector {
     private(set) var room: Double = -55
 
     init(
-        pauseMs: Double = 750, startWaitMs: Double = 10_000, maxMs: Double = 90_000, minSpeechMs: Double = 200,
+        pauseMs: Double = 1500, startWaitMs: Double = 10_000, maxMs: Double = 90_000, minSpeechMs: Double = 200,
         ignoreMs: Double = 0
     ) {
         self.pauseMs = pauseMs

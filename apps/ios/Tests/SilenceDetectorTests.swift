@@ -85,15 +85,16 @@ final class SilenceDetectorTests: XCTestCase {
         XCTAssertEqual(SilenceDetector.level(db: 0), 1)
     }
 
-    func test_by_default_three_quarters_of_a_second_of_quiet_ends_the_recording() {
+    func test_by_default_a_second_and_a_half_of_quiet_ends_the_recording() {
+        // Boris, 12.11: «если она слышит молчание полторы секунды тогда она должна замолчать и выдавать ответ».
         var s = SilenceDetector()
         var t = 0.0
         while t < 600 {
             _ = s.feed(db: -20, at: t)
             t += 20
         }
-        XCTAssertEqual(s.feed(db: -70, at: t + 700), .listen)
-        XCTAssertEqual(s.feed(db: -70, at: t + 760), .stop)
+        XCTAssertEqual(s.feed(db: -70, at: t + 1400), .listen)
+        XCTAssertEqual(s.feed(db: -70, at: t + 1500), .stop)
     }
 
     func test_the_knocks_at_the_start_are_not_heard_as_speech() {

@@ -115,7 +115,7 @@ struct HUDPlate: View {
         switch phase {
         case .listening: return "голос"
         case .sending: return "отправка"
-        case .thinking: return "ответ через"
+        case .thinking: return "ждёт ответа"
         case .speaking: return "громкость"
         case .failed: return "связь"
         default: return "канал"

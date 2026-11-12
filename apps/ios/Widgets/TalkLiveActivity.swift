@@ -100,11 +100,15 @@ struct CompactPhase: View {
                     values: Array(state.bars.suffix(5)), rows: 4, cell: 3, gap: 1.2, color: palette.accent,
                     empty: .white.opacity(0.14), centered: state.phase == .speaking)
             case .thinking, .sending:
-                Text(timerInterval: state.since...Date.distantFuture, countsDown: false)
-                    .font(HanceFont.mono(11))
-                    .monospacedDigit()
-                    .foregroundStyle(palette.accentInk)
-                    .frame(width: 36, alignment: .trailing)
+                // A ring that fills while she works: a stopwatch here read as «the recording has just begun» (12.11).
+                ProgressView(timerInterval: state.since...state.since.addingTimeInterval(15), countsDown: false) {
+                    EmptyView()
+                } currentValueLabel: {
+                    EmptyView()
+                }
+                .progressViewStyle(.circular)
+                .tint(palette.accent)
+                .frame(width: 18, height: 18)
             case .failed:
                 Text("!")
                     .font(HanceFont.mono(13))
@@ -142,7 +146,7 @@ struct PhaseStrip: View {
                 timer
             case .thinking, .sending:
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(state.phase == .thinking ? "ответ через" : "отправка")
+                    Text(state.phase == .thinking ? "думает над ответом" : "отправляю")
                         .monoLabel(9)
                         .foregroundStyle(palette.accentInk)
                     ProgressView(timerInterval: state.since...state.since.addingTimeInterval(40), countsDown: false) {
@@ -153,7 +157,6 @@ struct PhaseStrip: View {
                     .progressViewStyle(.linear)
                     .tint(palette.accent)
                 }
-                timer
             default:
                 PixelKnight(color: palette.accent, cell: 5, gap: 1.5)
                 Spacer(minLength: 0)
