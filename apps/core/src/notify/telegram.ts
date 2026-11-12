@@ -13,7 +13,6 @@ import type { BorisMessage, BorisReply } from '../learning/inbox'
 import { getSetting } from '../settings/store'
 import { bindChat, boundChat, boundUser } from './binding'
 import { COMMANDS, type CommandReply } from './botCommands'
-import { cardImageUrl, keepCardImage } from './cardImages'
 import { asState, type CardState, closedCardState, newState } from './cardState'
 import {
   closedLeadCardText,
@@ -656,28 +655,15 @@ export function createTelegramRuntime(d: {
   /** FR-NOTIF-2: without sound at the quiet hours, unless the message is urgent. */
   const silentNow = async (loud?: boolean) => !loud && (await quietNow(d.db, new Date()))
 
-  /** Lead cards are pictures (FR-NOTIF-6): Boris turned it on. It never throws. */
+  /** Lead cards are wide text cards (FR-NOTIF-6, `cards.picture`): Boris turned it on. It never throws. */
   const pictureOn = () => getSetting(d.db, 'cards.picture').catch(() => false)
 
   type Row = { text: string; callbackData: string }
   type Picture = { ref: number; card: LeadCard; state: CardState; kind: string }
 
-  /**
-   * Telegram makes a link preview only from a public https address: the card's picture is served by the core behind the
-   * pult's domain. Without one (development, a misconfigured server) there is no picture card; the text card goes.
-   */
-  const previewBase = (): string | null =>
-    d.publicUrl && /^https:\/\//.test(d.publicUrl) ? d.publicUrl : null
-
-  /** The large picture above the text, from a new address for every state, so Telegram never shows a cached one. */
-  const preview = (base: string, token: string) => ({
-    url: cardImageUrl(base, token),
-    prefer_large_media: true,
-    show_above_text: true,
-  })
   const buttons = (rows: ReturnType<typeof pictureKeyboard>) => rows as InlineKeyboardButton[][]
 
-  /** The picture card behind a message Sara knows by `ref`; null for any other message. */
+  /** The wide card (or a photo card of 11–12.11) behind a message Sara knows by `ref`; null for any other message. */
   async function pictureAt(ref: number): Promise<Picture | null> {
     const [row] = await d.db
       .select({ card: telegramCard.card, state: telegramCard.state, kind: telegramCard.kind })
@@ -689,9 +675,9 @@ export function createTelegramRuntime(d: {
   }
 
   /**
-   * The picture card drawn again in `state` (from `card` when the caller has a fresher one), with the buttons of that
-   * state; `rows` go under a short card (the reasons under a closed one). Throws when it cannot be drawn or Telegram
-   * refuses; the same picture again is no refusal.
+   * The card shown again in `state` (from `card` when the caller has a fresher one), with the buttons of that state;
+   * `rows` go under a short card (the reasons under a closed one). Throws when Telegram refuses; the same card again is
+   * no refusal. A card that went with a picture preview (12.11) loses it: it becomes the wide text.
    */
   async function showPicture(
     p: Picture,
@@ -701,26 +687,24 @@ export function createTelegramRuntime(d: {
     const card = o.card ?? p.card
     const at = await locate(p.ref)
     if (!at) throw new Error('card unknown')
-    const { png } = await renderCardPicture(card, state)
     const markup = { inline_keyboard: buttons(pictureKeyboard(card, state, o.rows)) }
-    const base = previewBase()
     try {
-      if (p.kind === 'text' && base) {
-        const token = await keepCardImage(d.db, png)
+      if (p.kind === 'text')
         await bot.api.editMessageText(at.to, at.id, pictureText(card, state), {
           parse_mode: 'HTML',
-          link_preview_options: preview(base, token),
+          link_preview_options: { is_disabled: true },
           reply_markup: markup,
         })
-      }
-      // A card of 11.11 is a photo: it keeps being one.
-      else
+      // A card of 11–12.11 is a photo: it keeps being one.
+      else {
+        const { png } = await renderCardPicture(card, state)
         await bot.api.editMessageMedia(
           at.to,
           at.id,
           { type: 'photo', media: new InputFile(png, 'card.png') },
           { reply_markup: markup },
         )
+      }
     } catch (e) {
       if (!/not modified/i.test(short(e))) throw e
     }
@@ -731,36 +715,26 @@ export function createTelegramRuntime(d: {
   }
 
   /**
-   * The lead card as a picture where the cards go (FR-NOTIF-6): its reference, or null when it cannot be drawn or
-   * Telegram refused it, and then the text card goes instead. A broken connection is thrown, as for the text card:
-   * the step tries again, and the card on the task keeps it from coming twice.
+   * The lead card as one wide text message where the cards go (FR-NOTIF-6): its reference, or null when Telegram
+   * refused it, and then the older text card goes instead. A broken connection is thrown, as for the text card: the
+   * step tries again, and the card on the task keeps it from coming twice.
    */
   async function sendPictureCard(c: LeadCard, silent: boolean): Promise<number | null> {
-    const base = previewBase()
-    if (!base) return null
     const state = newState(c)
-    let token: string
-    try {
-      // The picture is kept before the message goes: Telegram fetches it while it makes the message.
-      token = await keepCardImage(d.db, (await renderCardPicture(c, state)).png)
-    } catch (e) {
-      console.error('the card picture was not drawn, the text card goes', c.taskId, short(e))
-      return null
-    }
     let ref: number
     try {
       ref = await post('leads', (to, where) =>
         bot.api.sendMessage(to, pictureText(c, state), {
           ...where,
           parse_mode: 'HTML',
-          link_preview_options: preview(base, token),
+          link_preview_options: { is_disabled: true },
           reply_markup: { inline_keyboard: buttons(pictureKeyboard(c, state)) },
           ...(silent && { disable_notification: true }),
         }),
       )
     } catch (err) {
       if (!(err instanceof GrammyError)) throw err
-      console.error('telegram refused the card picture, the text card goes:', err.description)
+      console.error('telegram refused the wide card, the text card goes:', err.description)
       return null
     }
     // The card is with Boris: a row that cannot be written only costs its edits (they are logged), never the card.

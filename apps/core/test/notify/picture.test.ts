@@ -111,10 +111,30 @@ describe('the lead card as a large picture and text', () => {
     expect(pictureText(dashed, newState(dashed))).not.toMatch(/[\u2013\u2014]/)
   })
 
-  it("FR-NOTIF-6: the text under the picture, as on the mock: the client's whole words folded, «Отклик · от … до …» with the bid folded, the series, the link", () => {
+  it('FR-NOTIF-6: the wide card starts with the main: the title in bold, where and who, the figures in one line, the plus, the minus and the risk', () => {
     const html = pictureText(CARD, newState(CARD))
     expect(htmlProblem(html)).toBeNull()
-    expect(html.startsWith(`<blockquote expandable>${CARD.text}</blockquote>`)).toBe(true)
+    expect(sp(html).split('\n\n').slice(0, 3)).toEqual([
+      '<b>Стратегия продвижения для кофейни</b>\nдистанционно · Москва · Ирина, на Профи с 2020',
+      'Балл <b>72/100</b> · Бюджет <b>до 30 000 ₽</b> · Отклик <b>55 ₽</b>',
+      '➕ Стратегия, а не ведение соцсетей\n➖ Бюджет небольшой\n⚠️ Ждёт быстрых продаж от соцсетей',
+    ])
+    const bare: LeadCard = {
+      ...CARD,
+      score: null,
+      analysis: null,
+      budgetText: null,
+      bidPriceRub: 0,
+    }
+    expect(pictureText(bare, newState(bare))).toContain(
+      '\n\nБез оценки · Бюджет <b>не указан</b>\n\n',
+    )
+  })
+
+  it("FR-NOTIF-6: under the main, as on the mock: the client's whole words folded, «Отклик · от … до …» with the bid folded, the series, the link", () => {
+    const html = pictureText(CARD, newState(CARD))
+    expect(htmlProblem(html)).toBeNull()
+    expect(html).toContain(`\n\n<blockquote expandable>${CARD.text}</blockquote>\n\n`)
     expect(sp(html)).toContain('<b>Отклик</b> · от 15 000 до 25 000 ₽')
     expect(html).toContain('<blockquote expandable>Добрый день, Ирина!')
     expect(html).toContain(
@@ -154,6 +174,7 @@ describe('the lead card as a large picture and text', () => {
     const html = pictureText(
       {
         ...CARD,
+        title: 'Сайт <script>',
         text: '</blockquote><a href="x">ссылка</a> & <b>',
         draft: { text: '<i>кофе</i>', priceRub: null },
       },
@@ -162,15 +183,20 @@ describe('the lead card as a large picture and text', () => {
     expect(htmlProblem(html)).toBeNull()
     expect(html).toContain('&lt;/blockquote&gt;&lt;a href="x"&gt;ссылка&lt;/a&gt; &amp; &lt;b&gt;')
     expect(html).toContain('&lt;i&gt;кофе&lt;/i&gt;')
+    expect(html).toContain('<b>Сайт &lt;script&gt;</b>')
   })
 
-  it('FR-NOTIF-6: a later state says what happened in one line', () => {
+  it('FR-NOTIF-6: a later state is a short text card: the title, then what happened in one line', () => {
     const sent = foldedCardState({ state: 'sent', at: '2026-11-11T11:17:00.000Z', feeRub: 54 })
-    expect(sp(pictureText(CARD, sent)).split('\n')[0]).toBe(
-      '<b>Отклик ушёл в 14:17, списано 54 ₽</b>',
+    expect(sp(pictureText(CARD, sent)).split('\n').slice(0, 2)).toEqual([
+      '<b>Стратегия продвижения для кофейни</b>',
+      'Отклик ушёл в 14:17, списано 54 ₽',
+    ])
+    expect(pictureText(CARD, foldedCardState({ state: 'sending' })).split('\n')[1]).toBe(
+      'Отправляю отклик…',
     )
-    expect(pictureText(CARD, foldedCardState({ state: 'sending' })).split('\n')[0]).toBe(
-      '<b>Отправляю отклик…</b>',
+    expect(pictureText(CARD, { s: 'note', n: 'Карточка обновлена, новая ниже' })).toBe(
+      '<b>Стратегия продвижения для кофейни</b>\nКарточка обновлена, новая ниже\n<a href="https://profi.ru/backoffice/n.php?o=90001">Открыть на Профи.ру</a>',
     )
   })
 

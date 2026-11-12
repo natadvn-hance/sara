@@ -1,17 +1,15 @@
 import { newEventId } from '@sara/shared'
 import { eq } from 'drizzle-orm'
-import Fastify from 'fastify'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFakeTelegram, type FakeTelegram } from '../../../../tests/fakes/telegramApi'
-import { cardImage, lead, telegramCard } from '../../src/db/schema'
-import { registerCardImageRoutes } from '../../src/notify/cardImages'
+import { lead, telegramCard } from '../../src/db/schema'
 import { type LeadCard, TEXTS } from '../../src/notify/cards'
 import { createTelegramRuntime, type TelegramRuntime } from '../../src/notify/telegram'
 import { setSetting } from '../../src/settings/store'
 import { openTestDb, resetDb } from '../helpers/db'
 
-// FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: one message per lead, a large picture above its
-// text, changed in place.
+// FR-NOTIF-6, docs/superpowers/specs/2026-11-11-lead-card-widget.md: one wide text message per lead, no picture and no
+// link preview (Boris, 12.11.2026: «Текстом на всю ширину»), changed in place.
 
 const { db, close } = openTestDb()
 afterAll(close)
@@ -48,7 +46,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 5000) {
 }
 const nb = (s: string) => s.replace(/[\u00a0\u202f]/g, ' ')
 type Shown = {
-  link_preview_options?: { url?: string }
+  link_preview_options?: { url?: string; is_disabled?: boolean }
   reply_markup?: { inline_keyboard: { text: string }[][] }
 }
 const previewOf = (m: unknown) => (m as Shown | undefined)?.link_preview_options?.url ?? ''
@@ -91,7 +89,7 @@ afterEach(async () => {
   await tg.close()
 })
 
-describe('the lead card as a large picture above its text', () => {
+describe('the lead card as one wide text message', () => {
   it('FR-NOTIF-6: off by default: the text card with its buttons, as before', async () => {
     await start(SITE)
     await bot.notifier.sendLeadCard(CARD)
@@ -99,18 +97,16 @@ describe('the lead card as a large picture above its text', () => {
     expect(tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]?.text).toContain('Откликнуться')
   })
 
-  it('FR-NOTIF-6: on, the card is one message: the picture large above its text, the buttons under it', async () => {
+  it('FR-NOTIF-6: on, the card is one wide text message: no picture, no link preview, the buttons under it', async () => {
     await start(SITE)
     await setSetting(db, 'cards.picture', true, 'boris')
     const { messageId } = await bot.notifier.sendLeadCard(CARD)
     expect(tg.sent).toHaveLength(2)
     const m = tg.sent.at(-1)
     expect(m).toMatchObject({ chat_id: BORIS, message_id: messageId, parse_mode: 'HTML' })
-    expect(m?.link_preview_options).toMatchObject({
-      prefer_large_media: true,
-      show_above_text: true,
-    })
-    expect(previewOf(m)).toMatch(/^https:\/\/sara\.example\/api\/card\/[A-Za-z0-9_-]{24}\.png$/)
+    expect(m?.link_preview_options).toEqual({ is_disabled: true })
+    expect(tg.photos).toHaveLength(0)
+    expect(m?.text?.startsWith('<b>Сайт для салона красоты</b>\nКраснодар · Ирина')).toBe(true)
     expect(m?.text).toContain(
       '<blockquote expandable>Нужен сайт для салона, с записью онлайн.</blockquote>',
     )
@@ -119,40 +115,17 @@ describe('the lead card as a large picture above its text', () => {
     expect(row).toMatchObject({ taskId, kind: 'text', state: { s: 'new' } })
   })
 
-  it('FR-NOTIF-6: the picture of the preview is served at its address, nothing at any other', async () => {
-    await start(SITE)
-    await setSetting(db, 'cards.picture', true, 'boris')
-    await bot.notifier.sendLeadCard(CARD)
-    const path = previewOf(tg.sent.at(-1)).replace(SITE, '')
-    const app = Fastify()
-    registerCardImageRoutes(app, { db })
-    const ok = await app.inject({ method: 'GET', url: path })
-    expect(ok.statusCode).toBe(200)
-    expect(ok.headers['content-type']).toBe('image/png')
-    expect(ok.rawPayload.subarray(1, 4).toString('latin1')).toBe('PNG')
-    for (const url of [
-      '/api/card/AAAAAAAAAAAAAAAAAAAAAAAA.png',
-      '/api/card/x.png',
-      '/api/card/..%2Fsecret',
-    ])
-      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(404)
-    expect(await db.select({ t: cardImage.token }).from(cardImage)).toHaveLength(1)
-    await app.close()
-  })
-
-  it('FR-NOTIF-6: without a public https address there is no picture card: the text card goes', async () => {
+  it('FR-NOTIF-6: the wide card needs no public address: it goes from a server without one too', async () => {
     await start('http://localhost:5173')
     await setSetting(db, 'cards.picture', true, 'boris')
     await bot.notifier.sendLeadCard(CARD)
-    expect(previewOf(tg.sent.at(-1))).toBe('')
-    expect(tg.sent.at(-1)?.reply_markup?.inline_keyboard[0]?.[0]?.text).toContain('Откликнуться')
+    expect(buttons(tg.sent.at(-1))[0]).toEqual(['Отправить отклик · 210 ₽'])
   })
 
-  it('FR-NOTIF-6: the card changes in place: sending, sent, closed, each with a picture at a new address', async () => {
+  it('FR-NOTIF-6: the card changes in place: sending, sent, closed, each a short text with its title, no preview', async () => {
     await start(SITE)
     await setSetting(db, 'cards.picture', true, 'boris')
     const { messageId } = await bot.notifier.sendLeadCard(CARD)
-    const first = previewOf(tg.sent.at(-1))
     await bot.notifier.editText?.(messageId, '⏳ Отправляю отклик', [], {
       html: true,
       state: { s: 'sending' },
@@ -174,9 +147,15 @@ describe('the lead card as a large picture above its text', () => {
       },
     })
     expect(await stateOf(messageId)).toMatchObject({ s: 'closed' })
-    const urls = [first, ...tg.edited.map((e) => previewOf(e))]
-    expect(new Set(urls).size).toBe(4)
+    expect(tg.edited).toHaveLength(3)
+    for (const e of tg.edited) {
+      expect(e.message_id).toBe(messageId)
+      expect(e.text?.startsWith('<b>Сайт для салона красоты</b>\n')).toBe(true)
+      expect((e as Shown).link_preview_options).toEqual({ is_disabled: true })
+    }
+    expect(tg.edited.at(-1)?.text).toContain('Заявка закрыта на Профи.ру')
     expect(tg.sent).toHaveLength(2)
+    expect(tg.mediaEdits).toHaveLength(0)
   })
 
   it('FR-NOTIF-6: a bid that did not go puts the card back as new, with the fee the site shows now', async () => {

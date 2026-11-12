@@ -358,7 +358,7 @@ describe('the card folds itself (Boris, 03.11.2026)', () => {
   })
 })
 
-describe('the card as a large picture above its text (FR-NOTIF-6, 12.11.2026)', () => {
+describe('the card as one wide text message (FR-NOTIF-6, 12.11.2026)', () => {
   /** What the card's own row in the core says it shows now. */
   const stage = async (ref: number) => {
     const r = await db.execute<{ s: string }>(
@@ -366,10 +366,13 @@ describe('the card as a large picture above its text (FR-NOTIF-6, 12.11.2026)', 
     )
     return r.rows[0]?.s
   }
-  /** The messages that are picture cards: a large preview above the text. */
+  /** The messages that are wide cards: the main button «Отправить отклик», no link preview. */
   const pictures = () =>
     tg.sent.filter(
-      (m) => (m as { link_preview_options?: { url?: string } }).link_preview_options?.url,
+      (m) =>
+        /^Отправить отклик/.test(m.reply_markup?.inline_keyboard[0]?.[0]?.text ?? '') &&
+        (m as { link_preview_options?: { is_disabled?: boolean } }).link_preview_options
+          ?.is_disabled === true,
     )
   async function pictureFor(): Promise<{ messageId: number; data: (a: string) => string }> {
     await setSetting(db, 'cards.picture', true, 'boris')

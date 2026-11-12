@@ -9,7 +9,6 @@ import { checkInitData, tooManyBadSignatures } from '../auth/telegramAuth'
 import { ownerAuth } from '../db/schema'
 import { registerDirectionRoutes } from '../direction/routes'
 import { registerHealthRoutes } from '../health/routes'
-import { registerCardImageRoutes } from '../notify/cardImages'
 import { registerPultRoutes } from '../pult/routes'
 import { registerSetupRoutes } from '../setup/routes'
 import type { AppDeps } from './deps'
@@ -41,7 +40,5 @@ export async function buildServer(d: AppDeps): Promise<FastifyInstance> {
   registerAccountRoutes(app, d)
   registerDirectionRoutes(app, d)
   registerPultRoutes(app, d)
-  // The pictures of lead cards, for Telegram's link preview: no login, an unguessable token (FR-NOTIF-6).
-  registerCardImageRoutes(app, d)
   return app
 }

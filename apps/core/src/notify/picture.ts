@@ -109,7 +109,7 @@ function clipWords(s: string, max: number): string {
   return `${(space > max / 2 ? head.slice(0, space) : head).replace(/[\s,.;:·-]+$/u, '')}…`
 }
 /** The first sentence of a text, without the final period, cut after a whole word to at most `max` characters. */
-function thought(s: string | null | undefined, max: number): string {
+export function thought(s: string | null | undefined, max: number): string {
   const t = (s ?? '').replace(DASHES, '-').replace(/\s+/g, ' ').trim()
   const first = (t.split(/(?<=[.!?])\s+(?=[А-ЯЁA-Z«])/)[0] ?? t).replace(/[.\s]+$/, '')
   if (first.length <= max) return first
@@ -192,7 +192,7 @@ function headline(title: string, quiet: boolean, shrink: number): Node {
 }
 
 /** Who the client is, short: the first name and since when on Profi.ru. */
-function whoLine(c: LeadCard): string {
+export function whoLine(c: LeadCard): string {
   if (isTestOrder(c.orderId)) return 'тест, понарошку'
   const info = c.clientInfo ?? null
   const raw = info?.name?.trim() || c.clientName.trim()

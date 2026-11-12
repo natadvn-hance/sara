@@ -2,12 +2,15 @@ import { formatRub, isTestOrder, plural, priceRange } from '@sara/shared'
 import { isCallOffer } from '../leads/callSlots'
 import { isTelegramLine } from '../leads/telegramLine'
 import type { CardState } from './cardState'
-import { esc, type LeadCard, MESSAGE_LIMIT, orderUrl, telegramTextLength } from './cards'
+import { esc, type LeadCard, MESSAGE_LIMIT, orderUrl, plusMinus, telegramTextLength } from './cards'
+import { thought, whoLine } from './picture'
 
 /**
- * The text under a picture card (FR-NOTIF-6, 12.11.2026): what is long and may be copied goes as Telegram text, the
- * picture above it keeps only the main. A new card, by the mock Boris approved: the client's words folded, «Отклик · от
- * … до …» with the bid folded, then the series in one line; a later state: one sentence of what happened.
+ * The lead card as one wide text message (FR-NOTIF-6, setting `cards.picture`). Boris saw the picture cards of 12.11
+ * shrunk in the chat («Ну это полный кошмар… большая, на весь экран, растягивалась до часов») and chose «Текстом на
+ * всю ширину»: no picture and no link preview. A new card: the title in bold, where and who, the figures in one line,
+ * the plus, the minus and the risk, then the client's words folded, «Отклик · от … до …» with the bid folded and the
+ * series in one line; a later state: the title and what happened.
  */
 
 const DASHES = /[\u2013\u2014]/g
@@ -51,8 +54,48 @@ function seriesText(followUps: string[]): string | null {
   return n > 0 ? `${line}\n${quote(own.map((t) => cut(t, 400)).join('\n\n'))}` : line
 }
 
-/** The state of a short card in one sentence. */
-function stateText(st: CardState): string {
+/** Where and who: «дистанционно · Москва · Артём, на Профи с 2023». */
+function metaText(c: LeadCard): string {
+  const place = c.city
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^Дистанционно/u, 'дистанционно')
+  return [place, whoLine(c)].filter(Boolean).join(' · ')
+}
+
+/** The figures in one line, their values in bold: the score, the client's budget, the fee for the bid. */
+function figuresText(c: LeadCard, st: CardState): string {
+  const score = c.score?.value ?? null
+  const fee = st.f ?? (c.bidPriceRub > 0 ? formatRub(c.bidPriceRub) : null)
+  return [
+    score === null ? 'Без оценки' : `Балл <b>${score}/100</b>`,
+    `Бюджет <b>${esc(c.budgetText?.trim() || 'не указан')}</b>`,
+    fee ? `Отклик <b>${esc(fee)}</b>` : null,
+    c.autobid ? '<i>сама бы откликнулась</i>' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The plus, the minus and the risk, a line each, as the text card marks them. */
+function reasonsText(c: LeadCard): string | null {
+  const pm = plusMinus(c.score?.reason ?? c.reason ?? '')
+  const risk = c.analysis?.risk?.trim()
+  // Each a sentence of its own: «Подходит: стратегия…» gives «Стратегия…».
+  const line = (t: string) => {
+    const s = thought(t, 120)
+    return esc(`${s.charAt(0).toUpperCase()}${s.slice(1)}`)
+  }
+  const rows = [
+    pm.plus.trim() ? `➕ ${line(pm.plus)}` : null,
+    pm.minus?.trim() ? `➖ ${line(pm.minus)}` : null,
+    risk ? `⚠️ ${line(risk)}` : null,
+  ].filter((r): r is string => r !== null)
+  return rows.length > 0 ? rows.join('\n') : null
+}
+
+/** The state of a short card in one sentence; none for a note, which says it all. */
+function stateText(st: CardState): string | null {
   switch (st.s) {
     case 'sending':
       return 'Отправляю отклик…'
@@ -75,18 +118,20 @@ function stateText(st: CardState): string {
     case 'done':
       return 'Решено'
     default:
-      return 'Карточка заявки'
+      return null
   }
 }
 
-/** The text of the message the picture card is: Telegram HTML within one message. */
+/** The text of the wide card: Telegram HTML within one message. */
 export function pictureText(c: LeadCard, st: CardState): string {
   const link = isTestOrder(c.orderId)
     ? '<i>Заявка понарошку, на Профи.ру её нет</i>'
     : `<a href="${orderUrl(c.orderId)}">Открыть на Профи.ру</a>`
+  const title = `<b>${esc(cut(c.title, 200).replace(/\s+/g, ' '))}</b>`
   if (st.s !== 'new') {
+    const said = stateText(st)
     const note = st.n?.trim() ? esc(cut(st.n, 600)) : null
-    return [`<b>${esc(stateText(st))}</b>`, note, link]
+    return [title, said ? esc(said) : null, note, link]
       .filter(Boolean)
       .join('\n')
       .replace(DASHES, '-')
@@ -100,8 +145,10 @@ export function pictureText(c: LeadCard, st: CardState): string {
       })()
     : ''
   const series = seriesText(d?.followUps ?? [])
+  const head = [`${title}\n${esc(metaText(c))}`, figuresText(c, st), reasonsText(c)]
   const build = (wordsMax: number) =>
     [
+      ...head,
       c.text.trim() ? quote(cut(c.text, wordsMax)) : null,
       d
         ? `<b>Отклик</b>${price}\n${quote(cut(d.text, 1000))}`
