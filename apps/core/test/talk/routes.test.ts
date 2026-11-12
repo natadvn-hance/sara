@@ -334,6 +334,52 @@ describe('the voice app: Lora by default, Sara on call', () => {
     expect(voice.body).toBe('mp3:baya:Завтра в десять')
   })
 
+  it('FR-NOTIF-5: Lora answers twice to one talk: «ща гляну» at once (more), then the answer itself', async () => {
+    await lora_('/next', { key: 'lora-key' })
+    const body = (await say('что там по Максу', 'lora')).json()
+    await lora_('/next', { key: 'lora-key' })
+    const first = await lora_('/reply', {
+      method: 'POST',
+      key: 'lora-key',
+      payload: { talk: body.talk, text: 'Ща гляну, что там у Макса.', more: true },
+    })
+    expect(first.json()).toEqual({ ok: true, waiting: true })
+    const ask = (after?: number) =>
+      app.inject({
+        url: `/api/talk/${body.talk}${after === undefined ? '' : `?after=${after}`}`,
+        headers: { cookie: session },
+      })
+    expect((await ask()).json()).toEqual({
+      state: 'done',
+      text: 'Ща гляну, что там у Макса.',
+      cards: 0,
+      more: true,
+    })
+    // The second is not there yet: the app waits on.
+    expect((await ask(1)).json()).toEqual({ state: 'waiting' })
+    const second = await lora_('/reply', {
+      method: 'POST',
+      key: 'lora-key',
+      payload: { talk: body.talk, text: 'Макс прислал макеты, ждёт ответа' },
+    })
+    expect(second.json()).toEqual({ ok: true, waiting: true })
+    expect((await ask(1)).json()).toEqual({
+      state: 'done',
+      text: 'Макс прислал макеты, ждёт ответа',
+      cards: 0,
+    })
+    // A phone that lost a reply asks again by the same number and gets the same answer.
+    expect((await ask(0)).json()).toMatchObject({ text: 'Ща гляну, что там у Макса.', more: true })
+    // After the last answer nothing more comes, and a late third reply is not waited for.
+    expect((await ask(2)).statusCode).toBe(404)
+    const late = await lora_('/reply', {
+      method: 'POST',
+      key: 'lora-key',
+      payload: { talk: body.talk, text: 'И ещё' },
+    })
+    expect(late.json()).toEqual({ ok: true, waiting: false })
+  })
+
   it('FR-NOTIF-5: Lora not on the line is said so at once', async () => {
     const r = await say('что у меня завтра', 'lora')
     expect(r.json()).toEqual({

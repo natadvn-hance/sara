@@ -33,7 +33,13 @@ const AgentId = z.enum(AGENT_IDS)
 const TypedWords = z.object({ text: z.string().trim().min(1).max(4000) })
 const SpeakBody = z.object({ text: z.string().trim().min(1).max(4000), agent: AgentId.optional() })
 const AgentQuery = z.object({ agent: AgentId.optional(), talk: z.uuid().optional() })
-const LoraReply = z.object({ talk: z.uuid(), text: z.string().trim().min(1).max(4000) })
+const LoraReply = z.object({
+  talk: z.uuid(),
+  text: z.string().trim().min(1).max(4000),
+  /** Not her last word on this talk: the app says it and waits for the next (her quick «ща гляну», 12.11). */
+  more: z.boolean().optional(),
+})
+const AnswerQuery = z.object({ after: z.coerce.number().int().min(0).max(20).optional() })
 
 /**
  * One line a request in the log (Boris 08.11: «Нет связи» could not be told apart): the path without the talk's id,
@@ -125,7 +131,11 @@ export function registerTalkRoutes(
       if (!body.success) return reply.code(400).send({ error: 'talk and text are needed' })
       d.lora.reply(body.data.talk, body.data.text)
       const waiting = d.answers.pending(body.data.talk)
-      d.answers.give([body.data.talk], { text: body.data.text, cards: 0 })
+      d.answers.give([body.data.talk], {
+        text: body.data.text,
+        cards: 0,
+        ...(body.data.more && { more: true }),
+      })
       return { ok: true, waiting }
     })
   })
@@ -232,7 +242,8 @@ export function registerTalkRoutes(
       const { id } = req.params as { id: string }
       if (!z.uuid().safeParse(id).success)
         return reply.code(404).send({ state: 'gone', error: TALK_TEXTS.gone })
-      const w = await d.answers.wait(id, d.waitMs ?? WAIT_MS)
+      const after = AnswerQuery.safeParse(req.query ?? {}).data?.after ?? 0
+      const w = await d.answers.wait(id, d.waitMs ?? WAIT_MS, after)
       if (w.state === 'gone') return reply.code(404).send({ state: 'gone', error: TALK_TEXTS.gone })
       return w.state === 'done' ? { state: 'done', ...w.answer } : { state: 'waiting' }
     })
