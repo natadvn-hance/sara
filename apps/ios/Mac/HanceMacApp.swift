@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Hance on the Mac: an icon in the menu bar and ⌥Space anywhere; Lora comes out under the menu bar, listens and
+/// Hance on the Mac: an icon in the menu bar and ъ+ё (or ⌥Space) anywhere; Lora comes out under the menu bar, listens and
 /// answers in her voice, as in the app on the iPhone (Boris, 12.11).
 @main
 struct HanceMacApp: App {
@@ -20,11 +20,14 @@ struct HanceMacApp: App {
 
 final class MacAppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
+    private var chord: ChordKey?
     private var panel: IslandPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
             panel = IslandPanel(talk: .shared)
+            // ъ+ё (] and \ together) is the main way (Boris, 12.11); ⌥Space stays as the spare one.
+            chord = ChordKey { MacTalk.shared.press() }
             hotKey = HotKey { MacTalk.shared.press() }
         }
     }
@@ -52,7 +55,7 @@ struct MenuView: View {
             HStack {
                 HanceLogo(height: 18, mark: p.accent, word: .primary)
                 Spacer()
-                Text("⌥ Пробел").monoLabel(10).foregroundStyle(.secondary)
+                Text("ъ + ё").monoLabel(10).foregroundStyle(.secondary)
             }
             if talk.signedIn {
                 Button {

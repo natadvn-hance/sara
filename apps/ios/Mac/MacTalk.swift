@@ -9,7 +9,7 @@ final class MacTalk: ObservableObject {
     static let shared = MacTalk()
 
     static let notes = (
-        notHeard: "Не расслышала. Нажми ⌥Пробел и скажи ещё раз.",
+        notHeard: "Не расслышала. Нажми ъ + ё и скажи ещё раз.",
         offline: "Нет связи с сервером Сары.",
         failed: "Не получилось. Попробуй ещё раз.",
         late: "Ответа нет шесть минут. Спроси ещё раз.",

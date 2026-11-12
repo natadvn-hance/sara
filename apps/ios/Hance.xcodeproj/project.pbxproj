@@ -76,6 +76,7 @@
 		AC5E92BCF881640A636CFF3E /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
 		ADE49118F4FA60705E24872D /* SilenceDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */; };
 		B2003C361F4D097D4A36BD6D /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
+		B516994A0E429995C7EC8F19 /* ChordKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483D59F8DD2FBB619F06C4B2 /* ChordKey.swift */; };
 		BFEEAFBA93227E89E6A2FBF4 /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
 		C12C85EECFDE0447F4F6BC34 /* AnswerWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9D5D2F357894B785773B5F /* AnswerWait.swift */; };
 		C7AD80C5D389CFAADED0CEF7 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
@@ -156,6 +157,7 @@
 		435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkActivityAttributes.swift; sourceTree = "<group>"; };
 		448A1C0A8971860C3530151B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		45351CAA1463E02EA922F9D3 /* KnightMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnightMark.swift; sourceTree = "<group>"; };
+		483D59F8DD2FBB619F06C4B2 /* ChordKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChordKey.swift; sourceTree = "<group>"; };
 		494752230CCEB0631BD6FEAB /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
 		4B109EC8782E8093027E9381 /* HanceMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceMacApp.swift; sourceTree = "<group>"; };
 		4B1FC0B32B2A9F60521CE9EC /* HanceShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceShortcuts.swift; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 			isa = PBXGroup;
 			children = (
 				448A1C0A8971860C3530151B /* Assets.xcassets */,
+				483D59F8DD2FBB619F06C4B2 /* ChordKey.swift */,
 				4B109EC8782E8093027E9381 /* HanceMacApp.swift */,
 				10F5CB2A1C23B9077847A235 /* HotKey.swift */,
 				1EB1E2292BEC83128F9824CA /* Info.plist */,
@@ -653,6 +656,7 @@
 				3670D6E81558A84147316D4F /* Agent.swift in Sources */,
 				C12C85EECFDE0447F4F6BC34 /* AnswerWait.swift in Sources */,
 				768D1985C4BAE884170F3CAF /* Brand.swift in Sources */,
+				B516994A0E429995C7EC8F19 /* ChordKey.swift in Sources */,
 				FA6AA050724C57E0012F8B04 /* CoreClient.swift in Sources */,
 				2AB64EFACA136350BB875290 /* Earcon.swift in Sources */,
 				89CED40D90006B1AD1072617 /* HanceMacApp.swift in Sources */,
