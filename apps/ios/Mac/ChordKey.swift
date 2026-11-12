@@ -11,8 +11,8 @@ final class ChordKey {
     static let second = CGKeyCode(kVK_ANSI_Backslash)
     static let one = CGKeyCode(kVK_ANSI_1)
     static let two = CGKeyCode(kVK_ANSI_2)
-    /// How long the chord waits for a 1 or a 2 before it calls Lora, if the keys are still held.
-    static let digitWait = 0.35
+    /// How long the chord, still held, waits for a 1 or a 2 before it calls Lora; letting it go calls her at once.
+    static let digitWait = 1.5
     /// Marks the keys this class lets go later, so it does not catch them again.
     private static let replayMark: Int64 = 0x4841_4E43
 
@@ -26,6 +26,8 @@ final class ChordKey {
     private var choosing: DispatchWorkItem?
     /// Digits pressed as part of the chord: their key-ups are swallowed too.
     private var digits: Set<CGKeyCode> = []
+    /// A 1 or 2 pressed while one key of the pair was held back: it decides who answers if the partner comes.
+    private var heldDigit: CGEvent?
     private let action: (HanceAgent) -> Void
 
     init(action: @escaping (HanceAgent) -> Void) {
@@ -96,6 +98,11 @@ final class ChordKey {
                 fire(code == Self.two ? .sara : .lora)
                 return nil
             }
+            // ъ, then 2, then ё: the digit waits with the held key for its partner.
+            if type == .keyDown, held != nil, heldDigit == nil, let copy = event.copy() {
+                heldDigit = copy
+                return nil
+            }
             if type == .keyUp, digits.contains(code) {
                 digits.remove(code)
                 return nil
@@ -142,6 +149,19 @@ final class ChordKey {
             inChord = [h.code, code]
             let wait = DispatchWorkItem { [weak self] in self?.fire(.lora) }
             choosing = wait
+            // A digit pressed before the partner, or already down (2 first): it says who answers now.
+            if let d = heldDigit {
+                heldDigit = nil
+                let dc = CGKeyCode(d.getIntegerValueField(.keyboardEventKeycode))
+                digits.insert(dc)
+                fire(dc == Self.two ? .sara : .lora)
+                return nil
+            }
+            if CGEventSource.keyState(.combinedSessionState, key: Self.two) {
+                digits.insert(Self.two)
+                fire(.sara)
+                return nil
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.digitWait, execute: wait)
             return nil
         }
@@ -159,6 +179,7 @@ final class ChordKey {
         guard let c = choosing else { return }
         c.cancel()
         choosing = nil
+        log.notice("chord ъ+ё: \(who.rawValue)")
         DispatchQueue.main.async { self.action(who) }
     }
 
@@ -169,6 +190,11 @@ final class ChordKey {
         guard let h = held else { return }
         held = nil
         replay(h.down)
+        // A digit that waited with it is typed after it, in his order.
+        if let d = heldDigit {
+            heldDigit = nil
+            replay(d)
+        }
     }
 
     private func replay(_ event: CGEvent) {
