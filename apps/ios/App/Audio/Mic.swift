@@ -218,9 +218,12 @@ final class Ears: @unchecked Sendable {
         }
     }
 
+    /// One recognizer for all talks: making it takes a moment on the main thread at every press otherwise.
+    private static let russian = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU"))
+
     init?() {
         let status = SFSpeechRecognizer.authorizationStatus()
-        let r = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU"))
+        let r = Self.russian
         log.notice(
             "ears: allowed \(status == .authorized), recognizer \(r != nil), available \(r?.isAvailable ?? false), on device \(r?.supportsOnDeviceRecognition ?? false)"
         )

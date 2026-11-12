@@ -38,10 +38,9 @@ struct TalkScreen: View {
                         } label: {
                             HeroCard(
                                 agent: agent, phase: phase, palette: palette,
-                                size: CGSize(width: width, height: cardHeight))
+                                size: CGSize(width: width, height: cardHeight), arming: engine.arming)
                         }
                         .buttonStyle(CardPress())
-                        .disabled(phase == .sending || phase == .thinking)
                         HUDPlate(agent: agent, phase: phase, meter: engine.meter, since: engine.since, palette: palette)
                             .padding(12)
                             .onLongPressGesture { showTimings = true }
@@ -102,7 +101,8 @@ struct TalkScreen: View {
                 .environmentObject(engine)
                 .presentationDetents([.medium, .large])
         }
-        .sensoryFeedback(.impact(weight: .light), trigger: phase == .listening)
+        // One tap of the finger the moment he presses; the knocks then say the microphone is on.
+        .sensoryFeedback(.impact(weight: .light), trigger: engine.arming) { _, now in now }
         .sensoryFeedback(.selection, trigger: engine.agent)
     }
 
@@ -177,8 +177,8 @@ struct TalkScreen: View {
     private var hint: String {
         switch phase {
         case .listening: return "Говори. Пауза закончит запись"
-        case .sending: return "Отправляю"
-        case .thinking: return "\(agent.name) думает"
+        case .sending: return "Отправляю. Нажми, чтобы отменить"
+        case .thinking: return "\(agent.name) думает. Нажми, чтобы отменить"
         case .speaking: return "Нажми на фото, чтобы остановить"
         default: return "Нажми на фото и говори"
         }

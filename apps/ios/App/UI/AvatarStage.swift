@@ -27,6 +27,11 @@ struct HeroCard: View {
     let phase: TalkPhase
     let palette: Palette
     let size: CGSize
+    /// The microphone is starting after his press.
+    var arming = false
+
+    /// The marks are the light of the button: on while the microphone listens, off the moment his pause ends it.
+    private var lit: Bool { arming || phase == .listening }
 
     var body: some View {
         ZStack {
@@ -38,9 +43,9 @@ struct HeroCard: View {
                 .clipped()
             CornerMarks(arm: 16, inset: 14)
                 .stroke(palette.paper, style: StrokeStyle(lineWidth: 2.5, lineCap: .square))
-                .opacity(phase.isBusy ? 1 : 0)
-                .scaleEffect(phase.isBusy ? 1 : 1.04)
-                .animation(Motion.reveal(0.5), value: phase.isBusy)
+                .opacity(lit ? 1 : 0)
+                .scaleEffect(lit ? 1 : 1.04)
+                .animation(Motion.reveal(lit ? 0.25 : 0.35), value: lit)
         }
         .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -154,7 +159,8 @@ struct PixelBand: View {
     static var height: CGFloat { CGFloat(rows) * (cell + gap) - gap }
 
     var body: some View {
-        TimelineView(.animation) { tl in
+        // At rest only the knight moves, every 0,8 s: no redraw at the screen's full rate for it.
+        TimelineView(phase.isBusy ? .animation : .animation(minimumInterval: 0.8)) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
                 let step = Self.cell + Self.gap

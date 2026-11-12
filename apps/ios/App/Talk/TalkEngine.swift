@@ -22,6 +22,8 @@ final class TalkEngine: ObservableObject {
     /// Who answers now: Lora by default.
     @Published private(set) var agent: HanceAgent = .lora
     @Published private(set) var phase: TalkPhase = .idle
+    /// He pressed and the microphone is starting: the screen lights up at once, before the first sound.
+    @Published private(set) var arming = false
     /// When the phase began: the screen counts the thinking time from here.
     @Published private(set) var since = Date()
     /// What the core heard of Boris's last words.
@@ -82,8 +84,7 @@ final class TalkEngine: ObservableObject {
         switch phase {
         case .idle, .done, .failed: listen()
         case .listening: finishListening()
-        case .speaking: stop()
-        case .sending, .thinking: break
+        case .speaking, .sending, .thinking: stop()
         }
     }
 
@@ -208,6 +209,9 @@ final class TalkEngine: ObservableObject {
     // MARK: The talk
 
     private func listenFlow(followUp: Bool, turn mine: Int) async {
+        let pressed = Date()
+        arming = !followUp
+        defer { arming = false }
         guard await micAllowed() else {
             show(Self.notes.noMic)
             return endTalk(final: .failed)
@@ -226,7 +230,8 @@ final class TalkEngine: ObservableObject {
         if !followUp { card = nil }
         clock = TurnClock()
         clock.voice = true
-        detector = SilenceDetector(startWaitMs: followUp ? 6000 : 10_000)
+        // After her answer the talk waits 1,5 s for his next words, then goes out (Boris, 12.11).
+        detector = SilenceDetector(startWaitMs: followUp ? 1500 : 10_000)
         let up = VoiceUpload(client: client, agent: agent)
         upload = up
         // The phone hears the words itself as he speaks; the recording goes up too, for when it cannot.
@@ -236,7 +241,9 @@ final class TalkEngine: ObservableObject {
             ears?.feed(pcm)
         })
         set(.listening, line: nil)
+        arming = false
         Earcon.listening()
+        log.notice("listening \(Int(Date().timeIntervalSince(pressed) * 1000)) ms after the press")
 
         let step = await waitForVerdict()
         source.record(into: nil)
