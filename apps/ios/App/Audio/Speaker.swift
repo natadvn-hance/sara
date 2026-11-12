@@ -1,8 +1,9 @@
 import AVFoundation
 
 /// Her voice. The answer is said in pieces (SpeechChunker): the first piece is fetched at once, and each next one is
-/// fetched while the one before plays, so the first words come as soon as the first sentence is made. If the core has
-/// no voice (503) or a piece will not play, the phone's own Russian voice says the rest.
+/// fetched while the one before plays, so the first words come as soon as the first sentence is made. If her voice does
+/// not come even on a second try, the rest is not said: her words stay on the screen and in the notification. The
+/// phone's own voice sounded like a robot and was not her (Boris, 12.11).
 @MainActor
 final class Speaker: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDelegate {
     enum Played: Equatable {
@@ -48,17 +49,20 @@ final class Speaker: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDelegat
             } else {
                 next = nil
             }
-            let r: Played
+            var r: Played
             if let data {
                 r = await play(data)
             } else {
-                r = .failed
+                // Her voice did not come: once more, the way to the core may have been renewed meanwhile.
+                let again = try? await fetch(parts[i])
+                if stopped || Task.isCancelled { return .stopped }
+                if let voice = again { r = await play(voice) } else { r = .failed }
             }
             if r == .played { continue }
             next?.cancel()
             if r == .stopped { return .stopped }
-            // No voice from the core for this piece: the phone says it and the rest.
-            return await speakLocally(parts[i...].joined(separator: " "))
+            // Still no voice of hers: no robot voice of the phone instead (Boris, 12.11), her words stay as text.
+            return .failed
         }
         return .played
     }

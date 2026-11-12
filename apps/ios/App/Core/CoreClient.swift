@@ -76,6 +76,41 @@ final class CoreClient: @unchecked Sendable {
         cookieValue = SessionStore.load()
     }
 
+    /// What the phone thinks the way to the core is, for the log: the addresses its DNS gives (a VPN's fake 198.18.x.x
+    /// only works inside its tunnel) and the interfaces now up (a utun is a VPN tunnel).
+    static func wayReport(_ host: String) -> String {
+        var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM, ai_protocol: 0,
+            ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+        var res: UnsafeMutablePointer<addrinfo>?
+        var addresses: [String] = []
+        if getaddrinfo(host, "443", &hints, &res) == 0 {
+            var p = res
+            while let a = p {
+                var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                if getnameinfo(a.pointee.ai_addr, a.pointee.ai_addrlen, &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 {
+                    addresses.append(String(cString: buf))
+                }
+                p = a.pointee.ai_next
+            }
+            freeaddrinfo(res)
+        }
+        var interfaces: [String] = []
+        var ifs: UnsafeMutablePointer<ifaddrs>?
+        if getifaddrs(&ifs) == 0 {
+            var p = ifs
+            while let i = p {
+                let name = String(cString: i.pointee.ifa_name)
+                let up = (Int32(i.pointee.ifa_flags) & IFF_UP) != 0
+                if up, name.hasPrefix("utun") || name.hasPrefix("en") || name.hasPrefix("pdp_ip"), !interfaces.contains(name) {
+                    if i.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_INET) { interfaces.append(name) }
+                }
+                p = i.pointee.ifa_next
+            }
+            freeifaddrs(ifs)
+        }
+        return "dns \(addresses.isEmpty ? "none" : addresses.joined(separator: ",")), up \(interfaces.joined(separator: ","))"
+    }
+
     private static func makeSession() -> URLSession {
         let c = URLSessionConfiguration.default
         c.httpCookieAcceptPolicy = .never
@@ -115,7 +150,7 @@ final class CoreClient: @unchecked Sendable {
                 do {
                     _ = try await fresh.data(for: p)
                 } catch {
-                    log.notice("the core is not reachable from the phone")
+                    log.notice("the core is not reachable from the phone: \(Self.wayReport(self.base.host() ?? ""))")
                     await unreachable()
                     return
                 }
@@ -264,7 +299,7 @@ final class NetLog: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             return "\(Int(b.timeIntervalSince(a) * 1000))"
         }
         for t in metrics.transactionMetrics where t.resourceFetchType == .networkLoad {
-            let net = t.isCellular ? "cell" : "wifi"
+            let net = (t.isCellular ? "cell" : "wifi") + (t.remoteAddress.map { " " + $0 } ?? "")
             log.notice(
                 "net \(path) \(total) ms: \(t.networkProtocolName ?? "?") \(t.isReusedConnection ? "reused" : "new"), dns \(ms(t.domainLookupStartDate, t.domainLookupEndDate)) connect \(ms(t.connectStartDate, t.connectEndDate)) tls \(ms(t.secureConnectionStartDate, t.secureConnectionEndDate)) wait \(ms(t.requestEndDate, t.responseStartDate)) body \(ms(t.responseStartDate, t.responseEndDate)), \(net)\(t.isExpensive ? " expensive" : "")\(t.isConstrained ? " constrained" : "")\(t.isProxyConnection ? " proxy" : "")"
             )

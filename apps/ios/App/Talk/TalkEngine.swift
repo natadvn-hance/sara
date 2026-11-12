@@ -13,6 +13,7 @@ final class TalkEngine: ObservableObject {
     static let notes = (
         notHeard: "Не разобрала",
         notHeardTry: "Не услышала. Нажми и скажи ещё раз.",
+        noVoice: "Голос не дошёл: связь с сервером рвётся. Ответ выше текстом.",
         noMic: "Нет доступа к микрофону. Разреши его для Hance в Настройках.",
         late: "Ответа нет шесть минут. Спроси ещё раз.",
         gone: "Ответ потерялся: сервер перезапускался. Скажи ещё раз.",
@@ -86,6 +87,8 @@ final class TalkEngine: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self, self.signedIn else { return }
                 self.client.warm(self.agent)
+                let host = self.client.base.host() ?? ""
+                Task.detached { log.notice("on screen, way: \(CoreClient.wayReport(host))") }
             }
         }
         keepAlive = Task { [weak self] in
@@ -164,6 +167,8 @@ final class TalkEngine: ObservableObject {
     /// The side button, Siri or the Control Center: listening starts before the intent returns, with the island up.
     func startFromIntent(_ who: HanceAgent) async throws {
         log.notice("side button: phase \(phase), on screen \(onScreen), mic \(micOn)")
+        let host = client.base.host() ?? ""
+        Task.detached { log.notice("side button, way: \(CoreClient.wayReport(host))") }
         // One button, on and off (Boris, 09.11): listening, a press sends what he said; while she thinks or
         // speaks, a press stops her; otherwise it starts listening.
         if phase == .listening {
@@ -395,6 +400,7 @@ final class TalkEngine: ObservableObject {
         }
         record()
         guard mine == turn else { return }
+        if played == .failed { show(Self.notes.noVoice) }
         if played == .played && followUp {
             return await listenFlow(followUp: true, turn: mine)
         }
