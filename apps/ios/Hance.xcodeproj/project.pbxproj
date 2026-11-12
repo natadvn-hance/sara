@@ -11,20 +11,30 @@
 		0129F9707A92FF2780CB686E /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
 		0867A51A5AED2FA7C2B6F979 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
 		08C3BE05CC41C0BF9FA447F6 /* HanceWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B7455A5F0D11201F6030750 /* HanceWidgets.swift */; };
+		0B942927E854A1010F4A2E63 /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
 		0D71C81B83CAC857A7E1FA16 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494752230CCEB0631BD6FEAB /* Intents.swift */; };
 		0D83C536C3994B5DE8127ED3 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
+		0EC7E0C460E3AD2D7E587F9A /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */; };
 		122513EC9DE3AFE92AD99501 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
 		180F0A05D2ABA03161FAEC44 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
+		1988482C2A8CFD0F796A5279 /* MacLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07D191671C8149B3CD3EC901 /* MacLog.swift */; };
 		1A91D5B2AA5DED69ECC1A3CF /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
 		1D75A6394B21670FA035FA26 /* HanceWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7892F42A30B9D0294537D01A /* HanceWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1DD3CD1A7CD8E7602EF38AED /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2E0C12C02EAC73A7186093 /* Wordmark.swift */; };
 		23E24BB76F0EEC1A5BACE1D5 /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
 		25A08494C9BB4968C71EEAD9 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
+		25E351EFEB7A1AC4229ECB1B /* MacMic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BC670259802FF6BA946989A /* MacMic.swift */; };
 		273D1DF6695E591F43FC4C09 /* TalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */; };
 		28431E50ECF2ACD05E026330 /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */; };
 		2870AE5F46BDD5BDFE28BC78 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E739C8A762606790E910E1D /* CoreClient.swift */; };
+		28B1D13675F13C437C27A41B /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10F5CB2A1C23B9077847A235 /* HotKey.swift */; };
+		2AB64EFACA136350BB875290 /* Earcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E267B5B1FD895845A8D23FF /* Earcon.swift */; };
 		339234649382555EBAD59985 /* HanceNotification.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FCC37739D929CD8374A64D5 /* HanceNotification.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3670D6E81558A84147316D4F /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
+		3706961E277A1C78A9BC46AA /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
+		37BEEB1F876440F4F6B3D8A8 /* MacPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C52B7D26BD1159962EA3228 /* MacPanel.swift */; };
 		37BF84676C1EC1879668E160 /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
+		38EDAA680B4699CE24B55262 /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
 		3B7DECECCD969C9A04432B41 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5D9988BE76347E5B1CDCEC8B /* Assets.xcassets */; };
 		3E578EE23A41137D925C205B /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
 		408D75E123918542D895024F /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
@@ -37,16 +47,24 @@
 		4D7963ACA465C1E6926816CA /* HanceShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1FC0B32B2A9F60521CE9EC /* HanceShortcuts.swift */; };
 		4F5A3D95171AE1711F475FC2 /* SpeechChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4209E24635DB2A603522BF6 /* SpeechChunker.swift */; };
 		4FD02E9262D6F26318173E51 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494752230CCEB0631BD6FEAB /* Intents.swift */; };
+		524C8C7AA8679D9A3741C502 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 448A1C0A8971860C3530151B /* Assets.xcassets */; };
 		531CE3BEE6A6DCDBAB2847ED /* VoiceUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DF8A3657667729344E05B0 /* VoiceUpload.swift */; };
 		57F92B7E8BC37EFEC2F84B49 /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
 		6127272D111F56F430740C01 /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
 		62061A97DC9D62467336564D /* NotificationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EC235690ED85973807EAAEC /* NotificationViewController.swift */; };
+		66E466ECDF59819E81243A9A /* SilenceDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C695714E5A7578DFE49B7298 /* SilenceDetector.swift */; };
 		6C53B45A778768656EB9ACCC /* KnightMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45351CAA1463E02EA922F9D3 /* KnightMark.swift */; };
+		768D1985C4BAE884170F3CAF /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
 		77D8027E7B7A992B36A5BD28 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9CF7D4A329FFACD4BB363851 /* Assets.xcassets */; };
+		7A2B487059700B6F07E87603 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
+		7A8FA9A3A77CA4DD2AB178A9 /* MacTalk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343F1E6F91B3E1507458C691 /* MacTalk.swift */; };
 		810381AF0F22B124A6B3761E /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
+		82D181C8E80E10E3EA39ED43 /* Wav.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342ACCC1EA3276479549B29C /* Wav.swift */; };
 		838993AFBCFE719ABF2BB64B /* Pixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F44FE31C5C3EAC449B4123A /* Pixels.swift */; };
 		8409D1BF10A9C3443353B6EA /* AnswerBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */; };
 		87318EC69623ACD0EE25C108 /* KnightHop.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF82234EB3D6450BC147BCA7 /* KnightHop.swift */; };
+		89CED40D90006B1AD1072617 /* HanceMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B109EC8782E8093027E9381 /* HanceMacApp.swift */; };
+		8BBCCC384448AD5EFC890F7F /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA23B0D7058A41AF35B6217 /* SessionStore.swift */; };
 		9070D08790B22D2F72118A68 /* TalkWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321B750BDED9FD89E33A43BD /* TalkWidget.swift */; };
 		96230E662C9FE6E2DB7D65EB /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B59901B1EA1C4649BEAFDE0 /* Support.swift */; };
 		9714A668C8FB3BD3835D8364 /* TalkScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234D484032E679A4187AE9A0 /* TalkScreen.swift */; };
@@ -54,14 +72,19 @@
 		985296D6C70CD13AB03E11A2 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		9B1F93BB91098E4EED1862A1 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
 		A11A6073CCEB9CD82576DB71 /* TalkEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93B76D253F76B4F1BFC2E64 /* TalkEngine.swift */; };
+		AAABDB654BB61B8CCD7BAFB2 /* SpeechChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4209E24635DB2A603522BF6 /* SpeechChunker.swift */; };
+		AC5E92BCF881640A636CFF3E /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
 		ADE49118F4FA60705E24872D /* SilenceDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */; };
 		B2003C361F4D097D4A36BD6D /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFD14035E16132BEA9A7756 /* Brand.swift */; };
 		BFEEAFBA93227E89E6A2FBF4 /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
+		C12C85EECFDE0447F4F6BC34 /* AnswerWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9D5D2F357894B785773B5F /* AnswerWait.swift */; };
 		C7AD80C5D389CFAADED0CEF7 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6764B70361BF2831DCAB0EE7 /* Agent.swift */; };
 		C8CC653292359206D8DA6A91 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4176F77F1F4D8454C8B9E1DE /* Sheets.swift */; };
+		CC10DDB8FE16831B3376343A /* Involve-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AD469B3E40120589311F2517 /* Involve-Regular.ttf */; };
 		CEA1DAB8D718E5EFA770D050 /* TalkLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05B4AD23A1E8DE0838D8DD79 /* TalkLiveActivity.swift */; };
 		CEE10557B210C50CD9175ACF /* SpeechChunkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */; };
 		D1B107EDD4339D6B96014344 /* AnswerWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9D5D2F357894B785773B5F /* AnswerWait.swift */; };
+		D96DF9D55DAAE158291A0F02 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		DAAFF017E33D0481706CDD12 /* Involve-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D4BEC94C1B92B31D1A1A85DC /* Involve-SemiBold.ttf */; };
 		E32BD04277A9637AD41063B0 /* AnswerWaitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */; };
 		E7DD18D64126389FB07D22F4 /* Mic.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06640BE7BA84F21BC840DB /* Mic.swift */; };
@@ -69,6 +92,8 @@
 		F176537965628CB78E16E7B8 /* Earcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E267B5B1FD895845A8D23FF /* Earcon.swift */; };
 		F26993DFFCDED49C88102C91 /* AvatarStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 665CD155617AC12938D9EF66 /* AvatarStage.swift */; };
 		F2C64B5ADDB27F89F417DF3B /* MartianMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD6F87B500FC0FA5700033F9 /* MartianMono-Regular.ttf */; };
+		F40D42CA9FA196BB6329E795 /* VoiceUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DF8A3657667729344E05B0 /* VoiceUpload.swift */; };
+		FA6AA050724C57E0012F8B04 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E739C8A762606790E910E1D /* CoreClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,21 +137,27 @@
 
 /* Begin PBXFileReference section */
 		05B4AD23A1E8DE0838D8DD79 /* TalkLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkLiveActivity.swift; sourceTree = "<group>"; };
+		07D191671C8149B3CD3EC901 /* MacLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacLog.swift; sourceTree = "<group>"; };
 		08E2BB6599ABBAB1B582322A /* CoreClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClientTests.swift; sourceTree = "<group>"; };
 		09719A40F132EDD4FB306B59 /* SilenceDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilenceDetectorTests.swift; sourceTree = "<group>"; };
 		0B7455A5F0D11201F6030750 /* HanceWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceWidgets.swift; sourceTree = "<group>"; };
+		10F5CB2A1C23B9077847A235 /* HotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKey.swift; sourceTree = "<group>"; };
+		1EB1E2292BEC83128F9824CA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1FCC37739D929CD8374A64D5 /* HanceNotification.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HanceNotification.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		234D484032E679A4187AE9A0 /* TalkScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkScreen.swift; sourceTree = "<group>"; };
 		2E2E0C12C02EAC73A7186093 /* Wordmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wordmark.swift; sourceTree = "<group>"; };
 		321B750BDED9FD89E33A43BD /* TalkWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkWidget.swift; sourceTree = "<group>"; };
 		342ACCC1EA3276479549B29C /* Wav.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wav.swift; sourceTree = "<group>"; };
+		343F1E6F91B3E1507458C691 /* MacTalk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTalk.swift; sourceTree = "<group>"; };
 		350132D3E31E66B3154B520B /* HanceTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3E267B5B1FD895845A8D23FF /* Earcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Earcon.swift; sourceTree = "<group>"; };
 		3EC235690ED85973807EAAEC /* NotificationViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationViewController.swift; sourceTree = "<group>"; };
 		4176F77F1F4D8454C8B9E1DE /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
 		435A05D4730DFD841B5AC70C /* TalkActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkActivityAttributes.swift; sourceTree = "<group>"; };
+		448A1C0A8971860C3530151B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		45351CAA1463E02EA922F9D3 /* KnightMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnightMark.swift; sourceTree = "<group>"; };
 		494752230CCEB0631BD6FEAB /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
+		4B109EC8782E8093027E9381 /* HanceMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceMacApp.swift; sourceTree = "<group>"; };
 		4B1FC0B32B2A9F60521CE9EC /* HanceShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanceShortcuts.swift; sourceTree = "<group>"; };
 		4E739C8A762606790E910E1D /* CoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClient.swift; sourceTree = "<group>"; };
 		5D24218D1BE80EFBACF3E864 /* AnswerBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerBanner.swift; sourceTree = "<group>"; };
@@ -136,6 +167,7 @@
 		66DDEEC44D19FA069C917C83 /* SpeechChunkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunkerTests.swift; sourceTree = "<group>"; };
 		6764B70361BF2831DCAB0EE7 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
 		6AB12B71572D5D2376BFBBE2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		6BC670259802FF6BA946989A /* MacMic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMic.swift; sourceTree = "<group>"; };
 		7892F42A30B9D0294537D01A /* HanceWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HanceWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		7FE484EB002E81A9BBC2EB1B /* Hance.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Hance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		84DF8A3657667729344E05B0 /* VoiceUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceUpload.swift; sourceTree = "<group>"; };
@@ -143,7 +175,9 @@
 		8E809BF42ADFF4B3F83C5E26 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
 		8FF7E949FEA41DE168460B09 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		90BF89146EA45C249DDF15BF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		924DB1ED3A847CE0265FC020 /* HanceMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HanceMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B59901B1EA1C4649BEAFDE0 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
+		9C52B7D26BD1159962EA3228 /* MacPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPanel.swift; sourceTree = "<group>"; };
 		9CF7D4A329FFACD4BB363851 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A223153DC2AFBE7990891394 /* AnswerWaitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerWaitTests.swift; sourceTree = "<group>"; };
 		ACFD14035E16132BEA9A7756 /* Brand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Brand.swift; sourceTree = "<group>"; };
@@ -191,6 +225,21 @@
 				0E1EB685F919B66DF14B35A3 /* Brand */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		5070DAC66ABF5CAE36CF4B02 /* Mac */ = {
+			isa = PBXGroup;
+			children = (
+				448A1C0A8971860C3530151B /* Assets.xcassets */,
+				4B109EC8782E8093027E9381 /* HanceMacApp.swift */,
+				10F5CB2A1C23B9077847A235 /* HotKey.swift */,
+				1EB1E2292BEC83128F9824CA /* Info.plist */,
+				07D191671C8149B3CD3EC901 /* MacLog.swift */,
+				6BC670259802FF6BA946989A /* MacMic.swift */,
+				9C52B7D26BD1159962EA3228 /* MacPanel.swift */,
+				343F1E6F91B3E1507458C691 /* MacTalk.swift */,
+			);
+			path = Mac;
 			sourceTree = "<group>";
 		};
 		50BC31C5F777755A6C7B6734 /* Intents */ = {
@@ -276,6 +325,7 @@
 			children = (
 				D5AE30582F0E1653D8A208D8 /* App */,
 				E3B6C61532260076E661A04A /* Fonts */,
+				5070DAC66ABF5CAE36CF4B02 /* Mac */,
 				8405677881026159B8B56563 /* Notification */,
 				3C562B81631D1AA1A7106249 /* Shared */,
 				B975B033AB604A33A35A8D5E /* Tests */,
@@ -319,6 +369,7 @@
 			isa = PBXGroup;
 			children = (
 				7FE484EB002E81A9BBC2EB1B /* Hance.app */,
+				924DB1ED3A847CE0265FC020 /* HanceMac.app */,
 				1FCC37739D929CD8374A64D5 /* HanceNotification.appex */,
 				350132D3E31E66B3154B520B /* HanceTests.xctest */,
 				7892F42A30B9D0294537D01A /* HanceWidgets.appex */,
@@ -346,6 +397,24 @@
 			productName = HanceNotification;
 			productReference = 1FCC37739D929CD8374A64D5 /* HanceNotification.appex */;
 			productType = "com.apple.product-type.app-extension";
+		};
+		39C2C384E0F8234361E299B1 /* HanceMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 128E491D4D94B96A169B2926 /* Build configuration list for PBXNativeTarget "HanceMac" */;
+			buildPhases = (
+				CB1AC3A9269101C465CDD807 /* Sources */,
+				D02B22C60795165751745751 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HanceMac;
+			packageProductDependencies = (
+			);
+			productName = HanceMac;
+			productReference = 924DB1ED3A847CE0265FC020 /* HanceMac.app */;
+			productType = "com.apple.product-type.application";
 		};
 		9E4DF8CE845A170C36E49351 /* Hance */ = {
 			isa = PBXNativeTarget;
@@ -416,6 +485,9 @@
 					1DC439BEE83E1FD8D910549D = {
 						ProvisioningStyle = Automatic;
 					};
+					39C2C384E0F8234361E299B1 = {
+						ProvisioningStyle = Automatic;
+					};
 					9E4DF8CE845A170C36E49351 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -444,6 +516,7 @@
 				9E4DF8CE845A170C36E49351 /* Hance */,
 				FC00484EE054DF50A5833479 /* HanceWidgets */,
 				1DC439BEE83E1FD8D910549D /* HanceNotification */,
+				39C2C384E0F8234361E299B1 /* HanceMac */,
 				B8BDD2198D5732AD407CC88F /* HanceTests */,
 			);
 		};
@@ -480,6 +553,17 @@
 				810381AF0F22B124A6B3761E /* Involve-Regular.ttf in Resources */,
 				DAAFF017E33D0481706CDD12 /* Involve-SemiBold.ttf in Resources */,
 				0129F9707A92FF2780CB686E /* MartianMono-Regular.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D02B22C60795165751745751 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				524C8C7AA8679D9A3741C502 /* Assets.xcassets in Resources */,
+				CC10DDB8FE16831B3376343A /* Involve-Regular.ttf in Resources */,
+				D96DF9D55DAAE158291A0F02 /* Involve-SemiBold.ttf in Resources */,
+				AC5E92BCF881640A636CFF3E /* MartianMono-Regular.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -562,6 +646,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CB1AC3A9269101C465CDD807 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3670D6E81558A84147316D4F /* Agent.swift in Sources */,
+				C12C85EECFDE0447F4F6BC34 /* AnswerWait.swift in Sources */,
+				768D1985C4BAE884170F3CAF /* Brand.swift in Sources */,
+				FA6AA050724C57E0012F8B04 /* CoreClient.swift in Sources */,
+				2AB64EFACA136350BB875290 /* Earcon.swift in Sources */,
+				89CED40D90006B1AD1072617 /* HanceMacApp.swift in Sources */,
+				28B1D13675F13C437C27A41B /* HotKey.swift in Sources */,
+				7A2B487059700B6F07E87603 /* KnightHop.swift in Sources */,
+				38EDAA680B4699CE24B55262 /* KnightMark.swift in Sources */,
+				1988482C2A8CFD0F796A5279 /* MacLog.swift in Sources */,
+				25E351EFEB7A1AC4229ECB1B /* MacMic.swift in Sources */,
+				37BEEB1F876440F4F6B3D8A8 /* MacPanel.swift in Sources */,
+				7A8FA9A3A77CA4DD2AB178A9 /* MacTalk.swift in Sources */,
+				3706961E277A1C78A9BC46AA /* Pixels.swift in Sources */,
+				8BBCCC384448AD5EFC890F7F /* SessionStore.swift in Sources */,
+				66E466ECDF59819E81243A9A /* SilenceDetector.swift in Sources */,
+				0EC7E0C460E3AD2D7E587F9A /* Speaker.swift in Sources */,
+				AAABDB654BB61B8CCD7BAFB2 /* SpeechChunker.swift in Sources */,
+				F40D42CA9FA196BB6329E795 /* VoiceUpload.swift in Sources */,
+				82D181C8E80E10E3EA39ED43 /* Wav.swift in Sources */,
+				0B942927E854A1010F4A2E63 /* Wordmark.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -583,6 +695,25 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		14DB49C4F756EB0A88522D70 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				INFOPLIST_FILE = Mac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.mac;
+				PRODUCT_NAME = Hance;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HANCE_MAC";
+			};
+			name = Release;
+		};
 		2A23096EAA7059F75015134E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -599,6 +730,25 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hance.app/Hance";
 			};
 			name = Release;
+		};
+		4D18B64DA7178D4AF984F7F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				INFOPLIST_FILE = Mac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pro.hance.mac;
+				PRODUCT_NAME = Hance;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) HANCE_MAC";
+			};
+			name = Debug;
 		};
 		4EC6605D9D0980EDAA1CEAC0 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -678,7 +828,6 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -789,7 +938,6 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -853,6 +1001,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		128E491D4D94B96A169B2926 /* Build configuration list for PBXNativeTarget "HanceMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D18B64DA7178D4AF984F7F9 /* Debug */,
+				14DB49C4F756EB0A88522D70 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		15783AD4B64707D22CE6AB64 /* Build configuration list for PBXNativeTarget "HanceNotification" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

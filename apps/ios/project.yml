@@ -116,6 +116,41 @@ targets:
       base:
         PRODUCT_NAME: HanceNotification
         PRODUCT_BUNDLE_IDENTIFIER: pro.hance.talk.notification
+  # Lora on the Mac (Boris, 12.11): a menu bar app, ⌥Space anywhere, the same core, sign-in, voice and look.
+  HanceMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Mac
+      - path: Shared/Brand
+      - path: App/Core
+      - path: App/Talk/AnswerWait.swift
+      - path: App/Audio/Earcon.swift
+      - path: App/Audio/Speaker.swift
+      - path: App/Audio/SpeechChunker.swift
+      - path: App/Audio/SilenceDetector.swift
+      - path: Fonts
+        buildPhase: resources
+    info:
+      path: Mac/Info.plist
+      properties:
+        CFBundleDisplayName: Hance
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+        NSMicrophoneUsageDescription: Hance слушает тебя, когда ты говоришь с Лорой и Сарой.
+        NSSpeechRecognitionUsageDescription: Hance разбирает твои слова прямо на Маке, чтобы Лора отвечала быстрее.
+        ATSApplicationFontsPath: .
+    settings:
+      base:
+        PRODUCT_NAME: Hance
+        PRODUCT_BUNDLE_IDENTIFIER: pro.hance.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: NO
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) HANCE_MAC
   HanceTests:
     type: bundle.unit-test
     platform: iOS
@@ -128,6 +163,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: pro.hance.talk.tests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
+  HanceMac:
+    build:
+      targets:
+        HanceMac: all
+    run:
+      config: Debug
   Hance:
     build:
       targets:
