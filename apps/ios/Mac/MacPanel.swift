@@ -2,23 +2,26 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Lora under the menu bar, top centre, like the island of the iPhone (Boris, 12.11: «вылезала в шапке»): black, her
-/// square face, her index, name and phase, the voice as square pixels, his words or her answer below. It floats over
-/// every app and Space without taking the focus from what he works in.
+/// Lora grows out of the MacBook's notch (Boris, 12.11: «органическим дополнением самой чёлки, типо приклеенной»): a
+/// black island flush with the top of the screen, with the notch's concave shoulders where it meets the menu bar,
+/// opening down and out from the notch itself and folding back into it. On a screen without a notch it hangs from the
+/// top centre the same way. It floats over every app and Space without taking the focus from what he works in.
 @MainActor
 final class IslandPanel {
     private let panel: NSPanel
     private var bag: Set<AnyCancellable> = []
+    private var away: DispatchWorkItem?
 
     init(talk: MacTalk) {
         panel = KeyPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 140),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
-        panel.level = .statusBar
+        // Above the menu bar, so it joins the notch.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.contentView = NSHostingView(rootView: IslandView(talk: talk))
@@ -32,53 +35,92 @@ final class IslandPanel {
                 if shown && !signedIn { self.panel.makeKey() } else if self.panel.isKeyWindow { self.panel.resignKey() }
             }
         }.store(in: &bag)
-        // His words or her answer make it taller: it grows downwards from under the menu bar.
+        // His words or her answer make it taller: it grows downwards.
         talk.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.place() }
         }.store(in: &bag)
     }
 
     private func place() {
-        guard let view = panel.contentView, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        guard let view = panel.contentView else { return }
+        let screen = Notch.screen
+        Notch.shared.measure(screen)
         let size = view.fittingSize
         let x = screen.frame.midX - size.width / 2
-        let y = screen.visibleFrame.maxY - size.height - 6
+        let y = screen.frame.maxY - size.height
         panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
     }
 
     private func show() {
+        away?.cancel()
         place()
-        if !panel.isVisible {
-            panel.alphaValue = 0
-            panel.orderFrontRegardless()
-        }
-        NSAnimationContext.runAnimationGroup { c in
-            c.duration = 0.22
-            c.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
-            panel.animator().alphaValue = 1
-        }
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
     }
 
+    /// The island folds back into the notch first, then the window goes.
     private func hide() {
-        NSAnimationContext.runAnimationGroup { c in
-            c.duration = 0.3
-            panel.animator().alphaValue = 0
-        } completionHandler: { [weak self] in
-            Task { @MainActor in
-                guard let self, self.panel.alphaValue == 0 else { return }
-                self.panel.orderOut(nil)
-            }
+        let work = DispatchWorkItem { [weak self] in self?.panel.orderOut(nil) }
+        away = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
+    }
+}
+
+/// The notch of the screen Lora comes out of: its width and height in points (the menu bar's height without one).
+@MainActor
+final class Notch: ObservableObject {
+    static let shared = Notch()
+    @Published private(set) var width: CGFloat = 200
+    @Published private(set) var height: CGFloat = 32
+
+    /// The built-in screen with the notch when there is one, else the main screen.
+    static var screen: NSScreen {
+        NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main ?? NSScreen.screens[0]
+    }
+
+    func measure(_ screen: NSScreen) {
+        if screen.safeAreaInsets.top > 0, let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea {
+            width = screen.frame.width - l.width - r.width
+            height = screen.safeAreaInsets.top
+        } else {
+            width = 200
+            height = NSStatusBar.system.thickness
         }
     }
 }
 
-/// A panel that can take typing (the password) while the app he works in stays in front.
+/// The outline of the notch grown big: square to the top edge, concave shoulders into the menu bar, round below.
+struct NotchShape: Shape {
+    var shoulder: CGFloat = 9
+    var corner: CGFloat = 26
+
+    func path(in r: CGRect) -> Path {
+        let t = min(shoulder, r.width / 4)
+        let b = min(corner, r.height / 2, r.width / 4)
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.minY))
+        p.addQuadCurve(to: CGPoint(x: r.minX + t, y: r.minY + t), control: CGPoint(x: r.minX + t, y: r.minY))
+        p.addLine(to: CGPoint(x: r.minX + t, y: r.maxY - b))
+        p.addQuadCurve(to: CGPoint(x: r.minX + t + b, y: r.maxY), control: CGPoint(x: r.minX + t, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.maxX - t - b, y: r.maxY))
+        p.addQuadCurve(to: CGPoint(x: r.maxX - t, y: r.maxY - b), control: CGPoint(x: r.maxX - t, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.maxX - t, y: r.minY + t))
+        p.addQuadCurve(to: CGPoint(x: r.maxX, y: r.minY), control: CGPoint(x: r.maxX - t, y: r.minY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// A panel that can take typing (the password) and may stand over the menu bar, where the notch is.
 final class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 struct IslandView: View {
     @ObservedObject var talk: MacTalk
+    @ObservedObject private var notch = Notch.shared
+    @State private var open = false
 
     var body: some View {
         let p = Palette.of(talk.agent, dark: true)
@@ -124,11 +166,26 @@ struct IslandView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(16)
-        .frame(width: 460, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.black))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.white.opacity(0.09), lineWidth: 1))
-        .animation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.4), value: talk.phase)
+        .opacity(open ? 1 : 0)
+        // Below the camera: the top strip is the notch itself.
+        .padding(.top, notch.height + 10)
+        .padding(.horizontal, 26)
+        .padding(.bottom, 18)
+        .frame(width: 500, alignment: .leading)
+        .background(Color.black)
+        .mask {
+            NotchShape()
+                .frame(width: open ? nil : notch.width + 18, height: open ? nil : notch.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .onChange(of: talk.shown) { _, on in unfold(on) }
+        .onAppear { unfold(talk.shown) }
+    }
+
+    private func unfold(_ on: Bool) {
+        withAnimation(on ? .spring(response: 0.45, dampingFraction: 0.8) : .timingCurve(0.76, 0, 0.24, 1, duration: 0.4)) {
+            open = on
+        }
     }
 }
 
