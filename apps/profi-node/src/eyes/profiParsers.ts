@@ -1,7 +1,7 @@
 import type { MessageAuthor, ProfiOrder } from '@sara/shared'
 import type { Page } from 'playwright'
 import { clientInfoFromAnswer } from './clientInfo'
-import { chatHistory, chatsClientSaw, listedChats } from './history'
+import { chatHistory, chatsClientSaw, clientReadIds, listedChats } from './history'
 import type { MessageSignal, OrderSignal, ParseResult, Parsers, Signal } from './parsers'
 
 // Real Profi.ru pages, read the way old Sara read them (checked live September-October 2026):
@@ -167,6 +167,18 @@ export function fromSiteAnswer(url: string, body: unknown): ParseResult {
       what: 'chats',
       signals: chatsClientSaw(body).map((chatId) => ({ t: 'client_saw_bid', chatId })),
     }
+  // The chat's answer (messengerChatMessages), whichever page asked for it: who read each message. The page cannot tell
+  // whether the client read ours (Boris, 12.11.2026: double ticks on the site, «не прочитала» in Sara).
+  const chat = (body as { data?: { messengerChatMessages?: { messages?: unknown } } } | null)?.data
+    ?.messengerChatMessages
+  if (chat && Array.isArray(chat.messages)) {
+    const messageIds = clientReadIds(chat.messages)
+    return {
+      recognized: true,
+      what: 'chat',
+      signals: messageIds.length > 0 ? [{ t: 'read_by_client', messageIds }] : [],
+    }
+  }
   if (/\/backoffice\/api\//.test(url)) {
     const profile = fromProfileAnswer(body)
     // The client of an order page (getKlientInfo) is read by get_order itself; here it is only a known answer.

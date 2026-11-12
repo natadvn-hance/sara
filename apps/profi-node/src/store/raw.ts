@@ -169,7 +169,10 @@ export type StoredMessage = {
   read: boolean
 }
 
-/** True when this platform message was not stored before. */
+/**
+ * True when this platform message was not stored before. A message of ours is stored unread whatever the page said:
+ * `read` on ours is the client's reading, which only the chat's own answer tells (markReadByClient).
+ */
 export async function upsertMessage(
   db: NodeDbOrTx,
   m: { accountId: string; message: StoredMessage; history?: boolean },
@@ -184,10 +187,71 @@ export async function upsertMessage(
       author: m.message.author,
       sentAt: m.message.sent_at,
       text: m.message.text,
-      read: m.message.read,
+      read: m.message.author === 'specialist' ? false : m.message.read,
       history: m.history ?? false,
     })
     .onConflictDoNothing()
     .returning({ id: rawMessage.platformMessageId })
   return rows.length > 0
+}
+
+/** A chat where the client read messages of ours the node held unread: the last of them, by the chat's order. */
+export type ClientRead = {
+  chatId: string
+  orderId: string | null
+  platformMessageId: string
+  /** The core knows the chat: the node holds a message of it that went out as news, not only history. */
+  known: boolean
+}
+
+/**
+ * The core heard of this chat from the node: one of its messages went out as news. A chat with history alone is from
+ * before Sara watched; an event about it would make the core an empty conversation.
+ */
+export const KNOWN_CHAT = (accountId: string, chatId: unknown) =>
+  sql`exists (select 1 from node.raw_message k
+    where k.account_id = ${accountId} and k.chat_id = ${chatId} and not k.history)`
+
+/**
+ * The client read these messages: ours among them that the node held unread become read, with ours before them in
+ * the same chat (a client who read the last one has read the chat up to it). One entry a chat with such a change;
+ * nothing for a read already known, so a chat answer read again changes nothing.
+ */
+export async function markReadByClient(
+  db: NodeDbOrTx,
+  accountId: string,
+  messageIds: string[],
+): Promise<ClientRead[]> {
+  if (messageIds.length === 0) return []
+  const res = await db.execute<{
+    chat_id: string
+    order_id: string | null
+    platform_message_id: string
+    known: boolean
+  }>(sql`
+    with named as (
+      select chat_id, max(sent_at) as up_to from node.raw_message
+      where account_id = ${accountId} and author = 'specialist' and not read
+        and platform_message_id in (${sql.join(
+          messageIds.map((id) => sql`${id}`),
+          sql`, `,
+        )})
+      group by chat_id
+    ), changed as (
+      update node.raw_message m set read = true
+      from named n
+      where m.account_id = ${accountId} and m.chat_id = n.chat_id and m.author = 'specialist' and not m.read
+        and m.sent_at <= n.up_to
+      returning m.chat_id, m.order_id, m.platform_message_id, m.sent_at
+    )
+    select distinct on (c.chat_id) c.chat_id, c.order_id, c.platform_message_id,
+      ${KNOWN_CHAT(accountId, sql`c.chat_id`)} as known
+    from changed c
+    order by c.chat_id, c.sent_at desc, c.platform_message_id desc`)
+  return res.rows.map((r) => ({
+    chatId: r.chat_id,
+    orderId: r.order_id,
+    platformMessageId: r.platform_message_id,
+    known: r.known,
+  }))
 }

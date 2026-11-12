@@ -18,6 +18,11 @@ export type Signal =
   | { t: 'chat_touched'; chatId: string; messageId: string | null }
   /** The chats list says the client of this chat has seen our bid: it says so on every read from then on. */
   | { t: 'client_saw_bid'; chatId: string }
+  /**
+   * The chat's own answer: the client has read these messages (by platform number, unique on the site). It says so on
+   * every opening of the chat; only a message of ours the node holds unread is news.
+   */
+  | { t: 'read_by_client'; messageIds: string[] }
   /** The order page's own answer: the fee for a bid now. It completes an order, never makes one. */
   | { t: 'order_fee'; orderId: string; rub: number; baseRub: number | null; hasBid: boolean | null }
 

@@ -350,6 +350,42 @@ describe('the chats list of the live site', () => {
     expect(profiParsers.chatTextsFromAnswer?.('https://profi.ru/graphql', null)).toBe(null)
   })
 
+  it('FR-CONV-12: the chat answer names the messages the client has read, by who read them', () => {
+    // The shape the archive reader read live on 28.10.2026 (86 of 86): the client is among the readers of a message it
+    // read; its own words are read by the profile, the site's notes by both.
+    const msg = (id: string, readers: string[]) => ({
+      _id: id,
+      dateCreated: 'Tue Nov 10 2026 12:58:00 GMT+0300 (MSK)',
+      text: 'текст',
+      whoRead: readers.map((t) => ({ extUserType: t })),
+    })
+    const body = {
+      data: {
+        messengerChatMessages: {
+          hasPrev: false,
+          messages: [
+            msg('1', ['CLIENT']),
+            msg('2', ['PROFILE']),
+            msg('3', ['PROFILE', 'CLIENT']),
+            msg('4', []),
+          ],
+        },
+      },
+    }
+    expect(profiParsers.fromResponse('https://profi.ru/graphql', body)).toEqual({
+      recognized: true,
+      what: 'chat',
+      signals: [{ t: 'read_by_client', messageIds: ['1', '3'] }],
+    })
+    // Nothing read by the client yet: a known answer that says nothing.
+    const none = { data: { messengerChatMessages: { messages: [msg('4', [])] } } }
+    expect(profiParsers.fromResponse('https://profi.ru/graphql', none)).toEqual({
+      recognized: true,
+      what: 'chat',
+      signals: [],
+    })
+  })
+
   it('FR-CONV-1: an answer without the list is not a chats list', () => {
     const url = 'https://profi.ru/graphql'
     expect(profiParsers.chatsFromAnswer?.(url, { data: { orders: [] } })).toBe(null)

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type ProfiSite, startProfiSite } from '../../../tests/fakes/profiSite/server'
 import { type AccountBrowser, openAccountBrowser } from '../src/browser/accountBrowser'
-import { bidAttempt, clientSawBid, outboxNode, rawEvent } from '../src/db/schema'
+import { bidAttempt, clientSawBid, outboxNode, rawEvent, rawMessage } from '../src/db/schema'
 import { createEyes, type Eyes } from '../src/eyes/eyes'
 import { type Insurance, startInsurance } from '../src/eyes/insurance'
 import { type Parsers, standInParsers } from '../src/eyes/parsers'
@@ -237,7 +237,43 @@ describe('the client saw the bid, by the chats list', () => {
     expect(await reads()).toHaveLength(1)
   }, 30000)
 
+  /** What the node holds of a chat: a message of ours, news to the core or history from before Sara watched. */
+  const held = (id: string, history: boolean) =>
+    db.insert(rawMessage).values({
+      platformMessageId: `m-${id}`,
+      chatId: id,
+      accountId: 'hance-marketing',
+      orderId: id,
+      author: 'specialist',
+      sentAt: new Date().toISOString(),
+      text: 'Здравствуйте! Сделаем.',
+      read: false,
+      history,
+    })
+
+  it('FR-CONV-12: a bid Boris sent himself counts too, when the core knows the chat from the node', async () => {
+    // No press of Sara: Boris bid from the site. The node read the chat after Sara watched, so the core knows it.
+    await held('95700004', false)
+    await eyes.onParsed(
+      {
+        recognized: true,
+        what: 'chats',
+        signals: [{ t: 'client_saw_bid', chatId: '95700004' }],
+      },
+      'response',
+    )
+    const [read, ...more] = await reads()
+    expect(more).toEqual([])
+    expect(read?.payload).toMatchObject({
+      chat_id: '95700004',
+      order_id: '95700004',
+      platform_message_id: null,
+    })
+  }, 30000)
+
   it('FR-CONV-12: an older chat with no bid of Sara is written down without a mark, so the core makes no empty client', async () => {
+    // What the node holds of it is history from before Sara watched: the core was never told of it.
+    await held('95700003', true)
     await eyes.onParsed(
       {
         recognized: true,

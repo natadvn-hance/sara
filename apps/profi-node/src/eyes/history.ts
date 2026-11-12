@@ -136,6 +136,19 @@ type Msg = {
   whoRead?: { extUserType?: unknown }[] | null
 }
 
+/**
+ * The messages of one chat answer the client has read: the client is among their readers. Ours are the ones that
+ * matter; a client's own words never list the client, the site's notes list both sides.
+ */
+export function clientReadIds(messages: unknown[]): string[] {
+  const out: string[] = []
+  for (const x of messages as (Msg | null)[]) {
+    if (x?._id == null || !Array.isArray(x.whoRead)) continue
+    if (x.whoRead.some((w) => w?.extUserType === 'CLIENT')) out.push(String(x._id))
+  }
+  return out
+}
+
 /** One chat's messages from the site's answers (`messengerChatMessages`), in time order; complete when the first page came. */
 export function chatHistory(
   bodies: unknown[],

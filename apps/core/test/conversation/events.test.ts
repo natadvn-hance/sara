@@ -259,6 +259,32 @@ describe('conversation events', () => {
     const [m] = await db.select().from(chatMessage)
     expect(m?.read).toBe(true)
   })
+
+  it('FR-CONV-12: the node names the last of ours the client read: it and ours before it are read, a later one is not', async () => {
+    const { onEvent, chat } = setup()
+    const at = (min: number) => new Date(Date.now() - (60 - min) * 60_000).toISOString()
+    for (const [id, min] of [
+      ['m-5', 1],
+      ['m-6', 2],
+      ['m-7', 3],
+    ] as const)
+      chat.chat.push({ ...chatMsg(id, 'specialist', `Наше ${id}`, at(min)), read: false })
+    await onEvent(envelope('profi.specialist_message', ref('m-7', 'specialist')))
+    await onEvent(
+      envelope('profi.client_read', {
+        chat_id: CHAT,
+        order_id: CHAT,
+        platform_message_id: 'm-6',
+        at: new Date().toISOString(),
+      }),
+    )
+    const rows = await db.select().from(chatMessage)
+    expect(Object.fromEntries(rows.map((r) => [r.platformMessageId, r.read]))).toEqual({
+      'm-5': true,
+      'm-6': true,
+      'm-7': false,
+    })
+  })
 })
 
 describe('reconcile', () => {

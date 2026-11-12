@@ -50,6 +50,13 @@
       "when": 1793606132389,
       "tag": "0006_client_saw_bid",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794469186760,
+      "tag": "0007_our_messages_unread",
+      "breakpoints": true
     }
   ]
 }
