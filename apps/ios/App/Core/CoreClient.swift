@@ -266,7 +266,7 @@ final class NetLog: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         for t in metrics.transactionMetrics where t.resourceFetchType == .networkLoad {
             let net = t.isCellular ? "cell" : "wifi"
             log.notice(
-                "net \(path, privacy: .public) \(total) ms: \(t.networkProtocolName ?? "?", privacy: .public) \(t.isReusedConnection ? "reused" : "new", privacy: .public), dns \(ms(t.domainLookupStartDate, t.domainLookupEndDate), privacy: .public) connect \(ms(t.connectStartDate, t.connectEndDate), privacy: .public) tls \(ms(t.secureConnectionStartDate, t.secureConnectionEndDate), privacy: .public) wait \(ms(t.requestEndDate, t.responseStartDate), privacy: .public) body \(ms(t.responseStartDate, t.responseEndDate), privacy: .public), \(net, privacy: .public)\(t.isExpensive ? " expensive" : "", privacy: .public)\(t.isConstrained ? " constrained" : "", privacy: .public)\(t.isProxyConnection ? " proxy" : "", privacy: .public)"
+                "net \(path) \(total) ms: \(t.networkProtocolName ?? "?") \(t.isReusedConnection ? "reused" : "new"), dns \(ms(t.domainLookupStartDate, t.domainLookupEndDate)) connect \(ms(t.connectStartDate, t.connectEndDate)) tls \(ms(t.secureConnectionStartDate, t.secureConnectionEndDate)) wait \(ms(t.requestEndDate, t.responseStartDate)) body \(ms(t.responseStartDate, t.responseEndDate)), \(net)\(t.isExpensive ? " expensive" : "")\(t.isConstrained ? " constrained" : "")\(t.isProxyConnection ? " proxy" : "")"
             )
         }
     }

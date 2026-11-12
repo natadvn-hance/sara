@@ -3,7 +3,51 @@ import Foundation
 import UserNotifications
 import os
 
-let log = Logger(subsystem: "pro.hance.talk", category: "talk")
+/// The talk's log: the system log, and in debug builds also Documents/talk-log.txt on the phone, to be copied to the
+/// Mac when the live stream cannot follow the phone (the side button with the app in the background, 12.11). Phases,
+/// times and errors only, never Boris's words.
+struct TalkLog: Sendable {
+    private let os = Logger(subsystem: "pro.hance.talk", category: "talk")
+
+    func notice(_ s: String) {
+        os.notice("\(s, privacy: .public)")
+        TraceFile.add(s)
+    }
+
+    func error(_ s: String) {
+        os.error("\(s, privacy: .public)")
+        TraceFile.add("ERROR " + s)
+    }
+}
+
+let log = TalkLog()
+
+enum TraceFile {
+    private static let queue = DispatchQueue(label: "pro.hance.trace")
+
+    static func add(_ line: String) {
+        #if DEBUG
+            let stamp = Date().formatted(.dateTime.hour().minute().second().secondFraction(.fractional(3)))
+            queue.async {
+                guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                    return
+                }
+                let url = docs.appendingPathComponent("talk-log.txt")
+                if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 300_000 {
+                    try? FileManager.default.removeItem(at: url)
+                }
+                let data = Data("\(stamp) \(line)\n".utf8)
+                if let h = try? FileHandle(forWritingTo: url) {
+                    h.seekToEndOfFile()
+                    h.write(data)
+                    try? h.close()
+                } else {
+                    try? data.write(to: url)
+                }
+            }
+        #endif
+    }
+}
 
 /// The loudness of whoever speaks now, smoothed: quick to rise, slow to fall. The orb reads it every frame.
 @MainActor
@@ -66,7 +110,7 @@ final class TalkActivityController {
                 pushType: nil)
             lastPush = Date()
         } catch {
-            log.error("live activity: \(error.localizedDescription, privacy: .public)")
+            log.error("live activity: \(error.localizedDescription)")
         }
     }
 

@@ -163,6 +163,7 @@ final class TalkEngine: ObservableObject {
 
     /// The side button, Siri or the Control Center: listening starts before the intent returns, with the island up.
     func startFromIntent(_ who: HanceAgent) async throws {
+        log.notice("side button: phase \(phase), on screen \(onScreen), mic \(micOn)")
         // One button, on and off (Boris, 09.11): listening, a press sends what he said; while she thinks or
         // speaks, a press stops her; otherwise it starts listening.
         if phase == .listening {
@@ -284,7 +285,7 @@ final class TalkEngine: ObservableObject {
         let step = await waitForVerdict()
         source.record(into: nil)
         log.notice(
-            "listen ended: \(String(describing: step), privacy: .public), \(up.seconds, format: .fixed(precision: 1)) s, turn \(mine == self.turn ? "same" : "changed", privacy: .public)"
+            "listen ended: \(String(describing: step)), \(String(format: "%.1f", up.seconds)) s, turn \(mine == self.turn ? "same" : "changed")"
         )
         guard mine == turn, let step else {
             up.cancel()
@@ -408,7 +409,7 @@ final class TalkEngine: ObservableObject {
             return
         }
         if error is CancellationError || Task.isCancelled { return }
-        log.error("talk failed: \(String(describing: error), privacy: .public)")
+        log.error("talk failed: \(String(describing: error))")
         show(error.isOffline ? Self.notes.offline : Self.notes.failed)
         endTalk(final: .failed)
     }
@@ -476,7 +477,7 @@ final class TalkEngine: ObservableObject {
     }
 
     private func set(_ p: TalkPhase, line newLine: String?) {
-        log.notice("phase \(String(describing: p), privacy: .public)")
+        log.notice("phase \(String(describing: p))")
         phase = p
         since = Date()
         line = newLine
@@ -508,7 +509,7 @@ final class TalkEngine: ObservableObject {
         guard clock.sounded != nil || clock.answered != nil else { return }
         let t = clock.timings(agent: agent)
         guard t.answer != nil || t.heard != nil else { return }
-        log.info("timing \(t.agent.rawValue, privacy: .public) \(t.line, privacy: .public)")
+        log.notice("timing \(t.agent.rawValue) \(t.line)")
         timings.insert(t, at: 0)
         if timings.count > 30 { timings.removeLast(timings.count - 30) }
         TurnTimings.save(timings)

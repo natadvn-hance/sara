@@ -51,6 +51,7 @@ struct TalkIntent: AudioRecordingIntent, LiveActivityIntent {
             } catch {
                 // iOS gave no island, or would not start the microphone in the background: no error on the Lock
                 // Screen, the app comes up and listens on screen.
+                log.notice("side button failed: \(String(describing: error))")
                 guard #available(iOS 26.0, *) else { throw error }
                 try await continueInForeground(nil, alwaysConfirm: false)
                 TalkEngine.shared.openAndListen(agent.agent)

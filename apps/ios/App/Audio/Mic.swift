@@ -288,7 +288,7 @@ final class Ears: @unchecked Sendable {
     private var noSpeech = false
 
     private func heard(_ result: SFSpeechRecognitionResult?, _ error: Error?) {
-        if let error { log.notice("ears: \(String(describing: error), privacy: .public)") }
+        if let error { log.notice("ears: \(String(describing: error))") }
         let last = result?.isFinal == true || error != nil
         let none = (error as NSError?).map { $0.domain == "kAFAssistantErrorDomain" && $0.code == 1110 } ?? false
         lock.withLock {

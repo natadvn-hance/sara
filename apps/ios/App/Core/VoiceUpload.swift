@@ -87,7 +87,7 @@ final class VoiceUpload: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         guard sent.heard == nil, sent.talk == nil, Wav.seconds(pcmBytes: all.count) >= 0.6 else { return sent }
         log.notice("streamed voice not heard, sending it whole")
         let again = try await client.sendVoice(wav: Wav.file(pcm: all), agent: agent)
-        log.notice("whole voice: \(again.heard == nil ? "not heard either" : "heard", privacy: .public)")
+        log.notice("whole voice: \(again.heard == nil ? "not heard either" : "heard")")
         return again
     }
 
