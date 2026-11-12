@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmod, copyFile, mkdir, rm, stat } from 'node:fs/promises'
+import { chmod, chown, copyFile, mkdir, rm, stat } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { newEventId } from '@sara/shared'
@@ -128,6 +128,10 @@ export function createSocketTranscriber(c: {
       try {
         await mkdir(c.dropDir, { recursive: true })
         await copyFile(audioPath, drop)
+        // Node's copyFile gives the copy the owner and group of the source (gid 0 in the core's container), not the
+        // group of the setgid folder (root:voice-share 2770), so the service (user lora, group voice-share) was refused
+        // with EACCES every time (12.11.2026). The group becomes the folder's; the owner stays (-1: no change).
+        await chown(drop, -1, (await stat(c.dropDir)).gid)
         await chmod(drop, 0o640)
         return await ask(drop, (await stat(drop)).size)
       } catch (e) {
