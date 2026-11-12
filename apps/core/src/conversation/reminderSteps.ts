@@ -111,6 +111,21 @@ export const REFUSED = 'клиент отказался'
 /** Why nothing more is written on Profi.ru to a client who went over to a messenger. */
 export const MESSENGER = 'клиент ушел в мессенджер'
 
+/**
+ * Whose ladder a conversation has (Boris, 12.11.2026). Sara's client gets it as always. A client Boris wrote to himself
+ * on the page (FR-CONV-10) gets it too, from his own message, but every step only as a card for his press: nothing goes
+ * by itself, whatever the autopilot or `conv.pings_auto` say. A client he took («беру сам»), a paused or a closed
+ * conversation gets none.
+ */
+export function ladderOf(
+  conv: Pick<ConversationRow, 'owner' | 'ownerReason' | 'closedAt'>,
+): 'sara' | 'cards' | null {
+  if (conv.closedAt) return null
+  if (conv.owner === 'sara') return 'sara'
+  if (conv.owner === 'boris' && conv.ownerReason === 'wrote') return 'cards'
+  return null
+}
+
 const STOP = (why: string): Ground => ({ go: false, end: true, why })
 const SKIP = (why: string): Ground => ({ go: false, end: false, why })
 
@@ -193,6 +208,8 @@ export async function planNext(
     sent: number
     /** When the step before went, or was due if it was only skipped: the next wait counts from there. */
     prevAt: string | null
+    /** The first step not before this: the slot the catch-up gave the ladder (spreadStarts). */
+    notBefore?: string | null
   },
 ): Promise<Planned | null> {
   const conv = await getConversation(d.db, conversationId)
@@ -208,6 +225,8 @@ export async function planNext(
   const sc = await scenarioOf(d.db, conversationId, anchor)
   if (sc.kind === 'messenger') return null
   const w = pingWaits(sc)
+  const slot = st.notBefore ? Date.parse(st.notBefore) : Number.NaN
+  const notBefore = Math.max(w.notBefore?.getTime() ?? 0, Number.isNaN(slot) ? 0 : slot)
   const r = nextReminder({
     lastOursAt: m.sentAt,
     sent: st.sent,
@@ -221,7 +240,7 @@ export async function planNext(
       silent: d.waitsMs?.silent,
     },
     firstAfterMs: w.first,
-    firstNotBefore: w.notBefore,
+    firstNotBefore: notBefore > 0 ? new Date(notBefore) : null,
   })
   if (!r) return null
   const latest = new Date(r.at.getTime() + (d.laterWindowMs ?? LATER_WINDOW_MS))
@@ -422,7 +441,7 @@ async function readGround(
 
 /**
  * Whether a reminder may go now: the last word before it is spoken, at the wake-up and again right before sending
- * (FR-CONV-12, FR-CONV-6). Nothing goes for a conversation that is closed, Boris's or booked, to a client who wrote
+ * (FR-CONV-12, FR-CONV-6). Nothing goes for a conversation that is closed, taken by Boris (`ladderOf`) or booked, to a client who wrote
  * or when our side wrote since the anchor, while a turn runs, and (after the switch) while the «Пишет клиентам»
  * pause or the account's pause holds. The chat is read again here; an unreadable chat skips the step.
  */
@@ -439,7 +458,7 @@ export async function checkGround(
   if (!(await getSetting(db, 'pipeline.conversations'))) return SKIP('разговоры выключены')
   if (!(await getSetting(db, 'conv.reminders'))) return SKIP('напоминания выключены')
   if (conv.closedAt) return STOP('разговор закрыт')
-  if (conv.owner !== 'sara') return STOP('клиента ведёт Борис')
+  if (!ladderOf(conv)) return STOP('клиента ведёт Борис')
   try {
     if (await d.isBooked?.(conv.id)) return STOP('назначена встреча')
   } catch (e) {
@@ -835,9 +854,11 @@ export async function sendStep(
     return { outcome: 'drafted', end: false }
   }
   // Drafts mode (FR-CONV-5): Sara sends nothing by herself, Boris gets the card and his press sends the text. Pings
-  // alone may go by themselves when Boris switched `conv.pings_auto` on (default off).
+  // alone may go by themselves when Boris switched `conv.pings_auto` on (default off), but never to a client Boris
+  // wrote to himself: his client gets the card whatever the switches say (12.11.2026).
   const auto =
-    (await getSetting(d.db, 'conv.autopilot')) || (await getSetting(d.db, 'conv.pings_auto'))
+    ladderOf(conv) === 'sara' &&
+    ((await getSetting(d.db, 'conv.autopilot')) || (await getSetting(d.db, 'conv.pings_auto')))
   if (!auto) {
     try {
       await sendReminderCard(d, rowId, conv, p.step as 1 | 2 | 3, text, card)

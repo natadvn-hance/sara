@@ -1,10 +1,11 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
-import { and, eq, inArray, like, notLike } from 'drizzle-orm'
+import { and, eq, inArray, like, notLike, sql } from 'drizzle-orm'
 import { convTurn, deal, task } from '../db/schema'
 import { TransitionError, transition } from '../domain/deal'
 import { getSetting } from '../settings/store'
 import { clientTurnBefore, isRefusal } from './clientCues'
 import type { PingChoice } from './pingDecide'
+import { spreadStarts } from './reminderLadder'
 import {
   checkGround,
   decideStep,
@@ -15,6 +16,7 @@ import {
   giveUpDormant,
   groundStep,
   isLadderMessage,
+  ladderOf,
   ladderTexts,
   MESSENGER,
   type Planned,
@@ -27,6 +29,7 @@ import {
   wentToMessenger,
 } from './reminderSteps'
 import { getConversation } from './store'
+import { storedMessages } from './sync'
 import type { ConversationRow, StoredMessage } from './types'
 
 export {
@@ -36,6 +39,7 @@ export {
   type ReminderStep,
   type ReminderTone,
   reminderFallback,
+  spreadStarts,
 } from './reminderLadder'
 export type { RemindDeps } from './reminderSteps'
 
@@ -160,18 +164,27 @@ async function askBoris(
   return 'end'
 }
 
-async function runRemind(conversationId: string, anchor: string): Promise<void> {
+/** What a ladder may be started with: the slot of its first step the catch-up gave it (spreadStarts). */
+export type RemindStart = { notBefore?: string | null }
+
+async function runRemind(
+  conversationId: string,
+  anchor: string,
+  // Older processes were started without it: their input has two values.
+  start?: RemindStart | null,
+): Promise<void> {
   const wf = remindWorkflowId(conversationId, anchor)
+  const notBefore = start?.notBefore ?? null
   // How many steps are done, and when the one before went (or was due, if it was only skipped): the next wait
   // counts from there, by the scenario of the silence (pingScenario.ts: a day or two, then 2-3, then 3-4 days), and
   // three days after the third comes the task for Boris.
   let sent = 0
   let prevAt: string | null = null
   for (let k = 0; k < MAX_PLANS; k++) {
-    const next = await DBOS.runStep(() => planNext(d(), conversationId, anchor, { sent, prevAt }), {
-      name: `plan-${k}`,
-      ...DB_STEP,
-    })
+    const next = await DBOS.runStep(
+      () => planNext(d(), conversationId, anchor, { sent, prevAt, notBefore }),
+      { name: `plan-${k}`, ...DB_STEP },
+    )
     if (!next) return
     const rowId = `${wf}:${next.step}`
     if (next.step === 'dormant') {
@@ -277,13 +290,14 @@ const remindWorkflow = DBOS.registerWorkflow(runRemind, {
 export async function startReminder(
   conversationId: string,
   lastOursMessageId: string,
+  start: RemindStart = {},
 ): Promise<void> {
   const { db } = d()
   if (!(await getSetting(db, 'pipeline.conversations'))) return
   if (!(await getSetting(db, 'conv.reminders'))) return
   await DBOS.startWorkflow(remindWorkflow, {
     workflowID: remindWorkflowId(conversationId, lastOursMessageId),
-  })(conversationId, lastOursMessageId)
+  })(conversationId, lastOursMessageId, start)
 }
 
 /**
@@ -366,6 +380,7 @@ async function wakeDeal(conv: ConversationRow) {
 export async function syncReminders(
   conv: ConversationRow,
   messages: StoredMessage[],
+  start: RemindStart = {},
 ): Promise<void> {
   if (!deps) return
   const { db } = d()
@@ -380,8 +395,9 @@ export async function syncReminders(
     return
   }
   const fresh = (await getConversation(db, conv.id)) ?? conv
-  if (fresh.closedAt || fresh.owner !== 'sara') {
-    // Closed, or Boris leads the client: the processes end, and so does the task that asks him about the client.
+  if (!ladderOf(fresh)) {
+    // Closed, or Boris took the client: the processes end, and so does the task that asks him about the client. A
+    // client Boris only wrote to himself keeps a ladder, of cards for his press (12.11.2026).
     await cancelReminders(conv.id)
     await resolveDormantTasks(conv.id)
     return
@@ -393,37 +409,120 @@ export async function syncReminders(
     !(await getSetting(db, 'conv.reminders'))
   )
     return
-  // The ladder's own reminders stand in the chat as our side's messages and are not a new beginning.
-  const ladder = await ladderTexts(db, conv.id)
-  const anchor = messages.findLast((m) => m.side === 'specialist' && !isLadderMessage(m, ladder))
-  if (!anchor) return
-  const wf = remindWorkflowId(conv.id, anchor.platformMessageId)
-  // The client said no: no ladder, the code decides it. Nothing waits for an older message either.
-  const turn = clientTurnBefore(
-    messages.map((m) => ({ id: m.platformMessageId, side: m.side, text: m.text })),
-    anchor.platformMessageId,
-  )
-  if (isRefusal(turn)) {
+  const a = await anchorOf(conv.id, messages)
+  if (!a) return
+  const wf = remindWorkflowId(conv.id, a.id)
+  if (a.stop) {
+    // The client said no, or went over to Telegram or WhatsApp: no ladder, the code decides it. Nothing waits for an
+    // older message either.
     await cancelReminders(conv.id)
     await resolveDormantTasks(conv.id)
-    await traceRefusal(conv.id, anchor.platformMessageId, wf)
+    await traceRefusal(conv.id, a.id, wf, a.stop)
     return
   }
-  // The client went over to Telegram or WhatsApp (spec 2026-11-07-organic-pings): nothing more on Profi.ru.
+  if ((await cancelReminders(conv.id, { keep: wf })) > 0) await resolveDormantTasks(conv.id, wf)
+  await startReminder(conv.id, a.id, start)
+}
+
+/**
+ * The message of ours a ladder of this chat hangs on: the last one of our side that is not one of the ladder's own
+ * reminders (they stand in the chat as our side's messages and are not a new beginning). `stop` says why it gets no
+ * ladder: the client said no before it, or went over to a messenger (spec 2026-11-07-organic-pings).
+ */
+async function anchorOf(
+  conversationId: string,
+  messages: StoredMessage[],
+): Promise<{ id: string; stop: typeof REFUSED | typeof MESSENGER | null } | null> {
+  const { db } = d()
+  const ladder = await ladderTexts(db, conversationId)
+  const anchor = messages.findLast((m) => m.side === 'specialist' && !isLadderMessage(m, ladder))
+  if (!anchor) return null
+  const id = anchor.platformMessageId
+  const turn = clientTurnBefore(
+    messages.map((m) => ({ id: m.platformMessageId, side: m.side, text: m.text })),
+    id,
+  )
+  if (isRefusal(turn)) return { id, stop: REFUSED }
   const lines = messages.map((m) => ({
     id: m.platformMessageId,
     side: m.side,
     text: m.text,
     at: m.sentAt,
   }))
-  if (await wentToMessenger(db, lines)) {
-    await cancelReminders(conv.id)
-    await resolveDormantTasks(conv.id)
-    await traceRefusal(conv.id, anchor.platformMessageId, wf, MESSENGER)
-    return
+  if (await wentToMessenger(db, lines)) return { id, stop: MESSENGER }
+  return { id, stop: null }
+}
+
+/** A silence after Boris's own message older than this is history: the catch-up leaves it (two weeks). */
+const CATCH_UP_DAYS = 14
+/** The catch-up's steps already due come one at a time, this far apart. */
+const CATCH_UP_GAP_MS = 3600_000
+
+/**
+ * The ladders of the clients Boris wrote to himself and who are silent since (Boris, 12.11.2026: before that day they
+ * got none, and nobody reminded anyone). A ladder starts when the chat is read, but the 10-minute check reads only a
+ * chat with a new message, so a silent client would wait for ever: this pass, at start and every ten minutes with the
+ * catch-up of turns, starts the ladder each open conversation of his lacks. The steps already due do not come as a
+ * flood: one card an hour, at most `conv.cards_per_day` a Moscow day, never in the quiet hours (spreadStarts).
+ * Returns how many ladders it started.
+ */
+export async function catchUpLadders(now: Date = new Date()): Promise<number> {
+  if (!deps) return 0
+  const { db } = d()
+  if (
+    !(await getSetting(db, 'pipeline.conversations')) ||
+    !(await getSetting(db, 'conv.reminders'))
+  )
+    return 0
+  const since = new Date(now.getTime() - CATCH_UP_DAYS * 24 * 3600_000).toISOString()
+  const res = await db.execute(sql`
+    select c.id
+    from core.conversation c
+    join lateral (
+      select m.side, m.sent_at
+      from core.chat_message m
+      where m.conversation_id = c.id and m.side <> 'system'
+      order by m.sent_at desc, m.platform_message_id desc
+      limit 1
+    ) m on true
+    where c.closed_at is null and c.owner = 'boris' and c.owner_reason = 'wrote'
+      and m.side = 'specialist' and m.sent_at >= ${since}
+    order by m.sent_at asc`)
+  const due: { conv: ConversationRow; messages: StoredMessage[]; at: Date }[] = []
+  for (const r of res.rows as { id: string }[]) {
+    try {
+      const conv = await getConversation(db, r.id)
+      if (!conv || ladderOf(conv) !== 'cards') continue
+      const messages = await storedMessages(db, conv.id)
+      const a = await anchorOf(conv.id, messages)
+      if (!a || a.stop) continue
+      // A ladder that ran or runs, or was ended, is not started again.
+      if (await DBOS.getWorkflowStatus(remindWorkflowId(conv.id, a.id))) continue
+      const p = await planNext(d(), conv.id, a.id, { sent: 0, prevAt: null })
+      if (p) due.push({ conv, messages, at: new Date(p.at) })
+    } catch (e) {
+      console.error('ladder catch-up skipped a chat', r.id, e instanceof Error ? e.message : e)
+    }
   }
-  if ((await cancelReminders(conv.id, { keep: wf })) > 0) await resolveDormantTasks(conv.id, wf)
-  await startReminder(conv.id, anchor.platformMessageId)
+  due.sort((x, y) => x.at.getTime() - y.at.getTime())
+  const slots = spreadStarts(
+    due.map((x) => x.at),
+    {
+      gapMs: CATCH_UP_GAP_MS,
+      perDay: await getSetting(db, 'conv.cards_per_day'),
+      quiet: await getSetting(db, 'conv.reminder_quiet'),
+    },
+  )
+  let started = 0
+  for (const [i, x] of due.entries()) {
+    try {
+      await syncReminders(x.conv, x.messages, { notBefore: slots[i]?.toISOString() ?? null })
+      started++
+    } catch (e) {
+      console.error('ladder catch-up failed', x.conv.id, e instanceof Error ? e.message : e)
+    }
+  }
+  return started
 }
 
 /** The only trace of a ladder that was not run: one row, whatever the shadow or the switch (a repeat adds none). */

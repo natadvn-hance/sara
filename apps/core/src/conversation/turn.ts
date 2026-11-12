@@ -1,8 +1,8 @@
 import { DBOS } from '@dbos-inc/dbos-sdk'
 import { type CaseChoice, isTestOrder, newEventId, type Topic } from '@sara/shared'
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { account, chatMessage, convTurn, mindGap } from '../db/schema'
+import { account, convTurn, mindGap } from '../db/schema'
 import type { Gateway } from '../gateway/gateway'
 import { appendEvent } from '../journal/journal'
 import { workHoursSource } from '../leads/callSlots'
@@ -12,7 +12,7 @@ import { buildDossier, clientNames, turnMessageIds, untilOurs } from './dossier'
 import { planTurn } from './engine'
 import { readSiteOfTurn } from './siteTurn'
 import { applyOwnerRule, getConversation, updateConversation } from './store'
-import { storedOf, syncChat } from './sync'
+import { storedMessages, syncChat } from './sync'
 import { humanPauseMs, quietLeftSeconds } from './timing'
 import type {
   CaseHit,
@@ -529,15 +529,6 @@ async function handoff(
   await journal(OUTCOME_EVENT[outcome], conv, turnId, { outcome })
   const next = turnMessageIds(await storedMessages(db, conversationId), conv.handledThrough)[0]
   return next && next !== anchor ? next : null
-}
-
-async function storedMessages(db: Db, conversationId: string): Promise<StoredMessage[]> {
-  const rows = await db
-    .select()
-    .from(chatMessage)
-    .where(eq(chatMessage.conversationId, conversationId))
-    .orderBy(asc(chatMessage.sentAt), asc(chatMessage.platformMessageId))
-  return rows.map(storedOf)
 }
 
 /** The card of a turn could not be told to Boris in all the tries: the journal says the client has no answer. */

@@ -86,6 +86,42 @@ export function nextReminder(i: {
   return { at, step: p.step, tone: p.tone, read: i.read }
 }
 
+/** The Moscow day of a moment, and the start of the Moscow day after it (Moscow is UTC+3 all year). */
+const MSK_MS = 3 * 3600_000
+const moscowDayOf = (t: number) => new Date(t + MSK_MS).toISOString().slice(0, 10)
+const nextMoscowDay = (t: number) => {
+  const day = Date.parse(`${moscowDayOf(t)}T00:00:00Z`)
+  return day + DAY_MS - MSK_MS
+}
+
+/**
+ * The first steps of the ladders the catch-up starts after a deploy (Boris, 12.11.2026: the clients he wrote to himself
+ * got none, and their steps are due at once): one card at a time, `gapMs` apart, at most `perDay` a Moscow day
+ * (`conv.cards_per_day`), never in the quiet hours. `times` are when each step would be due, earliest first; each comes
+ * back as its own time or later, in the same order.
+ */
+export function spreadStarts(
+  times: Date[],
+  o: { gapMs: number; perDay: number; quiet: { from: number; to: number } },
+): Date[] {
+  const out: Date[] = []
+  const cap = Math.max(1, o.perDay)
+  const perDay = new Map<string, number>()
+  let prev = Number.NEGATIVE_INFINITY
+  for (const t of times) {
+    let at = Math.max(t.getTime(), prev + o.gapMs)
+    for (;;) {
+      at = moscowHoursEnd(new Date(at), o.quiet)?.getTime() ?? at
+      if ((perDay.get(moscowDayOf(at)) ?? 0) < cap) break
+      at = nextMoscowDay(at)
+    }
+    perDay.set(moscowDayOf(at), (perDay.get(moscowDayOf(at)) ?? 0) + 1)
+    out.push(new Date(at))
+    prev = at
+  }
+  return out
+}
+
 /**
  * The ready text of old Sara (followUpTemplates.js, 06.10.2026): it goes when the model gives no text that passes the
  * checks, because a reminder must go out for sure. Gender-neutral on purpose, the account is Hance. Variant 1 is the

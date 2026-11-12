@@ -34,7 +34,12 @@ import {
 import { sendTurnReply } from './conversation/outbox'
 import { startOwed } from './conversation/owed'
 import { startReconcile } from './conversation/reconcile'
-import { reminderGround, setRemindDeps, syncReminders } from './conversation/reminders'
+import {
+  catchUpLadders,
+  reminderGround,
+  setRemindDeps,
+  syncReminders,
+} from './conversation/reminders'
 import { onReplySamplePress, startReplyDigest } from './conversation/replyDigest'
 import { registerConversationRoutes } from './conversation/routes'
 import { setSendDeps, startSendJob } from './conversation/sendFlow'
@@ -652,6 +657,8 @@ export async function startApp(config: Config, o: StartOptions = {}): Promise<Ru
   // get theirs, once the node answers and then every ten minutes.
   const catchUp = startCatchUp({
     db,
+    // The silent clients Boris wrote to himself get their ladders too: the check of the chats reads only new messages.
+    ladders: () => catchUpLadders(),
     ready: async () => {
       const first = config.accounts[0]
       if (!first) return false
