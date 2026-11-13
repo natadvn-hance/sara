@@ -23,7 +23,8 @@ final class IslandPanel {
         panel.isOpaque = false
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        // Over every app, Space and full-screen window, the browser's included.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.contentView = NSHostingView(rootView: IslandView(talk: talk))
         talk.$shown.removeDuplicates().sink { [weak self] on in
             DispatchQueue.main.async { on ? self?.show() : self?.hide() }
@@ -73,9 +74,11 @@ final class Notch: ObservableObject {
     @Published private(set) var width: CGFloat = 200
     @Published private(set) var height: CGFloat = 32
 
-    /// The built-in screen with the notch when there is one, else the main screen.
+    /// The screen he works on now, the one under the pointer (12.11: with the browser on the second screen the island
+    /// came out on the MacBook's and was not seen); its notch if it has one.
     static var screen: NSScreen {
-        NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main ?? NSScreen.screens[0]
+        let at = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(at, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
     }
 
     func measure(_ screen: NSScreen) {
@@ -89,24 +92,25 @@ final class Notch: ObservableObject {
     }
 }
 
-/// The outline of the notch grown big: a straight band as tall as the menu bar (it merges with the dark bar and the
-/// notch), then, where its sides meet the bottom of the menu bar, a soft concave fillet into the island's sides (Boris,
-/// 12.11: «обратное скругление, где край касается верха»), and round corners below.
+/// The outline of the notch grown big: the island's own width straight through the menu bar (no black ears beside it,
+/// which showed as marks over a light menu bar, 12.11), then a small concave fillet out along the bottom of the menu
+/// bar where its sides meet it, and round corners below.
 struct NotchShape: Shape {
-    /// The menu bar's height: the band above the fillets.
+    /// The menu bar's height: where the fillets sit.
     var band: CGFloat
-    var fillet: CGFloat = 10
+    var fillet: CGFloat = 8
     var corner: CGFloat = 26
 
     func path(in r: CGRect) -> Path {
         let f = min(fillet, r.width / 4)
         // Folded into the notch: no room below the band, a plain block.
-        guard r.height > band + f + 2 else { return Path(r) }
+        guard r.height > band + f + 2 else { return Path(r.insetBy(dx: f, dy: 0)) }
         let b = min(corner, (r.height - band - f) / 2, r.width / 4)
         let top = r.minY + band
         var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.move(to: CGPoint(x: r.minX + f, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX - f, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX - f, y: top))
         p.addLine(to: CGPoint(x: r.maxX, y: top))
         p.addQuadCurve(to: CGPoint(x: r.maxX - f, y: top + f), control: CGPoint(x: r.maxX - f, y: top))
         p.addLine(to: CGPoint(x: r.maxX - f, y: r.maxY - b))
@@ -115,6 +119,7 @@ struct NotchShape: Shape {
         p.addQuadCurve(to: CGPoint(x: r.minX + f, y: r.maxY - b), control: CGPoint(x: r.minX + f, y: r.maxY))
         p.addLine(to: CGPoint(x: r.minX + f, y: top + f))
         p.addQuadCurve(to: CGPoint(x: r.minX, y: top), control: CGPoint(x: r.minX + f, y: top))
+        p.addLine(to: CGPoint(x: r.minX + f, y: top))
         p.closeSubpath()
         return p
     }
