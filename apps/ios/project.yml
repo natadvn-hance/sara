@@ -1,0 +1,184 @@
+# The Hance app for iPhone (ADR-028, ADR-029). The Xcode project is made from this file:
+#   brew install xcodegen && xcodegen generate
+# and the result (Hance.xcodeproj) is kept in the repository, so opening it needs nothing else.
+name: Hance
+options:
+  bundleIdPrefix: pro.hance
+  deploymentTarget:
+    iOS: "18.0"
+  developmentLanguage: ru
+  createIntermediateGroups: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+fontsList: &fonts
+  - Involve-Regular.ttf
+  - Involve-SemiBold.ttf
+  - MartianMono-Regular.ttf
+targets:
+  Hance:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared
+      - path: Fonts
+        buildPhase: resources
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Hance
+        CFBundleDevelopmentRegion: ru
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes:
+          - audio
+        NSMicrophoneUsageDescription: Hance слушает тебя, когда ты говоришь с Лорой и Сарой. Запись уходит только на сервер Сары.
+        NSSpeechRecognitionUsageDescription: Hance разбирает твои слова прямо на телефоне, чтобы Лора и Сара отвечали быстрее.
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        UIAppFonts: *fonts
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: pro.hance.talk
+            CFBundleURLSchemes:
+              - hance
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_NAME: Hance
+        PRODUCT_BUNDLE_IDENTIFIER: pro.hance.talk
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) HANCE_APP
+    dependencies:
+      - target: HanceWidgets
+      - target: HanceNotification
+  HanceWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+      - path: Fonts
+        buildPhase: resources
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: Hance
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        UIAppFonts: *fonts
+    settings:
+      base:
+        PRODUCT_NAME: HanceWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: pro.hance.talk.widgets
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) HANCE_WIDGETS
+  HanceNotification:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Notification
+      - path: Shared/Brand
+      - path: Fonts
+        buildPhase: resources
+    info:
+      path: Notification/Info.plist
+      properties:
+        CFBundleDisplayName: Hance
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.content-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationViewController
+          NSExtensionAttributes:
+            UNNotificationExtensionCategory: HANCE_REPLY
+            UNNotificationExtensionInitialContentSizeRatio: 0.55
+            UNNotificationExtensionDefaultContentHidden: true
+            UNNotificationExtensionUserInteractionEnabled: false
+        UIAppFonts: *fonts
+    settings:
+      base:
+        PRODUCT_NAME: HanceNotification
+        PRODUCT_BUNDLE_IDENTIFIER: pro.hance.talk.notification
+  # Lora on the Mac (Boris, 12.11): a menu bar app, ⌥Space anywhere, the same core, sign-in, voice and look.
+  HanceMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Mac
+      - path: Shared/Brand
+      - path: App/Core
+      - path: App/Talk/AnswerWait.swift
+      - path: App/Audio/Earcon.swift
+      - path: App/Audio/Speaker.swift
+      - path: App/Audio/SpeechChunker.swift
+      - path: App/Audio/SilenceDetector.swift
+      - path: App/Audio/Sounds
+        buildPhase: resources
+      - path: Fonts
+        buildPhase: resources
+    info:
+      path: Mac/Info.plist
+      properties:
+        CFBundleDisplayName: Hance
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+        NSMicrophoneUsageDescription: Hance слушает тебя, когда ты говоришь с Лорой и Сарой.
+        NSSpeechRecognitionUsageDescription: Hance разбирает твои слова прямо на Маке, чтобы Лора отвечала быстрее.
+        ATSApplicationFontsPath: .
+    settings:
+      base:
+        PRODUCT_NAME: Hance
+        PRODUCT_BUNDLE_IDENTIFIER: pro.hance.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: NO
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) HANCE_MAC
+  HanceTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Hance
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: pro.hance.talk.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  HanceMac:
+    build:
+      targets:
+        HanceMac: all
+    run:
+      config: Debug
+  Hance:
+    build:
+      targets:
+        Hance: all
+        HanceTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - HanceTests
