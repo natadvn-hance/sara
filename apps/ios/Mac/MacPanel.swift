@@ -162,6 +162,10 @@ struct IslandView: View {
             }
             if !talk.signedIn {
                 SignInRow(talk: talk, palette: p)
+            } else if talk.phase == .listening {
+                Text("Говори. ъ + ё, когда закончишь")
+                    .monoLabel(9.5)
+                    .foregroundStyle(.white.opacity(0.55))
             } else if let note = talk.note {
                 Text(note)
                     .font(HanceFont.text(14))

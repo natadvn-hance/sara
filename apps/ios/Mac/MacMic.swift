@@ -60,6 +60,9 @@ final class MacMic {
         running = true
     }
 
+    /// Some words were heard already.
+    var hasWords: Bool { !best.trimmingCharacters(in: .whitespaces).isEmpty }
+
     /// He finished: the words heard, waiting up to 1,5 s for the last of them.
     func finish() async -> String? {
         stopEngine()

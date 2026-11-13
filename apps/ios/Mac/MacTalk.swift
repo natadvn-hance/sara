@@ -68,7 +68,8 @@ final class MacTalk: ObservableObject {
             }
             listen(followUp: false)
         case .listening:
-            if detector.spoke { resolve(.stop) } else { turnOff() }
+            // The chord ends his words (Boris, 13.11): it sends what he said; before any word it switches her off.
+            if detector.spoke || mic.hasWords { resolve(.stop) } else { turnOff() }
         case .sending, .thinking, .speaking:
             turnOff()
         }
@@ -123,7 +124,10 @@ final class MacTalk: ObservableObject {
             guard let self, mine == self.turn, self.phase.isBusy else { return }
             self.show(Self.notes.offline)
         }
-        detector = SilenceDetector(startWaitMs: followUp ? 1500 : 10_000, ignoreMs: 350)
+        // His words end with the chord, not with a short quiet in the middle of a phrase (Boris, 13.11: «сама
+        // отключается»). Only 4 s of quiet send them by themselves, so the island never hangs; after her answer he
+        // has 4 s to begin his next words.
+        detector = SilenceDetector(pauseMs: 4000, startWaitMs: followUp ? 4000 : 10_000, ignoreMs: 350)
         started = Date()
         do {
             try mic.start()
